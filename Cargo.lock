@@ -3,5 +3,17 @@
 version = 3
 
 [[package]]
+name = "cccp-client"
+version = "0.1.0"
+
+[[package]]
+name = "cccp-offchain"
+version = "0.1.0"
+
+[[package]]
+name = "cccp-primitives"
+version = "0.1.0"
+
+[[package]]
 name = "cccp-relayer"
 version = "0.1.0"
