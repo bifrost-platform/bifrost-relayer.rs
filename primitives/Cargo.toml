@@ -1,7 +1,7 @@
 [package]
-name = "cccp-relayer"
+name = "cccp-primitives"
 version = "0.1.0"
-description = "The core rust implementation for BIFROST relayer"
+description = "The primitives for BIFROST relayer"
 authors = ["bifrost-platform"]
 homepage = "https://thebifrost.io"
 edition = "2021"
@@ -9,12 +9,3 @@ license = "Unlicense"
 repository = "https://github.com/bifrost-platform/cccp-relayer"
 
 [dependencies]
-
-[workspace]
-members = [
-	"client",
-    "offchain",
-    "primitives",
-]
-[profile.release]
-panic = "unwind"
