@@ -1,3 +1,6 @@
+pub mod btc;
+pub mod eth;
+
 pub fn add(left: usize, right: usize) -> usize {
 	left + right
 }
