@@ -1,0 +1,11 @@
+[package]
+name = "cccp-relayer"
+version = "0.1.0"
+description = "The rust implementation for BIFROST relayer"
+authors = ["bifrost-platform"]
+homepage = "https://thebifrost.io"
+edition = "2021"
+license = "Unlicense"
+repository = "https://github.com/bifrost-platform/cccp-relayer"
+
+[dependencies]
