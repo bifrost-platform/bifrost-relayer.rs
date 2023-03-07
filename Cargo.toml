@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 [package]
 name = "cccp-relayer"
 version = "0.1.0"
@@ -23,5 +24,16 @@ members = [
 	"primitives",
 ]
 
+=======
+[workspace]
+members = [
+	"client",
+    "offchain",
+    "primitives",
+    "relayer",
+]
+
+
+>>>>>>> c1a3868 (CCCP-9 feature: Add basic transaction manager)
 [profile.release]
 panic = "unwind"

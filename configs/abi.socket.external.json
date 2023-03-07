@@ -1,0 +1,1625 @@
+[
+    {
+        "inputs": [
+            {
+                "internalType": "bytes20",
+                "name": "_code_hash",
+                "type": "bytes20"
+            }
+        ],
+        "stateMutability": "nonpayable",
+        "type": "constructor",
+        "name": "constructor"
+    },
+    {
+        "anonymous": false,
+        "inputs": [
+            {
+                "indexed": false,
+                "internalType": "address",
+                "name": "previousAdmin",
+                "type": "address"
+            },
+            {
+                "indexed": false,
+                "internalType": "address",
+                "name": "newAdmin",
+                "type": "address"
+            }
+        ],
+        "name": "AdminChanged",
+        "type": "event"
+    },
+    {
+        "anonymous": false,
+        "inputs": [
+            {
+                "indexed": true,
+                "internalType": "address",
+                "name": "beacon",
+                "type": "address"
+            }
+        ],
+        "name": "BeaconUpgraded",
+        "type": "event"
+    },
+    {
+        "anonymous": false,
+        "inputs": [
+            {
+                "indexed": false,
+                "internalType": "uint8",
+                "name": "version",
+                "type": "uint8"
+            }
+        ],
+        "name": "Initialized",
+        "type": "event"
+    },
+    {
+        "anonymous": false,
+        "inputs": [
+            {
+                "indexed": true,
+                "internalType": "address",
+                "name": "target",
+                "type": "address"
+            },
+            {
+                "indexed": true,
+                "internalType": "enum Ownable_State.OwnableAuth",
+                "name": "auth",
+                "type": "uint8"
+            }
+        ],
+        "name": "RemoveAuth",
+        "type": "event"
+    },
+    {
+        "anonymous": false,
+        "inputs": [
+            {
+                "indexed": false,
+                "internalType": "enum Socket_Struct.Task_Status",
+                "name": "status",
+                "type": "uint8"
+            },
+            {
+                "components": [
+                    {
+                        "internalType": "uint256",
+                        "name": "round",
+                        "type": "uint256"
+                    },
+                    {
+                        "internalType": "address[]",
+                        "name": "new_relayers",
+                        "type": "address[]"
+                    },
+                    {
+                        "components": [
+                            {
+                                "internalType": "bytes32[]",
+                                "name": "r",
+                                "type": "bytes32[]"
+                            },
+                            {
+                                "internalType": "bytes32[]",
+                                "name": "s",
+                                "type": "bytes32[]"
+                            },
+                            {
+                                "internalType": "bytes",
+                                "name": "v",
+                                "type": "bytes"
+                            }
+                        ],
+                        "internalType": "struct Socket_Struct.Signatures",
+                        "name": "sigs",
+                        "type": "tuple"
+                    }
+                ],
+                "indexed": false,
+                "internalType": "struct Socket_Struct.Round_Up_Submit",
+                "name": "roundup",
+                "type": "tuple"
+            }
+        ],
+        "name": "RoundUp",
+        "type": "event"
+    },
+    {
+        "anonymous": false,
+        "inputs": [
+            {
+                "indexed": true,
+                "internalType": "address",
+                "name": "target",
+                "type": "address"
+            },
+            {
+                "indexed": true,
+                "internalType": "enum Ownable_State.OwnableAuth",
+                "name": "auth",
+                "type": "uint8"
+            }
+        ],
+        "name": "SetAuth",
+        "type": "event"
+    },
+    {
+        "anonymous": false,
+        "inputs": [
+            {
+                "components": [
+                    {
+                        "components": [
+                            {
+                                "internalType": "ChainIndex",
+                                "name": "chain",
+                                "type": "bytes4"
+                            },
+                            {
+                                "internalType": "uint64",
+                                "name": "round_id",
+                                "type": "uint64"
+                            },
+                            {
+                                "internalType": "uint128",
+                                "name": "sequence",
+                                "type": "uint128"
+                            }
+                        ],
+                        "internalType": "struct Socket_Struct.RequestID",
+                        "name": "req_id",
+                        "type": "tuple"
+                    },
+                    {
+                        "internalType": "enum Socket_Struct.Task_Status",
+                        "name": "status",
+                        "type": "uint8"
+                    },
+                    {
+                        "components": [
+                            {
+                                "internalType": "ChainIndex",
+                                "name": "chain",
+                                "type": "bytes4"
+                            },
+                            {
+                                "internalType": "RBCmethod",
+                                "name": "method",
+                                "type": "bytes16"
+                            }
+                        ],
+                        "internalType": "struct Socket_Struct.Instruction",
+                        "name": "ins_code",
+                        "type": "tuple"
+                    },
+                    {
+                        "components": [
+                            {
+                                "internalType": "Asset_Index",
+                                "name": "tokenIDX0",
+                                "type": "bytes32"
+                            },
+                            {
+                                "internalType": "Asset_Index",
+                                "name": "tokenIDX1",
+                                "type": "bytes32"
+                            },
+                            {
+                                "internalType": "address",
+                                "name": "refund",
+                                "type": "address"
+                            },
+                            {
+                                "internalType": "address",
+                                "name": "to",
+                                "type": "address"
+                            },
+                            {
+                                "internalType": "uint256",
+                                "name": "amount",
+                                "type": "uint256"
+                            },
+                            {
+                                "internalType": "bytes",
+                                "name": "variants",
+                                "type": "bytes"
+                            }
+                        ],
+                        "internalType": "struct Socket_Struct.Task_Params",
+                        "name": "params",
+                        "type": "tuple"
+                    }
+                ],
+                "indexed": false,
+                "internalType": "struct Socket_Struct.Socket_Message",
+                "name": "msg",
+                "type": "tuple"
+            }
+        ],
+        "name": "Socket",
+        "type": "event"
+    },
+    {
+        "anonymous": false,
+        "inputs": [
+            {
+                "indexed": true,
+                "internalType": "address",
+                "name": "owner_from",
+                "type": "address"
+            },
+            {
+                "indexed": true,
+                "internalType": "address",
+                "name": "owner_to",
+                "type": "address"
+            }
+        ],
+        "name": "TransferOwnership",
+        "type": "event"
+    },
+    {
+        "anonymous": false,
+        "inputs": [
+            {
+                "indexed": true,
+                "internalType": "address",
+                "name": "implementation",
+                "type": "address"
+            }
+        ],
+        "name": "Upgraded",
+        "type": "event"
+    },
+    {
+        "stateMutability": "payable",
+        "type": "fallback"
+    },
+    {
+        "inputs": [],
+        "name": "BFC_MAIN",
+        "outputs": [
+            {
+                "internalType": "ChainIndex",
+                "name": "",
+                "type": "bytes4"
+            }
+        ],
+        "stateMutability": "view",
+        "type": "function"
+    },
+    {
+        "inputs": [],
+        "name": "ZeroAddress",
+        "outputs": [
+            {
+                "internalType": "address",
+                "name": "",
+                "type": "address"
+            }
+        ],
+        "stateMutability": "view",
+        "type": "function"
+    },
+    {
+        "inputs": [
+            {
+                "internalType": "uint256",
+                "name": "",
+                "type": "uint256"
+            }
+        ],
+        "name": "admins",
+        "outputs": [
+            {
+                "internalType": "address",
+                "name": "",
+                "type": "address"
+            }
+        ],
+        "stateMutability": "view",
+        "type": "function"
+    },
+    {
+        "inputs": [
+            {
+                "internalType": "address",
+                "name": "",
+                "type": "address"
+            }
+        ],
+        "name": "auth_field_table",
+        "outputs": [
+            {
+                "internalType": "bytes32",
+                "name": "",
+                "type": "bytes32"
+            }
+        ],
+        "stateMutability": "view",
+        "type": "function"
+    },
+    {
+        "inputs": [],
+        "name": "authority",
+        "outputs": [
+            {
+                "internalType": "contract IAuthority",
+                "name": "",
+                "type": "address"
+            }
+        ],
+        "stateMutability": "view",
+        "type": "function"
+    },
+    {
+        "inputs": [],
+        "name": "claimAdminship",
+        "outputs": [
+            {
+                "internalType": "bool",
+                "name": "",
+                "type": "bool"
+            }
+        ],
+        "stateMutability": "nonpayable",
+        "type": "function"
+    },
+    {
+        "inputs": [],
+        "name": "claimOwnership",
+        "outputs": [
+            {
+                "internalType": "bool",
+                "name": "",
+                "type": "bool"
+            }
+        ],
+        "stateMutability": "nonpayable",
+        "type": "function"
+    },
+    {
+        "inputs": [],
+        "name": "code_hash",
+        "outputs": [
+            {
+                "internalType": "bytes20",
+                "name": "",
+                "type": "bytes20"
+            }
+        ],
+        "stateMutability": "view",
+        "type": "function"
+    },
+    {
+        "inputs": [
+            {
+                "internalType": "bytes32",
+                "name": "",
+                "type": "bytes32"
+            },
+            {
+                "internalType": "bytes32",
+                "name": "",
+                "type": "bytes32"
+            }
+        ],
+        "name": "fail_fork",
+        "outputs": [
+            {
+                "internalType": "uint256",
+                "name": "",
+                "type": "uint256"
+            }
+        ],
+        "stateMutability": "view",
+        "type": "function"
+    },
+    {
+        "inputs": [],
+        "name": "flag_up",
+        "outputs": [
+            {
+                "internalType": "bytes32",
+                "name": "",
+                "type": "bytes32"
+            }
+        ],
+        "stateMutability": "view",
+        "type": "function"
+    },
+    {
+        "inputs": [],
+        "name": "get_admins",
+        "outputs": [
+            {
+                "internalType": "address[]",
+                "name": "",
+                "type": "address[]"
+            }
+        ],
+        "stateMutability": "view",
+        "type": "function"
+    },
+    {
+        "inputs": [
+            {
+                "internalType": "address",
+                "name": "_target",
+                "type": "address"
+            }
+        ],
+        "name": "get_flag",
+        "outputs": [
+            {
+                "internalType": "bytes32",
+                "name": "",
+                "type": "bytes32"
+            }
+        ],
+        "stateMutability": "view",
+        "type": "function"
+    },
+    {
+        "inputs": [],
+        "name": "get_owners",
+        "outputs": [
+            {
+                "internalType": "address[]",
+                "name": "",
+                "type": "address[]"
+            }
+        ],
+        "stateMutability": "view",
+        "type": "function"
+    },
+    {
+        "inputs": [],
+        "name": "get_pendingAdmins",
+        "outputs": [
+            {
+                "internalType": "address[]",
+                "name": "",
+                "type": "address[]"
+            }
+        ],
+        "stateMutability": "view",
+        "type": "function"
+    },
+    {
+        "inputs": [],
+        "name": "get_pendingOwners",
+        "outputs": [
+            {
+                "internalType": "address[]",
+                "name": "",
+                "type": "address[]"
+            }
+        ],
+        "stateMutability": "view",
+        "type": "function"
+    },
+    {
+        "inputs": [
+            {
+                "components": [
+                    {
+                        "internalType": "ChainIndex",
+                        "name": "chain",
+                        "type": "bytes4"
+                    },
+                    {
+                        "internalType": "uint64",
+                        "name": "round_id",
+                        "type": "uint64"
+                    },
+                    {
+                        "internalType": "uint128",
+                        "name": "sequence",
+                        "type": "uint128"
+                    }
+                ],
+                "internalType": "struct Socket_Struct.RequestID",
+                "name": "_rid",
+                "type": "tuple"
+            },
+            {
+                "internalType": "address",
+                "name": "_sender",
+                "type": "address"
+            }
+        ],
+        "name": "get_poll_filter",
+        "outputs": [
+            {
+                "internalType": "uint256",
+                "name": "",
+                "type": "uint256"
+            }
+        ],
+        "stateMutability": "view",
+        "type": "function"
+    },
+    {
+        "inputs": [
+            {
+                "components": [
+                    {
+                        "internalType": "ChainIndex",
+                        "name": "chain",
+                        "type": "bytes4"
+                    },
+                    {
+                        "internalType": "uint64",
+                        "name": "round_id",
+                        "type": "uint64"
+                    },
+                    {
+                        "internalType": "uint128",
+                        "name": "sequence",
+                        "type": "uint128"
+                    }
+                ],
+                "internalType": "struct Socket_Struct.RequestID",
+                "name": "_rid",
+                "type": "tuple"
+            }
+        ],
+        "name": "get_request",
+        "outputs": [
+            {
+                "components": [
+                    {
+                        "internalType": "uint8[32]",
+                        "name": "field",
+                        "type": "uint8[32]"
+                    },
+                    {
+                        "internalType": "bytes32",
+                        "name": "msg_hash",
+                        "type": "bytes32"
+                    },
+                    {
+                        "internalType": "uint256",
+                        "name": "registered_time",
+                        "type": "uint256"
+                    }
+                ],
+                "internalType": "struct Socket_Struct.RequestInfo",
+                "name": "",
+                "type": "tuple"
+            }
+        ],
+        "stateMutability": "view",
+        "type": "function"
+    },
+    {
+        "inputs": [
+            {
+                "internalType": "uint256",
+                "name": "_round",
+                "type": "uint256"
+            }
+        ],
+        "name": "get_round_signatures",
+        "outputs": [
+            {
+                "components": [
+                    {
+                        "internalType": "bytes32[]",
+                        "name": "r",
+                        "type": "bytes32[]"
+                    },
+                    {
+                        "internalType": "bytes32[]",
+                        "name": "s",
+                        "type": "bytes32[]"
+                    },
+                    {
+                        "internalType": "bytes",
+                        "name": "v",
+                        "type": "bytes"
+                    }
+                ],
+                "internalType": "struct Socket_Struct.Signatures",
+                "name": "",
+                "type": "tuple"
+            }
+        ],
+        "stateMutability": "view",
+        "type": "function"
+    },
+    {
+        "inputs": [
+            {
+                "components": [
+                    {
+                        "internalType": "ChainIndex",
+                        "name": "chain",
+                        "type": "bytes4"
+                    },
+                    {
+                        "internalType": "uint64",
+                        "name": "round_id",
+                        "type": "uint64"
+                    },
+                    {
+                        "internalType": "uint128",
+                        "name": "sequence",
+                        "type": "uint128"
+                    }
+                ],
+                "internalType": "struct Socket_Struct.RequestID",
+                "name": "_rid",
+                "type": "tuple"
+            },
+            {
+                "internalType": "enum Socket_Struct.Task_Status",
+                "name": "_status",
+                "type": "uint8"
+            }
+        ],
+        "name": "get_signatures",
+        "outputs": [
+            {
+                "components": [
+                    {
+                        "internalType": "bytes32[]",
+                        "name": "r",
+                        "type": "bytes32[]"
+                    },
+                    {
+                        "internalType": "bytes32[]",
+                        "name": "s",
+                        "type": "bytes32[]"
+                    },
+                    {
+                        "internalType": "bytes",
+                        "name": "v",
+                        "type": "bytes"
+                    }
+                ],
+                "internalType": "struct Socket_Struct.Signatures",
+                "name": "",
+                "type": "tuple"
+            }
+        ],
+        "stateMutability": "view",
+        "type": "function"
+    },
+    {
+        "inputs": [],
+        "name": "init",
+        "outputs": [],
+        "stateMutability": "nonpayable",
+        "type": "function"
+    },
+    {
+        "inputs": [],
+        "name": "orc_manager",
+        "outputs": [
+            {
+                "internalType": "contract IOracle_Manager",
+                "name": "",
+                "type": "address"
+            }
+        ],
+        "stateMutability": "view",
+        "type": "function"
+    },
+    {
+        "inputs": [
+            {
+                "internalType": "uint256",
+                "name": "",
+                "type": "uint256"
+            }
+        ],
+        "name": "owners",
+        "outputs": [
+            {
+                "internalType": "address",
+                "name": "",
+                "type": "address"
+            }
+        ],
+        "stateMutability": "view",
+        "type": "function"
+    },
+    {
+        "inputs": [
+            {
+                "internalType": "uint256",
+                "name": "",
+                "type": "uint256"
+            }
+        ],
+        "name": "pendingAdmins",
+        "outputs": [
+            {
+                "internalType": "address",
+                "name": "",
+                "type": "address"
+            }
+        ],
+        "stateMutability": "view",
+        "type": "function"
+    },
+    {
+        "inputs": [
+            {
+                "internalType": "uint256",
+                "name": "",
+                "type": "uint256"
+            }
+        ],
+        "name": "pendingOwners",
+        "outputs": [
+            {
+                "internalType": "address",
+                "name": "",
+                "type": "address"
+            }
+        ],
+        "stateMutability": "view",
+        "type": "function"
+    },
+    {
+        "inputs": [
+            {
+                "components": [
+                    {
+                        "components": [
+                            {
+                                "components": [
+                                    {
+                                        "internalType": "ChainIndex",
+                                        "name": "chain",
+                                        "type": "bytes4"
+                                    },
+                                    {
+                                        "internalType": "uint64",
+                                        "name": "round_id",
+                                        "type": "uint64"
+                                    },
+                                    {
+                                        "internalType": "uint128",
+                                        "name": "sequence",
+                                        "type": "uint128"
+                                    }
+                                ],
+                                "internalType": "struct Socket_Struct.RequestID",
+                                "name": "req_id",
+                                "type": "tuple"
+                            },
+                            {
+                                "internalType": "enum Socket_Struct.Task_Status",
+                                "name": "status",
+                                "type": "uint8"
+                            },
+                            {
+                                "components": [
+                                    {
+                                        "internalType": "ChainIndex",
+                                        "name": "chain",
+                                        "type": "bytes4"
+                                    },
+                                    {
+                                        "internalType": "RBCmethod",
+                                        "name": "method",
+                                        "type": "bytes16"
+                                    }
+                                ],
+                                "internalType": "struct Socket_Struct.Instruction",
+                                "name": "ins_code",
+                                "type": "tuple"
+                            },
+                            {
+                                "components": [
+                                    {
+                                        "internalType": "Asset_Index",
+                                        "name": "tokenIDX0",
+                                        "type": "bytes32"
+                                    },
+                                    {
+                                        "internalType": "Asset_Index",
+                                        "name": "tokenIDX1",
+                                        "type": "bytes32"
+                                    },
+                                    {
+                                        "internalType": "address",
+                                        "name": "refund",
+                                        "type": "address"
+                                    },
+                                    {
+                                        "internalType": "address",
+                                        "name": "to",
+                                        "type": "address"
+                                    },
+                                    {
+                                        "internalType": "uint256",
+                                        "name": "amount",
+                                        "type": "uint256"
+                                    },
+                                    {
+                                        "internalType": "bytes",
+                                        "name": "variants",
+                                        "type": "bytes"
+                                    }
+                                ],
+                                "internalType": "struct Socket_Struct.Task_Params",
+                                "name": "params",
+                                "type": "tuple"
+                            }
+                        ],
+                        "internalType": "struct Socket_Struct.Socket_Message",
+                        "name": "msg",
+                        "type": "tuple"
+                    },
+                    {
+                        "components": [
+                            {
+                                "internalType": "bytes32[]",
+                                "name": "r",
+                                "type": "bytes32[]"
+                            },
+                            {
+                                "internalType": "bytes32[]",
+                                "name": "s",
+                                "type": "bytes32[]"
+                            },
+                            {
+                                "internalType": "bytes",
+                                "name": "v",
+                                "type": "bytes"
+                            }
+                        ],
+                        "internalType": "struct Socket_Struct.Signatures",
+                        "name": "sigs",
+                        "type": "tuple"
+                    },
+                    {
+                        "internalType": "uint256",
+                        "name": "option",
+                        "type": "uint256"
+                    }
+                ],
+                "internalType": "struct Socket_Struct.Poll_Submit",
+                "name": "_submit",
+                "type": "tuple"
+            }
+        ],
+        "name": "poll",
+        "outputs": [
+            {
+                "internalType": "bool",
+                "name": "",
+                "type": "bool"
+            }
+        ],
+        "stateMutability": "nonpayable",
+        "type": "function"
+    },
+    {
+        "inputs": [
+            {
+                "internalType": "bytes32",
+                "name": "",
+                "type": "bytes32"
+            }
+        ],
+        "name": "poll_filter",
+        "outputs": [
+            {
+                "internalType": "uint256",
+                "name": "",
+                "type": "uint256"
+            }
+        ],
+        "stateMutability": "view",
+        "type": "function"
+    },
+    {
+        "inputs": [
+            {
+                "internalType": "bytes32",
+                "name": "",
+                "type": "bytes32"
+            },
+            {
+                "internalType": "enum Socket_Struct.Task_Status",
+                "name": "",
+                "type": "uint8"
+            }
+        ],
+        "name": "polled_sigs",
+        "outputs": [
+            {
+                "internalType": "bytes",
+                "name": "v",
+                "type": "bytes"
+            }
+        ],
+        "stateMutability": "view",
+        "type": "function"
+    },
+    {
+        "inputs": [
+            {
+                "internalType": "address",
+                "name": "target",
+                "type": "address"
+            }
+        ],
+        "name": "registerAdmin",
+        "outputs": [
+            {
+                "internalType": "bool",
+                "name": "",
+                "type": "bool"
+            }
+        ],
+        "stateMutability": "nonpayable",
+        "type": "function"
+    },
+    {
+        "inputs": [
+            {
+                "internalType": "address",
+                "name": "target",
+                "type": "address"
+            }
+        ],
+        "name": "registerOwner",
+        "outputs": [
+            {
+                "internalType": "bool",
+                "name": "",
+                "type": "bool"
+            }
+        ],
+        "stateMutability": "nonpayable",
+        "type": "function"
+    },
+    {
+        "inputs": [
+            {
+                "internalType": "address",
+                "name": "target",
+                "type": "address"
+            }
+        ],
+        "name": "registerPendingAdmin",
+        "outputs": [
+            {
+                "internalType": "bool",
+                "name": "",
+                "type": "bool"
+            }
+        ],
+        "stateMutability": "nonpayable",
+        "type": "function"
+    },
+    {
+        "inputs": [
+            {
+                "internalType": "address",
+                "name": "target",
+                "type": "address"
+            }
+        ],
+        "name": "registerPendingOwner",
+        "outputs": [
+            {
+                "internalType": "bool",
+                "name": "",
+                "type": "bool"
+            }
+        ],
+        "stateMutability": "nonpayable",
+        "type": "function"
+    },
+    {
+        "inputs": [],
+        "name": "renounceAdminship",
+        "outputs": [
+            {
+                "internalType": "bool",
+                "name": "",
+                "type": "bool"
+            }
+        ],
+        "stateMutability": "nonpayable",
+        "type": "function"
+    },
+    {
+        "inputs": [
+            {
+                "internalType": "bool",
+                "name": "force",
+                "type": "bool"
+            }
+        ],
+        "name": "renounceOwnership",
+        "outputs": [
+            {
+                "internalType": "bool",
+                "name": "",
+                "type": "bool"
+            }
+        ],
+        "stateMutability": "nonpayable",
+        "type": "function"
+    },
+    {
+        "inputs": [],
+        "name": "renouncePendingAdmin",
+        "outputs": [
+            {
+                "internalType": "bool",
+                "name": "",
+                "type": "bool"
+            }
+        ],
+        "stateMutability": "nonpayable",
+        "type": "function"
+    },
+    {
+        "inputs": [],
+        "name": "renouncePendingOwner",
+        "outputs": [
+            {
+                "internalType": "bool",
+                "name": "",
+                "type": "bool"
+            }
+        ],
+        "stateMutability": "nonpayable",
+        "type": "function"
+    },
+    {
+        "inputs": [
+            {
+                "internalType": "bytes32",
+                "name": "",
+                "type": "bytes32"
+            },
+            {
+                "internalType": "bytes32",
+                "name": "",
+                "type": "bytes32"
+            }
+        ],
+        "name": "request_fork",
+        "outputs": [
+            {
+                "internalType": "uint256",
+                "name": "",
+                "type": "uint256"
+            }
+        ],
+        "stateMutability": "view",
+        "type": "function"
+    },
+    {
+        "inputs": [
+            {
+                "internalType": "bytes32",
+                "name": "",
+                "type": "bytes32"
+            }
+        ],
+        "name": "request_ids",
+        "outputs": [
+            {
+                "internalType": "bytes32",
+                "name": "msg_hash",
+                "type": "bytes32"
+            },
+            {
+                "internalType": "uint256",
+                "name": "registered_time",
+                "type": "uint256"
+            }
+        ],
+        "stateMutability": "view",
+        "type": "function"
+    },
+    {
+        "inputs": [],
+        "name": "request_timeout",
+        "outputs": [
+            {
+                "internalType": "uint256",
+                "name": "",
+                "type": "uint256"
+            }
+        ],
+        "stateMutability": "view",
+        "type": "function"
+    },
+    {
+        "inputs": [
+            {
+                "internalType": "address",
+                "name": "target",
+                "type": "address"
+            }
+        ],
+        "name": "revokeAdmin",
+        "outputs": [
+            {
+                "internalType": "bool",
+                "name": "",
+                "type": "bool"
+            }
+        ],
+        "stateMutability": "nonpayable",
+        "type": "function"
+    },
+    {
+        "inputs": [
+            {
+                "internalType": "address",
+                "name": "target",
+                "type": "address"
+            }
+        ],
+        "name": "revokeOwner",
+        "outputs": [
+            {
+                "internalType": "bool",
+                "name": "",
+                "type": "bool"
+            }
+        ],
+        "stateMutability": "nonpayable",
+        "type": "function"
+    },
+    {
+        "inputs": [
+            {
+                "components": [
+                    {
+                        "internalType": "uint256",
+                        "name": "round",
+                        "type": "uint256"
+                    },
+                    {
+                        "internalType": "address[]",
+                        "name": "new_relayers",
+                        "type": "address[]"
+                    },
+                    {
+                        "components": [
+                            {
+                                "internalType": "bytes32[]",
+                                "name": "r",
+                                "type": "bytes32[]"
+                            },
+                            {
+                                "internalType": "bytes32[]",
+                                "name": "s",
+                                "type": "bytes32[]"
+                            },
+                            {
+                                "internalType": "bytes",
+                                "name": "v",
+                                "type": "bytes"
+                            }
+                        ],
+                        "internalType": "struct Socket_Struct.Signatures",
+                        "name": "sigs",
+                        "type": "tuple"
+                    }
+                ],
+                "internalType": "struct Socket_Struct.Round_Up_Submit",
+                "name": "_round_up_submit",
+                "type": "tuple"
+            }
+        ],
+        "name": "round_control_relay",
+        "outputs": [
+            {
+                "internalType": "bool",
+                "name": "",
+                "type": "bool"
+            }
+        ],
+        "stateMutability": "nonpayable",
+        "type": "function"
+    },
+    {
+        "inputs": [
+            {
+                "internalType": "bytes32",
+                "name": "",
+                "type": "bytes32"
+            }
+        ],
+        "name": "round_up_poll_filter",
+        "outputs": [
+            {
+                "internalType": "bool",
+                "name": "",
+                "type": "bool"
+            }
+        ],
+        "stateMutability": "view",
+        "type": "function"
+    },
+    {
+        "inputs": [
+            {
+                "internalType": "uint256",
+                "name": "",
+                "type": "uint256"
+            }
+        ],
+        "name": "round_up_poll_history",
+        "outputs": [
+            {
+                "internalType": "bytes",
+                "name": "v",
+                "type": "bytes"
+            }
+        ],
+        "stateMutability": "view",
+        "type": "function"
+    },
+    {
+        "inputs": [],
+        "name": "sequence",
+        "outputs": [
+            {
+                "internalType": "uint128",
+                "name": "",
+                "type": "uint128"
+            }
+        ],
+        "stateMutability": "view",
+        "type": "function"
+    },
+    {
+        "inputs": [
+            {
+                "internalType": "address",
+                "name": "_impl",
+                "type": "address"
+            }
+        ],
+        "name": "set_1967impl",
+        "outputs": [],
+        "stateMutability": "nonpayable",
+        "type": "function"
+    },
+    {
+        "inputs": [
+            {
+                "internalType": "contract IAuthority",
+                "name": "_authority",
+                "type": "address"
+            }
+        ],
+        "name": "set_authority",
+        "outputs": [],
+        "stateMutability": "nonpayable",
+        "type": "function"
+    },
+    {
+        "inputs": [
+            {
+                "internalType": "ChainIndex",
+                "name": "_this",
+                "type": "bytes4"
+            }
+        ],
+        "name": "set_chain",
+        "outputs": [],
+        "stateMutability": "nonpayable",
+        "type": "function"
+    },
+    {
+        "inputs": [
+            {
+                "internalType": "bytes20",
+                "name": "_code_hash",
+                "type": "bytes20"
+            }
+        ],
+        "name": "set_code_hash",
+        "outputs": [],
+        "stateMutability": "nonpayable",
+        "type": "function"
+    },
+    {
+        "inputs": [
+            {
+                "internalType": "contract IOracle_Manager",
+                "name": "_orc_manager",
+                "type": "address"
+            }
+        ],
+        "name": "set_orc_manager",
+        "outputs": [],
+        "stateMutability": "nonpayable",
+        "type": "function"
+    },
+    {
+        "inputs": [
+            {
+                "internalType": "address",
+                "name": "_admin",
+                "type": "address"
+            }
+        ],
+        "name": "set_proxyAdmin",
+        "outputs": [],
+        "stateMutability": "nonpayable",
+        "type": "function"
+    },
+    {
+        "inputs": [
+            {
+                "internalType": "uint256",
+                "name": "_request_timeout",
+                "type": "uint256"
+            }
+        ],
+        "name": "set_request_timeout",
+        "outputs": [],
+        "stateMutability": "nonpayable",
+        "type": "function"
+    },
+    {
+        "inputs": [
+            {
+                "internalType": "uint128",
+                "name": "_sequence",
+                "type": "uint128"
+            }
+        ],
+        "name": "set_sequence",
+        "outputs": [],
+        "stateMutability": "nonpayable",
+        "type": "function"
+    },
+    {
+        "inputs": [
+            {
+                "internalType": "contract IVault",
+                "name": "_vault",
+                "type": "address"
+            }
+        ],
+        "name": "set_vault",
+        "outputs": [],
+        "stateMutability": "nonpayable",
+        "type": "function"
+    },
+    {
+        "inputs": [],
+        "name": "this_chain",
+        "outputs": [
+            {
+                "internalType": "ChainIndex",
+                "name": "",
+                "type": "bytes4"
+            }
+        ],
+        "stateMutability": "view",
+        "type": "function"
+    },
+    {
+        "inputs": [
+            {
+                "components": [
+                    {
+                        "internalType": "ChainIndex",
+                        "name": "chain",
+                        "type": "bytes4"
+                    },
+                    {
+                        "internalType": "uint64",
+                        "name": "round_id",
+                        "type": "uint64"
+                    },
+                    {
+                        "internalType": "uint128",
+                        "name": "sequence",
+                        "type": "uint128"
+                    }
+                ],
+                "internalType": "struct Socket_Struct.RequestID",
+                "name": "request",
+                "type": "tuple"
+            },
+            {
+                "components": [
+                    {
+                        "components": [
+                            {
+                                "internalType": "ChainIndex",
+                                "name": "chain",
+                                "type": "bytes4"
+                            },
+                            {
+                                "internalType": "RBCmethod",
+                                "name": "method",
+                                "type": "bytes16"
+                            }
+                        ],
+                        "internalType": "struct Socket_Struct.Instruction",
+                        "name": "ins_code",
+                        "type": "tuple"
+                    },
+                    {
+                        "components": [
+                            {
+                                "internalType": "Asset_Index",
+                                "name": "tokenIDX0",
+                                "type": "bytes32"
+                            },
+                            {
+                                "internalType": "Asset_Index",
+                                "name": "tokenIDX1",
+                                "type": "bytes32"
+                            },
+                            {
+                                "internalType": "address",
+                                "name": "refund",
+                                "type": "address"
+                            },
+                            {
+                                "internalType": "address",
+                                "name": "to",
+                                "type": "address"
+                            },
+                            {
+                                "internalType": "uint256",
+                                "name": "amount",
+                                "type": "uint256"
+                            },
+                            {
+                                "internalType": "bytes",
+                                "name": "variants",
+                                "type": "bytes"
+                            }
+                        ],
+                        "internalType": "struct Socket_Struct.Task_Params",
+                        "name": "params",
+                        "type": "tuple"
+                    }
+                ],
+                "internalType": "struct Socket_Struct.User_Request",
+                "name": "_req",
+                "type": "tuple"
+            }
+        ],
+        "name": "timeout_rollback",
+        "outputs": [
+            {
+                "internalType": "bool",
+                "name": "",
+                "type": "bool"
+            }
+        ],
+        "stateMutability": "nonpayable",
+        "type": "function"
+    },
+    {
+        "inputs": [
+            {
+                "internalType": "address",
+                "name": "target",
+                "type": "address"
+            }
+        ],
+        "name": "transferOwnership",
+        "outputs": [
+            {
+                "internalType": "bool",
+                "name": "",
+                "type": "bool"
+            }
+        ],
+        "stateMutability": "nonpayable",
+        "type": "function"
+    },
+    {
+        "inputs": [
+            {
+                "components": [
+                    {
+                        "components": [
+                            {
+                                "internalType": "ChainIndex",
+                                "name": "chain",
+                                "type": "bytes4"
+                            },
+                            {
+                                "internalType": "RBCmethod",
+                                "name": "method",
+                                "type": "bytes16"
+                            }
+                        ],
+                        "internalType": "struct Socket_Struct.Instruction",
+                        "name": "ins_code",
+                        "type": "tuple"
+                    },
+                    {
+                        "components": [
+                            {
+                                "internalType": "Asset_Index",
+                                "name": "tokenIDX0",
+                                "type": "bytes32"
+                            },
+                            {
+                                "internalType": "Asset_Index",
+                                "name": "tokenIDX1",
+                                "type": "bytes32"
+                            },
+                            {
+                                "internalType": "address",
+                                "name": "refund",
+                                "type": "address"
+                            },
+                            {
+                                "internalType": "address",
+                                "name": "to",
+                                "type": "address"
+                            },
+                            {
+                                "internalType": "uint256",
+                                "name": "amount",
+                                "type": "uint256"
+                            },
+                            {
+                                "internalType": "bytes",
+                                "name": "variants",
+                                "type": "bytes"
+                            }
+                        ],
+                        "internalType": "struct Socket_Struct.Task_Params",
+                        "name": "params",
+                        "type": "tuple"
+                    }
+                ],
+                "internalType": "struct Socket_Struct.User_Request",
+                "name": "request",
+                "type": "tuple"
+            }
+        ],
+        "name": "user_executor",
+        "outputs": [
+            {
+                "internalType": "bool",
+                "name": "",
+                "type": "bool"
+            }
+        ],
+        "stateMutability": "nonpayable",
+        "type": "function"
+    },
+    {
+        "inputs": [],
+        "name": "vault",
+        "outputs": [
+            {
+                "internalType": "contract IVault",
+                "name": "",
+                "type": "address"
+            }
+        ],
+        "stateMutability": "view",
+        "type": "function"
+    },
+    {
+        "stateMutability": "payable",
+        "type": "receive"
+    }
+]
