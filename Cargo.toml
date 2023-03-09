@@ -1,39 +1,12 @@
-<<<<<<< HEAD
-[package]
-name = "cccp-relayer"
-version = "0.1.0"
-description = "The core rust implementation for BIFROST relayer"
-authors = ["bifrost-platform"]
-homepage = "https://thebifrost.io"
-edition = "2021"
-license = "Unlicense"
-repository = "https://github.com/bifrost-platform/cccp-relayer"
-
-[dependencies]
-cc-cli = { path = "./client/cli" }
-cccp-client = { path = "./client" }
-sc-cli = { git = "https://github.com/bifrost-platform/bifrost-substrate", branch = "bifrost-polkadot-v0.9.35" }
-sc-service = { git = "https://github.com/bifrost-platform/bifrost-substrate", branch = "bifrost-polkadot-v0.9.35" }
-serde_yaml = "0.9.19"
-
 [workspace]
 members = [
 	"client",
 	"client/cli",
 	"offchain",
 	"primitives",
-]
-
-=======
-[workspace]
-members = [
-	"client",
-    "offchain",
-    "primitives",
     "relayer",
 ]
 
 
->>>>>>> c1a3868 (CCCP-9 feature: Add basic transaction manager)
 [profile.release]
 panic = "unwind"
