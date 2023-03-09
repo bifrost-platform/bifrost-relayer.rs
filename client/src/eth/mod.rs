@@ -8,7 +8,7 @@ use web3::{
 };
 
 #[derive(Debug, Clone)]
-pub struct EthClient<T: Transport + 'static> {
+pub struct EthClient<T: Transport> {
 	web3: Web3<T>,
 }
 
