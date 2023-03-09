@@ -1,7 +1,7 @@
 use cc_cli::Configuration;
 use sc_service::{Error as ServiceError, TaskManager};
 
-pub fn full_relay(config: Configuration) -> Result<TaskManager, ServiceError> {
+pub fn relay(config: Configuration) -> Result<TaskManager, ServiceError> {
 	new_relay_base(config).map(|RelayBase { task_manager, .. }| task_manager)
 }
 
