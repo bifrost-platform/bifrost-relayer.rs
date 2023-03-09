@@ -3,7 +3,7 @@ use web3::{types::U64, Transport};
 use super::EthClient;
 
 #[derive(Debug, Clone)]
-pub struct EventDetector<T: Transport + 'static> {
+pub struct EventDetector<T: Transport> {
 	pub client: EthClient<T>,
 	pub queue: Vec<U64>,
 }
