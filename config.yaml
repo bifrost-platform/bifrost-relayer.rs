@@ -2,4 +2,6 @@ bitcoin_provider:
 bitcoin_username:
 bitcoin_password:
 
+bfc_provider:
+
 eth_provider:

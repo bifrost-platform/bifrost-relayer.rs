@@ -27,6 +27,9 @@ pub struct RelayerPrivateConfig {
 	/// Password for BTC rpc authentication.
 	pub bitcoin_password: String,
 
-	/// Web3 provider url.
+	/// BFC rpc provider url.
+	pub bfc_provider: String,
+
+	/// ETH provider url.
 	pub eth_provider: String,
 }
