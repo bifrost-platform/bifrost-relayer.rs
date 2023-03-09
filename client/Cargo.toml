@@ -13,3 +13,6 @@ serde = { version = "1.0.153", features = ["derive"] }
 serde_yaml = "0.9.19"
 tokio = { version = "1.22.0", features = ["signal", "rt-multi-thread", "parking_lot"] }
 ethers = "2.0"
+web3 = "0.18.0"
+
+cccp-primitives = { path = "../primitives" }
