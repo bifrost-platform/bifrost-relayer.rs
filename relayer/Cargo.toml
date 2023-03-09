@@ -9,9 +9,11 @@ license = "Unlicense"
 repository = "https://github.com/bifrost-platform/cccp-relayer"
 
 [dependencies]
-cccp-primitives = { path = "../primitives" }
-serde_json = "1.0.94"
-web3 = "0.18"
+cc-cli = { path = "../client/cli" }
+cccp-client = { path = "../client" }
+sc-cli = { git = "https://github.com/bifrost-platform/bifrost-substrate", branch = "bifrost-polkadot-v0.9.35" }
+sc-service = { git = "https://github.com/bifrost-platform/bifrost-substrate", branch = "bifrost-polkadot-v0.9.35" }
+serde_yaml = "0.9.19"
 
 [[bin]]
-name = "relayer"
+name = "cccp-relayer"

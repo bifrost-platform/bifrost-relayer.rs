@@ -12,4 +12,4 @@ repository = "https://github.com/bifrost-platform/cccp-relayer"
 serde = { version = "1.0.153", default-features = false, features = ["derive"] }
 serde_json = { version = '1.0.94', default-features = false, features = ['alloc'] }
 ethers = "2.0"
-tokio = "1.26.0"
+tokio = { version = "1.22.0", features = ["signal", "rt-multi-thread", "parking_lot"] }
