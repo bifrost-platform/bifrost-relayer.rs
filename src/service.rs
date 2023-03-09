@@ -8,6 +8,8 @@ pub fn relay(config: Configuration) -> Result<TaskManager, ServiceError> {
 pub fn new_relay_base(config: Configuration) -> Result<RelayBase, ServiceError> {
 	let task_manager = TaskManager::new(config.tokio_handle.clone(), None)?;
 
+	// TODO: Workers tasks should spawn from here.
+
 	Ok(RelayBase { task_manager })
 }
 
