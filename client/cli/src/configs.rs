@@ -21,12 +21,12 @@ pub struct Configuration {
 #[derive(Debug, Deserialize)]
 pub struct RelayerPrivateConfig {
 	/// BTC rpc provider url with port.
-	bitcoin_provider: String,
+	pub bitcoin_provider: String,
 	/// Username for BTC rpc authentication.
-	bitcoin_username: String,
+	pub bitcoin_username: String,
 	/// Password for BTC rpc authentication.
-	bitcoin_password: String,
+	pub bitcoin_password: String,
 
 	/// Web3 provider url.
-	eth_provider: String,
+	pub eth_provider: String,
 }
