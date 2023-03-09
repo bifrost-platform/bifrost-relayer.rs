@@ -3,16 +3,14 @@ name = "cc-cli"
 version = "0.1.0"
 edition = "2021"
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
-
 [dependencies]
-serde = { version = "1.0.153", features = ["derive"] }
-serde_yaml = "0.9.19"
 cccp-client = { path = "../../client" }
-tokio = { version = "1.22.0", features = ["signal", "rt-multi-thread", "parking_lot"] }
-thiserror = "1.0.39"
+chrono = "0.4.23"
 futures = "0.3.26"
 log = "0.4.17"
 sc-service = { git = "https://github.com/bifrost-platform/bifrost-substrate", branch = "bifrost-polkadot-v0.9.35" }
 sc-utils = { git = "https://github.com/bifrost-platform/bifrost-substrate", branch = "bifrost-polkadot-v0.9.35" }
-chrono = "0.4.23"
+serde = { version = "1.0.153", features = ["derive"] }
+serde_yaml = "0.9.19"
+thiserror = "1.0.39"
+tokio = { version = "1.22.0", features = ["signal", "rt-multi-thread", "parking_lot"] }
