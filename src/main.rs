@@ -12,7 +12,7 @@ fn main() {
 	let runner = Runner::new(configuration, tokio_runtime).unwrap();
 	runner
 		.run_relayer_until_exit(|config| async move {
-			service::full_relay(config).map_err(sc_cli::Error::Service)
+			service::relay(config).map_err(sc_cli::Error::Service)
 		})
 		.unwrap_or_default();
 }
