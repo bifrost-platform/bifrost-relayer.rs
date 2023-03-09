@@ -9,12 +9,14 @@ pub fn relay(config: Configuration) -> Result<TaskManager, ServiceError> {
 pub fn new_relay_base(config: Configuration) -> Result<RelayBase, ServiceError> {
 	let task_manager = TaskManager::new(config.tokio_handle.clone(), None)?;
 
-	let eth_client = cccp_client::eth::EthClient::<Http>::new(&config.private_config.eth_provider);
-	let eth_event_detector = cccp_client::eth::EventDetector::new(eth_client);
+	let bfc_client = cccp_client::eth::EthClient::<Http>::new(&config.private_config.bfc_provider);
+	let bfc_event_detector = cccp_client::eth::EventDetector::new(bfc_client);
 
-	task_manager
-		.spawn_essential_handle()
-		.spawn_blocking("eth-event-detector", None, async move { eth_event_detector.run().await });
+	task_manager.spawn_essential_handle().spawn_blocking(
+		"bfc-event-detector",
+		Some("events"),
+		async move { bfc_event_detector.run().await },
+	);
 
 	Ok(RelayBase { task_manager })
 }
