@@ -1,11 +1,3 @@
-pub mod eth;
-pub mod traits;
-mod tx_manager;
-
-pub use tx_manager::*;
-
-pub type Err = Box<dyn std::error::Error + Send + Sync>;
-
 /// The time interval used when to request a new block for BIFROST.
 pub const BFC_CALL_INTERVAL_MS: u64 = 2_000;
 

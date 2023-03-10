@@ -1,6 +1,6 @@
 use cc_cli::Configuration;
 use cccp_client::eth::{EthClient, EventDetector};
-use cccp_primitives::{EthClientConfiguration, BFC_BLOCK_QUEUE_SIZE, BFC_CALL_INTERVAL_MS};
+use cccp_primitives::eth::{EthClientConfiguration, BFC_BLOCK_QUEUE_SIZE, BFC_CALL_INTERVAL_MS};
 
 use sc_service::{Error as ServiceError, TaskManager};
 use web3::transports::Http;

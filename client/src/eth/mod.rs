@@ -1,7 +1,7 @@
 mod events;
 pub use events::*;
 
-use cccp_primitives::EthClientConfiguration;
+use cccp_primitives::eth::EthClientConfiguration;
 
 use std::collections::VecDeque;
 use web3::{
