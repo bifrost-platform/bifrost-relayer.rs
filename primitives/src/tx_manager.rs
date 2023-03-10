@@ -1,27 +1,48 @@
+use crate::{traits::TransactionManager, SocketEvent};
 use ethers::{
 	prelude::abigen,
+	providers::{JsonRpcClient, Provider},
 	types::{Bytes, TransactionRequest},
 };
+use std::{sync::Arc, time::Duration};
+use tokio::time::Instant;
 
-use crate::{traits::TransactionManager, SocketEvent};
-
-pub struct EVMTransactionManager;
+pub struct EVMTransactionManager<T> {
+	pub client: Arc<Provider<T>>,
+	pub queue: Vec<SocketEvent>,
+}
 
 abigen!(Socket, "../configs/abi.socket.external.json");
 
-impl EVMTransactionManager {
-	// pub fn encode_transaction_data(
-	// 	&self,
-	// 	contract_name: &str,
-	// 	method_name: &str,
-	// 	method_params: &str,
-	// ) {
-	// }
+impl<T: JsonRpcClient> EVMTransactionManager<T> {
+	pub fn new(client: Arc<Provider<T>>) -> Self {
+		Self { client, queue: vec![] }
+	}
+
+	pub async fn run(&mut self) {
+		loop {
+			let now = Instant::now();
+
+			let socket_event = self.queue.pop();
+
+			match socket_event {
+				Some(e) => {
+					let tx = self.build("contract_name", "method_name", e);
+					println!("tx : {:?}", tx);
+				},
+				None => {
+					println!("No active events")
+				},
+			}
+
+			tokio::time::sleep_until(now + Duration::from_millis(3000)).await;
+		}
+	}
 
 	pub fn set_contract(&self) {}
 }
 
-impl TransactionManager for EVMTransactionManager {
+impl<T> TransactionManager for EVMTransactionManager<T> {
 	fn build(
 		&self,
 		_contract_name: &str,
@@ -78,9 +99,9 @@ mod tests {
 		let client = Arc::new(Provider::<Http>::try_from(eth_endpoint).unwrap());
 		let contract_address =
 			"0x4A31FfeAc276CC5e508cAC0568d932d398C4DD84".parse::<Address>().unwrap();
-		let contract = Socket::new(contract_address, client);
+		let contract = Socket::new(contract_address, client.clone());
 
-		let evm_manager = EVMTransactionManager;
+		let evm_manager = EVMTransactionManager::new(client);
 		let tx = evm_manager.build("contract_name", "method_name", socket_event);
 
 		// assert_eq!(tx.data, Some());
