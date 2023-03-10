@@ -689,6 +689,8 @@ version = "0.1.0"
 dependencies = [
  "cc-cli",
  "cccp-client",
+ "cccp-primitives",
+ "ethers",
  "sc-cli",
  "sc-service",
  "serde_yaml",

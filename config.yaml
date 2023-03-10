@@ -2,4 +2,4 @@ bitcoin_provider:
 bitcoin_username:
 bitcoin_password:
 
-eth_provider:
+eth_provider: "https://mainnet.infura.io/v3/e45599cfef884017af1d1d01c203ef30"
