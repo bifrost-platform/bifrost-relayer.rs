@@ -664,6 +664,7 @@ dependencies = [
 name = "cccp-client"
 version = "0.1.0"
 dependencies = [
+ "ethers",
  "serde",
  "serde_yaml",
  "tokio",
@@ -678,6 +679,7 @@ name = "cccp-primitives"
 version = "0.1.0"
 dependencies = [
  "ethers",
+ "hex",
  "serde",
  "serde_json",
  "tokio",
