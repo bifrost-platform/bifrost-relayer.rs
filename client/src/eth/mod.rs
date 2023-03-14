@@ -21,7 +21,7 @@ pub struct EthClient<T: Transport> {
 	/// exceeds the maximum size.
 	block_queue: VecDeque<U64>,
 	/// The queue storing CCCP-related transaction events.
-	_event_queue: Vec<EventData>,
+	_event_queue: Vec<SocketMessage>,
 	/// The specific configuration details for the connected chain.
 	config: EthClientConfiguration,
 }
