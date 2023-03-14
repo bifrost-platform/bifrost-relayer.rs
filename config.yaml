@@ -2,6 +2,6 @@ bitcoin_provider:
 bitcoin_username:
 bitcoin_password:
 
-bfc_provider:
+bfc_provider: "https://private.mainnet.thebifrost.io/rpc"
 
 eth_provider:

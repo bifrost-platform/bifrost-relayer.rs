@@ -705,6 +705,7 @@ dependencies = [
  "serde",
  "serde_json",
  "tokio",
+ "web3",
 ]
 
 [[package]]
