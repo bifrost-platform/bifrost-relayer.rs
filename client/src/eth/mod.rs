@@ -1,22 +1,18 @@
 mod events;
 pub use events::*;
 
-use cccp_primitives::eth::EthClientConfiguration;
-
-use std::collections::VecDeque;
-use web3::{
-	ethabi::Address,
-	types::{
-		Block, BlockId, BlockNumber, Transaction, TransactionId, TransactionReceipt, H256, U256,
-		U64,
-	},
-	Transport, Web3,
+use ethers::{
+	providers::{JsonRpcClient, Middleware, Provider},
+	types::{Block, BlockId, TransactionReceipt, H256, U64},
 };
+use std::{collections::VecDeque, sync::Arc};
+
+use cccp_primitives::eth::{EthClientConfiguration, EthResult};
 
 /// The core client for EVM-based chain interactions.
-pub struct EthClient<T: Transport> {
+pub struct EthClient<T> {
 	/// The web3 wrapper for the connected chain.
-	web3: Web3<T>,
+	provider: Arc<Provider<T>>,
 	/// The queue storing mined block numbers. The stored block will be popped when the queue size
 	/// exceeds the maximum size.
 	block_queue: VecDeque<U64>,
@@ -26,16 +22,10 @@ pub struct EthClient<T: Transport> {
 	config: EthClientConfiguration,
 }
 
-impl<T: Transport> EthClient<T> {
+impl<T: JsonRpcClient> EthClient<T> {
 	/// Instantiates a new `EthClient` instance for the given chain.
-	pub fn new(url: &str, config: EthClientConfiguration) -> EthClient<web3::transports::Http> {
-		match web3::transports::Http::new(url) {
-			Ok(transport) => {
-				let web3 = Web3::new(transport);
-				EthClient { web3, block_queue: VecDeque::new(), _event_queue: vec![], config }
-			},
-			Err(error) => panic!("Error on initiating EthClient: {:?}", error),
-		}
+	pub fn new(provider: Arc<Provider<T>>, config: EthClientConfiguration) -> Self {
+		Self { provider, block_queue: VecDeque::new(), _event_queue: vec![], config }
 	}
 
 	/// Push a new block to the queue. Whenever the queue is full, the first element will be popped.
@@ -59,35 +49,21 @@ impl<T: Transport> EthClient<T> {
 		false
 	}
 
-	/// Retrieves the balance of the given address.
-	pub async fn get_balance(
-		&self,
-		address: Address,
-		block: Option<BlockNumber>,
-	) -> web3::Result<U256> {
-		Ok(self.web3.eth().balance(address, block).await?)
-	}
-
 	/// Retrieves the latest mined block number of the connected chain.
-	pub async fn get_latest_block_number(&self) -> web3::Result<U64> {
-		Ok(self.web3.eth().block_number().await?)
+	pub async fn get_latest_block_number(&self) -> EthResult<U64> {
+		Ok(self.provider.get_block_number().await?)
 	}
 
 	/// Retrieves the block information of the given block hash.
-	pub async fn get_block(&self, id: BlockId) -> web3::Result<Option<Block<H256>>> {
-		Ok(self.web3.eth().block(id).await?)
-	}
-
-	/// Retrieves the transaction information of the given transaction hash.
-	pub async fn get_transaction(&self, id: TransactionId) -> web3::Result<Option<Transaction>> {
-		Ok(self.web3.eth().transaction(id).await?)
+	pub async fn get_block(&self, id: BlockId) -> EthResult<Option<Block<H256>>> {
+		Ok(self.provider.get_block(id).await?)
 	}
 
 	/// Retrieves the transaction receipt of the given transaction hash.
 	pub async fn get_transaction_receipt(
 		&self,
 		hash: H256,
-	) -> web3::Result<Option<TransactionReceipt>> {
-		Ok(self.web3.eth().transaction_receipt(hash).await?)
+	) -> EthResult<Option<TransactionReceipt>> {
+		Ok(self.provider.get_transaction_receipt(hash).await?)
 	}
 }

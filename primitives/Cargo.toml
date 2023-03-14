@@ -15,3 +15,4 @@ ethers = "2.0"
 tokio = { version = "1.22.0", features = ["signal", "rt-multi-thread", "parking_lot"] }
 hex = "0.4.3"
 web3 = "0.18.0"
+ethers = "2.0"
