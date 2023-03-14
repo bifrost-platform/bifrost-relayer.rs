@@ -9,6 +9,7 @@ license = "Unlicense"
 repository = "https://github.com/bifrost-platform/cccp-relayer"
 
 [dependencies]
+ethers = "2.0"
 web3 = "0.18.0"
 cc-cli = { path = "./client/cli" }
 cccp-client = { path = "./client" }

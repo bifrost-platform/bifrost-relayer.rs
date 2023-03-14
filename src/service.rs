@@ -7,8 +7,11 @@ use cccp_primitives::eth::{
 	EthClientConfiguration,
 };
 
-use sc_service::{Error as ServiceError, TaskManager};
-use web3::{transports::Http, types::H160};
+use ethers::{
+	providers::{Http, Provider},
+	types::H160,
+};
+use sc_service::{Arc, Error as ServiceError, TaskManager};
 
 pub fn relay(config: Configuration) -> Result<TaskManager, ServiceError> {
 	new_relay_base(config).map(|RelayBase { task_manager, .. }| task_manager)
@@ -19,8 +22,8 @@ pub fn new_relay_base(config: Configuration) -> Result<RelayBase, ServiceError> 
 
 	// TODO: add event detectors for every evm-chain
 
-	let bfc_client = EthClient::<Http>::new(
-		&config.private_config.bfc_provider,
+	let bfc_client = EthClient::new(
+		Arc::new(Provider::<Http>::try_from(&config.private_config.bfc_provider).unwrap()),
 		EthClientConfiguration {
 			call_interval: BFC_CALL_INTERVAL_MS,
 			block_queue_size: BFC_BLOCK_QUEUE_SIZE,

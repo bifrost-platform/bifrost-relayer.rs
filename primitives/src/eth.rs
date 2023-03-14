@@ -1,4 +1,6 @@
-use web3::types::H160;
+use ethers::{providers::ProviderError, types::H160};
+
+pub type EthResult<T = ()> = Result<T, ProviderError>;
 
 pub mod bfc {
 	/// The time interval used when to request a new block for BIFROST.
