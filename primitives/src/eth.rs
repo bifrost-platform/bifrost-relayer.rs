@@ -2,7 +2,7 @@ use ethers::{providers::ProviderError, types::H160};
 
 pub type EthResult<T = ()> = Result<T, ProviderError>;
 
-pub mod bfc {
+pub mod bfc_testnet {
 	/// The time interval used when to request a new block for BIFROST.
 	pub const BFC_CALL_INTERVAL_MS: u64 = 2_000;
 
@@ -10,7 +10,7 @@ pub mod bfc {
 	pub const BFC_BLOCK_QUEUE_SIZE: u64 = 6;
 
 	/// The socket contract address deployed on BIFROST.
-	pub const BFC_SOCKET_CONTRACT_ADDRESS: &str = "0xd551F33Ca8eCb0Be83d8799D9C68a368BA36Dd52";
+	pub const BFC_SOCKET_CONTRACT_ADDRESS: &str = "0x0218371b18340aBD460961bdF3Bd5F01858dAB53";
 }
 
 /// The socket event signature.
@@ -19,6 +19,8 @@ pub const SOCKET_EVENT_SIG: &str =
 
 /// The additional configuration details for an EVM-based chain.
 pub struct EthClientConfiguration {
+	/// The ethereum client name.
+	pub name: String,
 	/// The `get_block` request interval in milliseconds.
 	pub call_interval: u64,
 	/// The maximum block queue size for confirmation.
