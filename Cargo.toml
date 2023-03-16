@@ -10,13 +10,16 @@ repository = "https://github.com/bifrost-platform/cccp-relayer"
 
 [dependencies]
 ethers = "2.0"
-web3 = "0.18.0"
+serde_yaml = "0.9.19"
+
+# local
 cc-cli = { path = "./client/cli" }
 cccp-client = { path = "./client" }
 cccp-primitives = { path = "./primitives" }
+
+# substrate
 sc-cli = { git = "https://github.com/bifrost-platform/bifrost-substrate", branch = "bifrost-polkadot-v0.9.35" }
 sc-service = { git = "https://github.com/bifrost-platform/bifrost-substrate", branch = "bifrost-polkadot-v0.9.35" }
-serde_yaml = "0.9.19"
 
 [workspace]
 members = [
