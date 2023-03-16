@@ -2,6 +2,7 @@ mod events;
 pub use events::*;
 
 use ethers::{
+	prelude::abigen,
 	providers::{JsonRpcClient, Middleware, Provider},
 	types::{Block, BlockId, TransactionReceipt, H256, U64},
 };
@@ -9,15 +10,21 @@ use std::{collections::VecDeque, sync::Arc};
 
 use cccp_primitives::eth::{EthClientConfiguration, EthResult};
 
+abigen!(
+	Socket,
+	"../abi/abi.socket.external.json",
+	event_derives(serde::Deserialize, serde::Serialize)
+);
+
 /// The core client for EVM-based chain interactions.
 pub struct EthClient<T> {
-	/// The web3 wrapper for the connected chain.
+	/// The ethers.rs wrapper for the connected chain.
 	provider: Arc<Provider<T>>,
 	/// The queue storing mined block numbers. The stored block will be popped when the queue size
 	/// exceeds the maximum size.
 	block_queue: VecDeque<U64>,
-	/// The queue storing CCCP-related transaction events.
-	_event_queue: Vec<SocketMessage>,
+	/// The queue storing CCCP socket transaction events.
+	event_queue: Vec<SocketMessage>,
 	/// The specific configuration details for the connected chain.
 	config: EthClientConfiguration,
 }
@@ -25,7 +32,7 @@ pub struct EthClient<T> {
 impl<T: JsonRpcClient> EthClient<T> {
 	/// Instantiates a new `EthClient` instance for the given chain.
 	pub fn new(provider: Arc<Provider<T>>, config: EthClientConfiguration) -> Self {
-		Self { provider, block_queue: VecDeque::new(), _event_queue: vec![], config }
+		Self { provider, block_queue: VecDeque::new(), event_queue: vec![], config }
 	}
 
 	/// Push a new block to the queue. Whenever the queue is full, the first element will be popped.
@@ -39,6 +46,11 @@ impl<T: JsonRpcClient> EthClient<T> {
 			return self.block_queue.pop_front()
 		}
 		None
+	}
+
+	/// Push a new socket message to the queue.
+	pub fn push_event(&mut self, event: SocketMessage) {
+		self.event_queue.push(event);
 	}
 
 	/// Verifies whether or not the block queue is full.

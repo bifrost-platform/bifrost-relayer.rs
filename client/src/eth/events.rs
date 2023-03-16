@@ -1,22 +1,18 @@
-use super::EthClient;
+use super::{EthClient, Instruction, RequestID, SocketMessage, TaskParams};
 
 use std::str::FromStr;
 
 use cccp_primitives::eth::SOCKET_EVENT_SIG;
 use ethers::{
-	abi::{ParamType, Token, Tokenizable},
-	prelude::abigen,
+	abi::{
+		ParamType::{Address, Bytes, FixedBytes, Tuple, Uint},
+		Token, Tokenizable,
+	},
 	providers::JsonRpcClient,
 	types::{TransactionReceipt, H256, U64},
 };
 // use tokio::time::{sleep, Duration};
 use tokio_stream::StreamExt;
-
-abigen!(
-	Socket,
-	"../abi/abi.socket.external.json",
-	event_derives(serde::Deserialize, serde::Serialize)
-);
 
 /// The essential task that detects and parse CCCP-related events.
 pub struct EventDetector<T> {
@@ -31,7 +27,7 @@ impl<T: JsonRpcClient> EventDetector<T> {
 	}
 
 	/// Starts the event detector. Reads every new mined block of the connected chain and starts to
-	/// detect and store CCCP-related transaction events.
+	/// detect and store `Socket` transaction events.
 	pub async fn run(&mut self) {
 		// TODO: follow-up to the highest block
 		// loop {
@@ -53,6 +49,7 @@ impl<T: JsonRpcClient> EventDetector<T> {
 	async fn process_confirmed_block(&mut self, block: U64) {
 		if let Some(block) = self.client.get_block(block.into()).await.unwrap() {
 			let mut stream = tokio_stream::iter(block.transactions);
+
 			while let Some(tx) = stream.next().await {
 				if let Some(receipt) = self.client.get_transaction_receipt(tx).await.unwrap() {
 					self.process_confirmed_transaction(receipt).await;
@@ -61,40 +58,43 @@ impl<T: JsonRpcClient> EventDetector<T> {
 		}
 	}
 
-	/// TODO: impl
+	/// Decode and parse the socket event if the given transaction triggered an event.
 	async fn process_confirmed_transaction(&mut self, receipt: TransactionReceipt) {
-		if let Some(to) = receipt.to {
-			if to == self.client.config.socket_address {
-				receipt.logs.iter().for_each(|log| {
-					if log.topics[0] == H256::from_str(SOCKET_EVENT_SIG).unwrap() {
-						let decoded_socket_event = Self::decode_socket_event(&log.data);
-						let socket_message = Self::parse_socket_message(&decoded_socket_event[0]);
-						println!("socket message = {:?}", socket_message);
-					}
-				})
-			}
+		if Self::is_socket_contract(&self, &receipt) {
+			receipt.logs.iter().for_each(|log| {
+				if log.topics[0] == H256::from_str(SOCKET_EVENT_SIG).unwrap() {
+					let decoded_socket_event = Self::decode_socket_event(&log.data);
+					let socket_message = Self::parse_socket_message(&decoded_socket_event[0]);
+					println!("socket message = {:?}", socket_message);
+					self.client.push_event(socket_message);
+				}
+			})
 		}
 	}
 
+	/// Verifies whether the given transaction interacted with the socket contract.
+	fn is_socket_contract(&self, receipt: &TransactionReceipt) -> bool {
+		if let Some(to) = receipt.to {
+			if to == self.client.config.socket_address {
+				return true
+			}
+		}
+		false
+	}
+
+	/// Decode the raw event data of the triggered socket event.
 	fn decode_socket_event(data: &[u8]) -> Vec<Token> {
-		let types = [ParamType::Tuple(vec![
-			ParamType::Tuple(vec![
-				ParamType::FixedBytes(4),
-				ParamType::Uint(64),
-				ParamType::Uint(128),
-			]),
-			ParamType::Uint(8),
-			ParamType::Tuple(vec![ParamType::FixedBytes(4), ParamType::FixedBytes(16)]),
-			ParamType::Tuple(vec![
-				ParamType::FixedBytes(32),
-				ParamType::FixedBytes(32),
-				ParamType::Address,
-				ParamType::Address,
-				ParamType::Uint(256),
-				ParamType::Bytes,
-			]),
+		let abi_types = [Tuple(vec![
+			// req_id(bytes4,uint64,uint128)
+			Tuple(vec![FixedBytes(4), Uint(64), Uint(128)]),
+			// status(uint8)
+			Uint(8),
+			// ins_code(bytes4,bytes16)
+			Tuple(vec![FixedBytes(4), FixedBytes(16)]),
+			// task_params(bytes32,bytes32,address,address,uint256,bytes)
+			Tuple(vec![FixedBytes(32), FixedBytes(32), Address, Address, Uint(256), Bytes]),
 		])];
-		match ethers::abi::decode(&types, data) {
+		match ethers::abi::decode(&abi_types, data) {
 			Ok(decoded) => decoded,
 			Err(error) => panic!("panic -> {:?}", error),
 		}
