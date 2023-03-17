@@ -57,7 +57,7 @@ impl<T: JsonRpcClient> EventDetector<T> {
 	async fn process_confirmed_transaction(&mut self, receipt: TransactionReceipt) {
 		if self.is_socket_contract(&receipt) {
 			receipt.logs.iter().for_each(|log| {
-				if log.topics[0] == H256::from_str(SOCKET_EVENT_SIG).unwrap() {
+				if Self::is_socket_event(log.topics[0]) {
 					let raw_log: RawLog = log.clone().into();
 					match decode_logs::<SocketEvents>(&[raw_log]) {
 						Ok(decoded) => match &decoded[0] {
@@ -81,6 +81,14 @@ impl<T: JsonRpcClient> EventDetector<T> {
 			if to == self.client.config.socket_address {
 				return true
 			}
+		}
+		false
+	}
+
+	/// Verifies whether the given event topic matches the socket event signature.
+	fn is_socket_event(topic: H256) -> bool {
+		if topic == H256::from_str(SOCKET_EVENT_SIG).unwrap() {
+			return true
 		}
 		false
 	}
