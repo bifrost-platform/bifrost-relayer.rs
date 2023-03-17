@@ -1,6 +1,9 @@
 mod events;
 pub use events::*;
 
+mod tx;
+pub use tx::*;
+
 use ethers::{
 	abi::RawLog,
 	prelude::abigen,
@@ -52,26 +55,28 @@ impl ethers::contract::EthLogDecode for SocketEvents {
 	}
 }
 
+#[derive(Clone, Debug)]
 /// The core client for EVM-based chain interactions.
 pub struct EthClient<T> {
 	/// The ethers.rs wrapper for the connected chain.
-	provider: Arc<Provider<T>>,
-	/// The queue storing CCCP socket transaction events.
-	event_queue: Vec<SocketMessage>,
+	provider: Provider<T>,
 	/// The specific configuration details for the connected chain.
 	config: EthClientConfiguration,
 }
 
-impl<T: JsonRpcClient> EthClient<T> {
+impl<T: JsonRpcClient> EthClient<T>
+where
+	Self: Send + Sync,
+{
 	/// Instantiates a new `EthClient` instance for the given chain.
-	pub fn new(provider: Arc<Provider<T>>, config: EthClientConfiguration) -> Self {
-		Self { provider, event_queue: vec![], config }
+	pub fn new(provider: Provider<T>, config: EthClientConfiguration) -> Self {
+		Self { provider, config }
 	}
 
-	/// Push a new socket message to the queue.
-	pub fn push_event(&mut self, event: SocketMessage) {
-		self.event_queue.push(event);
-	}
+	// /// Push a new socket message to the queue.
+	// pub fn push_event(&mut self, event: SocketMessage) {
+	// 	self.event_queue.push(event);
+	// }
 
 	/// Retrieves the latest mined block number of the connected chain.
 	pub async fn get_latest_block_number(&self) -> EthResult<U64> {

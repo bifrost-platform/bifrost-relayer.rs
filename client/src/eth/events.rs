@@ -2,7 +2,10 @@ use crate::eth::SocketEvents;
 
 use super::EthClient;
 
-use std::str::FromStr;
+use std::{
+	str::FromStr,
+	sync::{Arc, Mutex},
+};
 
 use cccp_primitives::eth::SOCKET_EVENT_SIG;
 use ethers::{
@@ -17,19 +20,21 @@ use tokio_stream::StreamExt;
 /// The essential task that detects and parse CCCP-related events.
 pub struct EventDetector<T> {
 	/// The ethereum client for the connected chain.
-	pub client: EthClient<T>,
+	pub client: Arc<EthClient<T>>,
 }
 
 impl<T: JsonRpcClient> EventDetector<T> {
 	/// Instantiates a new `EventDetector` instance.
-	pub fn new(client: EthClient<T>) -> Self {
+	pub fn new(client: Arc<EthClient<T>>) -> Self {
 		Self { client }
 	}
 
 	/// Starts the event detector. Reads every new mined block of the connected chain and starts to
 	/// detect and store `Socket` transaction events.
-	pub async fn run(&mut self) {
+	pub async fn run(&self) {
 		// TODO: follow-up to the highest block
+		println!("b => {:?}", self.client.config.name);
+		println!("b => {:?}", self.client.provider);
 		loop {
 			let latest_block = self.client.get_latest_block_number().await.unwrap();
 			self.process_confirmed_block(latest_block).await;
@@ -40,7 +45,7 @@ impl<T: JsonRpcClient> EventDetector<T> {
 
 	/// Reads the contained transactions of the given confirmed block. This method will stream
 	/// through the transaction array and retrieve its data.
-	async fn process_confirmed_block(&mut self, block: U64) {
+	async fn process_confirmed_block(&self, block: U64) {
 		if let Some(block) = self.client.get_block(block.into()).await.unwrap() {
 			let mut stream = tokio_stream::iter(block.transactions);
 
@@ -54,15 +59,15 @@ impl<T: JsonRpcClient> EventDetector<T> {
 	}
 
 	/// Decode and parse the socket event if the given transaction triggered an event.
-	async fn process_confirmed_transaction(&mut self, receipt: TransactionReceipt) {
+	async fn process_confirmed_transaction(&self, receipt: TransactionReceipt) {
 		if self.is_socket_contract(&receipt) {
 			receipt.logs.iter().for_each(|log| {
 				if Self::is_socket_event(log.topics[0]) {
 					let raw_log: RawLog = log.clone().into();
 					match decode_logs::<SocketEvents>(&[raw_log]) {
 						Ok(decoded) => match &decoded[0] {
-							SocketEvents::Socket(socket) =>
-								self.client.push_event(socket.msg.clone()),
+							SocketEvents::Socket(socket) => {}, /* self.client.push_event(socket.
+							                                     * msg.clone()), */
 						},
 						Err(error) => panic!(
 							"[{:?}]-[{:?}] socket event decode error: {:?}",
@@ -72,7 +77,6 @@ impl<T: JsonRpcClient> EventDetector<T> {
 				}
 			})
 		}
-		println!("queue -> {:?}", self.client.event_queue);
 	}
 
 	/// Verifies whether the given transaction interacted with the socket contract.
