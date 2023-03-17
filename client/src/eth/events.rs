@@ -32,9 +32,7 @@ impl<T: JsonRpcClient> EventDetector<T> {
 		// TODO: follow-up to the highest block
 		loop {
 			let latest_block = self.client.get_latest_block_number().await.unwrap();
-			if let Some(confirmed_block) = self.client.try_push_block(latest_block) {
-				self.process_confirmed_block(confirmed_block).await;
-			}
+			self.process_confirmed_block(latest_block).await;
 
 			sleep(Duration::from_millis(self.client.config.call_interval)).await;
 		}

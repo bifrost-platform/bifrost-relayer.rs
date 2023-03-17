@@ -3,7 +3,7 @@ use std::str::FromStr;
 use cc_cli::Configuration;
 use cccp_client::eth::{EthClient, EventDetector};
 use cccp_primitives::eth::{
-	bfc_testnet::{BFC_BLOCK_QUEUE_SIZE, BFC_CALL_INTERVAL_MS, BFC_SOCKET_CONTRACT_ADDRESS},
+	bfc_testnet::{BFC_CALL_INTERVAL_MS, BFC_SOCKET_CONTRACT_ADDRESS},
 	EthClientConfiguration,
 };
 
@@ -28,7 +28,6 @@ pub fn new_relay_base(config: Configuration) -> Result<RelayBase, ServiceError> 
 		EthClientConfiguration {
 			name: "bfc-testnet".to_string(),
 			call_interval: BFC_CALL_INTERVAL_MS,
-			block_queue_size: BFC_BLOCK_QUEUE_SIZE,
 			socket_address: H160::from_str(BFC_SOCKET_CONTRACT_ADDRESS).unwrap(),
 		},
 	);
