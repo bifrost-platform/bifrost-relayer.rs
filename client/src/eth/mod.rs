@@ -7,7 +7,7 @@ use ethers::{
 	providers::{JsonRpcClient, Middleware, Provider},
 	types::{Block, BlockId, TransactionReceipt, H256, U64},
 };
-use std::{collections::VecDeque, sync::Arc};
+use std::sync::Arc;
 
 use cccp_primitives::eth::{EthClientConfiguration, EthResult};
 
@@ -56,9 +56,6 @@ impl ethers::contract::EthLogDecode for SocketEvents {
 pub struct EthClient<T> {
 	/// The ethers.rs wrapper for the connected chain.
 	provider: Arc<Provider<T>>,
-	/// The queue storing mined block numbers. The stored block will be popped when the queue size
-	/// exceeds the maximum size.
-	block_queue: VecDeque<U64>,
 	/// The queue storing CCCP socket transaction events.
 	event_queue: Vec<SocketMessage>,
 	/// The specific configuration details for the connected chain.
@@ -68,33 +65,12 @@ pub struct EthClient<T> {
 impl<T: JsonRpcClient> EthClient<T> {
 	/// Instantiates a new `EthClient` instance for the given chain.
 	pub fn new(provider: Arc<Provider<T>>, config: EthClientConfiguration) -> Self {
-		Self { provider, block_queue: VecDeque::new(), event_queue: vec![], config }
-	}
-
-	/// Push a new block to the queue. Whenever the queue is full, the first element will be popped.
-	pub fn try_push_block(&mut self, block_number: U64) -> Option<U64> {
-		if self.block_queue.contains(&block_number) {
-			return None
-		}
-
-		self.block_queue.push_back(block_number);
-		if self.is_block_queue_full() {
-			return self.block_queue.pop_front()
-		}
-		None
+		Self { provider, event_queue: vec![], config }
 	}
 
 	/// Push a new socket message to the queue.
 	pub fn push_event(&mut self, event: SocketMessage) {
 		self.event_queue.push(event);
-	}
-
-	/// Verifies whether or not the block queue is full.
-	fn is_block_queue_full(&self) -> bool {
-		if self.config.block_queue_size < self.block_queue.len() as u64 {
-			return true
-		}
-		false
 	}
 
 	/// Retrieves the latest mined block number of the connected chain.

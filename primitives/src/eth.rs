@@ -6,9 +6,6 @@ pub mod bfc_testnet {
 	/// The time interval used when to request a new block for BIFROST.
 	pub const BFC_CALL_INTERVAL_MS: u64 = 2_000;
 
-	/// The size of the queue storing blocks to prevent block reorgs for BIFROST.
-	pub const BFC_BLOCK_QUEUE_SIZE: u64 = 6;
-
 	/// The socket contract address deployed on BIFROST.
 	pub const BFC_SOCKET_CONTRACT_ADDRESS: &str = "0x0218371b18340aBD460961bdF3Bd5F01858dAB53";
 }
@@ -23,8 +20,6 @@ pub struct EthClientConfiguration {
 	pub name: String,
 	/// The `get_block` request interval in milliseconds.
 	pub call_interval: u64,
-	/// The maximum block queue size for confirmation.
-	pub block_queue_size: u64,
 	/// The socket contract address.
 	pub socket_address: H160,
 }
