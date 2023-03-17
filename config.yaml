@@ -2,7 +2,7 @@ bitcoin_provider:
 bitcoin_username:
 bitcoin_password:
 
-bfc_provider:
+bfc_provider: "https://private.chain.thebifrost.io/rpc"
 eth_provider:
 bsc_provider:
 polygon_provider:
