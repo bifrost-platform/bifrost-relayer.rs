@@ -1,26 +1,3 @@
-[package]
-name = "cccp-relayer"
-version = "0.1.0"
-description = "The core rust implementation for BIFROST relayer"
-authors = ["bifrost-platform"]
-homepage = "https://thebifrost.io"
-edition = "2021"
-license = "Unlicense"
-repository = "https://github.com/bifrost-platform/cccp-relayer"
-
-[dependencies]
-ethers = "2.0"
-serde_yaml = "0.9.19"
-
-# local
-cc-cli = { path = "./client/cli" }
-cccp-client = { path = "./client" }
-cccp-primitives = { path = "./primitives" }
-
-# substrate
-sc-cli = { git = "https://github.com/bifrost-platform/bifrost-substrate", branch = "bifrost-polkadot-v0.9.35" }
-sc-service = { git = "https://github.com/bifrost-platform/bifrost-substrate", branch = "bifrost-polkadot-v0.9.35" }
-
 [workspace]
 members = [
 	"client",
