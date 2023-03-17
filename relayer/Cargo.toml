@@ -16,6 +16,7 @@ sc-cli = { git = "https://github.com/bifrost-platform/bifrost-substrate", branch
 sc-service = { git = "https://github.com/bifrost-platform/bifrost-substrate", branch = "bifrost-polkadot-v0.9.35" }
 serde_yaml = "0.9.19"
 ethers = "2.0"
+tokio = { version = "1.22.0", features = ["signal", "rt-multi-thread", "parking_lot"] }
 
 [[bin]]
 name = "cccp-relayer"
