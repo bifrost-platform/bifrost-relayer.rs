@@ -1,11 +1,8 @@
 use crate::eth::SocketEvents;
 
-use super::EthClient;
+use super::{EthClient, SocketMessage};
 
-use std::{
-	str::FromStr,
-	sync::{Arc, Mutex},
-};
+use std::{str::FromStr, sync::Arc};
 
 use cccp_primitives::eth::SOCKET_EVENT_SIG;
 use ethers::{
@@ -14,27 +11,47 @@ use ethers::{
 	providers::JsonRpcClient,
 	types::{TransactionReceipt, H256, U64},
 };
-use tokio::time::{sleep, Duration};
+use tokio::{
+	sync::mpsc::Sender,
+	time::{sleep, Duration},
+};
 use tokio_stream::StreamExt;
+
+pub struct EventChannel {
+	pub bfc_channel: Sender<SocketMessage>,
+	pub eth_channel: Sender<SocketMessage>,
+	pub bsc_channel: Sender<SocketMessage>,
+	pub polygon_channel: Sender<SocketMessage>,
+}
+
+impl EventChannel {
+	pub fn new(
+		bfc_channel: Sender<SocketMessage>,
+		eth_channel: Sender<SocketMessage>,
+		bsc_channel: Sender<SocketMessage>,
+		polygon_channel: Sender<SocketMessage>,
+	) -> Self {
+		Self { bfc_channel, eth_channel, bsc_channel, polygon_channel }
+	}
+}
 
 /// The essential task that detects and parse CCCP-related events.
 pub struct EventDetector<T> {
 	/// The ethereum client for the connected chain.
 	pub client: Arc<EthClient<T>>,
+	pub event_channel: Arc<EventChannel>,
 }
 
 impl<T: JsonRpcClient> EventDetector<T> {
 	/// Instantiates a new `EventDetector` instance.
-	pub fn new(client: Arc<EthClient<T>>) -> Self {
-		Self { client }
+	pub fn new(client: Arc<EthClient<T>>, event_channel: Arc<EventChannel>) -> Self {
+		Self { client, event_channel }
 	}
 
 	/// Starts the event detector. Reads every new mined block of the connected chain and starts to
 	/// detect and store `Socket` transaction events.
 	pub async fn run(&self) {
 		// TODO: follow-up to the highest block
-		println!("b => {:?}", self.client.config.name);
-		println!("b => {:?}", self.client.provider);
 		loop {
 			let latest_block = self.client.get_latest_block_number().await.unwrap();
 			self.process_confirmed_block(latest_block).await;
@@ -66,8 +83,7 @@ impl<T: JsonRpcClient> EventDetector<T> {
 					let raw_log: RawLog = log.clone().into();
 					match decode_logs::<SocketEvents>(&[raw_log]) {
 						Ok(decoded) => match &decoded[0] {
-							SocketEvents::Socket(socket) => {}, /* self.client.push_event(socket.
-							                                     * msg.clone()), */
+							SocketEvents::Socket(socket) => {},
 						},
 						Err(error) => panic!(
 							"[{:?}]-[{:?}] socket event decode error: {:?}",

@@ -719,6 +719,7 @@ dependencies = [
  "sc-cli",
  "sc-service",
  "serde_yaml",
+ "tokio",
 ]
 
 [[package]]

@@ -10,7 +10,6 @@ use ethers::{
 	providers::{JsonRpcClient, Middleware, Provider},
 	types::{Block, BlockId, TransactionReceipt, H256, U64},
 };
-use std::sync::Arc;
 
 use cccp_primitives::eth::{EthClientConfiguration, EthResult};
 
@@ -72,11 +71,6 @@ where
 	pub fn new(provider: Provider<T>, config: EthClientConfiguration) -> Self {
 		Self { provider, config }
 	}
-
-	// /// Push a new socket message to the queue.
-	// pub fn push_event(&mut self, event: SocketMessage) {
-	// 	self.event_queue.push(event);
-	// }
 
 	/// Retrieves the latest mined block number of the connected chain.
 	pub async fn get_latest_block_number(&self) -> EthResult<U64> {
