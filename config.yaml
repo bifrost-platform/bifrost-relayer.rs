@@ -3,5 +3,6 @@ bitcoin_username:
 bitcoin_password:
 
 bfc_provider:
-
 eth_provider:
+bsc_provider:
+polygon_provider:
