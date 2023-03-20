@@ -141,15 +141,15 @@ impl<T: JsonRpcClient> EventDetector<T> {
 			SocketEventStatus::Executed |
 			SocketEventStatus::Reverted =>
 				if is_inbound {
-					return dst_chain_id
+					dst_chain_id
 				} else {
-					return src_chain_id
+					src_chain_id
 				},
 			SocketEventStatus::Accepted | SocketEventStatus::Rejected =>
 				if is_inbound {
-					return src_chain_id
+					src_chain_id
 				} else {
-					return dst_chain_id
+					dst_chain_id
 				},
 			_ => panic!(
 				"[{:?}] invalid socket event status received: {:?}",
@@ -162,29 +162,23 @@ impl<T: JsonRpcClient> EventDetector<T> {
 	fn is_inbound_sequence(&self, status: SocketEventStatus) -> bool {
 		if self.client.config.id == bfc_testnet::BFC_CHAIN_ID {
 			// event detected on BIFROST
-			match status {
+			matches!(
+				status,
 				SocketEventStatus::Executed |
-				SocketEventStatus::Reverted |
-				SocketEventStatus::Accepted |
-				SocketEventStatus::Rejected => return true,
-				_ => return false,
-			}
+					SocketEventStatus::Reverted |
+					SocketEventStatus::Accepted |
+					SocketEventStatus::Rejected
+			)
 		} else {
 			// event detected on any external chain
-			match status {
-				SocketEventStatus::Requested => return true,
-				_ => return false,
-			}
+			matches!(status, SocketEventStatus::Requested)
 		}
 	}
 
 	/// Verifies whether the socket event status is `COMMITTED` or `ROLLBACKED`. If `true`,
 	/// inbound|outbound sequence has been ended. No further actions required.
 	fn is_sequence_ended(status: SocketEventStatus) -> bool {
-		match status {
-			SocketEventStatus::Committed | SocketEventStatus::Rollbacked => return true,
-			_ => return false,
-		}
+		matches!(status, SocketEventStatus::Committed | SocketEventStatus::Rollbacked)
 	}
 
 	/// Verifies whether the given transaction interacted with the socket contract.
