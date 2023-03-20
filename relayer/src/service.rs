@@ -22,8 +22,9 @@ pub fn relay(config: Configuration) -> Result<TaskManager, ServiceError> {
 pub fn new_relay_base(config: Configuration) -> Result<RelayBase, ServiceError> {
 	let task_manager = TaskManager::new(config.tokio_handle, None)?;
 
+	// initialize eth client
 	let bfc_client = Arc::new(EthClient::new(
-		Provider::<Http>::try_from(&config.private_config.bfc_provider).unwrap(),
+		Arc::new(Provider::<Http>::try_from(&config.private_config.bfc_provider).unwrap()),
 		EthClientConfiguration {
 			name: "bfc-testnet".to_string(),
 			call_interval: BFC_CALL_INTERVAL_MS,
@@ -33,7 +34,7 @@ pub fn new_relay_base(config: Configuration) -> Result<RelayBase, ServiceError> 
 	let (mut bfc_tx_manager, bfc_channel) = TransactionManager::new(bfc_client.clone());
 
 	let eth_client = Arc::new(EthClient::new(
-		Provider::<Http>::try_from(&config.private_config.eth_provider).unwrap(),
+		Arc::new(Provider::<Http>::try_from(&config.private_config.eth_provider).unwrap()),
 		EthClientConfiguration {
 			name: "eth-testnet".to_string(),
 			call_interval: ETH_CALL_INTERVAL_MS,
@@ -43,7 +44,7 @@ pub fn new_relay_base(config: Configuration) -> Result<RelayBase, ServiceError> 
 	let (mut eth_tx_manager, eth_channel) = TransactionManager::new(eth_client.clone());
 
 	let bsc_client = Arc::new(EthClient::new(
-		Provider::<Http>::try_from(&config.private_config.bsc_provider).unwrap(),
+		Arc::new(Provider::<Http>::try_from(&config.private_config.bsc_provider).unwrap()),
 		EthClientConfiguration {
 			name: "bsc-testnet".to_string(),
 			call_interval: BSC_CALL_INTERVAL_MS,
@@ -53,7 +54,7 @@ pub fn new_relay_base(config: Configuration) -> Result<RelayBase, ServiceError> 
 	let (mut bsc_tx_manager, bsc_channel) = TransactionManager::new(bsc_client.clone());
 
 	let polygon_client = Arc::new(EthClient::new(
-		Provider::<Http>::try_from(&config.private_config.polygon_provider).unwrap(),
+		Arc::new(Provider::<Http>::try_from(&config.private_config.polygon_provider).unwrap()),
 		EthClientConfiguration {
 			name: "polygon-testnet".to_string(),
 			call_interval: POLYGON_CALL_INTERVAL_MS,

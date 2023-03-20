@@ -1,4 +1,6 @@
 mod events;
+use std::sync::Arc;
+
 pub use events::*;
 
 mod tx;
@@ -58,9 +60,10 @@ impl ethers::contract::EthLogDecode for SocketEvents {
 /// The core client for EVM-based chain interactions.
 pub struct EthClient<T> {
 	/// The ethers.rs wrapper for the connected chain.
-	provider: Provider<T>,
+	provider: Arc<Provider<T>>,
 	/// The specific configuration details for the connected chain.
 	config: EthClientConfiguration,
+	pub socket: SocketExternal<Provider<T>>,
 }
 
 impl<T: JsonRpcClient> EthClient<T>
@@ -68,8 +71,12 @@ where
 	Self: Send + Sync,
 {
 	/// Instantiates a new `EthClient` instance for the given chain.
-	pub fn new(provider: Provider<T>, config: EthClientConfiguration) -> Self {
-		Self { provider, config }
+	pub fn new(provider: Arc<Provider<T>>, config: EthClientConfiguration) -> Self {
+		Self {
+			provider: provider.clone(),
+			config: config.clone(),
+			socket: SocketExternal::new(config.socket_address.clone(), provider.clone()),
+		}
 	}
 
 	/// Retrieves the latest mined block number of the connected chain.
