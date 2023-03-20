@@ -63,6 +63,7 @@ pub struct EthClient<T> {
 	provider: Arc<Provider<T>>,
 	/// The specific configuration details for the connected chain.
 	config: EthClientConfiguration,
+	/// The socket contract instance deployed on the connected chain.
 	pub socket: SocketExternal<Provider<T>>,
 }
 

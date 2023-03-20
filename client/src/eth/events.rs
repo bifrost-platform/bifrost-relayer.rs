@@ -5,7 +5,7 @@ use super::{EthClient, SocketMessage};
 use std::{str::FromStr, sync::Arc};
 
 use cccp_primitives::eth::{
-	bfc_testnet, bsc_testnet, eth_testnet, polygon_testnet, SOCKET_EVENT_SIG,
+	bfc_testnet, bsc_testnet, eth_testnet, polygon_testnet, SocketEventStatus, SOCKET_EVENT_SIG,
 };
 use ethers::{
 	abi::RawLog,
@@ -102,26 +102,87 @@ impl<T: JsonRpcClient> EventDetector<T> {
 		}
 	}
 
-	/// Sends the `SocketMessage` to the `ins_code.chain` channel.
+	/// Sends the `SocketMessage` to the target chain channel.
 	async fn send_socket_message(&self, msg: SocketMessage) {
-		let dst_chain_id = u32::from_be_bytes(msg.ins_code.chain);
-		match dst_chain_id {
-			bfc_testnet::BFC_CHAIN_ID => {
-				self.event_channels.bfc_channel.send(msg).await.unwrap();
-			},
-			eth_testnet::ETH_CHAIN_ID => {
-				self.event_channels.eth_channel.send(msg).await.unwrap();
-			},
-			bsc_testnet::BSC_CHAIN_ID => {
-				self.event_channels.bsc_channel.send(msg).await.unwrap();
-			},
-			polygon_testnet::POLYGON_CHAIN_ID => {
-				self.event_channels.polygon_channel.send(msg).await.unwrap();
-			},
+		let status = SocketEventStatus::from_u8(msg.status);
+		if Self::is_sequence_ended(status) {
+			return
+		}
+
+		let send_to_channel = |chain_id: u32, msg: SocketMessage| match chain_id {
+			bfc_testnet::BFC_CHAIN_ID => self.event_channels.bfc_channel.send(msg),
+			eth_testnet::ETH_CHAIN_ID => self.event_channels.eth_channel.send(msg),
+			bsc_testnet::BSC_CHAIN_ID => self.event_channels.bsc_channel.send(msg),
+			polygon_testnet::POLYGON_CHAIN_ID => self.event_channels.polygon_channel.send(msg),
+			_ =>
+				panic!("[{:?}] invalid chain_id received : {:?}", self.client.config.name, chain_id),
+		};
+
+		let relay_tx_chain_id = self.get_relay_tx_chain_id(
+			status,
+			u32::from_be_bytes(msg.req_id.chain),
+			u32::from_be_bytes(msg.ins_code.chain),
+			self.is_inbound_sequence(status),
+		);
+		send_to_channel(relay_tx_chain_id, msg).await.unwrap();
+	}
+
+	/// Get the chain ID of the relay transaction.
+	fn get_relay_tx_chain_id(
+		&self,
+		status: SocketEventStatus,
+		src_chain_id: u32,
+		dst_chain_id: u32,
+		is_inbound: bool,
+	) -> u32 {
+		match status {
+			SocketEventStatus::Requested |
+			SocketEventStatus::Executed |
+			SocketEventStatus::Reverted =>
+				if is_inbound {
+					return dst_chain_id
+				} else {
+					return src_chain_id
+				},
+			SocketEventStatus::Accepted | SocketEventStatus::Rejected =>
+				if is_inbound {
+					return src_chain_id
+				} else {
+					return dst_chain_id
+				},
 			_ => panic!(
-				"[{:?}] invalid dst_chain_id received : {:?}",
-				self.client.config.name, dst_chain_id
+				"[{:?}] invalid socket event status received: {:?}",
+				self.client.config.name, status
 			),
+		}
+	}
+
+	/// Verifies whether the socket event is a sequence of an inbound protocol.
+	fn is_inbound_sequence(&self, status: SocketEventStatus) -> bool {
+		if self.client.config.id == bfc_testnet::BFC_CHAIN_ID {
+			// event detected on BIFROST
+			match status {
+				SocketEventStatus::Executed |
+				SocketEventStatus::Reverted |
+				SocketEventStatus::Accepted |
+				SocketEventStatus::Rejected => return true,
+				_ => return false,
+			}
+		} else {
+			// event detected on any external chain
+			match status {
+				SocketEventStatus::Requested => return true,
+				_ => return false,
+			}
+		}
+	}
+
+	/// Verifies whether the socket event status is `COMMITTED` or `ROLLBACKED`. If `true`,
+	/// inbound|outbound sequence has been ended. No further actions required.
+	fn is_sequence_ended(status: SocketEventStatus) -> bool {
+		match status {
+			SocketEventStatus::Committed | SocketEventStatus::Rollbacked => return true,
+			_ => return false,
 		}
 	}
 

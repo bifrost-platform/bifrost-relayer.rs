@@ -25,7 +25,7 @@ impl<T: JsonRpcClient> TransactionManager<T> {
 	/// Starts the transaction manager. Listens to every new consumed socket message.
 	pub async fn run(&mut self) {
 		while let Some(msg) = self.receiver.recv().await {
-			println!("msg -> {:?}", msg);
+			println!("[{:?}] socket event received -> {:?}", self.client.config.name, msg);
 
 			let poll_submit = PollSubmit {
 				msg,

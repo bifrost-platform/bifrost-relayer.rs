@@ -1,10 +1,12 @@
 use cc_cli::Configuration;
 use cccp_client::eth::{EthClient, EventChannels, EventDetector, TransactionManager};
 use cccp_primitives::eth::{
-	bfc_testnet::{BFC_CALL_INTERVAL_MS, BFC_SOCKET_CONTRACT_ADDRESS},
-	bsc_testnet::{BSC_CALL_INTERVAL_MS, BSC_SOCKET_CONTRACT_ADDRESS},
-	eth_testnet::{ETH_CALL_INTERVAL_MS, ETH_SOCKET_CONTRACT_ADDRESS},
-	polygon_testnet::{POLYGON_CALL_INTERVAL_MS, POLYGON_SOCKET_CONTRACT_ADDRESS},
+	bfc_testnet::{BFC_CALL_INTERVAL_MS, BFC_CHAIN_ID, BFC_SOCKET_CONTRACT_ADDRESS},
+	bsc_testnet::{BSC_CALL_INTERVAL_MS, BSC_CHAIN_ID, BSC_SOCKET_CONTRACT_ADDRESS},
+	eth_testnet::{ETH_CALL_INTERVAL_MS, ETH_CHAIN_ID, ETH_SOCKET_CONTRACT_ADDRESS},
+	polygon_testnet::{
+		POLYGON_CALL_INTERVAL_MS, POLYGON_CHAIN_ID, POLYGON_SOCKET_CONTRACT_ADDRESS,
+	},
 	EthClientConfiguration,
 };
 use sc_service::{Error as ServiceError, TaskManager};
@@ -26,6 +28,7 @@ pub fn new_relay_base(config: Configuration) -> Result<RelayBase, ServiceError> 
 			Provider::<Http>::try_from(config.get_evm_config_by_name("bfc")?.provider).unwrap(),
 		),
 		EthClientConfiguration {
+			id: BFC_CHAIN_ID,
 			name: "bfc-testnet".to_string(),
 			call_interval: BFC_CALL_INTERVAL_MS,
 			socket_address: H160::from_str(BFC_SOCKET_CONTRACT_ADDRESS).unwrap(),
@@ -38,6 +41,7 @@ pub fn new_relay_base(config: Configuration) -> Result<RelayBase, ServiceError> 
 			Provider::<Http>::try_from(config.get_evm_config_by_name("eth")?.provider).unwrap(),
 		),
 		EthClientConfiguration {
+			id: ETH_CHAIN_ID,
 			name: "eth-testnet".to_string(),
 			call_interval: ETH_CALL_INTERVAL_MS,
 			socket_address: H160::from_str(ETH_SOCKET_CONTRACT_ADDRESS).unwrap(),
@@ -50,6 +54,7 @@ pub fn new_relay_base(config: Configuration) -> Result<RelayBase, ServiceError> 
 			Provider::<Http>::try_from(config.get_evm_config_by_name("bsc")?.provider).unwrap(),
 		),
 		EthClientConfiguration {
+			id: BSC_CHAIN_ID,
 			name: "bsc-testnet".to_string(),
 			call_interval: BSC_CALL_INTERVAL_MS,
 			socket_address: H160::from_str(BSC_SOCKET_CONTRACT_ADDRESS).unwrap(),
@@ -62,6 +67,7 @@ pub fn new_relay_base(config: Configuration) -> Result<RelayBase, ServiceError> 
 			Provider::<Http>::try_from(config.get_evm_config_by_name("matic")?.provider).unwrap(),
 		),
 		EthClientConfiguration {
+			id: POLYGON_CHAIN_ID,
 			name: "polygon-testnet".to_string(),
 			call_interval: POLYGON_CALL_INTERVAL_MS,
 			socket_address: H160::from_str(POLYGON_SOCKET_CONTRACT_ADDRESS).unwrap(),
