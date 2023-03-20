@@ -1,19 +1,15 @@
 use cc_cli::Configuration;
-use cccp_client::eth::{EthClient, EventChannels, EventDetector, TransactionManager};
-use cccp_primitives::eth::{
-	bfc_testnet::{BFC_CALL_INTERVAL_MS, BFC_SOCKET_CONTRACT_ADDRESS},
-	bsc_testnet::{BSC_CALL_INTERVAL_MS, BSC_SOCKET_CONTRACT_ADDRESS},
-	eth_testnet::{ETH_CALL_INTERVAL_MS, ETH_SOCKET_CONTRACT_ADDRESS},
-	polygon_testnet::{POLYGON_CALL_INTERVAL_MS, POLYGON_SOCKET_CONTRACT_ADDRESS},
-	EthClientConfiguration,
+use cccp_client::eth::{
+	EthClient, EventChannels, EventDetector, SocketMessage, TransactionManager,
 };
-use sc_service::{Error as ServiceError, TaskManager};
-use std::{str::FromStr, sync::Arc};
-
+use cccp_primitives::eth::EthClientConfiguration;
 use ethers::{
 	providers::{Http, Provider},
 	types::H160,
 };
+use sc_service::{Error as ServiceError, TaskManager};
+use std::{str::FromStr, sync::Arc};
+use tokio::sync::mpsc::Sender;
 
 pub fn relay(config: Configuration) -> Result<TaskManager, ServiceError> {
 	new_relay_base(config).map(|RelayBase { task_manager, .. }| task_manager)
@@ -21,53 +17,14 @@ pub fn relay(config: Configuration) -> Result<TaskManager, ServiceError> {
 
 pub fn new_relay_base(config: Configuration) -> Result<RelayBase, ServiceError> {
 	// initialize eth client
-	let bfc_client = Arc::new(EthClient::new(
-		Arc::new(
-			Provider::<Http>::try_from(config.get_evm_config_by_name("bfc")?.provider).unwrap(),
-		),
-		EthClientConfiguration {
-			name: "bfc-testnet".to_string(),
-			call_interval: BFC_CALL_INTERVAL_MS,
-			socket_address: H160::from_str(BFC_SOCKET_CONTRACT_ADDRESS).unwrap(),
-		},
-	));
-	let (mut bfc_tx_manager, bfc_channel) = TransactionManager::new(bfc_client.clone());
-
-	let eth_client = Arc::new(EthClient::new(
-		Arc::new(
-			Provider::<Http>::try_from(config.get_evm_config_by_name("eth")?.provider).unwrap(),
-		),
-		EthClientConfiguration {
-			name: "eth-testnet".to_string(),
-			call_interval: ETH_CALL_INTERVAL_MS,
-			socket_address: H160::from_str(ETH_SOCKET_CONTRACT_ADDRESS).unwrap(),
-		},
-	));
-	let (mut eth_tx_manager, eth_channel) = TransactionManager::new(eth_client.clone());
-
-	let bsc_client = Arc::new(EthClient::new(
-		Arc::new(
-			Provider::<Http>::try_from(config.get_evm_config_by_name("bsc")?.provider).unwrap(),
-		),
-		EthClientConfiguration {
-			name: "bsc-testnet".to_string(),
-			call_interval: BSC_CALL_INTERVAL_MS,
-			socket_address: H160::from_str(BSC_SOCKET_CONTRACT_ADDRESS).unwrap(),
-		},
-	));
-	let (mut bsc_tx_manager, bsc_channel) = TransactionManager::new(bsc_client.clone());
-
-	let polygon_client = Arc::new(EthClient::new(
-		Arc::new(
-			Provider::<Http>::try_from(config.get_evm_config_by_name("matic")?.provider).unwrap(),
-		),
-		EthClientConfiguration {
-			name: "polygon-testnet".to_string(),
-			call_interval: POLYGON_CALL_INTERVAL_MS,
-			socket_address: H160::from_str(POLYGON_SOCKET_CONTRACT_ADDRESS).unwrap(),
-		},
-	));
-	let (mut polygon_tx_manager, polygon_channel) = TransactionManager::new(polygon_client.clone());
+	let (bfc_client, mut bfc_tx_manager, bfc_channel) =
+		initialize_client_by_name(config.clone(), "bfc-testnet");
+	let (eth_client, mut eth_tx_manager, eth_channel) =
+		initialize_client_by_name(config.clone(), "eth-goerli");
+	let (bsc_client, mut bsc_tx_manager, bsc_channel) =
+		initialize_client_by_name(config.clone(), "bsc-testnet");
+	let (polygon_client, mut polygon_tx_manager, polygon_channel) =
+		initialize_client_by_name(config.clone(), "polygon-mumbai");
 
 	// initialize cccp event channel
 	let event_channels =
@@ -120,6 +77,25 @@ pub fn new_relay_base(config: Configuration) -> Result<RelayBase, ServiceError> 
 	);
 
 	Ok(RelayBase { task_manager })
+}
+
+fn initialize_client_by_name(
+	config: Configuration,
+	name: &str,
+) -> (Arc<EthClient<Http>>, TransactionManager<Http>, Sender<SocketMessage>) {
+	let evm_config = config.get_evm_config_by_name(name).unwrap();
+
+	let client = Arc::new(EthClient::new(
+		Arc::new(Provider::<Http>::try_from(evm_config.provider).unwrap()),
+		EthClientConfiguration {
+			name: evm_config.name,
+			call_interval: evm_config.interval,
+			socket_address: H160::from_str(evm_config.socket.as_str()).unwrap(),
+		},
+	));
+	let (tx_manager, channel) = TransactionManager::new(client.clone());
+
+	(client, tx_manager, channel)
 }
 
 pub struct RelayBase {
