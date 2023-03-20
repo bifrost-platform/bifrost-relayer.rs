@@ -19,14 +19,14 @@ use tokio::{
 };
 use tokio_stream::StreamExt;
 
-pub struct EventChannel {
+pub struct EventChannels {
 	pub bfc_channel: Sender<SocketMessage>,
 	pub eth_channel: Sender<SocketMessage>,
 	pub bsc_channel: Sender<SocketMessage>,
 	pub polygon_channel: Sender<SocketMessage>,
 }
 
-impl EventChannel {
+impl EventChannels {
 	pub fn new(
 		bfc_channel: Sender<SocketMessage>,
 		eth_channel: Sender<SocketMessage>,
@@ -42,13 +42,13 @@ pub struct EventDetector<T> {
 	/// The ethereum client for the connected chain.
 	pub client: Arc<EthClient<T>>,
 	/// The channels sending socket messages.
-	pub event_channel: Arc<EventChannel>,
+	pub event_channels: Arc<EventChannels>,
 }
 
 impl<T: JsonRpcClient> EventDetector<T> {
 	/// Instantiates a new `EventDetector` instance.
-	pub fn new(client: Arc<EthClient<T>>, event_channel: Arc<EventChannel>) -> Self {
-		Self { client, event_channel }
+	pub fn new(client: Arc<EthClient<T>>, event_channels: Arc<EventChannels>) -> Self {
+		Self { client, event_channels }
 	}
 
 	/// Starts the event detector. Reads every new mined block of the connected chain and starts to
@@ -107,16 +107,16 @@ impl<T: JsonRpcClient> EventDetector<T> {
 		let dst_chain_id = u32::from_be_bytes(msg.ins_code.chain);
 		match dst_chain_id {
 			bfc_testnet::BFC_CHAIN_ID => {
-				self.event_channel.bfc_channel.send(msg).await.unwrap();
+				self.event_channels.bfc_channel.send(msg).await.unwrap();
 			},
 			eth_testnet::ETH_CHAIN_ID => {
-				self.event_channel.eth_channel.send(msg).await.unwrap();
+				self.event_channels.eth_channel.send(msg).await.unwrap();
 			},
 			bsc_testnet::BSC_CHAIN_ID => {
-				self.event_channel.bsc_channel.send(msg).await.unwrap();
+				self.event_channels.bsc_channel.send(msg).await.unwrap();
 			},
 			polygon_testnet::POLYGON_CHAIN_ID => {
-				self.event_channel.polygon_channel.send(msg).await.unwrap();
+				self.event_channels.polygon_channel.send(msg).await.unwrap();
 			},
 			_ => panic!(
 				"[{:?}] invalid dst_chain_id received : {:?}",

@@ -75,18 +75,18 @@ where
 		Self {
 			provider: provider.clone(),
 			config: config.clone(),
-			socket: SocketExternal::new(config.socket_address.clone(), provider.clone()),
+			socket: SocketExternal::new(config.socket_address, provider),
 		}
 	}
 
 	/// Retrieves the latest mined block number of the connected chain.
 	pub async fn get_latest_block_number(&self) -> EthResult<U64> {
-		Ok(self.provider.get_block_number().await?)
+		self.provider.get_block_number().await
 	}
 
 	/// Retrieves the block information of the given block hash.
 	pub async fn get_block(&self, id: BlockId) -> EthResult<Option<Block<H256>>> {
-		Ok(self.provider.get_block(id).await?)
+		self.provider.get_block(id).await
 	}
 
 	/// Retrieves the transaction receipt of the given transaction hash.
@@ -94,6 +94,6 @@ where
 		&self,
 		hash: H256,
 	) -> EthResult<Option<TransactionReceipt>> {
-		Ok(self.provider.get_transaction_receipt(hash).await?)
+		self.provider.get_transaction_receipt(hash).await
 	}
 }
