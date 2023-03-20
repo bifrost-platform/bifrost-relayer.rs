@@ -10,7 +10,7 @@ pub fn create_configuration(tokio_handle: tokio::runtime::Handle) -> Result<Conf
 	Ok(Configuration { private_config, tokio_handle })
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Configuration {
 	/// Private things. ex) RPC providers, API keys.
 	pub private_config: RelayerPrivateConfig,
@@ -18,26 +18,44 @@ pub struct Configuration {
 	pub tokio_handle: tokio::runtime::Handle,
 }
 
-#[derive(Debug, Deserialize)]
+impl Configuration {
+	pub fn get_evm_config_by_name(&self, name: &str) -> std::result::Result<EVMConfig, String> {
+		self.private_config
+			.evm_chains
+			.iter()
+			.find(|evm_config| evm_config.name == name)
+			.cloned()
+			.ok_or_else(|| format!("EVM config with name {} not found", name))
+	}
+}
+
+#[derive(Debug, Clone, Deserialize)]
 pub struct RelayerPrivateConfig {
+	/// BTC config
+	pub bitcoin: BitcoinConfig,
+
+	/// EVM configs
+	pub evm_chains: Vec<EVMConfig>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct BitcoinConfig {
 	/// BTC rpc provider url with port.
-	pub bitcoin_provider: String,
+	pub provider: String,
 	/// Username for BTC rpc authentication.
-	pub bitcoin_username: String,
+	pub username: String,
 	/// Password for BTC rpc authentication.
-	pub bitcoin_password: String,
+	pub password: String,
+}
 
-	/// Bifrost rpc provider url.
-	pub bfc_provider: String,
-
-	/// Ethereum provider url.
-	pub eth_provider: String,
-
-	/// Binance Smart Chain provider url.
-	pub bsc_provider: String,
-
-	/// Polygon provider url.
-	pub polygon_provider: String,
+#[derive(Debug, Clone, Deserialize)]
+pub struct EVMConfig {
+	/// Network name
+	pub name: String,
+	/// Chain ID
+	pub id: u32,
+	/// Endpoint provider
+	pub provider: String,
 }
 
 #[cfg(test)]
