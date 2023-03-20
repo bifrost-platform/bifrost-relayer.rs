@@ -1,8 +1,21 @@
-bitcoin_provider:
-bitcoin_username:
-bitcoin_password:
+bitcoin:
+  provider: ""
+  username: ""
+  password: ""
 
-bfc_provider: "https://private.chain.thebifrost.io/rpc"
-eth_provider:
-bsc_provider:
-polygon_provider:
+evm_chains:
+  - name: "bfc"
+    id: 123
+    provider: ""
+
+  - name: "eth"
+    id: 123
+    provider: ""
+
+  - name: "bsc"
+    id: 123
+    provider: ""
+
+  - name: "matic"
+    id: 123
+    provider: ""
