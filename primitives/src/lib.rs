@@ -1,8 +1,6 @@
 pub mod eth;
 pub mod traits;
 
-pub type Err = Box<dyn std::error::Error + Send + Sync>;
-
 /// The time interval used when to request a new block for BIFROST.
 pub const BFC_CALL_INTERVAL_MS: u64 = 2_000;
 

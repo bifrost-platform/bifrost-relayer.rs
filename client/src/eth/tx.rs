@@ -27,21 +27,39 @@ impl<T: JsonRpcClient> TransactionManager<T> {
 		while let Some(msg) = self.receiver.recv().await {
 			println!("msg -> {:?}", msg);
 
-			let poll_submit = PollSubmit {
-				msg,
-				sigs: Signatures::default(),
-				option: ethers::types::U256::default(),
+			// Until the primary relayer option is implemented, sigs should always be set to the
+			// default value
+			let sigs = match self.is_primiary() {
+				true => {
+					let sigs: Signatures = self
+						.client
+						.socket
+						.get_signatures(msg.req_id.clone(), msg.status)
+						.call()
+						.await
+						.unwrap_or_default();
+
+					sigs
+				},
+				false => Signatures::default(),
 			};
+
+			// forced_fail should be set to 0
+			let poll_submit = PollSubmit { msg, sigs, option: ethers::types::U256::default() };
 
 			match self.client.socket.poll(poll_submit).call().await {
 				Ok(result) => {
 					println!("result : {result:?}")
 				},
 				Err(e) => {
-					println!("error : {e:?}")
+					println!("error : {e:?}");
 				},
 			}
 		}
+	}
+
+	fn is_primiary(&self) -> bool {
+		false
 	}
 }
 

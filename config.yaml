@@ -27,3 +27,4 @@ evm_chains:
     provider: ""
     interval: 1000
     socket: "0xA25357F3C313Bd13885678f935178211f0dF6722"
+
