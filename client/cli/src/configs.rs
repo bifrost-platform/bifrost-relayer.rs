@@ -39,3 +39,18 @@ pub struct RelayerPrivateConfig {
 	/// Polygon provider url.
 	pub polygon_provider: String,
 }
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	#[test]
+	fn test_config_parsing() {
+		let private_config_file =
+			std::fs::File::open("../../config.yaml").expect("Could not open config file.");
+		let private_config: RelayerPrivateConfig =
+			serde_yaml::from_reader(private_config_file).expect("Config file not valid");
+
+		println!("{:#?}", private_config);
+	}
+}
