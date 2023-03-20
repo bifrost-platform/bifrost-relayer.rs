@@ -1,5 +1,5 @@
 use cc_cli::Configuration;
-use cccp_client::eth::{EthClient, EventChannel, EventDetector, TransactionManager};
+use cccp_client::eth::{EthClient, EventChannels, EventDetector, TransactionManager};
 use cccp_primitives::eth::{
 	bfc_testnet::{BFC_CALL_INTERVAL_MS, BFC_SOCKET_CONTRACT_ADDRESS},
 	bsc_testnet::{BSC_CALL_INTERVAL_MS, BSC_SOCKET_CONTRACT_ADDRESS},
@@ -64,14 +64,14 @@ pub fn new_relay_base(config: Configuration) -> Result<RelayBase, ServiceError> 
 	let (mut polygon_tx_manager, polygon_channel) = TransactionManager::new(polygon_client.clone());
 
 	// initialize cccp event channel
-	let event_channel =
-		Arc::new(EventChannel::new(bfc_channel, eth_channel, bsc_channel, polygon_channel));
+	let event_channels =
+		Arc::new(EventChannels::new(bfc_channel, eth_channel, bsc_channel, polygon_channel));
 
 	// initialize event detector
-	let bfc_event_detector = EventDetector::new(bfc_client.clone(), event_channel.clone());
-	let eth_event_detector = EventDetector::new(eth_client.clone(), event_channel.clone());
-	let bsc_event_detector = EventDetector::new(bsc_client.clone(), event_channel.clone());
-	let polygon_event_detector = EventDetector::new(polygon_client.clone(), event_channel.clone());
+	let bfc_event_detector = EventDetector::new(bfc_client, event_channels.clone());
+	let eth_event_detector = EventDetector::new(eth_client, event_channels.clone());
+	let bsc_event_detector = EventDetector::new(bsc_client, event_channels.clone());
+	let polygon_event_detector = EventDetector::new(polygon_client, event_channels);
 
 	// spawn transaction managers
 	task_manager.spawn_essential_handle().spawn(
