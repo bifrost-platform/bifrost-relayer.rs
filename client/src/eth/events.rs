@@ -4,7 +4,9 @@ use super::{EthClient, SocketMessage};
 
 use std::{str::FromStr, sync::Arc};
 
-use cccp_primitives::eth::SOCKET_EVENT_SIG;
+use cccp_primitives::eth::{
+	bfc_testnet, bsc_testnet, eth_testnet, polygon_testnet, SOCKET_EVENT_SIG,
+};
 use ethers::{
 	abi::RawLog,
 	prelude::decode_logs,
@@ -39,6 +41,7 @@ impl EventChannel {
 pub struct EventDetector<T> {
 	/// The ethereum client for the connected chain.
 	pub client: Arc<EthClient<T>>,
+	/// The channels sending socket messages.
 	pub event_channel: Arc<EventChannel>,
 }
 
@@ -78,12 +81,16 @@ impl<T: JsonRpcClient> EventDetector<T> {
 	/// Decode and parse the socket event if the given transaction triggered an event.
 	async fn process_confirmed_transaction(&self, receipt: TransactionReceipt) {
 		if self.is_socket_contract(&receipt) {
-			receipt.logs.iter().for_each(|log| {
+			let mut stream = tokio_stream::iter(receipt.logs);
+
+			while let Some(log) = stream.next().await {
 				if Self::is_socket_event(log.topics[0]) {
 					let raw_log: RawLog = log.clone().into();
 					match decode_logs::<SocketEvents>(&[raw_log]) {
 						Ok(decoded) => match &decoded[0] {
-							SocketEvents::Socket(socket) => {},
+							SocketEvents::Socket(socket) => {
+								self.send_socket_message(socket.msg.clone()).await;
+							},
 						},
 						Err(error) => panic!(
 							"[{:?}]-[{:?}] socket event decode error: {:?}",
@@ -91,7 +98,30 @@ impl<T: JsonRpcClient> EventDetector<T> {
 						),
 					}
 				}
-			})
+			}
+		}
+	}
+
+	/// Sends the `SocketMessage` to the `ins_code.chain` channel.
+	async fn send_socket_message(&self, msg: SocketMessage) {
+		let dst_chain_id = u32::from_be_bytes(msg.ins_code.chain);
+		match dst_chain_id {
+			bfc_testnet::BFC_CHAIN_ID => {
+				self.event_channel.bfc_channel.send(msg).await.unwrap();
+			},
+			eth_testnet::ETH_CHAIN_ID => {
+				self.event_channel.eth_channel.send(msg).await.unwrap();
+			},
+			bsc_testnet::BSC_CHAIN_ID => {
+				self.event_channel.bsc_channel.send(msg).await.unwrap();
+			},
+			polygon_testnet::POLYGON_CHAIN_ID => {
+				self.event_channel.polygon_channel.send(msg).await.unwrap();
+			},
+			_ => panic!(
+				"[{:?}] invalid dst_chain_id received : {:?}",
+				self.client.config.name, dst_chain_id
+			),
 		}
 	}
 

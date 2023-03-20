@@ -3,6 +3,8 @@ use ethers::{providers::ProviderError, types::H160};
 pub type EthResult<T = ()> = Result<T, ProviderError>;
 
 pub mod bfc_testnet {
+	pub const BFC_CHAIN_ID: u32 = 49088;
+
 	/// The time interval used when to request a new block for BIFROST.
 	pub const BFC_CALL_INTERVAL_MS: u64 = 2_000;
 
@@ -11,6 +13,8 @@ pub mod bfc_testnet {
 }
 
 pub mod eth_testnet {
+	pub const ETH_CHAIN_ID: u32 = 5;
+
 	/// The time interval used when to request a new block for Ethereum.
 	pub const ETH_CALL_INTERVAL_MS: u64 = 5_000;
 
@@ -19,6 +23,8 @@ pub mod eth_testnet {
 }
 
 pub mod bsc_testnet {
+	pub const BSC_CHAIN_ID: u32 = 97;
+
 	/// The time interval used when to request a new block for Binance Smart Chain.
 	pub const BSC_CALL_INTERVAL_MS: u64 = 2_000;
 
@@ -27,6 +33,8 @@ pub mod bsc_testnet {
 }
 
 pub mod polygon_testnet {
+	pub const POLYGON_CHAIN_ID: u32 = 80001;
+
 	/// The time interval used when to request a new block for Polygon.
 	pub const POLYGON_CALL_INTERVAL_MS: u64 = 1_000;
 
