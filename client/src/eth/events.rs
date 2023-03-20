@@ -80,7 +80,7 @@ impl<T: JsonRpcClient> EventDetector<T> {
 
 	/// Decode and parse the socket event if the given transaction triggered an event.
 	async fn process_confirmed_transaction(&self, receipt: TransactionReceipt) {
-		if self.is_socket_contract(&receipt) {
+		if self.is_socket_contract(&receipt) || self.is_vault_contract(&receipt) {
 			let mut stream = tokio_stream::iter(receipt.logs);
 
 			while let Some(log) = stream.next().await {
@@ -106,6 +106,7 @@ impl<T: JsonRpcClient> EventDetector<T> {
 	async fn send_socket_message(&self, msg: SocketMessage) {
 		let status = SocketEventStatus::from_u8(msg.status);
 		if Self::is_sequence_ended(status) {
+			// do nothing if protocol sequence ended
 			return
 		}
 
@@ -190,6 +191,16 @@ impl<T: JsonRpcClient> EventDetector<T> {
 	fn is_socket_contract(&self, receipt: &TransactionReceipt) -> bool {
 		if let Some(to) = receipt.to {
 			if to == self.client.config.socket_address {
+				return true
+			}
+		}
+		false
+	}
+
+	/// Verifies whether the given transaction interacted with the vault contract.
+	fn is_vault_contract(&self, receipt: &TransactionReceipt) -> bool {
+		if let Some(to) = receipt.to {
+			if to == self.client.config.vault_address {
 				return true
 			}
 		}

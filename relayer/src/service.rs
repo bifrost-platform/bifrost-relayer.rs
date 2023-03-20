@@ -1,11 +1,18 @@
 use cc_cli::Configuration;
 use cccp_client::eth::{EthClient, EventChannels, EventDetector, TransactionManager};
 use cccp_primitives::eth::{
-	bfc_testnet::{BFC_CALL_INTERVAL_MS, BFC_CHAIN_ID, BFC_SOCKET_CONTRACT_ADDRESS},
-	bsc_testnet::{BSC_CALL_INTERVAL_MS, BSC_CHAIN_ID, BSC_SOCKET_CONTRACT_ADDRESS},
-	eth_testnet::{ETH_CALL_INTERVAL_MS, ETH_CHAIN_ID, ETH_SOCKET_CONTRACT_ADDRESS},
+	bfc_testnet::{
+		BFC_CALL_INTERVAL_MS, BFC_CHAIN_ID, BFC_SOCKET_CONTRACT_ADDRESS, BFC_VAULT_CONTRACT_ADDRESS,
+	},
+	bsc_testnet::{
+		BSC_CALL_INTERVAL_MS, BSC_CHAIN_ID, BSC_SOCKET_CONTRACT_ADDRESS, BSC_VAULT_CONTRACT_ADDRESS,
+	},
+	eth_testnet::{
+		ETH_CALL_INTERVAL_MS, ETH_CHAIN_ID, ETH_SOCKET_CONTRACT_ADDRESS, ETH_VAULT_CONTRACT_ADDRESS,
+	},
 	polygon_testnet::{
 		POLYGON_CALL_INTERVAL_MS, POLYGON_CHAIN_ID, POLYGON_SOCKET_CONTRACT_ADDRESS,
+		POLYGON_VAULT_CONTRACT_ADDRESS,
 	},
 	EthClientConfiguration,
 };
@@ -32,6 +39,7 @@ pub fn new_relay_base(config: Configuration) -> Result<RelayBase, ServiceError> 
 			name: "bfc-testnet".to_string(),
 			call_interval: BFC_CALL_INTERVAL_MS,
 			socket_address: H160::from_str(BFC_SOCKET_CONTRACT_ADDRESS).unwrap(),
+			vault_address: H160::from_str(BFC_VAULT_CONTRACT_ADDRESS).unwrap(),
 		},
 	));
 	let (mut bfc_tx_manager, bfc_channel) = TransactionManager::new(bfc_client.clone());
@@ -45,6 +53,7 @@ pub fn new_relay_base(config: Configuration) -> Result<RelayBase, ServiceError> 
 			name: "eth-testnet".to_string(),
 			call_interval: ETH_CALL_INTERVAL_MS,
 			socket_address: H160::from_str(ETH_SOCKET_CONTRACT_ADDRESS).unwrap(),
+			vault_address: H160::from_str(ETH_VAULT_CONTRACT_ADDRESS).unwrap(),
 		},
 	));
 	let (mut eth_tx_manager, eth_channel) = TransactionManager::new(eth_client.clone());
@@ -58,6 +67,7 @@ pub fn new_relay_base(config: Configuration) -> Result<RelayBase, ServiceError> 
 			name: "bsc-testnet".to_string(),
 			call_interval: BSC_CALL_INTERVAL_MS,
 			socket_address: H160::from_str(BSC_SOCKET_CONTRACT_ADDRESS).unwrap(),
+			vault_address: H160::from_str(BSC_VAULT_CONTRACT_ADDRESS).unwrap(),
 		},
 	));
 	let (mut bsc_tx_manager, bsc_channel) = TransactionManager::new(bsc_client.clone());
@@ -71,6 +81,7 @@ pub fn new_relay_base(config: Configuration) -> Result<RelayBase, ServiceError> 
 			name: "polygon-testnet".to_string(),
 			call_interval: POLYGON_CALL_INTERVAL_MS,
 			socket_address: H160::from_str(POLYGON_SOCKET_CONTRACT_ADDRESS).unwrap(),
+			vault_address: H160::from_str(POLYGON_VAULT_CONTRACT_ADDRESS).unwrap(),
 		},
 	));
 	let (mut polygon_tx_manager, polygon_channel) = TransactionManager::new(polygon_client.clone());

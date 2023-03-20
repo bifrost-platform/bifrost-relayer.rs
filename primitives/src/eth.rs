@@ -10,6 +10,9 @@ pub mod bfc_testnet {
 
 	/// The socket contract address deployed on BIFROST.
 	pub const BFC_SOCKET_CONTRACT_ADDRESS: &str = "0x0218371b18340aBD460961bdF3Bd5F01858dAB53";
+
+	/// The vault contract address deployed on BIFROST.
+	pub const BFC_VAULT_CONTRACT_ADDRESS: &str = "0x90381bB369D4F8069fdA9246b23637a78c5d1c83";
 }
 
 pub mod eth_testnet {
@@ -20,6 +23,9 @@ pub mod eth_testnet {
 
 	/// The socket contract address deployed on Ethereum.
 	pub const ETH_SOCKET_CONTRACT_ADDRESS: &str = "0xeF5260Db045200142a6B5DDB297e860099ffd51d";
+
+	/// The vault contract address deployed on Ethereum.
+	pub const ETH_VAULT_CONTRACT_ADDRESS: &str = "0x7EB02c73349B3De1406e6b433c5bA1a526CBF253";
 }
 
 pub mod bsc_testnet {
@@ -30,6 +36,9 @@ pub mod bsc_testnet {
 
 	/// The socket contract address deployed on Binance Smart Chain.
 	pub const BSC_SOCKET_CONTRACT_ADDRESS: &str = "0x8039c3AD8ED55509fD3f6Daa78867923fDe6E61c";
+
+	/// The vault contract address deployed on Binance Smart Chain.
+	pub const BSC_VAULT_CONTRACT_ADDRESS: &str = "0x27C66cb5caa07C9B332939c357c789C606f5054C";
 }
 
 pub mod polygon_testnet {
@@ -40,6 +49,9 @@ pub mod polygon_testnet {
 
 	/// The socket contract address deployed on Polygon.
 	pub const POLYGON_SOCKET_CONTRACT_ADDRESS: &str = "0xA25357F3C313Bd13885678f935178211f0dF6722";
+
+	/// The vault contract address deployed on Polygon.
+	pub const POLYGON_VAULT_CONTRACT_ADDRESS: &str = "0xB2ba0020560cF6c164DC48D1E29559AbA8472208";
 }
 
 /// The socket event signature.
@@ -86,4 +98,6 @@ pub struct EthClientConfiguration {
 	pub call_interval: u64,
 	/// The socket contract address.
 	pub socket_address: H160,
+	/// The vault contract address.
+	pub vault_address: H160,
 }
