@@ -79,6 +79,11 @@ where
 		}
 	}
 
+	/// Returns name which chain this client interacts with.
+	pub fn get_chain_name(&self) -> String {
+		self.config.name.clone()
+	}
+
 	/// Retrieves the latest mined block number of the connected chain.
 	pub async fn get_latest_block_number(&self) -> EthResult<U64> {
 		self.provider.get_block_number().await
