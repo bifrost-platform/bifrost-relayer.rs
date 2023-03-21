@@ -100,13 +100,12 @@ impl<T: JsonRpcClient> EventDetector<T> {
 		self.event_channels
 			.iter()
 			.find(|channel| channel.id == dst_chain_id)
-			.ok_or_else(|| {
+			.unwrap_or_else(|| {
 				panic!(
 					"[{:?}] invalid dst_chain_id received : {:?}",
 					self.client.config.name, dst_chain_id
 				)
 			})
-			.unwrap()
 			.channel
 			.send(msg)
 			.await
