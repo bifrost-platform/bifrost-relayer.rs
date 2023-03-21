@@ -1,0 +1,29 @@
+bitcoin:
+  provider: ""
+  username: ""
+  password: ""
+
+evm_chains:
+  - name: "bfc-testnet"
+    id: 49088
+    provider: ""
+    interval: 2000
+    socket: "0x0218371b18340aBD460961bdF3Bd5F01858dAB53"
+
+  - name: "eth-goerli"
+    id: 5
+    provider: ""
+    interval: 5000
+    socket: "0xeF5260Db045200142a6B5DDB297e860099ffd51d"
+
+  - name: "bsc-testnet"
+    id: 97
+    provider: ""
+    interval: 2000
+    socket: "0x8039c3AD8ED55509fD3f6Daa78867923fDe6E61c"
+
+  - name: "matic-mumbai"
+    id: 80001
+    provider: ""
+    interval: 1000
+    socket: "0xA25357F3C313Bd13885678f935178211f0dF6722"

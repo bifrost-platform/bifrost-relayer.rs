@@ -200,6 +200,11 @@ impl<T: JsonRpcClient> EthClient<T> {
 		self.rpc_call("eth_getBalance", (who, "latest")).await
 	}
 
+	/// Returns name which chain this client interacts with.
+	pub fn get_chain_name(&self) -> String {
+		self.config.name.clone()
+	}
+
 	/// Retrieves the latest mined block number of the connected chain.
 	pub async fn get_latest_block_number(&self) -> U64 {
 		self.rpc_call("eth_blockNumber", ()).await
