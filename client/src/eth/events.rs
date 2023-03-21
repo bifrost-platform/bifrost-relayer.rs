@@ -119,38 +119,30 @@ impl<T: JsonRpcClient> EventDetector<T> {
 				panic!("[{:?}] invalid chain_id received : {:?}", self.client.config.name, chain_id),
 		};
 
-		let relay_tx_chain_id = self.get_relay_tx_chain_id(
-			status,
-			u32::from_be_bytes(msg.req_id.chain),
-			u32::from_be_bytes(msg.ins_code.chain),
-			self.is_inbound_sequence(status),
-		);
+		let src_chain_id = u32::from_be_bytes(msg.req_id.chain);
+		let dst_chain_id = u32::from_be_bytes(msg.ins_code.chain);
+		let is_inbound = src_chain_id != bfc_testnet::BFC_CHAIN_ID;
+
+		let relay_tx_chain_id = if is_inbound {
+			self.get_inbound_relay_tx_chain_id(status, src_chain_id, dst_chain_id)
+		} else {
+			self.get_outbound_relay_tx_chain_id(status, src_chain_id, dst_chain_id)
+		};
 		send_to_channel(relay_tx_chain_id, msg).await.unwrap();
 	}
 
-	/// Get the chain ID of the relay transaction.
-	fn get_relay_tx_chain_id(
+	/// Get the chain ID of the inbound sequence relay transaction.
+	fn get_inbound_relay_tx_chain_id(
 		&self,
 		status: SocketEventStatus,
 		src_chain_id: u32,
 		dst_chain_id: u32,
-		is_inbound: bool,
 	) -> u32 {
 		match status {
 			SocketEventStatus::Requested |
 			SocketEventStatus::Executed |
-			SocketEventStatus::Reverted =>
-				if is_inbound {
-					dst_chain_id
-				} else {
-					src_chain_id
-				},
-			SocketEventStatus::Accepted | SocketEventStatus::Rejected =>
-				if is_inbound {
-					src_chain_id
-				} else {
-					dst_chain_id
-				},
+			SocketEventStatus::Reverted => dst_chain_id,
+			SocketEventStatus::Accepted | SocketEventStatus::Rejected => src_chain_id,
 			_ => panic!(
 				"[{:?}] invalid socket event status received: {:?}",
 				self.client.config.name, status
@@ -158,20 +150,22 @@ impl<T: JsonRpcClient> EventDetector<T> {
 		}
 	}
 
-	/// Verifies whether the socket event is a sequence of an inbound protocol.
-	fn is_inbound_sequence(&self, status: SocketEventStatus) -> bool {
-		if self.client.config.id == bfc_testnet::BFC_CHAIN_ID {
-			// event detected on BIFROST
-			matches!(
-				status,
-				SocketEventStatus::Executed |
-					SocketEventStatus::Reverted |
-					SocketEventStatus::Accepted |
-					SocketEventStatus::Rejected
-			)
-		} else {
-			// event detected on any external chain
-			matches!(status, SocketEventStatus::Requested)
+	/// Get the chain ID of the outbound sequence relay transaction.
+	fn get_outbound_relay_tx_chain_id(
+		&self,
+		status: SocketEventStatus,
+		src_chain_id: u32,
+		dst_chain_id: u32,
+	) -> u32 {
+		match status {
+			SocketEventStatus::Requested |
+			SocketEventStatus::Executed |
+			SocketEventStatus::Reverted => src_chain_id,
+			SocketEventStatus::Accepted | SocketEventStatus::Rejected => dst_chain_id,
+			_ => panic!(
+				"[{:?}] invalid socket event status received: {:?}",
+				self.client.config.name, status
+			),
 		}
 	}
 
@@ -184,7 +178,9 @@ impl<T: JsonRpcClient> EventDetector<T> {
 	/// Verifies whether the given transaction interacted with the socket contract.
 	fn is_socket_contract(&self, receipt: &TransactionReceipt) -> bool {
 		if let Some(to) = receipt.to {
-			if to == self.client.config.socket_address {
+			if ethers::utils::to_checksum(&to, None) ==
+				ethers::utils::to_checksum(&self.client.config.socket_address, None)
+			{
 				return true
 			}
 		}
@@ -194,7 +190,9 @@ impl<T: JsonRpcClient> EventDetector<T> {
 	/// Verifies whether the given transaction interacted with the vault contract.
 	fn is_vault_contract(&self, receipt: &TransactionReceipt) -> bool {
 		if let Some(to) = receipt.to {
-			if to == self.client.config.vault_address {
+			if ethers::utils::to_checksum(&to, None) ==
+				ethers::utils::to_checksum(&self.client.config.vault_address, None)
+			{
 				return true
 			}
 		}
