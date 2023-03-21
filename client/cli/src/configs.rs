@@ -56,6 +56,10 @@ pub struct EVMConfig {
 	pub id: u32,
 	/// Endpoint provider
 	pub provider: String,
+	/// The time interval used when to request a new block
+	pub interval: u64,
+	/// The socket contract address
+	pub socket: String,
 }
 
 #[cfg(test)]
