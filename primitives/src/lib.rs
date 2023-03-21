@@ -1,5 +1,4 @@
 pub mod eth;
-pub mod traits;
 
 pub type Err = Box<dyn std::error::Error + Send + Sync>;
 
