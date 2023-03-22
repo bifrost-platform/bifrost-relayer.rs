@@ -4,8 +4,8 @@ use cccp_primitives::eth::SOCKET_EVENT_SIG;
 use ethers::{
 	abi::RawLog,
 	prelude::{abigen, decode_logs},
-	providers::JsonRpcClient,
-	types::{Transaction, TransactionReceipt, TransactionRequest, H256},
+	providers::Http,
+	types::{TransactionReceipt, TransactionRequest, H256},
 };
 use tokio_stream::StreamExt;
 
@@ -56,7 +56,21 @@ impl ethers::contract::EthLogDecode for SocketEvents {
 pub struct SocketHandler {
 	/// The channels sending socket messages.
 	pub event_channels: Arc<Vec<EventChannel>>,
+	/// The channels receiving new block with transactions.
 	pub block_channel: Arc<BlockChannel>,
+	/// EthClient to interact with blockchain.
+	pub client: Arc<EthClient<Http>>,
+}
+
+impl SocketHandler {
+	/// The constructor of SocketHandler
+	fn new(
+		event_channels: Arc<Vec<EventChannel>>,
+		block_channel: Arc<BlockChannel>,
+		client: Arc<EthClient<Http>>,
+	) -> Self {
+		Self { event_channels, block_channel, client }
+	}
 }
 
 #[async_trait::async_trait]
@@ -69,19 +83,20 @@ impl Handler for SocketHandler {
 	}
 
 	async fn process_confirmed_transaction(&self, receipt: TransactionReceipt) {
-		if self.is_socket_contract(&receipt) {
+		if self.is_target_contract(&receipt) {
 			let mut stream = tokio_stream::iter(receipt.logs);
 
 			while let Some(log) = stream.next().await {
-				if Self::is_socket_event(log.topics[0]) {
+				if Self::is_target_event(log.topics[0]) {
 					let raw_log: RawLog = log.clone().into();
 					match decode_logs::<SocketEvents>(&[raw_log]) {
 						Ok(decoded) => match &decoded[0] {
 							SocketEvents::Socket(socket) => {
-								self.send_socket_message(socket.msg.clone()).await;
+								// TODO: Edit under to use self.request_send_transaction()
+								// self.send_socket_message(socket.msg.clone()).await;
 							},
 						},
-						Err(error) => panic!("panic"),
+						Err(error) => panic!("panic"), // TODO: Print fail reason on panic
 					}
 				}
 			}
