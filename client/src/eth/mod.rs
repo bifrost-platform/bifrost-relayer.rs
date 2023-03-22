@@ -280,6 +280,16 @@ pub struct EthClient<T> {
 		self.config.name.clone()
 	}
 
+	/// Returns id which chain this client interacts with.
+	pub fn get_chain_id(&self) -> u32 {
+		self.config.id
+	}
+
+	/// Returns Arc<Provider>
+	pub fn get_provider(&self) -> Arc<Provider<T>> {
+		self.provider.clone()
+	}
+
 	/// Retrieves the latest mined block number of the connected chain.
 	pub async fn get_latest_block_number(&self) -> U64 {
 		self.rpc_call("eth_blockNumber", ()).await
