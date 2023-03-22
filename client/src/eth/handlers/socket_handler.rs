@@ -5,7 +5,7 @@ use cccp_primitives::eth::SOCKET_EVENT_SIG; /* TODO: Move event sig into handler
 use ethers::{
 	abi::RawLog,
 	prelude::{abigen, decode_logs},
-	providers::Http,
+	providers::JsonRpcClient,
 	types::{TransactionReceipt, TransactionRequest, H256},
 };
 use tokio_stream::StreamExt;
@@ -54,28 +54,28 @@ impl ethers::contract::EthLogDecode for SocketEvents {
 }
 
 /// The essential task that detects and parse CCCP-related events.
-pub struct SocketHandler {
+pub struct SocketHandler<T> {
 	/// The channels sending socket messages.
 	pub event_channels: Arc<Vec<EventChannel>>,
 	/// The channels receiving new block with transactions.
 	pub block_channel: Arc<BlockChannel>,
 	/// EthClient to interact with blockchain.
-	pub client: Arc<EthClient<Http>>,
+	pub client: Arc<EthClient<T>>,
 }
 
-impl SocketHandler {
+impl<T: JsonRpcClient> SocketHandler<T> {
 	/// The constructor of SocketHandler
 	fn new(
 		event_channels: Arc<Vec<EventChannel>>,
 		block_channel: Arc<BlockChannel>,
-		client: Arc<EthClient<Http>>,
+		client: Arc<EthClient<T>>,
 	) -> Self {
 		Self { event_channels, block_channel, client }
 	}
 }
 
 #[async_trait::async_trait]
-impl Handler for SocketHandler {
+impl<T: JsonRpcClient> Handler for SocketHandler<T> {
 	async fn run(&self) {
 		loop {
 			// TODO: read block data
