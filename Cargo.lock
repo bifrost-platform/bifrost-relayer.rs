@@ -664,6 +664,7 @@ dependencies = [
 name = "cccp-client"
 version = "0.1.0"
 dependencies = [
+ "async-trait",
  "cccp-primitives",
  "ethers",
  "serde",

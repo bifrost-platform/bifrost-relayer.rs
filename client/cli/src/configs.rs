@@ -2,26 +2,25 @@ use crate::Result;
 use serde::Deserialize;
 
 pub fn create_configuration(tokio_handle: tokio::runtime::Handle) -> Result<Configuration> {
-	let private_config_file =
-		std::fs::File::open("config.yaml").expect("Could not open config file.");
-	let private_config: RelayerPrivateConfig =
-		serde_yaml::from_reader(private_config_file).expect("Config file not valid");
+	let user_config_file = std::fs::File::open("config.yaml").expect("Could not open config file.");
+	let user_config: RelayerConfig =
+		serde_yaml::from_reader(user_config_file).expect("Config file not valid");
 
-	Ok(Configuration { private_config, tokio_handle })
+	Ok(Configuration { relayer_config: user_config, tokio_handle })
 }
 
 #[derive(Debug, Clone)]
 pub struct Configuration {
 	/// Private things. ex) RPC providers, API keys.
-	pub private_config: RelayerPrivateConfig,
+	pub relayer_config: RelayerConfig,
 	/// Handle to the tokio runtime. Will be used to spawn futures by the task manager.
 	pub tokio_handle: tokio::runtime::Handle,
 }
 
 impl Configuration {
-	pub fn get_evm_config_by_name(&self, name: &str) -> std::result::Result<EVMConfig, String> {
-		self.private_config
-			.evm_chains
+	pub fn get_evm_provider_by_name(&self, name: &str) -> std::result::Result<EVMProvider, String> {
+		self.relayer_config
+			.evm_providers
 			.iter()
 			.find(|evm_config| evm_config.name == name)
 			.cloned()
@@ -30,12 +29,13 @@ impl Configuration {
 }
 
 #[derive(Debug, Clone, Deserialize)]
-pub struct RelayerPrivateConfig {
+pub struct RelayerConfig {
 	/// BTC config
 	pub bitcoin: BitcoinConfig,
-
 	/// EVM configs
-	pub evm_chains: Vec<EVMConfig>,
+	pub evm_providers: Vec<EVMProvider>,
+	/// Handler configs
+	pub handler_configs: Vec<HandlerConfig>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -49,17 +49,48 @@ pub struct BitcoinConfig {
 }
 
 #[derive(Debug, Clone, Deserialize)]
-pub struct EVMConfig {
+pub struct EVMProvider {
 	/// Network name
 	pub name: String,
 	/// Chain ID
 	pub id: u32,
 	/// Endpoint provider
 	pub provider: String,
-	/// The time interval used when to request a new block
+	/// The time interval(ms) used when to request a new block
 	pub interval: u64,
-	/// The socket contract address
-	pub socket: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub enum HandlerType {
+	/// Socket handler
+	Socket,
+	/// Vault handler
+	Vault,
+}
+
+impl ToString for HandlerType {
+	fn to_string(&self) -> String {
+		match *self {
+			HandlerType::Socket => "Socket".to_string(),
+			HandlerType::Vault => "Vault".to_string(),
+		}
+	}
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct WatchTarget {
+	/// Chain id looking for. Used when mapping EthClient
+	pub chain_id: u32,
+	/// Contract address looking for.
+	pub contract: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct HandlerConfig {
+	/// Handle type
+	pub handler_type: HandlerType,
+	/// Target list
+	pub watch_list: Vec<WatchTarget>,
 }
 
 #[cfg(test)]
@@ -68,11 +99,11 @@ mod tests {
 
 	#[test]
 	fn test_config_parsing() {
-		let private_config_file =
+		let user_config_file =
 			std::fs::File::open("../../config.yaml").expect("Could not open config file.");
-		let private_config: RelayerPrivateConfig =
-			serde_yaml::from_reader(private_config_file).expect("Config file not valid");
+		let user_config: RelayerConfig =
+			serde_yaml::from_reader(user_config_file).expect("Config file not valid");
 
-		println!("{:#?}", private_config);
+		println!("{:#?}", user_config);
 	}
 }
