@@ -33,7 +33,7 @@ where
 {
 	/// Instantiates a new `EthClient` instance for the given chain.
 	pub fn new(provider: Arc<Provider<T>>, config: EthClientConfiguration) -> Self {
-		Self { provide, config }
+		Self { provider, config }
 	}
 
 	/// Returns name which chain this client interacts with.
