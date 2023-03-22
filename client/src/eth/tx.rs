@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use ethers::{providers::JsonRpcClient, types::TransactionRequest};
-use tokio::sync::mpsc::{self, Receiver, Sender};
+use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
 
 use super::EthClient;
 
@@ -10,13 +10,13 @@ pub struct TransactionManager<T> {
 	/// The ethereum client for the connected chain.
 	pub client: Arc<EthClient<T>>,
 	/// The channel receiving socket messages.
-	pub receiver: Receiver<TransactionRequest>,
+	pub receiver: UnboundedReceiver<TransactionRequest>,
 }
 
 impl<T: JsonRpcClient> TransactionManager<T> {
 	/// Instantiates a new `EventDetector` instance.
-	pub fn new(client: Arc<EthClient<T>>) -> (Self, Sender<TransactionRequest>) {
-		let (sender, receiver) = mpsc::channel::<TransactionRequest>(512); // TODO: TransactionRequest instance's usize not sure
+	pub fn new(client: Arc<EthClient<T>>) -> (Self, UnboundedSender<TransactionRequest>) {
+		let (sender, receiver) = mpsc::unbounded_channel::<TransactionRequest>();
 		(Self { client, receiver }, sender)
 	}
 

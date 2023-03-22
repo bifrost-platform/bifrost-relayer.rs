@@ -109,7 +109,8 @@ impl<T: JsonRpcClient> Handler for CCCPHandler<T> {
 
 	async fn request_send_transaction(&self, dst_chain_id: u32, request: TransactionRequest) {
 		// TODO: Make it works
-		self.event_channels
+		match self
+			.event_channels
 			.iter()
 			.find(|channel| channel.id == dst_chain_id)
 			.unwrap_or_else(|| {
@@ -120,8 +121,10 @@ impl<T: JsonRpcClient> Handler for CCCPHandler<T> {
 			})
 			.channel
 			.send(request)
-			.await
-			.unwrap();
+		{
+			Ok(()) => println!("Request sent successfully"),
+			Err(e) => println!("Failed to send request: {}", e),
+		}
 	}
 
 	fn is_target_contract(&self, receipt: &TransactionReceipt) -> bool {
