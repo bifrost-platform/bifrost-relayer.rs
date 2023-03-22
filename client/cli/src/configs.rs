@@ -79,7 +79,7 @@ pub struct WatchTarget {
 	/// Handle type
 	pub handler_type: HandlerType,
 	/// Target list
-	pub target: Vec<TargetInfo>,
+	pub targets: Vec<TargetInfo>,
 }
 
 #[cfg(test)]

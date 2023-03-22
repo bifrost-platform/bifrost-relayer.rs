@@ -61,6 +61,8 @@ pub struct SocketHandler<T> {
 	pub block_channel: Arc<BlockReceiver>,
 	/// EthClient to interact with blockchain.
 	pub client: Arc<EthClient<T>>,
+	/// The address of socket contract.
+	pub socket_contract: String,
 }
 
 impl<T: JsonRpcClient> SocketHandler<T> {
@@ -69,8 +71,9 @@ impl<T: JsonRpcClient> SocketHandler<T> {
 		event_channels: Arc<Vec<EventChannel>>,
 		block_channel: Arc<BlockReceiver>,
 		client: Arc<EthClient<T>>,
+		socket_contract: String,
 	) -> Self {
-		Self { event_channels, block_channel, client }
+		Self { event_channels, block_channel, client, socket_contract }
 	}
 }
 
