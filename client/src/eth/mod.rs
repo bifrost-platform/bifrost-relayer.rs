@@ -41,6 +41,11 @@ where
 		self.config.name.clone()
 	}
 
+	/// Returns id which chain this client interacts with.
+	pub fn get_chain_id(&self) -> u32 {
+		self.config.id
+	}
+
 	/// Retrieves the latest mined block number of the connected chain.
 	pub async fn get_latest_block_number(&self) -> EthResult<U64> {
 		self.provider.get_block_number().await
