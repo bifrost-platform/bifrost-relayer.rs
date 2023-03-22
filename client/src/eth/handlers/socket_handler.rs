@@ -10,7 +10,7 @@ use ethers::{
 };
 use tokio_stream::StreamExt;
 
-use crate::eth::{BlockChannel, EthClient, EventChannel, Handler};
+use crate::eth::{BlockReceiver, EthClient, EventChannel, Handler};
 
 abigen!(
 	SocketExternal,
@@ -58,16 +58,16 @@ pub struct SocketHandler<T> {
 	/// The channels sending socket messages.
 	pub event_channels: Arc<Vec<EventChannel>>,
 	/// The channels receiving new block with transactions.
-	pub block_channel: Arc<BlockChannel>,
+	pub block_channel: Arc<BlockReceiver>,
 	/// EthClient to interact with blockchain.
 	pub client: Arc<EthClient<T>>,
 }
 
 impl<T: JsonRpcClient> SocketHandler<T> {
 	/// The constructor of SocketHandler
-	fn new(
+	pub fn new(
 		event_channels: Arc<Vec<EventChannel>>,
-		block_channel: Arc<BlockChannel>,
+		block_channel: Arc<BlockReceiver>,
 		client: Arc<EthClient<T>>,
 	) -> Self {
 		Self { event_channels, block_channel, client }

@@ -11,7 +11,16 @@ use tokio::{
 
 use super::EthClient;
 
-pub type BlockChannel = Receiver<Option<Block<H256>>>;
+pub struct BlockReceiver {
+	pub channel: Arc<Receiver<Option<Block<H256>>>>,
+	pub id: u32,
+}
+
+impl BlockReceiver {
+	pub fn new(channel: Receiver<Option<Block<H256>>>, id: u32) -> Arc<Self> {
+		Arc::new(Self { channel: Arc::new(channel), id })
+	}
+}
 
 /// The essential task that detects and parse CCCP-related events.
 pub struct BlockManager<T> {
@@ -23,9 +32,10 @@ pub struct BlockManager<T> {
 
 impl<T: JsonRpcClient> BlockManager<T> {
 	/// Instantiates a new `EventDetector` instance.
-	pub fn new(client: Arc<EthClient<T>>) -> (Self, Arc<BlockChannel>) {
+	pub fn new(client: Arc<EthClient<T>>) -> (Self, Arc<BlockReceiver>) {
 		let (latest_block, receiver) = watch::channel(None);
-		(Self { client, latest_block }, Arc::new(receiver))
+		let id = client.get_chain_id();
+		(Self { client, latest_block }, BlockReceiver::new(receiver, id))
 	}
 
 	/// Starts the event detector. Reads every new mined block of the connected chain and starts to

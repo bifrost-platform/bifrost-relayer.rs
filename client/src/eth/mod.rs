@@ -43,7 +43,7 @@ where
 
 	/// Returns id which chain this client interacts with.
 	pub fn get_chain_id(&self) -> u32 {
-		self.config.id
+		self.config.id.clone()
 	}
 
 	/// Retrieves the latest mined block number of the connected chain.
