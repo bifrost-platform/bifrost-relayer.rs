@@ -1,4 +1,4 @@
-use ethers::{providers::ProviderError, types::H160};
+use ethers::providers::ProviderError;
 
 pub type EthResult<T = ()> = Result<T, ProviderError>;
 
@@ -9,10 +9,10 @@ pub const SOCKET_EVENT_SIG: &str =
 #[derive(Clone, Debug)]
 /// The additional configuration details for an EVM-based chain.
 pub struct EthClientConfiguration {
-	/// The ethereum client name.
+	/// The name of chain which this client interact with.
 	pub name: String,
+	/// Id of chain which this client interact with.
+	pub id: u32,
 	/// The `get_block` request interval in milliseconds.
 	pub call_interval: u64,
-	/// The socket contract address.
-	pub socket_address: H160,
 }
