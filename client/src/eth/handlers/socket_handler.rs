@@ -104,22 +104,21 @@ impl<T: JsonRpcClient> Handler for SocketHandler<T> {
 		}
 	}
 
-	async fn request_send_transaction(&self, dst_chain_id: u32, transaction: TransactionRequest) {
-		// let _dst_chain_id = u32::from_be_bytes(msg.ins_code.chain);
-
-		// self.event_channels
-		// 	.iter()
-		// 	.find(|channel| channel.id == dst_chain_id)
-		// 	.unwrap_or_else(|| {
-		// 		panic!(
-		// 			"[{:?}] invalid dst_chain_id received : {:?}",
-		// 			self.client.config.name, dst_chain_id
-		// 		)
-		// 	})
-		// 	.channel
-		// 	.send(msg)
-		// 	.await
-		// 	.unwrap();
+	async fn request_send_transaction(&self, dst_chain_id: u32, request: TransactionRequest) {
+		// TODO: Make it works
+		self.event_channels
+			.iter()
+			.find(|channel| channel.id == dst_chain_id)
+			.unwrap_or_else(|| {
+				panic!(
+					"[{:?}] invalid dst_chain_id received : {:?}",
+					self.client.config.name, dst_chain_id
+				)
+			})
+			.channel
+			.send(request)
+			.await
+			.unwrap();
 	}
 
 	fn is_target_contract(&self, receipt: &TransactionReceipt) -> bool {
