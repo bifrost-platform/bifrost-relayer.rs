@@ -32,3 +32,13 @@ watch_targets:
         contract: "0x8039c3AD8ED55509fD3f6Daa78867923fDe6E61c"
       - chain_id: 80001
         contract: "0xA25357F3C313Bd13885678f935178211f0dF6722"
+  - handler_type: Vault
+    targets:
+      - chain_id: 49088
+        contract: ""
+      - chain_id: 5
+        contract: ""
+      - chain_id: 97
+        contract: ""
+      - chain_id: 80001
+        contract: ""

@@ -54,31 +54,31 @@ impl ethers::contract::EthLogDecode for SocketEvents {
 }
 
 /// The essential task that detects and parse CCCP-related events.
-pub struct SocketHandler<T> {
+pub struct CCCPHandler<T> {
 	/// The channels sending socket messages.
 	pub event_channels: Arc<Vec<EventChannel>>,
 	/// The channels receiving new block with transactions.
 	pub block_channel: Arc<BlockReceiver>,
 	/// EthClient to interact with blockchain.
 	pub client: Arc<EthClient<T>>,
-	/// The address of socket contract.
-	pub socket_contract: String,
+	/// The address of socket | vault contract.
+	pub contract: String,
 }
 
-impl<T: JsonRpcClient> SocketHandler<T> {
+impl<T: JsonRpcClient> CCCPHandler<T> {
 	/// The constructor of SocketHandler
 	pub fn new(
 		event_channels: Arc<Vec<EventChannel>>,
 		block_channel: Arc<BlockReceiver>,
 		client: Arc<EthClient<T>>,
-		socket_contract: String,
+		contract: String,
 	) -> Self {
-		Self { event_channels, block_channel, client, socket_contract }
+		Self { event_channels, block_channel, client, contract }
 	}
 }
 
 #[async_trait::async_trait]
-impl<T: JsonRpcClient> Handler for SocketHandler<T> {
+impl<T: JsonRpcClient> Handler for CCCPHandler<T> {
 	async fn run(&self) {
 		loop {
 			// TODO: read block data

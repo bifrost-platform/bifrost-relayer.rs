@@ -64,6 +64,17 @@ pub struct EVMProvider {
 pub enum HandlerType {
 	/// Socket handler
 	Socket,
+	/// Vault handler
+	Vault,
+}
+
+impl ToString for HandlerType {
+	fn to_string(&self) -> String {
+		match *self {
+			HandlerType::Socket => "Socket".to_string(),
+			HandlerType::Vault => "Vault".to_string(),
+		}
+	}
 }
 
 #[derive(Debug, Clone, Deserialize)]

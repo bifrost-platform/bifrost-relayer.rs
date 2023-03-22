@@ -1,6 +1,6 @@
 use cc_cli::{Configuration, HandlerType};
 use cccp_client::eth::{
-	BlockManager, EthClient, EventChannel, Handler, SocketHandler, TransactionManager,
+	BlockManager, CCCPHandler, EthClient, EventChannel, Handler, TransactionManager,
 };
 use cccp_primitives::eth::EthClientConfiguration;
 use ethers::providers::{Http, Provider};
@@ -59,7 +59,7 @@ pub fn new_relay_base(config: Configuration) -> Result<RelayBase, ServiceError> 
 	// Initialize handlers & spawn tasks
 	for target in config.relayer_config.watch_targets {
 		match target.handler_type {
-			HandlerType::Socket =>
+			HandlerType::Socket | HandlerType::Vault =>
 				for target_info in target.targets {
 					let block_channel = block_channels
 						.iter()
@@ -79,7 +79,7 @@ pub fn new_relay_base(config: Configuration) -> Result<RelayBase, ServiceError> 
 							target_info.chain_id
 						));
 
-					let socket_handler = SocketHandler::new(
+					let cccp_handler = CCCPHandler::new(
 						event_channels.clone(),
 						block_channel.clone(),
 						client.clone(),
@@ -88,14 +88,15 @@ pub fn new_relay_base(config: Configuration) -> Result<RelayBase, ServiceError> 
 					task_manager.spawn_essential_handle().spawn(
 						Box::leak(
 							format!(
-								"{}-{}-socket-handler",
+								"{}-{}-{}-handler",
 								client.get_chain_name(),
-								socket_handler.socket_contract
+								cccp_handler.contract,
+								target.handler_type.to_string(),
 							)
 							.into_boxed_str(),
 						),
 						Some("Socket"),
-						async move { socket_handler.run().await },
+						async move { cccp_handler.run().await },
 					);
 				},
 		}
