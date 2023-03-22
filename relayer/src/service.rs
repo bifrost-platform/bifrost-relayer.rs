@@ -71,7 +71,7 @@ fn initialize_senders(
 	let mut event_channels = vec![]; // producers
 	let mut block_channels = vec![]; // consumers
 
-	for evm_config in config.private_config.evm_chains {
+	for evm_config in config.relayer_config.evm_providers {
 		let client = Arc::new(EthClient::new(
 			Arc::new(Provider::<Http>::try_from(evm_config.provider).unwrap()),
 			EthClientConfiguration {
