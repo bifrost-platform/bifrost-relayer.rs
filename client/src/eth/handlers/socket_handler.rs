@@ -5,11 +5,11 @@ use ethers::{
 	abi::RawLog,
 	prelude::{abigen, decode_logs},
 	providers::JsonRpcClient,
-	types::{TransactionReceipt, H256},
+	types::{Transaction, TransactionReceipt, TransactionRequest, H256},
 };
 use tokio_stream::StreamExt;
 
-use crate::eth::{BlockChannel, EthClient, EventChannel, EventHandler};
+use crate::eth::{BlockChannel, EthClient, EventChannel, Handler};
 
 abigen!(
 	SocketExternal,
@@ -60,12 +60,7 @@ pub struct SocketHandler {
 }
 
 #[async_trait::async_trait]
-impl EventHandler for SocketHandler {
-	/// Instantiates a new `EventDetector` instance.
-	fn new(event_channels: Arc<Vec<EventChannel>>, block_channel: Arc<BlockChannel>) -> Self {
-		Self { event_channels, block_channel }
-	}
-
+impl Handler for SocketHandler {
 	async fn run(&self) {
 		loop {
 			// TODO: read block data
@@ -73,7 +68,6 @@ impl EventHandler for SocketHandler {
 		}
 	}
 
-	/// Decode and parse the socket event if the given transaction triggered an event.
 	async fn process_confirmed_transaction(&self, receipt: TransactionReceipt) {
 		if self.is_socket_contract(&receipt) {
 			let mut stream = tokio_stream::iter(receipt.logs);
@@ -93,12 +87,9 @@ impl EventHandler for SocketHandler {
 			}
 		}
 	}
-}
 
-impl SocketHandler {
-	/// Sends the `SocketMessage` to the `ins_code.chain` channel.
-	async fn send_socket_message(&self, msg: SocketMessage) {
-		let _dst_chain_id = u32::from_be_bytes(msg.ins_code.chain);
+	async fn request_send_transaction(&self, dst_chain_id: u32, transaction: TransactionRequest) {
+		// let _dst_chain_id = u32::from_be_bytes(msg.ins_code.chain);
 
 		// self.event_channels
 		// 	.iter()
@@ -115,8 +106,7 @@ impl SocketHandler {
 		// 	.unwrap();
 	}
 
-	/// Verifies whether the given transaction interacted with the socket contract.
-	fn is_socket_contract(&self, receipt: &TransactionReceipt) -> bool {
+	fn is_target_contract(&self, receipt: &TransactionReceipt) -> bool {
 		if let Some(to) = receipt.to {
 			// if to == self.client.config.socket_address {
 			// 	return true
@@ -125,8 +115,7 @@ impl SocketHandler {
 		false
 	}
 
-	/// Verifies whether the given event topic matches the socket event signature.
-	fn is_socket_event(topic: H256) -> bool {
+	fn is_target_event(topic: H256) -> bool {
 		if topic == H256::from_str(SOCKET_EVENT_SIG).unwrap() {
 			return true
 		}
