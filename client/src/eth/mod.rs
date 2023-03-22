@@ -10,6 +10,7 @@ use br_primitives::{
 	eth::{AggregatorContracts, ChainID, ProtocolContracts, ProviderMetadata},
 	utils::sub_display_format,
 };
+use std::sync::Arc;
 
 use ethers::{
 	abi::Detokenize,
@@ -203,6 +204,16 @@ impl<T: JsonRpcClient> EthClient<T> {
 	/// Returns name which chain this client interacts with.
 	pub fn get_chain_name(&self) -> String {
 		self.config.name.clone()
+	}
+
+	/// Returns id which chain this client interacts with.
+	pub fn get_chain_id(&self) -> u32 {
+		self.config.id
+	}
+
+	/// Returns Arc<Provider>
+	pub fn get_provider(&self) -> Arc<Provider<T>> {
+		self.provider.clone()
 	}
 
 	/// Retrieves the latest mined block number of the connected chain.
