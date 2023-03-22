@@ -23,7 +23,7 @@ evm_providers:
 
 watch_targets:
   - handler_type: Socket
-    target:
+    targets:
       - chain_id: 49088
         contract: "0x0218371b18340aBD460961bdF3Bd5F01858dAB53"
       - chain_id: 5

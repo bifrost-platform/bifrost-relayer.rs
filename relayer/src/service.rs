@@ -86,7 +86,14 @@ pub fn new_relay_base(config: Configuration) -> Result<RelayBase, ServiceError> 
 						target_info.contract,
 					);
 					task_manager.spawn_essential_handle().spawn(
-						Box::leak(format!("{}-socket-handler", "asdf").into_boxed_str()),
+						Box::leak(
+							format!(
+								"{}-{}-socket-handler",
+								client.get_chain_name(),
+								socket_handler.socket_contract
+							)
+							.into_boxed_str(),
+						),
 						Some("Socket"),
 						async move { socket_handler.run().await },
 					);
