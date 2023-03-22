@@ -1,6 +1,7 @@
 use std::{str::FromStr, sync::Arc};
 
-use cccp_primitives::eth::SOCKET_EVENT_SIG;
+use cccp_primitives::eth::SOCKET_EVENT_SIG; /* TODO: Move event sig into handler structure
+											 * (Initialize from config.yaml) */
 use ethers::{
 	abi::RawLog,
 	prelude::{abigen, decode_logs},
