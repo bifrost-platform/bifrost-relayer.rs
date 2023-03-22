@@ -12,13 +12,13 @@ use tokio::{
 use super::EthClient;
 
 pub struct BlockReceiver {
-	pub channel: Arc<Receiver<Option<Block<H256>>>>,
+	pub receiver: Receiver<Option<Block<H256>>>,
 	pub id: u32,
 }
 
 impl BlockReceiver {
-	pub fn new(channel: Receiver<Option<Block<H256>>>, id: u32) -> Arc<Self> {
-		Arc::new(Self { channel: Arc::new(channel), id })
+	pub fn new(receiver: Receiver<Option<Block<H256>>>, id: u32) -> Arc<Self> {
+		Arc::new(Self { receiver, id })
 	}
 }
 
