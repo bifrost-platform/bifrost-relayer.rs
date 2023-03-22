@@ -21,9 +21,9 @@ evm_providers:
     provider: ""
     interval: 1000
 
-watch_targets:
+handler_configs:
   - handler_type: Socket
-    targets:
+    watch_list:
       - chain_id: 49088
         contract: "0x0218371b18340aBD460961bdF3Bd5F01858dAB53"
       - chain_id: 5
@@ -33,7 +33,7 @@ watch_targets:
       - chain_id: 80001
         contract: "0xA25357F3C313Bd13885678f935178211f0dF6722"
   - handler_type: Vault
-    targets:
+    watch_list:
       - chain_id: 49088
         contract: ""
       - chain_id: 5

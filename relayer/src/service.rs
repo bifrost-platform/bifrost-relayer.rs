@@ -57,41 +57,40 @@ pub fn new_relay_base(config: Configuration) -> Result<RelayBase, ServiceError> 
 	}
 
 	// Initialize handlers & spawn tasks
-	for target in config.relayer_config.watch_targets {
-		match target.handler_type {
+	for handler_config in config.relayer_config.handler_configs {
+		match handler_config.handler_type {
 			HandlerType::Socket | HandlerType::Vault =>
-				for target_info in target.targets {
+				for target in handler_config.watch_list {
 					let block_channel = block_channels
 						.iter()
-						.find(|receiver| receiver.id == target_info.chain_id)
+						.find(|receiver| receiver.id == target.chain_id)
 						.cloned()
 						.expect(&format!(
 							"Unknown chain id ({:?}) required on initializing socket handler.",
-							target_info.chain_id
+							target.chain_id
 						));
 
 					let client = clients
 						.iter()
-						.find(|client| client.get_chain_id() == target_info.chain_id)
+						.find(|client| client.get_chain_id() == target.chain_id)
 						.cloned()
 						.expect(&format!(
 							"Unknown chain id ({:?}) required on initializing socket handler.",
-							target_info.chain_id
+							target.chain_id
 						));
 
 					let cccp_handler = CCCPHandler::new(
 						event_channels.clone(),
 						block_channel.clone(),
 						client.clone(),
-						target_info.contract,
+						target.contract,
 					);
 					task_manager.spawn_essential_handle().spawn(
 						Box::leak(
 							format!(
-								"{}-{}-{}-handler",
+								"{}-{}-handler",
 								client.get_chain_name(),
-								cccp_handler.contract,
-								target.handler_type.to_string(),
+								handler_config.handler_type.to_string(),
 							)
 							.into_boxed_str(),
 						),

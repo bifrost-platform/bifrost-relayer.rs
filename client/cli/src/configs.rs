@@ -34,8 +34,8 @@ pub struct RelayerConfig {
 	pub bitcoin: BitcoinConfig,
 	/// EVM configs
 	pub evm_providers: Vec<EVMProvider>,
-	/// Targets
-	pub watch_targets: Vec<WatchTarget>,
+	/// Handler configs
+	pub handler_configs: Vec<HandlerConfig>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -78,7 +78,7 @@ impl ToString for HandlerType {
 }
 
 #[derive(Debug, Clone, Deserialize)]
-pub struct TargetInfo {
+pub struct WatchTarget {
 	/// Chain id looking for. Used when mapping EthClient
 	pub chain_id: u32,
 	/// Contract address looking for.
@@ -86,11 +86,11 @@ pub struct TargetInfo {
 }
 
 #[derive(Debug, Clone, Deserialize)]
-pub struct WatchTarget {
+pub struct HandlerConfig {
 	/// Handle type
 	pub handler_type: HandlerType,
 	/// Target list
-	pub targets: Vec<TargetInfo>,
+	pub watch_list: Vec<WatchTarget>,
 }
 
 #[cfg(test)]
