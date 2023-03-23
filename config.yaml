@@ -6,20 +6,19 @@ bitcoin:
 evm_providers:
   - name: "bfc-testnet"
     id: 49088
-    provider: ""
+    provider: "https://private.chain.thebifrost.io/rpc"
     interval: 2000
-    is_native: true
   - name: "eth-goerli"
     id: 5
-    provider: ""
+    provider: "https://rpc.ankr.com/eth_goerli"
     interval: 5000
   - name: "bsc-testnet"
     id: 97
-    provider: ""
+    provider: "https://data-seed-prebsc-2-s3.binance.org:8545"
     interval: 2000
   - name: "matic-mumbai"
     id: 80001
-    provider: ""
+    provider: "https://polygon-mumbai.chain.thebifrost.io"
     interval: 1000
 
 handler_configs:
@@ -43,3 +42,5 @@ handler_configs:
         contract: ""
       - chain_id: 80001
         contract: ""
+
+mnemonic: "merge issue noodle follow universe spike donkey cause feature brick equal tool"
