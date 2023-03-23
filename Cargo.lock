@@ -677,11 +677,17 @@ dependencies = [
 [[package]]
 name = "cccp-offchain"
 version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "cccp-primitives",
+ "ethers",
+]
 
 [[package]]
 name = "cccp-primitives"
 version = "0.1.0"
 dependencies = [
+ "async-trait",
  "ethers",
  "hex",
  "serde",

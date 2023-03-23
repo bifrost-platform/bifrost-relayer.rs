@@ -9,3 +9,6 @@ license = "Unlicense"
 repository = "https://github.com/bifrost-platform/cccp-relayer"
 
 [dependencies]
+async-trait = "0.1.57"
+cccp-primitives = { path = "../primitives" }
+ethers = "2.0"

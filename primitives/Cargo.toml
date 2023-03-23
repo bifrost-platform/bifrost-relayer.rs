@@ -9,6 +9,7 @@ license = "Unlicense"
 repository = "https://github.com/bifrost-platform/cccp-relayer"
 
 [dependencies]
+async-trait = "0.1.57"
 serde = { version = "1.0.153", features = ["derive"] }
 serde_json = { version = '1.0.94', features = ['alloc'] }
 ethers = "2.0"
