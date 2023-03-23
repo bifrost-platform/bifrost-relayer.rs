@@ -96,7 +96,6 @@ fn construct_periodics(
 		let (rollback_emitter, rollback_sender) =
 			SocketRollbackEmitter::new(tx_request_sender.clone(), clients.clone());
 		rollback_emitters.push(rollback_emitter);
-		rollback_senders.insert(
 			tx_request_sender.id,
 			Arc::new(RollbackSender::new(tx_request_sender.id, rollback_sender)),
 		);
@@ -286,137 +285,6 @@ fn construct_btc_deps(
 	) {
 		(Some(username), Some(password)) => Auth::UserPass(username, password),
 		_ => Auth::None,
-	};
-	let btc_client = BitcoinClient::new(&config.relayer_config.btc_provider.provider, auth)
-		.expect(INVALID_PROVIDER_URL);
-
-	let bfc_client = manager_deps
-		.clients
-		.iter()
-		.find(|client| client.metadata.is_native)
-		.expect(INVALID_BIFROST_NATIVENESS)
-		.clone();
-	let tx_request_sender = manager_deps
-		.tx_request_senders
-		.iter()
-		.find(|sender| sender.is_native)
-		.expect(INVALID_BIFROST_NATIVENESS)
-		.clone();
-
-	let block_manager = BlockManager::new(
-		btc_client.clone(),
-		bfc_client.clone(),
-		pending_outbounds.clone(),
-		bootstrap_shared_data.clone(),
-		config
-			.relayer_config
-			.btc_provider
-			.bootstrap_offset
-			.unwrap_or(DEFAULT_BITCOIN_BOOTSTRAP_BLOCK_OFFSET),
-	);
-	let inbound = InboundHandler::new(
-		bfc_client.clone(),
-		tx_request_sender.clone(),
-		block_manager.subscribe(),
-		bootstrap_shared_data.clone(),
-	);
-	let outbound = OutboundHandler::new(
-		bfc_client.clone(),
-		tx_request_sender.clone(),
-		block_manager.subscribe(),
-		bootstrap_shared_data.clone(),
-	);
-
-	let psbt_signer = PsbtSigner::new(
-		bfc_client.clone(),
-		substrate_deps.xt_request_sender.clone(),
-		block_manager.subscribe(),
-		keypair_storage.clone(),
-		migration_sequence.clone(),
-		network,
-	);
-	let pub_key_submitter = PubKeySubmitter::new(
-		bfc_client.clone(),
-		substrate_deps.xt_request_sender.clone(),
-		keypair_storage.clone(),
-		migration_sequence.clone(),
-	);
-	let rollback_verifier = BitcoinRollbackVerifier::new(
-		btc_client.clone(),
-		bfc_client.clone(),
-		substrate_deps.xt_request_sender.clone(),
-	);
-
-	BtcDeps { outbound, inbound, block_manager, psbt_signer, pub_key_submitter, rollback_verifier }
-}
-
-/// Initializes Substrate related instances.
-fn construct_substrate_deps(
-	manager_deps: &ManagerDeps,
-	task_manager: &TaskManager,
-) -> SubstrateDeps {
-	let bfc_client = manager_deps
-		.clients
-		.iter()
-		.find(|client| client.metadata.is_native)
-		.expect(INVALID_BIFROST_NATIVENESS)
-		.clone();
-
-	let (unsigned_tx_manager, sender) =
-		UnsignedTransactionManager::new(bfc_client.clone(), task_manager.spawn_handle());
-
-	let xt_request_sender = Arc::new(XtRequestSender::new(sender));
-
-	SubstrateDeps { unsigned_tx_manager, xt_request_sender }
-}
-
-/// Spawn relayer service tasks by the `TaskManager`.
-fn spawn_relayer_tasks(
-	task_manager: TaskManager,
-	deps: FullDeps,
-	config: &Configuration,
-) -> TaskManager {
-	let prometheus_config = &config.relayer_config.prometheus_config;
-
-	let FullDeps {
-		bootstrap_shared_data,
-		manager_deps,
-		periodic_deps,
-		handler_deps,
-		substrate_deps,
-		btc_deps,
-	} = deps;
-
-	let BootstrapSharedData { socket_barrier, bootstrap_states, .. } = bootstrap_shared_data;
-	let ManagerDeps { tx_managers, event_managers, .. } = manager_deps;
-	let PeriodicDeps {
-		mut heartbeat_sender,
-		mut oracle_price_feeder,
-		mut roundup_emitter,
-		rollback_emitters,
-		mut keypair_migrator,
-		..
-	} = periodic_deps;
-	let HandlerDeps { socket_relay_handlers, roundup_relay_handlers } = handler_deps;
-	let SubstrateDeps { mut unsigned_tx_manager, .. } = substrate_deps;
-	let BtcDeps {
-		mut outbound,
-		mut inbound,
-		mut block_manager,
-		mut psbt_signer,
-		mut pub_key_submitter,
-		mut rollback_verifier,
-	} = btc_deps;
-
-	// spawn migration detector
-	task_manager.spawn_essential_handle().spawn(
-		"migration-detector",
-		Some("migration-detector"),
-		async move { keypair_migrator.run().await },
-	);
-
-	// spawn legacy transaction managers
-	tx_managers.0.into_iter().for_each(|mut tx_manager| {
 		task_manager.spawn_essential_handle().spawn(
 			Box::leak(
 				format!("{}-transaction-manager", tx_manager.client.get_chain_name())
@@ -513,60 +381,8 @@ fn spawn_relayer_tasks(
 	// spawn roundup emitter
 	task_manager.spawn_essential_handle().spawn(
 		"roundup-emitter",
-		Some("roundup-emitter"),
 		async move { roundup_emitter.run().await },
 	);
-
-	// spawn event managers
-	event_managers.into_iter().for_each(|(_chain_id, mut event_manager)| {
-		task_manager.spawn_essential_handle().spawn(
-			Box::leak(
-				format!("{}-event-manager", event_manager.client.get_chain_name()).into_boxed_str(),
-			),
-			Some("event-managers"),
-			async move {
-				event_manager.wait_provider_sync().await;
-
-				event_manager.run().await
-			},
-		)
-	});
-
-	// spawn bitcoin deps
-	task_manager.spawn_essential_handle().spawn(
-		"bitcoin-inbound-handler",
-		Some("handlers"),
-		async move { inbound.run().await },
-	);
-	task_manager.spawn_essential_handle().spawn(
-		"bitcoin-outbound-handler",
-		Some("handlers"),
-		async move { outbound.run().await },
-	);
-	task_manager.spawn_essential_handle().spawn(
-		"bitcoin-psbt-signer",
-		Some("handlers"),
-		async move { psbt_signer.run().await },
-	);
-	task_manager.spawn_essential_handle().spawn(
-		"bitcoin-public-key-submitter",
-		Some("pub-key-submitter"),
-		async move { pub_key_submitter.run().await },
-	);
-	task_manager.spawn_essential_handle().spawn(
-		"bitcoin-rollback-verifier",
-		Some("rollback-verifier"),
-		async move { rollback_verifier.run().await },
-	);
-	task_manager.spawn_essential_handle().spawn(
-		"bitcoin-block-manager",
-		Some("block-manager"),
-		async move {
-			socket_barrier.wait().await;
-
-			// After All of barrier complete the waiting
-			let mut guard = bootstrap_states.write().await;
-			if guard.iter().all(|s| *s == BootstrapState::BootstrapRoundUpPhase2) {
 				for state in guard.iter_mut() {
 					*state = BootstrapState::BootstrapSocketRelay;
 				}
