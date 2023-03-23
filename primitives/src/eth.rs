@@ -35,6 +35,14 @@ impl SocketEventStatus {
 	}
 }
 
+#[derive(Clone, Copy, Debug)]
+pub enum BridgeDirection {
+	/// From external network, to bifrost network
+	Inbound,
+	/// From bifrost network, to external network
+	Outbound,
+}
+
 #[derive(Clone, Debug)]
 /// The additional configuration details for an EVM-based chain.
 pub struct EthClientConfiguration {
@@ -44,4 +52,6 @@ pub struct EthClientConfiguration {
 	pub id: u32,
 	/// The `get_block` request interval in milliseconds.
 	pub call_interval: u64,
+	/// Bridge direction when bridge event points this chain as destination.
+	pub if_destination_chain: BridgeDirection,
 }

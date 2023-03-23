@@ -1,8 +1,10 @@
-use cc_cli::{Configuration, HandlerConfig, HandlerType};
 use cccp_client::eth::{
 	BlockManager, CCCPHandler, EthClient, EventSender, Handler, TransactionManager,
 };
-use cccp_primitives::eth::EthClientConfiguration;
+use cccp_primitives::{
+	cli::{Configuration, HandlerConfig, HandlerType},
+	eth::{BridgeDirection, EthClientConfiguration},
+};
 
 use ethers::{
 	providers::{Http, Provider},
@@ -50,6 +52,10 @@ pub fn new_relay_base(config: Configuration) -> Result<RelayBase, ServiceError> 
 					name: evm_provider.name,
 					id: evm_provider.id,
 					call_interval: evm_provider.interval,
+					if_destination_chain: match evm_provider.is_native.unwrap_or_else(|| false) {
+						true => BridgeDirection::Inbound,
+						_ => BridgeDirection::Outbound,
+					},
 				},
 			));
 			let (tx_manager, event_sender) = TransactionManager::new(client.clone());
