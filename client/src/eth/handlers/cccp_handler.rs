@@ -1,7 +1,7 @@
 use std::{str::FromStr, sync::Arc};
 
-use cccp_primitives::eth::{SocketEventStatus, SOCKET_EVENT_SIG}; /* TODO: Move event sig into handler structure
-																  * (Initialize from config.yaml) */
+use cccp_primitives::eth::{BridgeDirection, SocketEventStatus, SOCKET_EVENT_SIG}; /* TODO: Move event sig into handler structure
+																				   * (Initialize from config.yaml) */
 use ethers::{
 	abi::RawLog,
 	prelude::{abigen, decode_logs},
@@ -173,8 +173,7 @@ impl<T: JsonRpcClient> CCCPHandler<T> {
 
 		let src_chain_id = u32::from_be_bytes(msg.req_id.chain);
 		let dst_chain_id = u32::from_be_bytes(msg.ins_code.chain);
-		// let is_inbound = src_chain_id != bfc_testnet::BFC_CHAIN_ID;
-		let is_inbound = true;
+		let is_inbound = self.is_inbound_sequence(dst_chain_id);
 
 		let _relay_tx_chain_id = if is_inbound {
 			self.get_inbound_relay_tx_chain_id(status, src_chain_id, dst_chain_id)
@@ -227,5 +226,20 @@ impl<T: JsonRpcClient> CCCPHandler<T> {
 	/// inbound|outbound sequence has been ended. No further actions required.
 	fn is_sequence_ended(status: SocketEventStatus) -> bool {
 		matches!(status, SocketEventStatus::Committed | SocketEventStatus::Rollbacked)
+	}
+
+	/// Verifies whether the socket event is an inbound sequence.
+	fn is_inbound_sequence(&self, dst_chain_id: u32) -> bool {
+		match self.client.config.if_destination_chain {
+			BridgeDirection::Inbound =>
+				if self.client.get_chain_id() == dst_chain_id {
+					return true
+				},
+			BridgeDirection::Outbound =>
+				if self.client.get_chain_id() != dst_chain_id {
+					return true
+				},
+		}
+		false
 	}
 }
