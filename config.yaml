@@ -8,6 +8,7 @@ evm_providers:
     id: 49088
     provider: ""
     interval: 2000
+    is_native: true
   - name: "eth-goerli"
     id: 5
     provider: ""
