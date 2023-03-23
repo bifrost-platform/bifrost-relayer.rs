@@ -61,11 +61,17 @@ impl<T: JsonRpcClient> BlockManager<T> {
 	/// publish to the block channel.
 	pub async fn run(&self) {
 		// TODO: follow-up to the highest block
+		println!("target contracts -> {:?}", self.target_contracts);
 		loop {
 			// TODO: handle block reorgs
 			let latest_block = self.client.get_latest_block_number().await.unwrap();
 			self.process_confirmed_block(latest_block).await;
 
+			println!(
+				"[{:?}]-[block-manager] processed block: {:?}",
+				self.client.get_chain_name(),
+				latest_block
+			);
 			sleep(Duration::from_millis(self.client.config.call_interval)).await;
 		}
 	}

@@ -28,6 +28,21 @@ fn get_target_contracts_by_chain_id(
 	target_contracts
 }
 
+fn get_socket_contract_by_chain_id(chain_id: u32, handler_configs: &Vec<HandlerConfig>) -> H160 {
+	for handler_config in handler_configs {
+		match handler_config.handler_type {
+			HandlerType::Socket =>
+				for socket in &handler_config.watch_list {
+					if socket.chain_id == chain_id {
+						return H160::from_str(&socket.contract).unwrap()
+					}
+				},
+			_ => {},
+		}
+	}
+	panic!("Unknown chain id ({:?}) required on initializing socket contract.", chain_id)
+}
+
 pub fn relay(config: Configuration) -> Result<TaskManager, ServiceError> {
 	new_relay_base(config).map(|RelayBase { task_manager, .. }| task_manager)
 }
@@ -52,9 +67,15 @@ pub fn new_relay_base(config: Configuration) -> Result<RelayBase, ServiceError> 
 			)
 			.expect("Should exist");
 
+			let socket_contract = get_socket_contract_by_chain_id(
+				evm_provider.id,
+				&config.relayer_config.handler_configs,
+			);
+
 			let client = Arc::new(EthClient::new(
 				wallet,
 				Arc::new(Provider::<Http>::try_from(evm_provider.provider).unwrap()),
+				socket_contract,
 				EthClientConfiguration {
 					name: evm_provider.name,
 					id: evm_provider.id,

@@ -1,60 +1,20 @@
 use std::{str::FromStr, sync::Arc};
 
-use cccp_primitives::eth::{BridgeDirection, SocketEventStatus, SOCKET_EVENT_SIG}; /* TODO: Move event sig into handler structure
-																				   * (Initialize from config.yaml) */
+// TODO: Move event sig into handler structure (Initialize from config.yaml)
+use cccp_primitives::eth::{BridgeDirection, SocketEventStatus, SOCKET_EVENT_SIG};
 use ethers::{
 	abi::RawLog,
-	prelude::{abigen, decode_logs},
+	prelude::decode_logs,
 	providers::JsonRpcClient,
-	types::{TransactionReceipt, TransactionRequest, H160, H256},
+	types::{Eip1559TransactionRequest, TransactionReceipt, H160, H256},
 };
 use tokio::sync::broadcast::Receiver;
 use tokio_stream::StreamExt;
 
-use crate::eth::{BlockMessage, EthClient, EventSender, Handler};
-
-abigen!(
-	SocketExternal,
-	"../abi/abi.socket.external.json",
-	event_derives(serde::Deserialize, serde::Serialize)
-);
-
-#[derive(
-	Clone,
-	ethers::contract::EthEvent,
-	ethers::contract::EthDisplay,
-	Default,
-	Debug,
-	PartialEq,
-	Eq,
-	Hash,
-)]
-#[ethevent(
-	name = "Socket",
-	abi = "Socket(((bytes4,uint64,uint128),uint8,(bytes4,bytes16),(bytes32,bytes32,address,address,uint256,bytes)))"
-)]
-/// The `Socket` event from the `SocketExternal` contract.
-pub struct Socket {
-	pub msg: SocketMessage,
-}
-
-#[derive(Clone, ethers::contract::EthAbiType, Debug, PartialEq, Eq, Hash)]
-/// The event enums originated from the `SocketExternal` contract.
-pub enum SocketEvents {
-	Socket(Socket),
-}
-
-impl ethers::contract::EthLogDecode for SocketEvents {
-	fn decode_log(log: &RawLog) -> Result<Self, ethers::abi::Error>
-	where
-		Self: Sized,
-	{
-		if let Ok(decoded) = Socket::decode_log(log) {
-			return Ok(SocketEvents::Socket(decoded))
-		}
-		Err(ethers::abi::Error::InvalidData)
-	}
-}
+use crate::eth::{
+	BlockMessage, EthClient, EventSender, Handler, Signatures, SocketClient, SocketEvents,
+	SocketMessage,
+};
 
 /// The essential task that handles CCCP-related events.
 pub struct CCCPHandler<T> {
@@ -88,6 +48,12 @@ impl<T: JsonRpcClient> Handler for CCCPHandler<T> {
 
 			let mut stream = tokio_stream::iter(block_msg.target_receipts);
 
+			println!(
+				"[{:?}]-[cccp-handler] received block: {:?}",
+				self.client.get_chain_name(),
+				block_msg.raw_block.number
+			);
+
 			while let Some(receipt) = stream.next().await {
 				self.process_confirmed_transaction(receipt).await;
 			}
@@ -104,6 +70,13 @@ impl<T: JsonRpcClient> Handler for CCCPHandler<T> {
 					match decode_logs::<SocketEvents>(&[raw_log]) {
 						Ok(decoded) => match &decoded[0] {
 							SocketEvents::Socket(socket) => {
+								println!(
+									"[{:?}]-[cccp-handler] detected socket event: {:?}-{:?}-{:?}",
+									self.client.get_chain_name(),
+									socket.msg.status,
+									u32::from_be_bytes(socket.msg.req_id.chain),
+									u32::from_be_bytes(socket.msg.ins_code.chain),
+								);
 								self.send_socket_message(socket.msg.clone()).await;
 							},
 						},
@@ -114,23 +87,13 @@ impl<T: JsonRpcClient> Handler for CCCPHandler<T> {
 		}
 	}
 
-	async fn request_send_transaction(&self, dst_chain_id: u32, request: TransactionRequest) {
-		// TODO: Make it works
-		match self
-			.event_senders
-			.iter()
-			.find(|sender| sender.id == dst_chain_id)
-			.unwrap_or_else(|| {
-				panic!(
-					"[{:?}] invalid dst_chain_id received : {:?}",
-					self.client.config.name, dst_chain_id
-				)
-			})
-			.sender
-			.send(request)
+	fn request_send_transaction(&self, chain_id: u32, raw_tx: Eip1559TransactionRequest) {
+		if let Some(event_sender) =
+			self.event_senders.iter().find(|event_sender| event_sender.id == chain_id)
 		{
-			Ok(()) => println!("Request sent successfully"),
-			Err(e) => println!("Failed to send request: {}", e),
+			event_sender.sender.send(raw_tx).unwrap();
+		} else {
+			panic!("[{:?}] invalid chain_id received : {:?}", self.client.config.name, chain_id)
 		}
 	}
 
@@ -162,16 +125,6 @@ impl<T: JsonRpcClient> CCCPHandler<T> {
 			return
 		}
 
-		let send_to_channel = |chain_id: u32, msg: TransactionRequest| {
-			if let Some(event_sender) =
-				self.event_senders.iter().find(|event_sender| event_sender.id == chain_id)
-			{
-				event_sender.sender.send(msg)
-			} else {
-				panic!("[{:?}] invalid chain_id received : {:?}", self.client.config.name, chain_id)
-			}
-		};
-
 		let src_chain_id = u32::from_be_bytes(msg.req_id.chain);
 		let dst_chain_id = u32::from_be_bytes(msg.ins_code.chain);
 		let is_inbound = self.is_inbound_sequence(dst_chain_id);
@@ -181,8 +134,12 @@ impl<T: JsonRpcClient> CCCPHandler<T> {
 		} else {
 			self.get_outbound_relay_tx_chain_id(status, src_chain_id, dst_chain_id)
 		};
-		// TODO: request_send_transaction
-		// send_to_channel(relay_tx_chain_id, msg).expect("Something wrong");
+
+		let mut raw_tx = Eip1559TransactionRequest::new();
+		// TODO: check how to set sigs. For now we just set as default.
+		raw_tx = raw_tx.data(self.client.build_poll_call_data(msg, Signatures::default()));
+
+		self.request_send_transaction(relay_tx_chain_id, raw_tx);
 	}
 
 	/// Get the chain ID of the inbound sequence relay transaction.

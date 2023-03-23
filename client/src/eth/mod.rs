@@ -4,6 +4,9 @@ pub use events::*;
 mod handlers;
 pub use handlers::*;
 
+mod contracts;
+pub use contracts::*;
+
 mod tx;
 pub use tx::*;
 
@@ -15,7 +18,7 @@ pub use wallet::*;
 
 use ethers::{
 	providers::{JsonRpcClient, Middleware, Provider},
-	types::{Block, BlockId, TransactionReceipt, H256, U64},
+	types::{Block, BlockId, Bytes, TransactionReceipt, H160, H256, U256, U64},
 };
 use std::sync::Arc;
 
@@ -31,19 +34,24 @@ pub struct EthClient<T> {
 	provider: Arc<Provider<T>>,
 	/// The specific configuration details for the connected chain.
 	config: EthClientConfiguration,
+	/// The `Socket` contract instance.
+	socket: SocketExternal<Provider<T>>,
 }
 
-impl<T: JsonRpcClient> EthClient<T>
-where
-	Self: Send + Sync,
-{
+impl<T: JsonRpcClient> EthClient<T> {
 	/// Instantiates a new `EthClient` instance for the given chain.
 	pub fn new(
 		wallet: WalletManager,
 		provider: Arc<Provider<T>>,
+		socket_contract: H160,
 		config: EthClientConfiguration,
 	) -> Self {
-		Self { wallet, provider, config }
+		Self {
+			wallet,
+			provider: provider.clone(),
+			config,
+			socket: SocketExternal::new(socket_contract, provider),
+		}
 	}
 
 	/// Returns name which chain this client interacts with.
@@ -72,5 +80,26 @@ where
 		hash: H256,
 	) -> EthResult<Option<TransactionReceipt>> {
 		self.provider.get_transaction_receipt(hash).await
+	}
+}
+
+#[async_trait::async_trait]
+impl<T: JsonRpcClient> SocketClient for EthClient<T> {
+	fn build_poll_call_data(&self, msg: SocketMessage, sigs: Signatures) -> Bytes {
+		let poll_submit = PollSubmit { msg, sigs, option: U256::default() };
+		self.socket.poll(poll_submit).calldata().unwrap()
+	}
+
+	async fn get_estimated_gas_for_poll(&self, msg: SocketMessage, sigs: Signatures) -> U256 {
+		let poll_submit = PollSubmit { msg, sigs, option: U256::default() };
+		self.socket.poll(poll_submit).estimate_gas().await.unwrap()
+	}
+
+	async fn get_signatures(&self, msg: SocketMessage) -> Signatures {
+		self.socket
+			.get_signatures(msg.req_id, msg.status)
+			.call()
+			.await
+			.unwrap_or_default()
 	}
 }

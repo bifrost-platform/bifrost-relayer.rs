@@ -2,7 +2,7 @@ use ethers::{
 	prelude::{NonceManagerMiddleware, SignerMiddleware},
 	providers::{JsonRpcClient, Middleware, Provider},
 	signers::{LocalWallet, Signer},
-	types::{TransactionRequest, U256},
+	types::{Eip1559TransactionRequest, U256},
 };
 use std::sync::Arc;
 use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
@@ -16,13 +16,13 @@ pub struct TransactionManager<T> {
 	/// The client signs transaction for the connected chain with local nonce manager.
 	pub middleware: Arc<NonceManagerMiddleware<SignerMiddleware<Arc<Provider<T>>, LocalWallet>>>,
 	/// The receiver connected to the event channel.
-	pub receiver: UnboundedReceiver<TransactionRequest>,
+	pub receiver: UnboundedReceiver<Eip1559TransactionRequest>,
 }
 
 impl<T: 'static + JsonRpcClient> TransactionManager<T> {
 	/// Instantiates a new `TransactionManager` instance.
 	pub fn new(client: Arc<EthClient<T>>) -> (Self, UnboundedSender<TransactionRequest>) {
-		let (sender, receiver) = mpsc::unbounded_channel::<TransactionRequest>();
+		let (sender, receiver) = mpsc::unbounded_channel::<Eip1559TransactionRequest>();
 
 		let middleware = Arc::new(NonceManagerMiddleware::new(
 			SignerMiddleware::new(client.provider.clone(), client.wallet.signer.clone()),

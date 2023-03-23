@@ -1,7 +1,7 @@
 mod cccp_handler;
-
 pub use cccp_handler::*;
-use ethers::types::{TransactionReceipt, TransactionRequest, H256};
+
+use ethers::types::{Eip1559TransactionRequest, TransactionReceipt, H256};
 
 #[async_trait::async_trait]
 pub trait Handler {
@@ -12,7 +12,7 @@ pub trait Handler {
 	async fn process_confirmed_transaction(&self, receipt: TransactionReceipt);
 
 	/// Request send relay transaction to the target event channel.
-	async fn request_send_transaction(&self, dst_chain_id: u32, transaction: TransactionRequest);
+	fn request_send_transaction(&self, chain_id: u32, raw_tx: Eip1559TransactionRequest);
 
 	/// Verifies whether the given transaction interacted with the target contract.
 	fn is_target_contract(&self, receipt: &TransactionReceipt) -> bool;
