@@ -9,7 +9,7 @@ use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
 
 use crate::eth::{PollSubmit, Signatures, SocketExternal};
 
-use super::{ClientErr, EthClient, SocketMessage};
+use super::{EthClient, SocketMessage, TxResult};
 
 /// The essential task that sends asynchronous transactions.
 pub struct TransactionManager<T> {
@@ -36,7 +36,7 @@ impl<T: JsonRpcClient> TransactionManager<T> {
 		}
 	}
 
-	async fn request_send_transaction(&mut self, msg: SocketMessage) -> Result<(), ClientErr> {
+	async fn request_send_transaction(&mut self, msg: SocketMessage) -> TxResult {
 		let middleware = Arc::new(SignerMiddleware::new(
 			self.client.provider.clone(),
 			self.client.wallet.signer.clone(),

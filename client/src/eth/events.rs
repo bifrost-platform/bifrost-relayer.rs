@@ -1,4 +1,3 @@
-use ethers::types::TransactionRequest;
 use tokio::sync::mpsc::UnboundedSender;
 
 use super::SocketMessage;

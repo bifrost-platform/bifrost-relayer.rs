@@ -21,12 +21,12 @@ use std::sync::Arc;
 
 use cccp_primitives::eth::{EthClientConfiguration, EthResult};
 
-pub type ClientErr = Box<dyn std::error::Error + Send + Sync>;
+pub type TxResult<T = ()> = Result<T, Box<dyn std::error::Error + Send + Sync>>;
 
 #[derive(Debug)]
 /// The core client for EVM-based chain interactions.
 pub struct EthClient<T> {
-	wallet: Wallet,
+	wallet: WalletManager,
 	/// The ethers.rs wrapper for the connected chain.
 	provider: Arc<Provider<T>>,
 	/// The specific configuration details for the connected chain.
@@ -38,7 +38,11 @@ where
 	Self: Send + Sync,
 {
 	/// Instantiates a new `EthClient` instance for the given chain.
-	pub fn new(wallet: Wallet, provider: Arc<Provider<T>>, config: EthClientConfiguration) -> Self {
+	pub fn new(
+		wallet: WalletManager,
+		provider: Arc<Provider<T>>,
+		config: EthClientConfiguration,
+	) -> Self {
 		Self { wallet, provider, config }
 	}
 

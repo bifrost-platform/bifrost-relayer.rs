@@ -6,7 +6,7 @@ use ethers::{
 	abi::RawLog,
 	prelude::{abigen, decode_logs},
 	providers::JsonRpcClient,
-	types::{TransactionReceipt, TransactionRequest, H160, H256},
+	types::{TransactionReceipt, H160, H256},
 };
 use tokio::sync::broadcast::Receiver;
 use tokio_stream::StreamExt;

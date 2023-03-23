@@ -1,7 +1,7 @@
 mod cccp_handler;
 
 pub use cccp_handler::*;
-use ethers::types::{TransactionReceipt, TransactionRequest, H256};
+use ethers::types::{TransactionReceipt, H256};
 
 #[async_trait::async_trait]
 pub trait Handler {

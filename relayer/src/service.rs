@@ -1,5 +1,5 @@
 use cccp_client::eth::{
-	BlockManager, CCCPHandler, EthClient, EventSender, Handler, TransactionManager, Wallet,
+	BlockManager, CCCPHandler, EthClient, EventSender, Handler, TransactionManager, WalletManager,
 };
 use cccp_primitives::{
 	cli::{Configuration, HandlerConfig, HandlerType},
@@ -70,7 +70,7 @@ pub fn new_relay_base(config: Configuration) -> Result<RelayBase, ServiceError> 
 				&config.relayer_config.handler_configs,
 			);
 
-			let wallet = Wallet::from_phrase_or_file(
+			let wallet = WalletManager::from_phrase_or_file(
 				config.relayer_config.mnemonic.as_str(),
 				evm_provider.id,
 			)
