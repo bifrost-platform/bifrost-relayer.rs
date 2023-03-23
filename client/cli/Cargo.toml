@@ -5,6 +5,7 @@ edition = "2021"
 
 [dependencies]
 cccp-client = { path = "../../client" }
+cccp-primitives = { path = "../../primitives" }
 chrono = "0.4.23"
 futures = "0.3.26"
 log = "0.4.17"

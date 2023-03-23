@@ -1,13 +1,13 @@
-use crate::{Configuration, Result};
+use cccp_primitives::cli::{Configuration, Result as CliResult};
 use futures::{future, future::FutureExt, pin_mut, select, Future};
 use sc_service::{Error as ServiceError, TaskManager};
 use sc_utils::metrics::{TOKIO_THREADS_ALIVE, TOKIO_THREADS_TOTAL};
 use std::time::Duration;
 
 #[cfg(target_family = "unix")]
-async fn main<F, E>(func: F) -> std::result::Result<(), E>
+async fn main<F, E>(func: F) -> Result<(), E>
 where
-	F: Future<Output = std::result::Result<(), E>> + future::FusedFuture,
+	F: Future<Output = Result<(), E>> + future::FusedFuture,
 	E: std::error::Error + Send + Sync + 'static + From<ServiceError>,
 {
 	use tokio::signal::unix::{signal, SignalKind};
@@ -31,7 +31,7 @@ where
 }
 
 /// Build a tokio runtime with all features
-pub fn build_runtime() -> std::result::Result<tokio::runtime::Runtime, std::io::Error> {
+pub fn build_runtime() -> Result<tokio::runtime::Runtime, std::io::Error> {
 	tokio::runtime::Builder::new_multi_thread()
 		.on_thread_start(|| {
 			TOKIO_THREADS_ALIVE.inc();
@@ -51,16 +51,16 @@ pub struct Runner {
 }
 
 impl Runner {
-	pub fn new(config: Configuration, tokio_runtime: tokio::runtime::Runtime) -> Result<Runner> {
+	pub fn new(config: Configuration, tokio_runtime: tokio::runtime::Runtime) -> CliResult<Runner> {
 		Ok(Runner { config, tokio_runtime })
 	}
 
 	pub fn run_relayer_until_exit<F, E>(
 		self,
 		initialize: impl FnOnce(Configuration) -> F,
-	) -> std::result::Result<(), E>
+	) -> Result<(), E>
 	where
-		F: Future<Output = std::result::Result<TaskManager, E>>,
+		F: Future<Output = Result<TaskManager, E>>,
 		E: std::error::Error + Send + Sync + 'static + From<ServiceError>,
 	{
 		let mut task_manager = self.tokio_runtime.block_on(initialize(self.config))?;
