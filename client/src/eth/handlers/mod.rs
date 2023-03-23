@@ -1,16 +1,17 @@
 mod cccp_handler;
 
-use ethers::types::{TransactionReceipt, TransactionRequest, H256};
 pub use cccp_handler::*;
+use ethers::types::{TransactionReceipt, TransactionRequest, H256};
 
 #[async_trait::async_trait]
 pub trait Handler {
-	async fn run(&self);
+	/// Starts the event handler and listens to every new consumed block.
+	async fn run(&mut self);
 
 	/// Decode and parse the event if the given transaction triggered an event.
 	async fn process_confirmed_transaction(&self, receipt: TransactionReceipt);
 
-	/// Request send relay transaction to `dst_chain_id` channel.
+	/// Request send relay transaction to the target event channel.
 	async fn request_send_transaction(&self, dst_chain_id: u32, transaction: TransactionRequest);
 
 	/// Verifies whether the given transaction interacted with the target contract.

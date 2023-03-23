@@ -1,29 +1,29 @@
-use std::sync::Arc;
-
 use ethers::{providers::JsonRpcClient, types::TransactionRequest};
+use std::sync::Arc;
 use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
 
 use super::EthClient;
 
-/// The essential task that sends relay transactions.
+/// The essential task that sends asynchronous transactions.
 pub struct TransactionManager<T> {
 	/// The ethereum client for the connected chain.
 	pub client: Arc<EthClient<T>>,
-	/// The channel receiving socket messages.
+	/// The receiver connected to the event channel.
 	pub receiver: UnboundedReceiver<TransactionRequest>,
 }
 
 impl<T: JsonRpcClient> TransactionManager<T> {
-	/// Instantiates a new `EventDetector` instance.
+	/// Instantiates a new `TransactionManager` instance.
 	pub fn new(client: Arc<EthClient<T>>) -> (Self, UnboundedSender<TransactionRequest>) {
 		let (sender, receiver) = mpsc::unbounded_channel::<TransactionRequest>();
 		(Self { client, receiver }, sender)
 	}
 
-	/// Starts the transaction manager. Listens to every new consumed socket message.
+	/// Starts the transaction manager. Listens to every new consumed event message.
 	pub async fn run(&mut self) {
 		while let Some(msg) = self.receiver.recv().await {
 			println!("msg -> {:?}", msg);
+			// TODO: send raw transaction
 
 			// let poll_submit = PollSubmit {
 			// 	msg,
