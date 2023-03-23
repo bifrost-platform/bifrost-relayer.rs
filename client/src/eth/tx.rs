@@ -2,25 +2,28 @@ use ethers::{
 	prelude::SignerMiddleware,
 	providers::{JsonRpcClient, Middleware},
 	signers::Signer,
-	types::{TransactionRequest, U256},
+	types::{transaction::eip2718::TypedTransaction, U256},
 };
 use std::sync::Arc;
 use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
 
-use super::{ClientErr, EthClient};
+use crate::eth::{PollSubmit, Signatures, SocketExternal};
+
+use super::{ClientErr, EthClient, SocketMessage};
 
 /// The essential task that sends asynchronous transactions.
 pub struct TransactionManager<T> {
 	/// The ethereum client for the connected chain.
 	pub client: Arc<EthClient<T>>,
 	/// The receiver connected to the event channel.
-	pub receiver: UnboundedReceiver<TransactionRequest>,
+	pub receiver: UnboundedReceiver<SocketMessage>,
 }
 
 impl<T: JsonRpcClient> TransactionManager<T> {
 	/// Instantiates a new `TransactionManager` instance.
-	pub fn new(client: Arc<EthClient<T>>) -> (Self, UnboundedSender<TransactionRequest>) {
-		let (sender, receiver) = mpsc::unbounded_channel::<TransactionRequest>();
+	pub fn new(client: Arc<EthClient<T>>) -> (Self, UnboundedSender<SocketMessage>) {
+		let (sender, receiver) = mpsc::unbounded_channel::<SocketMessage>();
+
 		(Self { client, receiver }, sender)
 	}
 
@@ -29,33 +32,18 @@ impl<T: JsonRpcClient> TransactionManager<T> {
 		while let Some(msg) = self.receiver.recv().await {
 			println!("msg -> {:?}", msg);
 
-			self.request_send_transaction(msg).await;
-			// TODO: send raw transaction
-
-			// let poll_submit = PollSubmit {
-			// 	msg,
-			// 	sigs: Signatures::default(),
-			// 	option: ethers::types::U256::default(),
-			// };
-
-			// match self.client.socket.poll(poll_submit).call().await {
-			// 	Ok(result) => {
-			// 		println!("result : {result:?}")
-			// 	},
-			// 	Err(e) => {
-			// 		println!("error : {e:?}")
-			// 	},
-			// }
+			self.request_send_transaction(msg).await.unwrap();
 		}
 	}
 
-	async fn request_send_transaction(&mut self, msg: TransactionRequest) -> Result<(), ClientErr> {
+	async fn request_send_transaction(&mut self, msg: SocketMessage) -> Result<(), ClientErr> {
 		let middleware = Arc::new(SignerMiddleware::new(
 			self.client.provider.clone(),
 			self.client.wallet.signer.clone(),
 		));
 
 		// TODO: Need specific addresses for each chain
+		let socket = SocketExternal::new(self.client.config.socket_address, middleware.clone());
 		// let socket = SocketExternal::new(H160::default(), middleware.clone());
 
 		let nonce = middleware
@@ -66,11 +54,29 @@ impl<T: JsonRpcClient> TransactionManager<T> {
 		let (max_fee_per_gas, max_priority_fee_per_gas) =
 			middleware.clone().estimate_eip1559_fees(None).await.unwrap();
 
-		let tx = msg.gas(U256::from(1000000)).gas_price(max_fee_per_gas).nonce(nonce);
+		let poll_submit =
+			PollSubmit { msg, sigs: Signatures::default(), option: ethers::types::U256::default() };
+		// let tx = msg.gas(U256::from(1000000)).gas_price(max_fee_per_gas).nonce(nonce);
+		let mut tx: TypedTransaction = socket.poll(poll_submit).tx;
+		tx.set_gas(U256::from(1000000)).set_nonce(nonce);
 
-		let res = middleware.send_transaction(tx, None).await.unwrap().await.unwrap();
+		match tx {
+			TypedTransaction::Eip1559(ref mut inner) => {
+				inner.max_fee_per_gas = Some(max_fee_per_gas);
+				inner.max_priority_fee_per_gas = Some(max_priority_fee_per_gas)
+			},
+			_ => {
+				tx.set_gas_price(max_fee_per_gas);
+			},
+		};
 
-		// println!("Transaction Receipt: {}", serde_json::to_string(&tx).unwrap());
+		let res = middleware
+			.send_transaction(tx, None)
+			.await
+			.expect("fail to sending tx")
+			.await
+			.unwrap();
+
 		println!("transaction result : {:?}", res);
 
 		Ok(())

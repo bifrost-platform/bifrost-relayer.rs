@@ -85,6 +85,7 @@ impl<T: JsonRpcClient> Handler for CCCPHandler<T> {
 	async fn run(&mut self) {
 		loop {
 			let block_msg = self.block_receiver.recv().await.unwrap();
+
 			let mut stream = tokio_stream::iter(block_msg.target_receipts);
 
 			while let Some(receipt) = stream.next().await {
@@ -113,7 +114,7 @@ impl<T: JsonRpcClient> Handler for CCCPHandler<T> {
 		}
 	}
 
-	async fn request_send_transaction(&self, dst_chain_id: u32, request: TransactionRequest) {
+	async fn request_send_transaction(&self, dst_chain_id: u32, request: SocketMessage) {
 		// TODO: Make it works
 		match self
 			.event_senders
@@ -155,13 +156,15 @@ impl<T: JsonRpcClient> Handler for CCCPHandler<T> {
 impl<T: JsonRpcClient> CCCPHandler<T> {
 	/// Sends the `SocketMessage` to the target chain channel.
 	async fn send_socket_message(&self, msg: SocketMessage) {
+		println!("got something");
+
 		let status = SocketEventStatus::from_u8(msg.status);
 		if Self::is_sequence_ended(status) {
 			// do nothing if protocol sequence ended
 			return
 		}
 
-		let _send_to_channel = |chain_id: u32, msg: TransactionRequest| {
+		let send_to_channel = |chain_id: u32, msg: SocketMessage| {
 			if let Some(event_sender) =
 				self.event_senders.iter().find(|event_sender| event_sender.id == chain_id)
 			{
@@ -175,13 +178,13 @@ impl<T: JsonRpcClient> CCCPHandler<T> {
 		let dst_chain_id = u32::from_be_bytes(msg.ins_code.chain);
 		let is_inbound = self.is_inbound_sequence(dst_chain_id);
 
-		let _relay_tx_chain_id = if is_inbound {
+		let relay_tx_chain_id = if is_inbound {
 			self.get_inbound_relay_tx_chain_id(status, src_chain_id, dst_chain_id)
 		} else {
 			self.get_outbound_relay_tx_chain_id(status, src_chain_id, dst_chain_id)
 		};
 		// TODO: request_send_transaction
-		// send_to_channel(relay_tx_chain_id, msg).await.unwrap();
+		// send_to_channel(relay_tx_chain_id, msg).expect("Something wrong");
 	}
 
 	/// Get the chain ID of the inbound sequence relay transaction.

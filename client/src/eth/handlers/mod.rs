@@ -12,7 +12,7 @@ pub trait Handler {
 	async fn process_confirmed_transaction(&self, receipt: TransactionReceipt);
 
 	/// Request send relay transaction to the target event channel.
-	async fn request_send_transaction(&self, dst_chain_id: u32, transaction: TransactionRequest);
+	async fn request_send_transaction(&self, dst_chain_id: u32, transaction: SocketMessage);
 
 	/// Verifies whether the given transaction interacted with the target contract.
 	fn is_target_contract(&self, receipt: &TransactionReceipt) -> bool;
