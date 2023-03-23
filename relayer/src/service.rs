@@ -101,7 +101,6 @@ fn construct_periodics(
 		let (rollback_emitter, rollback_sender) =
 			SocketRollbackEmitter::new(tx_request_sender.clone(), clients.clone());
 		rollback_emitters.push(rollback_emitter);
-		rollback_senders.insert(
 			tx_request_sender.id,
 			Arc::new(RollbackSender::new(tx_request_sender.id, rollback_sender)),
 		);
@@ -543,60 +542,8 @@ fn spawn_relayer_tasks(
 	// spawn roundup emitter
 	task_manager.spawn_essential_handle().spawn(
 		"roundup-emitter",
-		Some("roundup-emitter"),
 		async move { roundup_emitter.run().await },
 	);
-
-	// spawn event managers
-	event_managers.into_iter().for_each(|(_chain_id, mut event_manager)| {
-		task_manager.spawn_essential_handle().spawn(
-			Box::leak(
-				format!("{}-event-manager", event_manager.client.get_chain_name()).into_boxed_str(),
-			),
-			Some("event-managers"),
-			async move {
-				event_manager.wait_provider_sync().await;
-
-				event_manager.run().await
-			},
-		)
-	});
-
-	// spawn bitcoin deps
-	task_manager.spawn_essential_handle().spawn(
-		"bitcoin-inbound-handler",
-		Some("handlers"),
-		async move { inbound.run().await },
-	);
-	task_manager.spawn_essential_handle().spawn(
-		"bitcoin-outbound-handler",
-		Some("handlers"),
-		async move { outbound.run().await },
-	);
-	task_manager.spawn_essential_handle().spawn(
-		"bitcoin-psbt-signer",
-		Some("handlers"),
-		async move { psbt_signer.run().await },
-	);
-	task_manager.spawn_essential_handle().spawn(
-		"bitcoin-public-key-submitter",
-		Some("pub-key-submitter"),
-		async move { pub_key_submitter.run().await },
-	);
-	task_manager.spawn_essential_handle().spawn(
-		"bitcoin-rollback-verifier",
-		Some("rollback-verifier"),
-		async move { rollback_verifier.run().await },
-	);
-	task_manager.spawn_essential_handle().spawn(
-		"bitcoin-block-manager",
-		Some("block-manager"),
-		async move {
-			socket_barrier.wait().await;
-
-			// After All of barrier complete the waiting
-			let mut guard = bootstrap_states.write().await;
-			if guard.iter().all(|s| *s == BootstrapState::BootstrapRoundUpPhase2) {
 				for state in guard.iter_mut() {
 					*state = BootstrapState::BootstrapSocketRelay;
 				}

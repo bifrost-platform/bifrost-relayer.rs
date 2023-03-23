@@ -174,6 +174,10 @@ Cargo.lock
 .history
 .ionide
 
+# Config files
+config.testnet.yaml
+config.mainnet.yaml
+
 # End of https://www.toptal.com/developers/gitignore/api/visualstudiocode,macos,intellij,rust
 
 *.local.yaml
