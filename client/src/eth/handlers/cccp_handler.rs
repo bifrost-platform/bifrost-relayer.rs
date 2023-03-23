@@ -5,15 +5,15 @@ use cccp_primitives::eth::{BridgeDirection, SocketEventStatus, SOCKET_EVENT_SIG}
 use ethers::{
 	abi::RawLog,
 	prelude::decode_logs,
-	providers::JsonRpcClient,
-	types::{Eip1559TransactionRequest, TransactionReceipt, H160, H256},
+	providers::{JsonRpcClient, Provider},
+	types::{Bytes, Eip1559TransactionRequest, TransactionReceipt, H160, H256, U256},
 };
 use tokio::sync::broadcast::Receiver;
 use tokio_stream::StreamExt;
 
 use crate::eth::{
-	BlockMessage, EthClient, EventSender, Handler, Signatures, SocketClient, SocketEvents,
-	SocketMessage,
+	BlockMessage, EthClient, EventSender, Handler, PollSubmit, Signatures, SocketClient,
+	SocketEvents, SocketExternal, SocketMessage,
 };
 
 /// The essential task that handles CCCP-related events.
@@ -25,7 +25,9 @@ pub struct CCCPHandler<T> {
 	/// The `EthClient` to interact with the connected blockchain.
 	pub client: Arc<EthClient<T>>,
 	/// The address of the `Socket` | `Vault` contract.
-	pub contract: H160,
+	pub target_contract: H160,
+	/// The `Socket` contract instance.
+	pub socket: SocketExternal<Provider<T>>,
 }
 
 impl<T: JsonRpcClient> CCCPHandler<T> {
@@ -34,9 +36,16 @@ impl<T: JsonRpcClient> CCCPHandler<T> {
 		event_senders: Vec<Arc<EventSender>>,
 		block_receiver: Receiver<BlockMessage>,
 		client: Arc<EthClient<T>>,
-		contract: H160,
+		target_contract: H160,
+		socket_contract: H160,
 	) -> Self {
-		Self { event_senders, block_receiver, client, contract }
+		Self {
+			event_senders,
+			block_receiver,
+			client: client.clone(),
+			target_contract,
+			socket: SocketExternal::new(socket_contract, client.provider.clone()),
+		}
 	}
 }
 
@@ -100,7 +109,7 @@ impl<T: JsonRpcClient> Handler for CCCPHandler<T> {
 	fn is_target_contract(&self, receipt: &TransactionReceipt) -> bool {
 		if let Some(to) = receipt.to {
 			if ethers::utils::to_checksum(&to, None) ==
-				ethers::utils::to_checksum(&self.contract, None)
+				ethers::utils::to_checksum(&self.target_contract, None)
 			{
 				return true
 			}
@@ -113,6 +122,22 @@ impl<T: JsonRpcClient> Handler for CCCPHandler<T> {
 			return true
 		}
 		false
+	}
+}
+
+#[async_trait::async_trait]
+impl<T: JsonRpcClient> SocketClient for CCCPHandler<T> {
+	fn build_poll_call_data(&self, msg: SocketMessage, sigs: Signatures) -> Bytes {
+		let poll_submit = PollSubmit { msg, sigs, option: U256::default() };
+		self.socket.poll(poll_submit).calldata().unwrap()
+	}
+
+	async fn get_signatures(&self, msg: SocketMessage) -> Signatures {
+		self.socket
+			.get_signatures(msg.req_id, msg.status)
+			.call()
+			.await
+			.unwrap_or_default()
 	}
 }
 
@@ -137,7 +162,7 @@ impl<T: JsonRpcClient> CCCPHandler<T> {
 
 		let mut raw_tx = Eip1559TransactionRequest::new();
 		// TODO: check how to set sigs. For now we just set as default.
-		raw_tx = raw_tx.data(self.client.build_poll_call_data(msg, Signatures::default()));
+		raw_tx = raw_tx.data(self.build_poll_call_data(msg, Signatures::default()));
 
 		self.request_send_transaction(relay_tx_chain_id, raw_tx);
 	}

@@ -1,8 +1,4 @@
-use ethers::{
-	abi::RawLog,
-	prelude::abigen,
-	types::{Bytes, U256},
-};
+use ethers::{abi::RawLog, prelude::abigen, types::Bytes};
 
 abigen!(
 	SocketExternal,
@@ -52,9 +48,6 @@ impl ethers::contract::EthLogDecode for SocketEvents {
 pub trait SocketClient {
 	/// Builds the `poll()` function call data.
 	fn build_poll_call_data(&self, msg: SocketMessage, sigs: Signatures) -> Bytes;
-
-	/// Get the estimated gas amount to execute `poll()`.
-	async fn get_estimated_gas_for_poll(&self, msg: SocketMessage, sigs: Signatures) -> U256;
 
 	/// Get the signatures of the given message.
 	async fn get_signatures(&self, msg: SocketMessage) -> Signatures;

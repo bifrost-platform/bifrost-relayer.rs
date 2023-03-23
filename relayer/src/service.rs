@@ -67,15 +67,9 @@ pub fn new_relay_base(config: Configuration) -> Result<RelayBase, ServiceError> 
 			)
 			.expect("Should exist");
 
-			let socket_contract = get_socket_contract_by_chain_id(
-				evm_provider.id,
-				&config.relayer_config.handler_configs,
-			);
-
 			let client = Arc::new(EthClient::new(
 				wallet,
 				Arc::new(Provider::<Http>::try_from(evm_provider.provider).unwrap()),
-				socket_contract,
 				EthClientConfiguration {
 					name: evm_provider.name,
 					id: evm_provider.id,
@@ -134,11 +128,17 @@ pub fn new_relay_base(config: Configuration) -> Result<RelayBase, ServiceError> 
 							target.chain_id
 						));
 
+					let socket_contract = get_socket_contract_by_chain_id(
+						target.chain_id,
+						&config.relayer_config.handler_configs,
+					);
+
 					let mut cccp_handler = CCCPHandler::new(
 						event_channels.clone(),
 						block_receiver,
 						client.clone(),
 						H160::from_str(&target.contract).unwrap(),
+						socket_contract,
 					);
 					task_manager.spawn_essential_handle().spawn(
 						Box::leak(
