@@ -6,7 +6,7 @@ use ethers::{
 	abi::RawLog,
 	prelude::{abigen, decode_logs},
 	providers::JsonRpcClient,
-	types::{TransactionReceipt, H160, H256},
+	types::{TransactionReceipt, TransactionRequest, H160, H256},
 };
 use tokio::sync::broadcast::Receiver;
 use tokio_stream::StreamExt;
@@ -114,7 +114,7 @@ impl<T: JsonRpcClient> Handler for CCCPHandler<T> {
 		}
 	}
 
-	async fn request_send_transaction(&self, dst_chain_id: u32, request: SocketMessage) {
+	async fn request_send_transaction(&self, dst_chain_id: u32, request: TransactionRequest) {
 		// TODO: Make it works
 		match self
 			.event_senders
@@ -156,15 +156,13 @@ impl<T: JsonRpcClient> Handler for CCCPHandler<T> {
 impl<T: JsonRpcClient> CCCPHandler<T> {
 	/// Sends the `SocketMessage` to the target chain channel.
 	async fn send_socket_message(&self, msg: SocketMessage) {
-		println!("got something");
-
 		let status = SocketEventStatus::from_u8(msg.status);
 		if Self::is_sequence_ended(status) {
 			// do nothing if protocol sequence ended
 			return
 		}
 
-		let send_to_channel = |chain_id: u32, msg: SocketMessage| {
+		let send_to_channel = |chain_id: u32, msg: TransactionRequest| {
 			if let Some(event_sender) =
 				self.event_senders.iter().find(|event_sender| event_sender.id == chain_id)
 			{

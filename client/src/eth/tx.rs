@@ -2,27 +2,25 @@ use ethers::{
 	prelude::SignerMiddleware,
 	providers::{JsonRpcClient, Middleware},
 	signers::Signer,
-	types::{transaction::eip2718::TypedTransaction, U256},
+	types::{TransactionRequest, U256},
 };
 use std::sync::Arc;
 use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
 
-use crate::eth::{PollSubmit, Signatures, SocketExternal};
-
-use super::{EthClient, SocketMessage, TxResult};
+use super::{EthClient, TxResult};
 
 /// The essential task that sends asynchronous transactions.
 pub struct TransactionManager<T> {
 	/// The ethereum client for the connected chain.
 	pub client: Arc<EthClient<T>>,
 	/// The receiver connected to the event channel.
-	pub receiver: UnboundedReceiver<SocketMessage>,
+	pub receiver: UnboundedReceiver<TransactionRequest>,
 }
 
 impl<T: JsonRpcClient> TransactionManager<T> {
 	/// Instantiates a new `TransactionManager` instance.
-	pub fn new(client: Arc<EthClient<T>>) -> (Self, UnboundedSender<SocketMessage>) {
-		let (sender, receiver) = mpsc::unbounded_channel::<SocketMessage>();
+	pub fn new(client: Arc<EthClient<T>>) -> (Self, UnboundedSender<TransactionRequest>) {
+		let (sender, receiver) = mpsc::unbounded_channel::<TransactionRequest>();
 
 		(Self { client, receiver }, sender)
 	}
@@ -36,39 +34,24 @@ impl<T: JsonRpcClient> TransactionManager<T> {
 		}
 	}
 
-	async fn request_send_transaction(&mut self, msg: SocketMessage) -> TxResult {
+	async fn request_send_transaction(&mut self, msg: TransactionRequest) -> TxResult {
 		let middleware = Arc::new(SignerMiddleware::new(
 			self.client.provider.clone(),
 			self.client.wallet.signer.clone(),
 		));
 
 		// TODO: Need specific addresses for each chain
-		let socket = SocketExternal::new(self.client.config.socket_address, middleware.clone());
-		// let socket = SocketExternal::new(H160::default(), middleware.clone());
+		// let socket = SocketExternal::new(self.client.config.socket_address, middleware.clone());
 
 		let nonce = middleware
 			.get_transaction_count(self.client.wallet.signer.address(), None)
 			.await
 			.unwrap();
 
-		let (max_fee_per_gas, max_priority_fee_per_gas) =
+		let (max_fee_per_gas, _max_priority_fee_per_gas) =
 			middleware.clone().estimate_eip1559_fees(None).await.unwrap();
 
-		let poll_submit =
-			PollSubmit { msg, sigs: Signatures::default(), option: ethers::types::U256::default() };
-		// let tx = msg.gas(U256::from(1000000)).gas_price(max_fee_per_gas).nonce(nonce);
-		let mut tx: TypedTransaction = socket.poll(poll_submit).tx;
-		tx.set_gas(U256::from(1000000)).set_nonce(nonce);
-
-		match tx {
-			TypedTransaction::Eip1559(ref mut inner) => {
-				inner.max_fee_per_gas = Some(max_fee_per_gas);
-				inner.max_priority_fee_per_gas = Some(max_priority_fee_per_gas)
-			},
-			_ => {
-				tx.set_gas_price(max_fee_per_gas);
-			},
-		};
+		let tx = msg.gas(U256::from(1000000)).gas_price(max_fee_per_gas).nonce(nonce);
 
 		let res = middleware
 			.send_transaction(tx, None)
