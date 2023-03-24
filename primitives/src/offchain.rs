@@ -1,4 +1,5 @@
 use ethers::types::TransactionRequest;
+use serde::Deserialize;
 
 #[async_trait::async_trait]
 pub trait OffchainWorker {
@@ -13,4 +14,22 @@ pub trait OffchainWorker {
 pub trait TimeDrivenOffchainWorker {
 	/// Wait until next schedule
 	async fn wait_until_next_time();
+}
+
+#[derive(Debug, Deserialize)]
+pub struct PriceResponse {
+	pub symbol: String,
+	pub price: String,
+}
+
+#[async_trait::async_trait]
+pub trait PriceFetcher {
+	/// Instantiates a new `PriceFetcher` instance.
+	fn new(symbols: Vec<String>) -> Self;
+
+	/// Get price with ticker symbol
+	async fn get_price_with_symbol(&self, symbol: String) -> String;
+
+	/// Get all prices of support coin/token
+	async fn get_price(&self) -> Vec<PriceResponse>;
 }
