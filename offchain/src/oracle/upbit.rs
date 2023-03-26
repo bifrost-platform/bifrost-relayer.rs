@@ -1,5 +1,4 @@
 use cccp_primitives::offchain::{PriceFetcher, PriceResponse};
-use serde_json::Value;
 
 pub struct UpbitPriceFetcher {
 	base_url: reqwest::Url,
