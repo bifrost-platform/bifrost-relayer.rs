@@ -683,6 +683,7 @@ dependencies = [
  "cccp-primitives",
  "ethers",
  "reqwest",
+ "serde",
  "serde_json",
  "tokio",
 ]
