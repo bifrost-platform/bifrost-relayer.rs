@@ -96,8 +96,8 @@ pub fn new_relay_base(config: Configuration) -> Result<RelayBase, ServiceError> 
 			let (tx_manager, event_sender) = TransactionManager::new(client.clone());
 			let block_manager = BlockManager::new(client.clone(), target_contracts);
 
+			tx_managers.push((tx_manager, client.get_chain_name()));
 			clients.push(client);
-			tx_managers.push(tx_manager);
 			block_managers.push(block_manager);
 			event_senders.push(Arc::new(EventSender::new(evm_provider.id, event_sender)));
 		});
@@ -109,11 +109,9 @@ pub fn new_relay_base(config: Configuration) -> Result<RelayBase, ServiceError> 
 	let task_manager = TaskManager::new(config.tokio_handle, None)?;
 
 	// Spawn transaction managers' tasks
-	tx_managers.into_iter().for_each(|mut tx_manager| {
+	tx_managers.into_iter().for_each(|(mut tx_manager, chain_name)| {
 		task_manager.spawn_essential_handle().spawn(
-			Box::leak(
-				format!("{}-tx-manager", tx_manager.client.get_chain_name()).into_boxed_str(),
-			),
+			Box::leak(format!("{}-tx-manager", chain_name).into_boxed_str()),
 			Some("transaction-managers"),
 			async move { tx_manager.run().await },
 		)
