@@ -208,7 +208,7 @@ impl<T: JsonRpcClient> EthClient<T> {
 
 	/// Returns id which chain this client interacts with.
 	pub fn get_chain_id(&self) -> u32 {
-		self.config.id.clone()
+		self.config.id
 	}
 
 	/// Retrieves the latest mined block number of the connected chain.
