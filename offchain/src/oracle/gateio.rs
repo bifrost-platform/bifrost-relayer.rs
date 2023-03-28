@@ -1,4 +1,5 @@
 use cccp_primitives::offchain::{PriceFetcher, PriceResponse};
+use reqwest::Url;
 use serde::Deserialize;
 
 #[derive(Debug, Deserialize)]
@@ -8,15 +9,15 @@ pub struct GateioResponse {
 }
 
 pub struct GateioPriceFetcher {
-	base_url: reqwest::Url,
+	base_url: Url,
 	symbols: Vec<String>,
 }
 
 #[async_trait::async_trait]
-impl PriceFetcher for GateioPriceFetcher {
+impl PriceFetcher<Vec<GateioResponse>> for GateioPriceFetcher {
 	fn new(symbols: Vec<String>) -> Self {
 		Self {
-			base_url: reqwest::Url::parse("https://api.gateio.ws/api/v4/")
+			base_url: Url::parse("https://api.gateio.ws/api/v4/")
 				.expect("Failed to parse GateIo URL"),
 			symbols,
 		}
@@ -26,12 +27,12 @@ impl PriceFetcher for GateioPriceFetcher {
 		let mut url = self.base_url.join("spot/tickers").unwrap();
 		url.query_pairs_mut().append_pair("currency_pair", symbol.as_str());
 
-		send_request(url).await[0].last.clone()
+		self._send_request(url).await[0].last.clone()
 	}
 
 	async fn get_price(&self) -> Vec<PriceResponse> {
 		let url = self.base_url.join("spot/tickers").unwrap();
-		send_request(url)
+		self._send_request(url)
 			.await
 			.iter()
 			.filter_map(|ticker| {
@@ -46,15 +47,15 @@ impl PriceFetcher for GateioPriceFetcher {
 			})
 			.collect()
 	}
-}
 
-async fn send_request(url: reqwest::Url) -> Vec<GateioResponse> {
-	reqwest::get(url)
-		.await
-		.expect("Failed to send request to gateio")
-		.json::<Vec<GateioResponse>>()
-		.await
-		.expect("Failed to parse gateio response")
+	async fn _send_request(&self, url: Url) -> Vec<GateioResponse> {
+		reqwest::get(url)
+			.await
+			.expect("Failed to send request to gateio")
+			.json::<Vec<GateioResponse>>()
+			.await
+			.expect("Failed to parse gateio response")
+	}
 }
 
 #[cfg(test)]

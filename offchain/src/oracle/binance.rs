@@ -1,19 +1,20 @@
 use cccp_primitives::offchain::{PriceFetcher, PriceResponse};
+use reqwest::Url;
 
 pub struct BinancePriceFetcher {
-	base_url: reqwest::Url,
+	base_url: Url,
 	symbols: String,
 }
 
 #[async_trait::async_trait]
-impl PriceFetcher for BinancePriceFetcher {
+impl PriceFetcher<PriceResponse> for BinancePriceFetcher {
 	fn new(mut symbols: Vec<String>) -> Self {
 		for s in symbols.iter_mut() {
 			*s = s.replace("_", "");
 		}
 
 		Self {
-			base_url: reqwest::Url::parse("https://api.binance.com/api/v3/").unwrap(),
+			base_url: Url::parse("https://api.binance.com/api/v3/").unwrap(),
 			symbols: serde_json::to_string(&symbols).unwrap(),
 		}
 	}
@@ -22,7 +23,7 @@ impl PriceFetcher for BinancePriceFetcher {
 		let mut url = self.base_url.join("ticker/price").unwrap();
 		url.query_pairs_mut().append_pair("symbol", symbol.replace("_", "").as_str());
 
-		reqwest::get(url).await.unwrap().json::<PriceResponse>().await.unwrap().price
+		self._send_request(url).await.price
 	}
 
 	async fn get_price(&self) -> Vec<PriceResponse> {
@@ -30,6 +31,10 @@ impl PriceFetcher for BinancePriceFetcher {
 		url.query_pairs_mut().append_pair("symbols", self.symbols.as_str());
 
 		reqwest::get(url).await.unwrap().json::<Vec<PriceResponse>>().await.unwrap()
+	}
+
+	async fn _send_request(&self, url: Url) -> PriceResponse {
+		reqwest::get(url).await.unwrap().json::<PriceResponse>().await.unwrap()
 	}
 }
 

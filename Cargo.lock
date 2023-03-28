@@ -695,6 +695,7 @@ dependencies = [
  "async-trait",
  "ethers",
  "hex",
+ "reqwest",
  "serde",
  "serde_json",
  "thiserror",

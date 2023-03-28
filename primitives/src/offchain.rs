@@ -23,7 +23,7 @@ pub struct PriceResponse {
 }
 
 #[async_trait::async_trait]
-pub trait PriceFetcher {
+pub trait PriceFetcher<T> {
 	/// Instantiates a new `PriceFetcher` instance.
 	fn new(symbols: Vec<String>) -> Self;
 
@@ -32,4 +32,7 @@ pub trait PriceFetcher {
 
 	/// Get all prices of support coin/token
 	async fn get_price(&self) -> Vec<PriceResponse>;
+
+	/// Send request to price source
+	async fn _send_request(&self, url: reqwest::Url) -> T ;
 }

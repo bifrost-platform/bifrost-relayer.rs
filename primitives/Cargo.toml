@@ -13,6 +13,7 @@ async-trait = "0.1.57"
 serde = { version = "1.0.153", features = ["derive"] }
 serde_json = { version = '1.0.94', features = ['alloc'] }
 ethers = "2.0"
+reqwest = { version = "0.11.15", features = ["json"] }
 thiserror = "1.0.39"
 tokio = { version = "1.22.0", features = ["signal", "rt-multi-thread", "parking_lot"] }
 hex = "0.4.3"
