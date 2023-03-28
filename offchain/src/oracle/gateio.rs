@@ -15,7 +15,7 @@ pub struct GateioPriceFetcher {
 
 #[async_trait::async_trait]
 impl PriceFetcher<Vec<GateioResponse>> for GateioPriceFetcher {
-	fn new(symbols: Vec<String>) -> Self {
+	async fn new(symbols: Vec<String>) -> Self {
 		Self {
 			base_url: Url::parse("https://api.gateio.ws/api/v4/")
 				.expect("Failed to parse GateIo URL"),
@@ -64,7 +64,7 @@ mod tests {
 
 	#[tokio::test]
 	async fn fetch_price() {
-		let gateio_fetcher = GateioPriceFetcher::new(vec!["BTC_USDT".to_string()]);
+		let gateio_fetcher = GateioPriceFetcher::new(vec!["BTC_USDT".to_string()]).await;
 		let res = gateio_fetcher.get_price_with_symbol("BTC_USDT".to_string()).await;
 
 		println!("{:?}", res);
@@ -73,7 +73,7 @@ mod tests {
 	#[tokio::test]
 	async fn fetch_prices() {
 		let gateio_fetcher =
-			GateioPriceFetcher::new(vec!["BTC_USDT".to_string(), "ETH_USDT".to_string()]);
+			GateioPriceFetcher::new(vec!["BTC_USDT".to_string(), "ETH_USDT".to_string()]).await;
 		let res = gateio_fetcher.get_price().await;
 
 		println!("{:#?}", res);

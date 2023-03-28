@@ -15,7 +15,7 @@ pub struct UpbitPriceFetcher {
 
 #[async_trait::async_trait]
 impl PriceFetcher<Vec<UpbitResponse>> for UpbitPriceFetcher {
-	fn new(symbols: Vec<String>) -> Self {
+	async fn new(symbols: Vec<String>) -> Self {
 		let symbols_flipped: Vec<String> =
 			symbols.into_iter().map(|symbol| to_upbit_symbol(&symbol)).collect();
 
@@ -72,7 +72,7 @@ mod tests {
 
 	#[tokio::test]
 	async fn fetch_price() {
-		let upbit_fetcher = UpbitPriceFetcher::new(vec!["BTC_USDT".to_string()]);
+		let upbit_fetcher = UpbitPriceFetcher::new(vec!["BTC_USDT".to_string()]).await;
 		let res = upbit_fetcher.get_price_with_symbol("BTC_USDT".to_string()).await;
 
 		println!("{:?}", res);
@@ -81,7 +81,7 @@ mod tests {
 	#[tokio::test]
 	async fn fetch_prices() {
 		let upbit_fetcher =
-			UpbitPriceFetcher::new(vec!["BTC_USDT".to_string(), "ETH_USDT".to_string()]);
+			UpbitPriceFetcher::new(vec!["BTC_USDT".to_string(), "ETH_USDT".to_string()]).await;
 		let res = upbit_fetcher.get_price().await;
 
 		println!("{:#?}", res);

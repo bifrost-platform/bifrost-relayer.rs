@@ -25,7 +25,7 @@ pub struct PriceResponse {
 #[async_trait::async_trait]
 pub trait PriceFetcher<T> {
 	/// Instantiates a new `PriceFetcher` instance.
-	fn new(symbols: Vec<String>) -> Self;
+	async fn new(symbols: Vec<String>) -> Self;
 
 	/// Get price with ticker symbol
 	async fn get_price_with_symbol(&self, symbol: String) -> String;

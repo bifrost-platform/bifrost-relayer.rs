@@ -8,7 +8,7 @@ pub struct BinancePriceFetcher {
 
 #[async_trait::async_trait]
 impl PriceFetcher<PriceResponse> for BinancePriceFetcher {
-	fn new(mut symbols: Vec<String>) -> Self {
+	async fn new(mut symbols: Vec<String>) -> Self {
 		for s in symbols.iter_mut() {
 			*s = s.replace("_", "");
 		}
@@ -44,7 +44,7 @@ mod tests {
 
 	#[tokio::test]
 	async fn fetch_price() {
-		let binance_fetcher = BinancePriceFetcher::new(vec!["BTC_USDT".to_string()]);
+		let binance_fetcher = BinancePriceFetcher::new(vec!["BTC_USDT".to_string()]).await;
 		let res = binance_fetcher.get_price_with_symbol("BTC_USDT".to_string()).await;
 
 		println!("{:?}", res);
@@ -53,7 +53,7 @@ mod tests {
 	#[tokio::test]
 	async fn fetch_prices() {
 		let binance_fetcher =
-			BinancePriceFetcher::new(vec!["BTC_USDT".to_string(), "ETH_USDT".to_string()]);
+			BinancePriceFetcher::new(vec!["BTC_USDT".to_string(), "ETH_USDT".to_string()]).await;
 		let res = binance_fetcher.get_price().await;
 
 		println!("{:#?}", res);
