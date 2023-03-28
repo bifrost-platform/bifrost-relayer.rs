@@ -31,27 +31,6 @@ fn get_target_contracts_by_chain_id(
 	target_contracts
 }
 
-fn get_target_contract_by_chain_id_and_handler_type(
-	chain_id: u32,
-	handler_configs: &Vec<HandlerConfig>,
-) -> H160 {
-	for handler_config in handler_configs {
-		match handler_config.handler_type {
-			HandlerType::Socket =>
-				for target in &handler_config.watch_list {
-					if target.chain_id == chain_id {
-						return H160::from_str(
-							target.contract.strip_prefix("0x").unwrap_or_default(),
-						)
-						.unwrap_or_default()
-					}
-				},
-			_ => panic!("no socket address in config"),
-		}
-	}
-	panic!("no socket address in config")
-}
-
 pub fn relay(config: Configuration) -> Result<TaskManager, ServiceError> {
 	new_relay_base(config).map(|RelayBase { task_manager, .. }| task_manager)
 }
@@ -87,10 +66,6 @@ pub fn new_relay_base(config: Configuration) -> Result<RelayBase, ServiceError> 
 						true => BridgeDirection::Inbound,
 						_ => BridgeDirection::Outbound,
 					},
-					socket_address: get_target_contract_by_chain_id_and_handler_type(
-						evm_provider.id,
-						&config.relayer_config.handler_configs,
-					),
 				},
 			));
 			let (tx_manager, event_sender) = TransactionManager::new(client.clone());

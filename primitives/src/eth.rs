@@ -54,6 +54,4 @@ pub struct EthClientConfiguration {
 	pub call_interval: u64,
 	/// Bridge direction when bridge event points this chain as destination.
 	pub if_destination_chain: BridgeDirection,
-	/// Socket address of this client.
-	pub socket_address: H160,
 }
