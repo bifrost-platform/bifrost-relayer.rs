@@ -21,7 +21,7 @@ pub struct TransactionManager<T> {
 
 impl<T: 'static + JsonRpcClient> TransactionManager<T> {
 	/// Instantiates a new `TransactionManager` instance.
-	pub fn new(client: Arc<EthClient<T>>) -> (Self, UnboundedSender<TransactionRequest>) {
+	pub fn new(client: Arc<EthClient<T>>) -> (Self, UnboundedSender<Eip1559TransactionRequest>) {
 		let (sender, receiver) = mpsc::unbounded_channel::<Eip1559TransactionRequest>();
 
 		let middleware = Arc::new(NonceManagerMiddleware::new(
@@ -41,13 +41,17 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> {
 		}
 	}
 
-	async fn send_transaction(&mut self, msg: TransactionRequest) -> TxResult {
+	async fn send_transaction(&mut self, msg: Eip1559TransactionRequest) -> TxResult {
 		let nonce = self.middleware.get_transaction_count(msg.from.unwrap(), None).await.unwrap();
 
-		let (max_fee_per_gas, _max_priority_fee_per_gas) =
+		let (max_fee_per_gas, max_priority_fee_per_gas) =
 			self.middleware.estimate_eip1559_fees(None).await?;
 
-		let tx = msg.gas(U256::from(1000000)).gas_price(max_fee_per_gas).nonce(nonce);
+		let tx = msg
+			.gas(U256::from(1000000))
+			.max_fee_per_gas(max_fee_per_gas)
+			.max_priority_fee_per_gas(max_priority_fee_per_gas)
+			.nonce(nonce);
 
 		let pending_tx = self.middleware.send_transaction(tx.clone(), None).await?;
 
@@ -74,7 +78,7 @@ mod tests {
 	use ethers::{
 		prelude::MiddlewareBuilder,
 		providers::{Http, Middleware, Provider},
-		signers::LocalWallet,
+		signers::{LocalWallet, Signer},
 		types::{BlockNumber, TransactionRequest},
 		utils::{Anvil, AnvilInstance},
 	};
@@ -132,10 +136,10 @@ mod tests {
 	async fn send_transaction() {
 		let (provider, anvil) = spawn_anvil();
 		let wallet1: LocalWallet = anvil.keys()[0].clone().into();
-		let address = wallet1.address;
+		let address = wallet1.address();
 
 		let wallet2: LocalWallet = anvil.keys()[1].clone().into();
-		let to = wallet2.address;
+		let to = wallet2.address();
 
 		let provider = provider;
 		// let provider = provider.with_signer(wallet1).nonce_manager(address);
