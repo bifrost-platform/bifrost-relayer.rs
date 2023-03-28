@@ -57,7 +57,6 @@ pub struct EthClient<T> {
 	pub protocol_contracts: ProtocolContracts<T>,
 	/// the aggregator contract instances of the provider.
 	pub aggregator_contracts: AggregatorContracts<T>,
-	/// The ethers.rs wrapper for the connected chain.
 	provider: Arc<Provider<T>>,
 	/// The flag whether debug mode is enabled. If enabled, certain errors will be logged such as
 	/// gas estimation failures.
@@ -274,8 +273,6 @@ pub struct EthClient<T> {
 	pub async fn get_balance(&self, who: Address) -> U256 {
 		self.rpc_call("eth_getBalance", (who, "latest")).await
 	}
-
-	/// Returns name which chain this client interacts with.
 	pub fn get_chain_name(&self) -> String {
 		self.config.name.clone()
 	}
