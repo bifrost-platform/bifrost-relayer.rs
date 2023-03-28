@@ -1,4 +1,4 @@
-use ethers::{providers::ProviderError, types::H160};
+use ethers::providers::ProviderError;
 
 pub type EthResult<T = ()> = Result<T, ProviderError>;
 

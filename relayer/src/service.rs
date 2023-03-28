@@ -21,10 +21,7 @@ fn get_target_contracts_by_chain_id(
 	for handler_config in handler_configs {
 		for target in &handler_config.watch_list {
 			if target.chain_id == chain_id {
-				target_contracts.push(
-					H160::from_str(target.contract.strip_prefix("0x").unwrap_or_default())
-						.unwrap_or_default(),
-				);
+				target_contracts.push(H160::from_str(&target.contract).unwrap());
 			}
 		}
 	}
@@ -120,8 +117,7 @@ pub fn new_relay_base(config: Configuration) -> Result<RelayBase, ServiceError> 
 						event_channels.clone(),
 						block_receiver,
 						client.clone(),
-						H160::from_str(target.contract.strip_prefix("0x").unwrap_or_default())
-							.unwrap_or_default(),
+						H160::from_str(&target.contract).unwrap(),
 					);
 					task_manager.spawn_essential_handle().spawn(
 						Box::leak(
