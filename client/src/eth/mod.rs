@@ -10,6 +10,9 @@ pub use tx::*;
 mod blocks;
 pub use blocks::*;
 
+mod wallet;
+pub use wallet::*;
+
 use ethers::{
 	providers::{JsonRpcClient, Middleware, Provider},
 	types::{Block, BlockId, TransactionReceipt, H256, U64},
@@ -18,9 +21,12 @@ use std::sync::Arc;
 
 use cccp_primitives::eth::{EthClientConfiguration, EthResult};
 
-#[derive(Clone, Debug)]
+pub type TxResult<T = ()> = Result<T, Box<dyn std::error::Error + Send + Sync>>;
+
+#[derive(Debug)]
 /// The core client for EVM-based chain interactions.
 pub struct EthClient<T> {
+	wallet: WalletManager,
 	/// The ethers.rs wrapper for the connected chain.
 	provider: Arc<Provider<T>>,
 	/// The specific configuration details for the connected chain.
@@ -32,8 +38,12 @@ where
 	Self: Send + Sync,
 {
 	/// Instantiates a new `EthClient` instance for the given chain.
-	pub fn new(provider: Arc<Provider<T>>, config: EthClientConfiguration) -> Self {
-		Self { provider, config }
+	pub fn new(
+		wallet: WalletManager,
+		provider: Arc<Provider<T>>,
+		config: EthClientConfiguration,
+	) -> Self {
+		Self { wallet, provider, config }
 	}
 
 	/// Returns name which chain this client interacts with.
@@ -43,7 +53,7 @@ where
 
 	/// Returns id which chain this client interacts with.
 	pub fn get_chain_id(&self) -> u32 {
-		self.config.id.clone()
+		self.config.id
 	}
 
 	/// Retrieves the latest mined block number of the connected chain.

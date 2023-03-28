@@ -1,5 +1,5 @@
 use cccp_client::eth::{
-	BlockManager, CCCPHandler, EthClient, EventSender, Handler, TransactionManager,
+	BlockManager, CCCPHandler, EthClient, EventSender, Handler, TransactionManager, WalletManager,
 };
 use cccp_primitives::{
 	cli::{Configuration, HandlerConfig, HandlerType},
@@ -46,7 +46,14 @@ pub fn new_relay_base(config: Configuration) -> Result<RelayBase, ServiceError> 
 				&config.relayer_config.handler_configs,
 			);
 
+			let wallet = WalletManager::from_phrase_or_file(
+				config.relayer_config.mnemonic.as_str(),
+				evm_provider.id,
+			)
+			.expect("Should exist");
+
 			let client = Arc::new(EthClient::new(
+				wallet,
 				Arc::new(Provider::<Http>::try_from(evm_provider.provider).unwrap()),
 				EthClientConfiguration {
 					name: evm_provider.name,
@@ -61,8 +68,8 @@ pub fn new_relay_base(config: Configuration) -> Result<RelayBase, ServiceError> 
 			let (tx_manager, event_sender) = TransactionManager::new(client.clone());
 			let block_manager = BlockManager::new(client.clone(), target_contracts);
 
-			clients.push(client.clone());
-			tx_managers.push(tx_manager);
+			tx_managers.push((tx_manager, client.get_chain_name()));
+			clients.push(client);
 			block_managers.push(block_manager);
 			event_senders.push(Arc::new(EventSender::new(evm_provider.id, event_sender)));
 		});
@@ -74,11 +81,9 @@ pub fn new_relay_base(config: Configuration) -> Result<RelayBase, ServiceError> 
 	let task_manager = TaskManager::new(config.tokio_handle, None)?;
 
 	// Spawn transaction managers' tasks
-	tx_managers.into_iter().for_each(|mut tx_manager| {
+	tx_managers.into_iter().for_each(|(mut tx_manager, chain_name)| {
 		task_manager.spawn_essential_handle().spawn(
-			Box::leak(
-				format!("{}-tx-manager", tx_manager.client.get_chain_name()).into_boxed_str(),
-			),
+			Box::leak(format!("{}-tx-manager", chain_name).into_boxed_str()),
 			Some("transaction-managers"),
 			async move { tx_manager.run().await },
 		)

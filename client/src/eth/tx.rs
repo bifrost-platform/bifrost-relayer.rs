@@ -1,164 +1,186 @@
-use ethers::{providers::JsonRpcClient, types::TransactionRequest};
+use ethers::{
+	prelude::{NonceManagerMiddleware, SignerMiddleware},
+	providers::{JsonRpcClient, Middleware, Provider},
+	signers::{LocalWallet, Signer},
+	types::{TransactionRequest, U256},
+};
 use std::sync::Arc;
 use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
 
-use super::EthClient;
+use super::{EthClient, TxResult};
 
 /// The essential task that sends asynchronous transactions.
 pub struct TransactionManager<T> {
-	/// The ethereum client for the connected chain.
-	pub client: Arc<EthClient<T>>,
+	// /// The ethereum client for the connected chain.
+	// pub client: Arc<EthClient<T>>,
+	/// The client signs transaction for the connected chain with local nonce manager.
+	pub middleware: Arc<NonceManagerMiddleware<SignerMiddleware<Arc<Provider<T>>, LocalWallet>>>,
 	/// The receiver connected to the event channel.
 	pub receiver: UnboundedReceiver<TransactionRequest>,
 }
 
-impl<T: JsonRpcClient> TransactionManager<T> {
+impl<T: 'static + JsonRpcClient> TransactionManager<T> {
 	/// Instantiates a new `TransactionManager` instance.
 	pub fn new(client: Arc<EthClient<T>>) -> (Self, UnboundedSender<TransactionRequest>) {
 		let (sender, receiver) = mpsc::unbounded_channel::<TransactionRequest>();
-		(Self { client, receiver }, sender)
+
+		let middleware = Arc::new(NonceManagerMiddleware::new(
+			SignerMiddleware::new(client.provider.clone(), client.wallet.signer.clone()),
+			client.wallet.signer.address(),
+		));
+
+		(Self { middleware, receiver }, sender)
 	}
 
 	/// Starts the transaction manager. Listens to every new consumed event message.
 	pub async fn run(&mut self) {
 		while let Some(msg) = self.receiver.recv().await {
 			println!("msg -> {:?}", msg);
-			// TODO: send raw transaction
 
-			// let poll_submit = PollSubmit {
-			// 	msg,
-			// 	sigs: Signatures::default(),
-			// 	option: ethers::types::U256::default(),
-			// };
-
-			// match self.client.socket.poll(poll_submit).call().await {
-			// 	Ok(result) => {
-			// 		println!("result : {result:?}")
-			// 	},
-			// 	Err(e) => {
-			// 		println!("error : {e:?}")
-			// 	},
-			// }
+			self.send_transaction(msg).await.unwrap();
 		}
+	}
+
+	async fn send_transaction(&mut self, msg: TransactionRequest) -> TxResult {
+		let nonce = self.middleware.get_transaction_count(msg.from.unwrap(), None).await.unwrap();
+
+		let (max_fee_per_gas, _max_priority_fee_per_gas) =
+			self.middleware.estimate_eip1559_fees(None).await?;
+
+		let tx = msg.gas(U256::from(1000000)).gas_price(max_fee_per_gas).nonce(nonce);
+
+		let pending_tx = self.middleware.send_transaction(tx.clone(), None).await?;
+
+		let receipt = pending_tx.await?.ok_or("tx dropped".to_string())?;
+
+		println!("transaction result : {:?}", receipt);
+
+		match self.middleware.get_transaction(receipt.transaction_hash).await? {
+			Some(t) => println!("Sent tx: {:?}", t),
+			None => {
+				println!("retry to send tx");
+				self.middleware.send_transaction(tx, None).await?.await?;
+			},
+		}
+
+		Ok(())
 	}
 }
 
-// #[cfg(test)]
-// mod tests {
-// 	use std::{sync::Arc, time::Duration};
+#[cfg(test)]
+mod tests {
+	use std::time::Duration;
 
-// 	use ethers::{
-// 		providers::{Http, Provider},
-// 		types::Address,
-// 	};
-// 	use tokio::time::Instant;
+	use ethers::{
+		prelude::MiddlewareBuilder,
+		providers::{Http, Middleware, Provider},
+		signers::LocalWallet,
+		types::{BlockNumber, TransactionRequest},
+		utils::{Anvil, AnvilInstance},
+	};
 
-// 	use crate::eth::{PollSubmit, Signatures, SocketExternal, SocketMessage};
+	pub fn spawn_anvil() -> (Provider<Http>, AnvilInstance) {
+		let anvil = Anvil::new().block_time(1u64).chain_id(1337_u64).spawn();
+		let provider = Provider::<Http>::try_from(anvil.endpoint())
+			.unwrap()
+			.interval(Duration::from_millis(50u64));
+		(provider, anvil)
+	}
 
-// 	#[tokio::test]
-// 	async fn test_parse_tx_from_event() {
-// 		let eth_endpoint = "";
+	#[tokio::test]
+	async fn nonce_manager() {
+		let (provider, anvil) = spawn_anvil();
+		let address = anvil.addresses()[0];
+		let to = anvil.addresses()[1];
 
-// 		let _decoded_log_dict = r#"
-// 		{
-// 			"rid": {
-// 				"requested_chain": 5,
-// 				"round": 2464,
-// 				"sequence_number": 292
-// 			},
-// 			"request_status": 1,
-// 			"instruction": {
-// 				"dst_chain": 49088,
-// 				"instruction": "0x03010104000000000000000000000000"
-// 			},
-// 			"params": {
-// 				"asset1": "0x00000001ffffffff000000053a815eba66eabe966a6ae7e5df9652eca24e9c54",
-// 				"asset2": "0x00000001000000010000bfc0ffffffffffffffffffffffffffffffffffffffff",
-// 				"sender": "0xb04571fa24f3edd516807fe97a27ba3b1c6b589c",
-// 				"receiver": "0xb04571fa24f3edd516807fe97a27ba3b1c6b589c",
-// 				"amount": 749412003486191616,
-// 				"variants": "0x00"
-// 			}
-// 		}"#;
+		let provider = provider.nonce_manager(address);
 
-// 		let now = Instant::now();
+		let nonce = provider
+			.get_transaction_count(address, Some(BlockNumber::Pending.into()))
+			.await
+			.unwrap()
+			.as_u64();
 
-// 		// let socket_event = SocketEvent::from(decoded_log_dict).unwrap();
-// 		// println!("{:?}", socket_event);
+		println!("nonce : {:?}", nonce);
 
-// 		let client = Arc::new(Provider::<Http>::try_from(eth_endpoint).unwrap());
-// 		let contract_address =
-// 			"0x4A31FfeAc276CC5e508cAC0568d932d398C4DD84".parse::<Address>().unwrap();
-// 		let contract = SocketExternal::new(contract_address, client.clone());
+		let num_tx = 3;
+		let mut tx_hashes = Vec::with_capacity(num_tx);
+		for _ in 0..num_tx {
+			let tx = provider
+				.send_transaction(
+					TransactionRequest::new().from(address).to(to).value(100u64),
+					None,
+				)
+				.await
+				.unwrap();
+			tx_hashes.push(*tx);
+		}
 
-// 		let poll_submit = PollSubmit {
-// 			msg: SocketMessage::default(),
-// 			sigs: Signatures::default(),
-// 			option: ethers::types::U256::default(),
-// 		};
+		println!("tx_hashes : {:?}", &tx_hashes);
 
-// 		match contract.poll(poll_submit).call().await {
-// 			Ok(result) => {
-// 				println!("result : {result:?}")
-// 			},
-// 			Err(e) => {
-// 				println!("error : {e:?}")
-// 			},
-// 		}
+		let mut nonces = Vec::with_capacity(num_tx);
+		for tx_hash in tx_hashes {
+			nonces.push(provider.get_transaction(tx_hash).await.unwrap().unwrap().nonce.as_u64());
+		}
 
-// 		match contract.get_owners().call().await {
-// 			Ok(result) => {
-// 				println!("owner : {result:?}")
-// 			},
-// 			Err(e) => {
-// 				println!("error : {e:?}")
-// 			},
-// 		}
+		println!("nonces : {:?}", nonces);
 
-// 		tokio::time::sleep_until(now + Duration::from_millis(3000)).await;
+		assert_eq!(nonces, (nonce..nonce + num_tx as u64).collect::<Vec<_>>());
+	}
 
-// 		// let evm_manager = EVMTransactionManager::new(client);
-// 		// let tx = evm_manager.build("contract_name", "method_name", socket_event);
+	#[tokio::test]
+	async fn send_transaction() {
+		let (provider, anvil) = spawn_anvil();
+		let wallet1: LocalWallet = anvil.keys()[0].clone().into();
+		let address = wallet1.address;
 
-// 		// assert_eq!(tx.data, Some());
-// 	}
+		let wallet2: LocalWallet = anvil.keys()[1].clone().into();
+		let to = wallet2.address;
 
-// 	// use std::fs;
+		let provider = provider;
+		// let provider = provider.with_signer(wallet1).nonce_manager(address);
 
-// 	// use ethabi::Contract;
-// 	// use hex;
+		let nonce = provider
+			.get_transaction_count(address, Some(BlockNumber::Pending.into()))
+			.await
+			.unwrap()
+			.as_u64();
 
-// 	// fn test_decode_event_from_ethlog() {
-// 	// 	// input data
-// 	// 	let data =
-// 	// "0xa9059cbb000000000000000000000000d18a52ae66778bf9ece5515115875a313d45f0e900000000000000000000000000000000000000000000000000000000007fde60"
-// 	// ;
+		let num_tx = 3;
+		let mut tx_hashes = Vec::with_capacity(num_tx);
+		for _ in 0..num_tx {
+			let nonce = provider.get_transaction_count(address, None).await.unwrap();
+			println!("nonce is increased? : {:?}", nonce);
 
-// 	// 	// remove hex prefix: 0x
-// 	// 	let prefix_removed_data = data.trim_start_matches("0x");
+			let tx = provider
+				.send_transaction(
+					TransactionRequest::new().from(address).to(to).value(100u64),
+					None,
+				)
+				.await
+				.unwrap()
+				.await
+				.unwrap();
 
-// 	// 	// get method id, 4 bytes from data
-// 	// 	let method_id = &prefix_removed_data[0..8];
-// 	// 	println!("method_id={}", method_id);
+			tx_hashes.push(tx.unwrap());
+		}
+		println!("tx : {:?}", &tx_hashes);
 
-// 	// 	// load abi
-// 	// 	let contract =
-// 	// 		Contract::load(fs::read("../configs/abi.socket.external.json").unwrap().as_slice())
-// 	// 			.unwrap();
-// 	// 	// get matched function
-// 	// 	let function = contract
-// 	// 		.functions()
-// 	// 		.into_iter()
-// 	// 		.find(|f| hex::encode(f.short_signature()) == method_id)
-// 	// 		.unwrap();
+		let mut nonces = Vec::with_capacity(num_tx);
+		for tx_hash in tx_hashes {
+			nonces.push(
+				provider
+					.get_transaction(tx_hash.transaction_hash)
+					.await
+					.unwrap()
+					.unwrap()
+					.nonce
+					.as_u64(),
+			);
+		}
 
-// 	// 	// method id removed data
-// 	// 	let method_removed_data = &prefix_removed_data[8..];
-// 	// 	// using selected function decodes input data
-// 	// 	let tokens = function
-// 	// 		.decode_input(hex::decode(method_removed_data).unwrap().as_slice())
-// 	// 		.unwrap();
+		println!("nonces : {:?}", &nonces);
 
-// 	// 	println!("{:?}", tokens);
-// 	// }
-// }
+		assert_eq!(nonces, (nonce..nonce + num_tx as u64).collect::<Vec<_>>());
+	}
+}
