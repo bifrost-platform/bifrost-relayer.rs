@@ -2,6 +2,7 @@ use cccp_primitives::offchain::{PriceFetcher, PriceResponse};
 use reqwest::Url;
 use serde::Deserialize;
 use std::collections::HashMap;
+use tokio::time::{sleep, Duration};
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct SupportCoin {
@@ -19,12 +20,7 @@ pub struct CoingeckoFetcher {
 #[async_trait::async_trait]
 impl PriceFetcher<HashMap<String, HashMap<String, f64>>> for CoingeckoFetcher {
 	async fn new(symbols: Vec<String>) -> Self {
-		let support_coin_list = reqwest::get("https://api.coingecko.com/api/v3/coins/list")
-			.await
-			.expect("Cant get from coingecko api")
-			.json::<Vec<SupportCoin>>()
-			.await
-			.expect("Parsing error on coingecko support coin list");
+		let support_coin_list: Vec<SupportCoin> = CoingeckoFetcher::get_all_coin_list().await;
 
 		let ids: Vec<String> = symbols
 			.iter()
@@ -93,6 +89,29 @@ impl PriceFetcher<HashMap<String, HashMap<String, f64>>> for CoingeckoFetcher {
 }
 
 impl CoingeckoFetcher {
+	async fn get_all_coin_list() -> Vec<SupportCoin> {
+		let mut retry_interval = Duration::from_secs(1);
+		loop {
+			match reqwest::get("https://api.coingecko.com/api/v3/coins/list").await {
+				Ok(response) => match response.json::<Vec<SupportCoin>>().await {
+					Ok(coins) => return coins,
+					Err(e) => {
+						println!("Error decoding support coin list: {}", e);
+						println!("Retry in {:?} secs...", retry_interval);
+						sleep(retry_interval).await;
+						retry_interval *= 2;
+					},
+				},
+				Err(e) => {
+					println!("Error fetching support coin list: {}", e);
+					println!("Retry in {:?} secs...", retry_interval);
+					sleep(retry_interval).await;
+					retry_interval *= 2;
+				},
+			}
+		}
+	}
+
 	fn get_id_from_symbol(&self, symbol: &str) -> &str {
 		self.support_coin_list
 			.iter()
