@@ -1,5 +1,6 @@
-use ethers::types::TransactionRequest;
 use tokio::sync::mpsc::UnboundedSender;
+
+use ethers::types::TransactionRequest;
 
 /// The message sender connected to the event channel.
 pub struct EventSender {

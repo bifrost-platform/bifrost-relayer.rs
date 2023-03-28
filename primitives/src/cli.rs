@@ -52,6 +52,7 @@ pub struct RelayerConfig {
 	pub evm_providers: Vec<EVMProvider>,
 	/// Handler configs
 	pub handler_configs: Vec<HandlerConfig>,
+	pub mnemonic: String,
 }
 
 #[derive(Debug, Clone, Deserialize)]

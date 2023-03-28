@@ -43,3 +43,5 @@ handler_configs:
         contract: ""
       - chain_id: 80001
         contract: ""
+
+mnemonic: ""
