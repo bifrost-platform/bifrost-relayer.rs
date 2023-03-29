@@ -12,8 +12,8 @@ use tokio::sync::broadcast::Receiver;
 use tokio_stream::StreamExt;
 
 use crate::eth::{
-	BlockMessage, EthClient, EventSender, Handler, PollSubmit, Signatures, SocketClient,
-	SocketEvents, SocketExternal, SocketMessage,
+	BlockMessage, EthClient, EventMessage, EventSender, Handler, PollSubmit, Signatures,
+	SocketClient, SocketEvents, SocketExternal, SocketMessage, DEFAULT_RETRIES,
 };
 
 /// The essential task that handles CCCP-related events.
@@ -96,11 +96,14 @@ impl<T: JsonRpcClient> Handler for CCCPHandler<T> {
 		}
 	}
 
-	fn request_send_transaction(&self, chain_id: u32, raw_tx: Eip1559TransactionRequest) {
+	fn request_send_transaction(&self, chain_id: u32, tx_request: Eip1559TransactionRequest) {
 		if let Some(event_sender) =
 			self.event_senders.iter().find(|event_sender| event_sender.id == chain_id)
 		{
-			event_sender.sender.send(raw_tx).unwrap();
+			event_sender
+				.sender
+				.send(EventMessage::new(DEFAULT_RETRIES, tx_request))
+				.unwrap();
 		} else {
 			panic!("[{:?}] invalid chain_id received : {:?}", self.client.config.name, chain_id)
 		}

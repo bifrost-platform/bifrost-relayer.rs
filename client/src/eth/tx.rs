@@ -1,35 +1,51 @@
 use ethers::{
-	prelude::{NonceManagerMiddleware, SignerMiddleware},
+	prelude::{
+		gas_escalator::{Frequency, GasEscalatorMiddleware, GeometricGasPrice},
+		NonceManagerMiddleware, SignerMiddleware,
+	},
 	providers::{JsonRpcClient, Middleware, Provider},
 	signers::{LocalWallet, Signer},
-	types::{Eip1559TransactionRequest, U256},
+	types::transaction::eip2718::TypedTransaction,
 };
 use std::sync::Arc;
 use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
 
-use super::{EthClient, TxResult};
+use super::{EthClient, EventMessage};
 
 /// The essential task that sends asynchronous transactions.
 pub struct TransactionManager<T> {
-	// /// The ethereum client for the connected chain.
-	// pub client: Arc<EthClient<T>>,
+	/// The ethereum client for the connected chain.
+	pub client: Arc<EthClient<T>>,
 	/// The client signs transaction for the connected chain with local nonce manager.
-	pub middleware: Arc<NonceManagerMiddleware<SignerMiddleware<Arc<Provider<T>>, LocalWallet>>>,
+	pub middleware: NonceManagerMiddleware<
+		SignerMiddleware<GasEscalatorMiddleware<Arc<Provider<T>>, GeometricGasPrice>, LocalWallet>,
+	>,
+	/// The sender connected to the event channel.
+	pub sender: UnboundedSender<EventMessage>,
 	/// The receiver connected to the event channel.
-	pub receiver: UnboundedReceiver<Eip1559TransactionRequest>,
+	pub receiver: UnboundedReceiver<EventMessage>,
 }
 
 impl<T: 'static + JsonRpcClient> TransactionManager<T> {
 	/// Instantiates a new `TransactionManager` instance.
-	pub fn new(client: Arc<EthClient<T>>) -> (Self, UnboundedSender<Eip1559TransactionRequest>) {
-		let (sender, receiver) = mpsc::unbounded_channel::<Eip1559TransactionRequest>();
+	pub fn new(client: Arc<EthClient<T>>) -> (Self, UnboundedSender<EventMessage>) {
+		let (sender, receiver) = mpsc::unbounded_channel::<EventMessage>();
 
-		let middleware = Arc::new(NonceManagerMiddleware::new(
-			SignerMiddleware::new(client.provider.clone(), client.wallet.signer.clone()),
-			client.wallet.signer.address(),
-		));
+		// Bumps transactions gas price in the background to avoid getting them stuck in the memory
+		// pool.
+		let geometric_gas_price = GeometricGasPrice::new(1.125, 60u64, None::<u64>);
+		let gas_escalator = GasEscalatorMiddleware::new(
+			client.provider.clone(),
+			geometric_gas_price,
+			Frequency::PerBlock,
+		);
+		// Signs transactions locally, with a private key or a hardware wallet.
+		let signer = SignerMiddleware::new(gas_escalator, client.wallet.signer.clone());
+		// Manages nonces locally. Allows to sign multiple consecutive transactions without waiting
+		// for them to hit the mempool.
+		let middleware = NonceManagerMiddleware::new(signer, client.wallet.signer.address());
 
-		(Self { middleware, receiver }, sender)
+		(Self { client, sender: sender.clone(), middleware, receiver }, sender)
 	}
 
 	/// Starts the transaction manager. Listens to every new consumed event message.
@@ -37,37 +53,64 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> {
 		while let Some(msg) = self.receiver.recv().await {
 			println!("msg -> {:?}", msg);
 
-			self.send_transaction(msg).await.unwrap();
+			self.send_transaction(msg).await;
 		}
 	}
 
-	async fn send_transaction(&mut self, msg: Eip1559TransactionRequest) -> TxResult {
-		let nonce = self.middleware.get_transaction_count(msg.from.unwrap(), None).await.unwrap();
+	async fn send_transaction(&self, msg: EventMessage) {
+		if msg.retries_remaining == 0 {
+			println!("Exceeded the retry limit for sending a transaction");
+			// TODO: retry 전부 소모시 정책 결정 필요
+		}
+
+		// get the next nonce to be used
+		let nonce = self.middleware.next();
 
 		let (max_fee_per_gas, max_priority_fee_per_gas) =
-			self.middleware.estimate_eip1559_fees(None).await?;
+			self.middleware.estimate_eip1559_fees(None).await.unwrap();
 
-		let tx = msg
-			.gas(U256::from(1000000))
+		let estimated_gas = self
+			.middleware
+			.estimate_gas(&TypedTransaction::Eip1559(msg.tx_request.clone()), None)
+			.await
+			.unwrap();
+
+		let final_tx = msg
+			.tx_request
+			.clone()
+			.gas(estimated_gas)
 			.max_fee_per_gas(max_fee_per_gas)
 			.max_priority_fee_per_gas(max_priority_fee_per_gas)
 			.nonce(nonce);
 
-		let pending_tx = self.middleware.send_transaction(tx.clone(), None).await?;
-
-		let receipt = pending_tx.await?.ok_or("tx dropped".to_string())?;
-
-		println!("transaction result : {:?}", receipt);
-
-		match self.middleware.get_transaction(receipt.transaction_hash).await? {
-			Some(t) => println!("Sent tx: {:?}", t),
-			None => {
-				println!("retry to send tx");
-				self.middleware.send_transaction(tx, None).await?.await?;
+		match self.middleware.send_transaction(final_tx.clone(), None).await {
+			Ok(pending_tx) => match pending_tx.await {
+				Ok(receipt) =>
+					if let Some(receipt) = receipt {
+						println!(
+							"The requested transaction has successfully mined in a block: {:?}",
+							receipt.transaction_hash
+						);
+					} else {
+						println!("The requested transaction has been dropped from the mempool");
+						self.sender
+							.send(EventMessage::new(msg.retries_remaining - 1, msg.tx_request))
+							.unwrap();
+					},
+				Err(error) => {
+					println!("Unknown error while waiting for transaction receipt: {:?}", error);
+					self.sender
+						.send(EventMessage::new(msg.retries_remaining - 1, msg.tx_request))
+						.unwrap();
+				},
+			},
+			Err(error) => {
+				println!("Unknown error while sending transaction: {:?}", error);
+				self.sender
+					.send(EventMessage::new(msg.retries_remaining - 1, msg.tx_request))
+					.unwrap();
 			},
 		}
-
-		Ok(())
 	}
 }
 
