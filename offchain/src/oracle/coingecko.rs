@@ -79,12 +79,30 @@ impl PriceFetcher<HashMap<String, HashMap<String, f64>>> for CoingeckoFetcher {
 	}
 
 	async fn _send_request(&self, url: Url) -> HashMap<String, HashMap<String, f64>> {
-		reqwest::get(url)
-			.await
-			.expect("Coingecko api server down")
-			.json::<HashMap<String, HashMap<String, f64>>>()
-			.await
-			.expect("Coingecko api rate limit exceeds")
+		let mut retry_interval = Duration::from_secs(1);
+		loop {
+			match reqwest::get(url.clone()).await {
+				Ok(response) =>
+					match response.json::<HashMap<String, HashMap<String, f64>>>().await {
+						Ok(result) => return result,
+						Err(e) => {
+							println!(
+								"Error decoding coingecko response. Maybe rete limit exceeds?: {}",
+								e
+							);
+							println!("Retry in {:?} secs...", retry_interval);
+							sleep(retry_interval).await;
+							retry_interval *= 2;
+						},
+					},
+				Err(e) => {
+					println!("Error fetching from coingecko: {}", e);
+					println!("Retry in {:?} secs...", retry_interval);
+					sleep(retry_interval).await;
+					retry_interval *= 2;
+				},
+			}
+		}
 	}
 }
 
