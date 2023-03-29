@@ -1,1 +1,1 @@
-pub mod oracle;
+pub mod price_source;
