@@ -45,3 +45,18 @@ handler_configs:
         contract: "0xB2ba0020560cF6c164DC48D1E29559AbA8472208"
 
 mnemonic: ""
+
+oracle_price_feeder:
+  network_id: 49088
+  feed_interval: 300
+  contract: "0x252a402B80d081F672e7874E94214054FdB78C77"
+  price_sources: [ Coingecko ]
+  symbols: [ "ETH", "BFC", "BNB", "MATIC", "USDC", "BIFI" ]
+
+#offchain_configs:
+#  - OraclePriceFeeder:
+#      network_id: 49088
+#      feed_interval: 300
+#      contract: "0x252a402B80d081F672e7874E94214054FdB78C77"
+#      price_sources: [ Coingecko ]
+#      symbols: [ "BFC", "ETH" ]

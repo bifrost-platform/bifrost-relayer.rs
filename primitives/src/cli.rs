@@ -1,3 +1,4 @@
+use crate::offchain::PriceSource;
 use serde::Deserialize;
 
 pub type Result<T> = std::result::Result<T, Error>;
@@ -53,6 +54,9 @@ pub struct RelayerConfig {
 	/// Handler configs
 	pub handler_configs: Vec<HandlerConfig>,
 	pub mnemonic: String,
+	/// Offchain worker configs
+	pub oracle_price_feeder: Option<PriceFeederConfig>,
+	// pub offchain_configs: Option<Vec<OffchainWorkerConfig>>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -110,4 +114,19 @@ pub struct HandlerConfig {
 	pub handler_type: HandlerType,
 	/// Target list
 	pub watch_list: Vec<WatchTarget>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct PriceFeederConfig {
+	pub network_id: u32,
+	pub feed_interval: u64,
+	pub contract: String,
+	pub price_sources: Vec<PriceSource>,
+	pub symbols: Vec<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub enum OffchainWorkerConfig {
+	/// Oracle price feeder
+	OraclePriceFeeder(PriceFeederConfig),
 }

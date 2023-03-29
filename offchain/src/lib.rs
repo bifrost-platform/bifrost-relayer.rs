@@ -1,1 +1,2 @@
-pub mod price_source;
+pub mod price_feeder;
+mod price_source;

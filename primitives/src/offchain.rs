@@ -1,19 +1,16 @@
-use ethers::types::TransactionRequest;
+use async_trait::async_trait;
 use serde::Deserialize;
 
-#[async_trait::async_trait]
+#[async_trait]
 pub trait OffchainWorker {
-	/// Starts the offchain worker. Do what it have to do according to a fixed schedule.
+	/// Starts the offchain worker.
 	async fn run(&mut self);
-
-	/// Request send transaction to the target event channel.
-	async fn request_send_transaction(&self, dst_chain_id: u32, transaction: TransactionRequest);
 }
 
-#[async_trait::async_trait]
+#[async_trait]
 pub trait TimeDrivenOffchainWorker {
 	/// Wait until next schedule
-	async fn wait_until_next_time();
+	async fn wait_until_next_time(&self);
 }
 
 #[derive(Debug, Deserialize)]
@@ -22,17 +19,19 @@ pub struct PriceResponse {
 	pub price: String,
 }
 
-#[async_trait::async_trait]
-pub trait PriceFetcher<T> {
-	/// Instantiates a new `PriceFetcher` instance.
-	async fn new(symbols: Vec<String>) -> Self;
+#[derive(Debug, Clone, Deserialize)]
+pub enum PriceSource {
+	Binance,
+	Coingecko,
+	Gateio,
+	Upbit,
+}
 
+#[async_trait]
+pub trait PriceFetcher {
 	/// Get price with ticker symbol
 	async fn get_price_with_symbol(&self, symbol: String) -> String;
 
 	/// Get all prices of support coin/token
 	async fn get_price(&self) -> Vec<PriceResponse>;
-
-	/// Send request to price source
-	async fn _send_request(&self, url: reqwest::Url) -> T ;
 }
