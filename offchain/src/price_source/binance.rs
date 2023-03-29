@@ -7,18 +7,7 @@ pub struct BinancePriceFetcher {
 }
 
 #[async_trait::async_trait]
-impl PriceFetcher<PriceResponse> for BinancePriceFetcher {
-	async fn new(mut symbols: Vec<String>) -> Self {
-		for s in symbols.iter_mut() {
-			*s = s.replace("_", "");
-		}
-
-		Self {
-			base_url: Url::parse("https://api.binance.com/api/v3/").unwrap(),
-			symbols: serde_json::to_string(&symbols).unwrap(),
-		}
-	}
-
+impl PriceFetcher for BinancePriceFetcher {
 	async fn get_price_with_symbol(&self, symbol: String) -> String {
 		let mut url = self.base_url.join("ticker/price").unwrap();
 		url.query_pairs_mut().append_pair("symbol", symbol.replace("_", "").as_str());
@@ -31,6 +20,19 @@ impl PriceFetcher<PriceResponse> for BinancePriceFetcher {
 		url.query_pairs_mut().append_pair("symbols", self.symbols.as_str());
 
 		reqwest::get(url).await.unwrap().json::<Vec<PriceResponse>>().await.unwrap()
+	}
+}
+
+impl BinancePriceFetcher {
+	pub async fn new(mut symbols: Vec<String>) -> Self {
+		for s in symbols.iter_mut() {
+			*s = s.replace("_", "");
+		}
+
+		Self {
+			base_url: Url::parse("https://api.binance.com/api/v3/").unwrap(),
+			symbols: serde_json::to_string(&symbols).unwrap(),
+		}
 	}
 
 	async fn _send_request(&self, url: Url) -> PriceResponse {

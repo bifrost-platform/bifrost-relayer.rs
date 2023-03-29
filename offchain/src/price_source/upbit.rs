@@ -14,17 +14,7 @@ pub struct UpbitPriceFetcher {
 }
 
 #[async_trait::async_trait]
-impl PriceFetcher<Vec<UpbitResponse>> for UpbitPriceFetcher {
-	async fn new(symbols: Vec<String>) -> Self {
-		let symbols_flipped: Vec<String> =
-			symbols.into_iter().map(|symbol| to_upbit_symbol(&symbol)).collect();
-
-		Self {
-			base_url: Url::parse("https://api.upbit.com/v1/").unwrap(),
-			symbols: symbols_flipped.join(",").to_string(),
-		}
-	}
-
+impl PriceFetcher for UpbitPriceFetcher {
 	async fn get_price_with_symbol(&self, symbol: String) -> String {
 		let mut url = self.base_url.join("ticker").unwrap();
 		url.query_pairs_mut().append_pair("markets", to_upbit_symbol(&symbol).as_str());
@@ -44,6 +34,18 @@ impl PriceFetcher<Vec<UpbitResponse>> for UpbitPriceFetcher {
 				price: res.trade_price.to_string(),
 			})
 			.collect()
+	}
+}
+
+impl UpbitPriceFetcher {
+	pub async fn new(symbols: Vec<String>) -> Self {
+		let symbols_flipped: Vec<String> =
+			symbols.into_iter().map(|symbol| to_upbit_symbol(&symbol)).collect();
+
+		Self {
+			base_url: Url::parse("https://api.upbit.com/v1/").unwrap(),
+			symbols: symbols_flipped.join(",").to_string(),
+		}
 	}
 
 	async fn _send_request(&self, url: Url) -> Vec<UpbitResponse> {

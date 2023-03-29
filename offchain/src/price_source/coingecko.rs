@@ -11,34 +11,14 @@ pub struct SupportCoin {
 	pub name: String,
 }
 
-pub struct CoingeckoFetcher {
+pub struct CoingeckoPriceFetcher {
 	pub base_url: Url,
 	pub ids: Vec<String>,
 	pub support_coin_list: Vec<SupportCoin>,
 }
 
 #[async_trait::async_trait]
-impl PriceFetcher<HashMap<String, HashMap<String, f64>>> for CoingeckoFetcher {
-	async fn new(symbols: Vec<String>) -> Self {
-		let support_coin_list: Vec<SupportCoin> = CoingeckoFetcher::get_all_coin_list().await;
-
-		let ids: Vec<String> = symbols
-			.iter()
-			.filter_map(|symbol| {
-				support_coin_list
-					.iter()
-					.find(|coin| coin.symbol == symbol.to_lowercase())
-					.map(|coin| coin.id.clone())
-			})
-			.collect();
-
-		Self {
-			base_url: Url::parse("https://api.coingecko.com/api/v3/").unwrap(),
-			ids,
-			support_coin_list,
-		}
-	}
-
+impl PriceFetcher for CoingeckoPriceFetcher {
 	async fn get_price_with_symbol(&self, symbol: String) -> String {
 		let id = self.get_id_from_symbol(&symbol);
 		let url = self
@@ -77,6 +57,51 @@ impl PriceFetcher<HashMap<String, HashMap<String, f64>>> for CoingeckoFetcher {
 			})
 			.collect()
 	}
+}
+
+impl CoingeckoPriceFetcher {
+	pub async fn new(symbols: Vec<String>) -> Self {
+		let support_coin_list: Vec<SupportCoin> = CoingeckoPriceFetcher::get_all_coin_list().await;
+
+		let ids: Vec<String> = symbols
+			.iter()
+			.filter_map(|symbol| {
+				support_coin_list
+					.iter()
+					.find(|coin| coin.symbol == symbol.to_lowercase())
+					.map(|coin| coin.id.clone())
+			})
+			.collect();
+
+		Self {
+			base_url: Url::parse("https://api.coingecko.com/api/v3/").unwrap(),
+			ids,
+			support_coin_list,
+		}
+	}
+
+	async fn get_all_coin_list() -> Vec<SupportCoin> {
+		let mut retry_interval = Duration::from_secs(1);
+		loop {
+			match reqwest::get("https://api.coingecko.com/api/v3/coins/list").await {
+				Ok(response) => match response.json::<Vec<SupportCoin>>().await {
+					Ok(coins) => return coins,
+					Err(e) => {
+						println!("Error decoding support coin list: {}", e);
+						println!("Retry in {:?} secs...", retry_interval);
+						sleep(retry_interval).await;
+						retry_interval *= 2;
+					},
+				},
+				Err(e) => {
+					println!("Error fetching support coin list: {}", e);
+					println!("Retry in {:?} secs...", retry_interval);
+					sleep(retry_interval).await;
+					retry_interval *= 2;
+				},
+			}
+		}
+	}
 
 	async fn _send_request(&self, url: Url) -> HashMap<String, HashMap<String, f64>> {
 		let mut retry_interval = Duration::from_secs(1);
@@ -104,31 +129,6 @@ impl PriceFetcher<HashMap<String, HashMap<String, f64>>> for CoingeckoFetcher {
 			}
 		}
 	}
-}
-
-impl CoingeckoFetcher {
-	async fn get_all_coin_list() -> Vec<SupportCoin> {
-		let mut retry_interval = Duration::from_secs(1);
-		loop {
-			match reqwest::get("https://api.coingecko.com/api/v3/coins/list").await {
-				Ok(response) => match response.json::<Vec<SupportCoin>>().await {
-					Ok(coins) => return coins,
-					Err(e) => {
-						println!("Error decoding support coin list: {}", e);
-						println!("Retry in {:?} secs...", retry_interval);
-						sleep(retry_interval).await;
-						retry_interval *= 2;
-					},
-				},
-				Err(e) => {
-					println!("Error fetching support coin list: {}", e);
-					println!("Retry in {:?} secs...", retry_interval);
-					sleep(retry_interval).await;
-					retry_interval *= 2;
-				},
-			}
-		}
-	}
 
 	fn get_id_from_symbol(&self, symbol: &str) -> &str {
 		self.support_coin_list
@@ -146,7 +146,7 @@ mod tests {
 
 	#[tokio::test]
 	async fn fetch_price() {
-		let coingecko_fetcher = CoingeckoFetcher::new(vec!["BTC".to_string()]).await;
+		let coingecko_fetcher = CoingeckoPriceFetcher::new(vec!["BTC".to_string()]).await;
 		let res = coingecko_fetcher.get_price_with_symbol("BTC".to_string()).await;
 
 		println!("{:?}", res);
@@ -155,7 +155,7 @@ mod tests {
 	#[tokio::test]
 	async fn fetch_prices() {
 		let binance_fetcher =
-			CoingeckoFetcher::new(vec!["BTC".to_string(), "ETH".to_string()]).await;
+			CoingeckoPriceFetcher::new(vec!["BTC".to_string(), "ETH".to_string()]).await;
 		let res = binance_fetcher.get_price().await;
 
 		println!("{:#?}", res);

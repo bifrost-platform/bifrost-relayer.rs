@@ -14,15 +14,7 @@ pub struct GateioPriceFetcher {
 }
 
 #[async_trait::async_trait]
-impl PriceFetcher<Vec<GateioResponse>> for GateioPriceFetcher {
-	async fn new(symbols: Vec<String>) -> Self {
-		Self {
-			base_url: Url::parse("https://api.gateio.ws/api/v4/")
-				.expect("Failed to parse GateIo URL"),
-			symbols,
-		}
-	}
-
+impl PriceFetcher for GateioPriceFetcher {
 	async fn get_price_with_symbol(&self, symbol: String) -> String {
 		let mut url = self.base_url.join("spot/tickers").unwrap();
 		url.query_pairs_mut().append_pair("currency_pair", symbol.as_str());
@@ -46,6 +38,16 @@ impl PriceFetcher<Vec<GateioResponse>> for GateioPriceFetcher {
 				}
 			})
 			.collect()
+	}
+}
+
+impl GateioPriceFetcher {
+	pub async fn new(symbols: Vec<String>) -> Self {
+		Self {
+			base_url: Url::parse("https://api.gateio.ws/api/v4/")
+				.expect("Failed to parse GateIo URL"),
+			symbols,
+		}
 	}
 
 	async fn _send_request(&self, url: Url) -> Vec<GateioResponse> {
