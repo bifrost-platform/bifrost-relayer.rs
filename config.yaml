@@ -49,7 +49,7 @@ mnemonic: ""
 oracle_price_feeder:
   network_id: 49088
   feed_interval: 300
-  contract: "0x252a402B80d081F672e7874E94214054FdB78C77"
+  contract: "0x0218371b18340aBD460961bdF3Bd5F01858dAB53"
   price_sources: [ Coingecko ]
   symbols: [ "ETH", "BFC", "BNB", "MATIC", "USDC", "BIFI" ]
 
