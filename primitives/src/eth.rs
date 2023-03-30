@@ -1,6 +1,21 @@
-use ethers::providers::ProviderError;
+use ethers::{providers::ProviderError, types::H160};
 
 pub type EthResult<T = ()> = Result<T, ProviderError>;
+
+#[derive(Clone, Copy, Debug)]
+/// Contract abstraction with an additional chain ID field.
+pub struct Contract {
+	/// The chain ID of the deployed network.
+	pub chain_id: u32,
+	/// The address of the contract.
+	pub address: H160,
+}
+
+impl Contract {
+	pub fn new(chain_id: u32, address: H160) -> Self {
+		Self { chain_id, address }
+	}
+}
 
 /// The socket event signature.
 pub const SOCKET_EVENT_SIG: &str =

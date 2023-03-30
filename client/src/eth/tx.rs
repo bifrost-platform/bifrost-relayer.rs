@@ -57,17 +57,26 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> {
 		}
 	}
 
-	async fn send_transaction(&self, msg: EventMessage) {
+	async fn send_transaction(&self, mut msg: EventMessage) {
 		if msg.retries_remaining == 0 {
 			println!("Exceeded the retry limit for sending a transaction");
+			return
 			// TODO: retry 전부 소모시 정책 결정 필요
+			// return? panic? etc?
 		}
 
 		// get the next nonce to be used
 		let nonce = self.middleware.next();
 
+		msg.tx_request = msg.tx_request.nonce(nonce);
+
 		let (max_fee_per_gas, max_priority_fee_per_gas) =
 			self.middleware.estimate_eip1559_fees(None).await.unwrap();
+
+		msg.tx_request = msg
+			.tx_request
+			.max_fee_per_gas(max_fee_per_gas)
+			.max_priority_fee_per_gas(max_priority_fee_per_gas);
 
 		let estimated_gas = self
 			.middleware
@@ -75,15 +84,9 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> {
 			.await
 			.unwrap();
 
-		let final_tx = msg
-			.tx_request
-			.clone()
-			.gas(estimated_gas)
-			.max_fee_per_gas(max_fee_per_gas)
-			.max_priority_fee_per_gas(max_priority_fee_per_gas)
-			.nonce(nonce);
+		msg.tx_request = msg.tx_request.gas(estimated_gas);
 
-		match self.middleware.send_transaction(final_tx.clone(), None).await {
+		match self.middleware.send_transaction(msg.tx_request.clone(), None).await {
 			Ok(pending_tx) => match pending_tx.await {
 				Ok(receipt) =>
 					if let Some(receipt) = receipt {

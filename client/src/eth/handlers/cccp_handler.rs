@@ -1,7 +1,7 @@
 use std::{str::FromStr, sync::Arc};
 
 // TODO: Move event sig into handler structure (Initialize from config.yaml)
-use cccp_primitives::eth::{BridgeDirection, SocketEventStatus, SOCKET_EVENT_SIG};
+use cccp_primitives::eth::{BridgeDirection, Contract, SocketEventStatus, SOCKET_EVENT_SIG};
 use ethers::{
 	abi::RawLog,
 	prelude::decode_logs,
@@ -26,8 +26,10 @@ pub struct CCCPHandler<T> {
 	pub client: Arc<EthClient<T>>,
 	/// The address of the `Socket` | `Vault` contract.
 	pub target_contract: H160,
-	/// The `Socket` contract instance.
-	pub socket: SocketExternal<Provider<T>>,
+	/// The target `Socket` contract instance.
+	pub target_socket: SocketExternal<Provider<T>>,
+	/// The socket contracts supporting CCCP.
+	pub socket_contracts: Vec<Contract>,
 }
 
 impl<T: JsonRpcClient> CCCPHandler<T> {
@@ -37,14 +39,16 @@ impl<T: JsonRpcClient> CCCPHandler<T> {
 		block_receiver: Receiver<BlockMessage>,
 		client: Arc<EthClient<T>>,
 		target_contract: H160,
-		socket_contract: H160,
+		target_socket: H160,
+		socket_contracts: Vec<Contract>,
 	) -> Self {
 		Self {
 			event_senders,
 			block_receiver,
 			client: client.clone(),
 			target_contract,
-			socket: SocketExternal::new(socket_contract, client.provider.clone()),
+			target_socket: SocketExternal::new(target_socket, client.provider.clone()),
+			socket_contracts,
 		}
 	}
 }
@@ -132,11 +136,11 @@ impl<T: JsonRpcClient> Handler for CCCPHandler<T> {
 impl<T: JsonRpcClient> SocketClient for CCCPHandler<T> {
 	fn build_poll_call_data(&self, msg: SocketMessage, sigs: Signatures) -> Bytes {
 		let poll_submit = PollSubmit { msg, sigs, option: U256::default() };
-		self.socket.poll(poll_submit).calldata().unwrap()
+		self.target_socket.poll(poll_submit).calldata().unwrap()
 	}
 
 	async fn get_signatures(&self, msg: SocketMessage) -> Signatures {
-		self.socket
+		self.target_socket
 			.get_signatures(msg.req_id, msg.status)
 			.call()
 			.await
@@ -163,11 +167,19 @@ impl<T: JsonRpcClient> CCCPHandler<T> {
 			self.get_outbound_relay_tx_chain_id(status, src_chain_id, dst_chain_id)
 		};
 
-		let mut raw_tx = Eip1559TransactionRequest::new();
+		let to_socket = self
+			.socket_contracts
+			.iter()
+			.find(|socket| socket.chain_id == relay_tx_chain_id)
+			.unwrap()
+			.address;
 		// TODO: check how to set sigs. For now we just set as default.
-		raw_tx = raw_tx.data(self.build_poll_call_data(msg, Signatures::default()));
+		let mut tx_request = Eip1559TransactionRequest::new();
+		tx_request = tx_request
+			.data(self.build_poll_call_data(msg, Signatures::default()))
+			.to(to_socket);
 
-		self.request_send_transaction(relay_tx_chain_id, raw_tx);
+		self.request_send_transaction(relay_tx_chain_id, tx_request);
 	}
 
 	/// Get the chain ID of the inbound sequence relay transaction.

@@ -3,7 +3,7 @@ use cccp_client::eth::{
 };
 use cccp_primitives::{
 	cli::{Configuration, HandlerConfig, HandlerType},
-	eth::{BridgeDirection, EthClientConfiguration},
+	eth::{BridgeDirection, Contract, EthClientConfiguration},
 };
 
 use ethers::{
@@ -13,6 +13,7 @@ use ethers::{
 use sc_service::{Error as ServiceError, TaskManager};
 use std::{str::FromStr, sync::Arc};
 
+/// Get the target contracts for the `BlockManager` to monitor.
 fn get_target_contracts_by_chain_id(
 	chain_id: u32,
 	handler_configs: &Vec<HandlerConfig>,
@@ -28,19 +29,22 @@ fn get_target_contracts_by_chain_id(
 	target_contracts
 }
 
-fn get_socket_contract_by_chain_id(chain_id: u32, handler_configs: &Vec<HandlerConfig>) -> H160 {
+/// Builds socket `Contract` instances that supports CCCP.
+fn build_socket_contracts(handler_configs: &Vec<HandlerConfig>) -> Vec<Contract> {
+	let mut contracts = vec![];
 	for handler_config in handler_configs {
 		match handler_config.handler_type {
 			HandlerType::Socket =>
 				for socket in &handler_config.watch_list {
-					if socket.chain_id == chain_id {
-						return H160::from_str(&socket.contract).unwrap()
-					}
+					contracts.push(Contract::new(
+						socket.chain_id,
+						H160::from_str(&socket.contract).unwrap(),
+					));
 				},
 			_ => {},
 		}
 	}
-	panic!("Unknown chain id ({:?}) required on initializing socket contract.", chain_id)
+	contracts
 }
 
 pub fn relay(config: Configuration) -> Result<TaskManager, ServiceError> {
@@ -104,6 +108,8 @@ pub fn new_relay_base(config: Configuration) -> Result<RelayBase, ServiceError> 
 		)
 	});
 
+	let socket_contracts = build_socket_contracts(&config.relayer_config.handler_configs);
+
 	// Initialize handlers & spawn tasks
 	config.relayer_config.handler_configs.iter().for_each(|handler_config| {
 		match handler_config.handler_type {
@@ -128,17 +134,18 @@ pub fn new_relay_base(config: Configuration) -> Result<RelayBase, ServiceError> 
 							target.chain_id
 						));
 
-					let socket_contract = get_socket_contract_by_chain_id(
-						target.chain_id,
-						&config.relayer_config.handler_configs,
-					);
+					let target_socket = socket_contracts
+						.iter()
+						.find(|socket| socket.chain_id == client.get_chain_id())
+						.unwrap();
 
 					let mut cccp_handler = CCCPHandler::new(
 						event_channels.clone(),
 						block_receiver,
 						client.clone(),
 						H160::from_str(&target.contract).unwrap(),
-						socket_contract,
+						target_socket.address,
+						socket_contracts.clone(),
 					);
 					task_manager.spawn_essential_handle().spawn(
 						Box::leak(

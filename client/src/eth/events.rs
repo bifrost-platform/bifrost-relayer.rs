@@ -14,6 +14,7 @@ pub struct EventMessage {
 }
 
 impl EventMessage {
+	/// Instantiates a new `EventMessage` instance.
 	pub fn new(retries_remaining: u8, tx_request: Eip1559TransactionRequest) -> Self {
 		Self { retries_remaining, tx_request }
 	}
@@ -28,6 +29,7 @@ pub struct EventSender {
 }
 
 impl EventSender {
+	/// Instantiates a new `EventSender` instance.
 	pub fn new(id: u32, sender: UnboundedSender<EventMessage>) -> Self {
 		Self { id, sender }
 	}
