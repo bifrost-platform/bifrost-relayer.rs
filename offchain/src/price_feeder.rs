@@ -1,6 +1,6 @@
 use crate::price_source::PriceFetchers;
 use async_trait::async_trait;
-use cccp_client::eth::EventSender;
+use cccp_client::eth::{EventMessage, EventSender};
 use cccp_primitives::{
 	cli::PriceFeederConfig,
 	offchain::{OffchainWorker, PriceFetcher, TimeDrivenOffchainWorker},
@@ -176,7 +176,11 @@ impl<T: JsonRpcClient> OraclePriceFeeder<T> {
 
 	/// Request send transaction to the target event channel.
 	async fn request_send_transaction(&self, request: TransactionRequest) {
-		match self.event_sender.sender.send(request) {
+		match self
+			.event_sender
+			.sender
+			.send(EventMessage { retries_remaining: 10, tx_request: request })
+		{
 			Ok(()) => println!("Oracle price feed request sent successfully"),
 			Err(e) => println!("Failed to send oracle price feed request: {}", e),
 		}
@@ -201,7 +205,7 @@ mod tests {
 			.into_iter()
 			.find(|evm_provider| evm_provider.name == "bfc-testnet")
 			.unwrap();
-		let (sender, _) = mpsc::unbounded_channel::<TransactionRequest>();
+		let (sender, _) = mpsc::unbounded_channel::<EventMessage>();
 		let event_sender = EventSender { id: evm_provider.id, sender };
 
 		let mut oracle_price_feeder = OraclePriceFeeder::new(

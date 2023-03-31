@@ -5,9 +5,9 @@ use cccp_offchain::OraclePriceFeeder;
 use cccp_primitives::{
 	cli::{Configuration, HandlerConfig, HandlerType},
 	eth::{BridgeDirection, Contract, EthClientConfiguration},
+	offchain::OffchainWorker,
 };
 
-use cccp_primitives::offchain::OffchainWorker;
 use ethers::{
 	providers::{Http, Provider},
 	types::H160,
@@ -139,9 +139,8 @@ pub fn new_relay_base(config: Configuration) -> Result<RelayBase, ServiceError> 
 			);
 		});
 
-	let socket_contracts = build_socket_contracts(&config.relayer_config.handler_configs);
-
 	// Initialize handlers & spawn tasks
+	let socket_contracts = build_socket_contracts(&config.relayer_config.handler_configs);
 	config.relayer_config.handler_configs.iter().for_each(|handler_config| {
 		match handler_config.handler_type {
 			HandlerType::Socket | HandlerType::Vault =>
