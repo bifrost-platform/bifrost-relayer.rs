@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use tokio::time::{sleep, Duration};
 
 #[derive(Debug, Clone, Deserialize)]
-pub struct SupportCoin {
+pub struct SupportedCoin {
 	pub id: String,
 	pub symbol: String,
 	pub name: String,
@@ -14,7 +14,7 @@ pub struct SupportCoin {
 pub struct CoingeckoPriceFetcher {
 	pub base_url: Url,
 	pub ids: Vec<String>,
-	pub support_coin_list: Vec<SupportCoin>,
+	pub supported_coins: Vec<SupportedCoin>,
 }
 
 #[async_trait::async_trait]
@@ -47,7 +47,7 @@ impl PriceFetcher for CoingeckoPriceFetcher {
 			.filter_map(|id| {
 				let price = response.get(id).unwrap().get("usd").unwrap().to_string();
 				let symbol = self
-					.support_coin_list
+					.supported_coins
 					.iter()
 					.find(|coin| coin.id == *id)
 					.unwrap()
@@ -61,7 +61,7 @@ impl PriceFetcher for CoingeckoPriceFetcher {
 
 impl CoingeckoPriceFetcher {
 	pub async fn new(symbols: Vec<String>) -> Self {
-		let support_coin_list: Vec<SupportCoin> = CoingeckoPriceFetcher::get_all_coin_list().await;
+		let support_coin_list: Vec<SupportedCoin> = CoingeckoPriceFetcher::get_all_coin_list().await;
 
 		let ids: Vec<String> = symbols
 			.iter()
@@ -76,15 +76,15 @@ impl CoingeckoPriceFetcher {
 		Self {
 			base_url: Url::parse("https://api.coingecko.com/api/v3/").unwrap(),
 			ids,
-			support_coin_list,
+			supported_coins: support_coin_list,
 		}
 	}
 
-	async fn get_all_coin_list() -> Vec<SupportCoin> {
+	async fn get_all_coin_list() -> Vec<SupportedCoin> {
 		let mut retry_interval = Duration::from_secs(30);
 		loop {
 			match reqwest::get("https://api.coingecko.com/api/v3/coins/list").await {
-				Ok(response) => match response.json::<Vec<SupportCoin>>().await {
+				Ok(response) => match response.json::<Vec<SupportedCoin>>().await {
 					Ok(mut coins) => {
 						coins.retain(|x| &x.name != "Beefy.Finance");
 						return coins
@@ -134,7 +134,7 @@ impl CoingeckoPriceFetcher {
 	}
 
 	fn get_id_from_symbol(&self, symbol: &str) -> &str {
-		self.support_coin_list
+		self.supported_coins
 			.iter()
 			.find(|coin| coin.symbol == symbol.to_lowercase())
 			.expect("Cannot find symbol in support coin list")

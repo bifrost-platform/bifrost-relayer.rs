@@ -117,7 +117,7 @@ pub struct HandlerConfig {
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct PriceFeederConfig {
-	pub network_id: u32,
+	pub chain_id: u32,
 	pub schedule: String,
 	pub contract: String,
 	pub price_sources: Vec<PriceSource>,

@@ -48,7 +48,7 @@ mnemonic: ""
 
 offchain_configs:
   oracle_price_feeder:
-    - network_id: 49088
+    - chain_id: 49088
       schedule: "0 */5 * * * * *"
       contract: "0x0218371b18340aBD460961bdF3Bd5F01858dAB53"
       price_sources: [ Coingecko ]

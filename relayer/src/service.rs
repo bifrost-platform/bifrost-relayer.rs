@@ -119,12 +119,12 @@ pub fn new_relay_base(config: Configuration) -> Result<RelayBase, ServiceError> 
 		.for_each(|price_feeder_config| {
 			let client = clients
 				.iter()
-				.find(|client| client.get_chain_id() == price_feeder_config.network_id)
+				.find(|client| client.get_chain_id() == price_feeder_config.chain_id)
 				.unwrap()
 				.clone();
 			let channel = event_channels
 				.iter()
-				.find(|channel| channel.id == price_feeder_config.network_id)
+				.find(|channel| channel.id == price_feeder_config.chain_id)
 				.expect("Invalid network_id on oracle_price_feeder config")
 				.clone();
 
