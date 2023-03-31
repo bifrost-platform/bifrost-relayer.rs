@@ -65,11 +65,11 @@ pub fn new_relay_base(config: Configuration) -> Result<RelayBase, ServiceError> 
 				&config.relayer_config.handler_configs,
 			);
 
-			let wallet = WalletManager::from_phrase_or_file(
+			let wallet = WalletManager::from_private_key(
 				config.relayer_config.mnemonic.as_str(),
 				evm_provider.id,
 			)
-			.expect("Should exist");
+			.expect("Failed to initialize wallet manager");
 
 			let client = Arc::new(EthClient::new(
 				wallet,

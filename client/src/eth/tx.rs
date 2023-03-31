@@ -5,7 +5,7 @@ use ethers::{
 	},
 	providers::{JsonRpcClient, Middleware, Provider},
 	signers::{LocalWallet, Signer},
-	types::transaction::eip2718::TypedTransaction,
+	types::U256,
 };
 use std::sync::Arc;
 use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
@@ -57,6 +57,8 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> {
 		}
 	}
 
+	/// Sends the consumed transaction request to the connected chain. The transaction request will
+	/// be re-published to the event channel if the transaction fails to be mined in a block.
 	async fn send_transaction(&self, mut msg: EventMessage) {
 		if msg.retries_remaining == 0 {
 			println!("Exceeded the retry limit for sending a transaction");
@@ -65,25 +67,22 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> {
 			// return? panic? etc?
 		}
 
-		// get the next nonce to be used
+		// set the next nonce to be used
 		let nonce = self.middleware.next();
-
 		msg.tx_request = msg.tx_request.nonce(nonce);
 
-		let (max_fee_per_gas, max_priority_fee_per_gas) =
-			self.middleware.estimate_eip1559_fees(None).await.unwrap();
+		// set the gas price to be used
+		let gas_price = self.middleware.get_gas_price().await.unwrap();
+		msg.tx_request = msg.tx_request.gas_price(gas_price);
 
-		msg.tx_request = msg
-			.tx_request
-			.max_fee_per_gas(max_fee_per_gas)
-			.max_priority_fee_per_gas(max_priority_fee_per_gas);
-
-		let estimated_gas = self
-			.middleware
-			.estimate_gas(&TypedTransaction::Eip1559(msg.tx_request.clone()), None)
-			.await
-			.unwrap();
-
+		// let estimated_gas = self
+		// 	.middleware
+		// 	.estimate_gas(&TypedTransaction::Eip1559(msg.tx_request.clone()), None)
+		// 	.await
+		// 	.unwrap();
+		// TODO: remove constant gas
+		// estimate the gas amount to be used
+		let estimated_gas = U256::from(300_000);
 		msg.tx_request = msg.tx_request.gas(estimated_gas);
 
 		match self.middleware.send_transaction(msg.tx_request.clone(), None).await {

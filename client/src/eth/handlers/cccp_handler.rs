@@ -6,7 +6,7 @@ use ethers::{
 	abi::RawLog,
 	prelude::decode_logs,
 	providers::{JsonRpcClient, Provider},
-	types::{Bytes, Eip1559TransactionRequest, TransactionReceipt, H160, H256, U256},
+	types::{Bytes, TransactionReceipt, TransactionRequest, H160, H256, U256},
 };
 use tokio::sync::broadcast::Receiver;
 use tokio_stream::StreamExt;
@@ -100,7 +100,7 @@ impl<T: JsonRpcClient> Handler for CCCPHandler<T> {
 		}
 	}
 
-	fn request_send_transaction(&self, chain_id: u32, tx_request: Eip1559TransactionRequest) {
+	fn request_send_transaction(&self, chain_id: u32, tx_request: TransactionRequest) {
 		if let Some(event_sender) =
 			self.event_senders.iter().find(|event_sender| event_sender.id == chain_id)
 		{
@@ -174,7 +174,7 @@ impl<T: JsonRpcClient> CCCPHandler<T> {
 			.unwrap()
 			.address;
 		// TODO: check how to set sigs. For now we just set as default.
-		let mut tx_request = Eip1559TransactionRequest::new();
+		let mut tx_request = TransactionRequest::new();
 		tx_request = tx_request
 			.data(self.build_poll_call_data(msg, Signatures::default()))
 			.to(to_socket);

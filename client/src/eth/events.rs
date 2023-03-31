@@ -1,4 +1,4 @@
-use ethers::types::Eip1559TransactionRequest;
+use ethers::types::TransactionRequest;
 use tokio::sync::mpsc::UnboundedSender;
 
 /// The default retries of a single transaction request.
@@ -10,12 +10,12 @@ pub struct EventMessage {
 	/// The remaining retries of the transaction request.
 	pub retries_remaining: u8,
 	/// The raw transaction request.
-	pub tx_request: Eip1559TransactionRequest,
+	pub tx_request: TransactionRequest,
 }
 
 impl EventMessage {
 	/// Instantiates a new `EventMessage` instance.
-	pub fn new(retries_remaining: u8, tx_request: Eip1559TransactionRequest) -> Self {
+	pub fn new(retries_remaining: u8, tx_request: TransactionRequest) -> Self {
 		Self { retries_remaining, tx_request }
 	}
 }
