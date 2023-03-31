@@ -4,6 +4,9 @@ pub use events::*;
 mod handlers;
 pub use handlers::*;
 
+mod contracts;
+pub use contracts::*;
+
 mod tx;
 pub use tx::*;
 
@@ -26,6 +29,7 @@ pub type TxResult<T = ()> = Result<T, Box<dyn std::error::Error + Send + Sync>>;
 #[derive(Debug)]
 /// The core client for EVM-based chain interactions.
 pub struct EthClient<T> {
+	/// The wallet manager for the connected relayer.
 	wallet: WalletManager,
 	/// The ethers.rs wrapper for the connected chain.
 	provider: Arc<Provider<T>>,
@@ -33,10 +37,7 @@ pub struct EthClient<T> {
 	config: EthClientConfiguration,
 }
 
-impl<T: JsonRpcClient> EthClient<T>
-where
-	Self: Send + Sync,
-{
+impl<T: JsonRpcClient> EthClient<T> {
 	/// Instantiates a new `EthClient` instance for the given chain.
 	pub fn new(
 		wallet: WalletManager,

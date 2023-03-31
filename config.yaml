@@ -36,12 +36,12 @@ handler_configs:
   - handler_type: Vault
     watch_list:
       - chain_id: 49088
-        contract: ""
+        contract: "0x90381bB369D4F8069fdA9246b23637a78c5d1c83"
       - chain_id: 5
-        contract: ""
+        contract: "0x7EB02c73349B3De1406e6b433c5bA1a526CBF253"
       - chain_id: 97
-        contract: ""
+        contract: "0x27C66cb5caa07C9B332939c357c789C606f5054C"
       - chain_id: 80001
-        contract: ""
+        contract: "0xB2ba0020560cF6c164DC48D1E29559AbA8472208"
 
 mnemonic: ""
