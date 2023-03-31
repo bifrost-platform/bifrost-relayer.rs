@@ -1,60 +1,20 @@
 use std::{str::FromStr, sync::Arc};
 
-use cccp_primitives::eth::{BridgeDirection, SocketEventStatus, SOCKET_EVENT_SIG}; /* TODO: Move event sig into handler structure
-																				   * (Initialize from config.yaml) */
+// TODO: Move event sig into handler structure (Initialize from config.yaml)
+use cccp_primitives::eth::{BridgeDirection, Contract, SocketEventStatus, SOCKET_EVENT_SIG};
 use ethers::{
 	abi::RawLog,
-	prelude::{abigen, decode_logs},
-	providers::JsonRpcClient,
-	types::{TransactionReceipt, TransactionRequest, H160, H256},
+	prelude::decode_logs,
+	providers::{JsonRpcClient, Provider},
+	types::{Bytes, TransactionReceipt, TransactionRequest, H160, H256, U256},
 };
 use tokio::sync::broadcast::Receiver;
 use tokio_stream::StreamExt;
 
-use crate::eth::{BlockMessage, EthClient, EventSender, Handler};
-
-abigen!(
-	SocketExternal,
-	"../abi/abi.socket.external.json",
-	event_derives(serde::Deserialize, serde::Serialize)
-);
-
-#[derive(
-	Clone,
-	ethers::contract::EthEvent,
-	ethers::contract::EthDisplay,
-	Default,
-	Debug,
-	PartialEq,
-	Eq,
-	Hash,
-)]
-#[ethevent(
-	name = "Socket",
-	abi = "Socket(((bytes4,uint64,uint128),uint8,(bytes4,bytes16),(bytes32,bytes32,address,address,uint256,bytes)))"
-)]
-/// The `Socket` event from the `SocketExternal` contract.
-pub struct Socket {
-	pub msg: SocketMessage,
-}
-
-#[derive(Clone, ethers::contract::EthAbiType, Debug, PartialEq, Eq, Hash)]
-/// The event enums originated from the `SocketExternal` contract.
-pub enum SocketEvents {
-	Socket(Socket),
-}
-
-impl ethers::contract::EthLogDecode for SocketEvents {
-	fn decode_log(log: &RawLog) -> Result<Self, ethers::abi::Error>
-	where
-		Self: Sized,
-	{
-		if let Ok(decoded) = Socket::decode_log(log) {
-			return Ok(SocketEvents::Socket(decoded))
-		}
-		Err(ethers::abi::Error::InvalidData)
-	}
-}
+use crate::eth::{
+	BlockMessage, EthClient, EventMessage, EventSender, Handler, PollSubmit, Signatures,
+	SocketClient, SocketEvents, SocketExternal, SocketMessage, DEFAULT_RETRIES,
+};
 
 /// The essential task that handles CCCP-related events.
 pub struct CCCPHandler<T> {
@@ -65,7 +25,11 @@ pub struct CCCPHandler<T> {
 	/// The `EthClient` to interact with the connected blockchain.
 	pub client: Arc<EthClient<T>>,
 	/// The address of the `Socket` | `Vault` contract.
-	pub contract: H160,
+	pub target_contract: H160,
+	/// The target `Socket` contract instance.
+	pub target_socket: SocketExternal<Provider<T>>,
+	/// The socket contracts supporting CCCP.
+	pub socket_contracts: Vec<Contract>,
 }
 
 impl<T: JsonRpcClient> CCCPHandler<T> {
@@ -74,9 +38,18 @@ impl<T: JsonRpcClient> CCCPHandler<T> {
 		event_senders: Vec<Arc<EventSender>>,
 		block_receiver: Receiver<BlockMessage>,
 		client: Arc<EthClient<T>>,
-		contract: H160,
+		target_contract: H160,
+		target_socket: H160,
+		socket_contracts: Vec<Contract>,
 	) -> Self {
-		Self { event_senders, block_receiver, client, contract }
+		Self {
+			event_senders,
+			block_receiver,
+			client: client.clone(),
+			target_contract,
+			target_socket: SocketExternal::new(target_socket, client.provider.clone()),
+			socket_contracts,
+		}
 	}
 }
 
@@ -87,6 +60,12 @@ impl<T: JsonRpcClient> Handler for CCCPHandler<T> {
 			let block_msg = self.block_receiver.recv().await.unwrap();
 
 			let mut stream = tokio_stream::iter(block_msg.target_receipts);
+
+			println!(
+				"[{:?}]-[cccp-handler] received block: {:?}",
+				self.client.get_chain_name(),
+				block_msg.raw_block.number
+			);
 
 			while let Some(receipt) = stream.next().await {
 				self.process_confirmed_transaction(receipt).await;
@@ -104,6 +83,13 @@ impl<T: JsonRpcClient> Handler for CCCPHandler<T> {
 					match decode_logs::<SocketEvents>(&[raw_log]) {
 						Ok(decoded) => match &decoded[0] {
 							SocketEvents::Socket(socket) => {
+								println!(
+									"[{:?}]-[cccp-handler] detected socket event: {:?}-{:?}-{:?}",
+									self.client.get_chain_name(),
+									socket.msg.status,
+									u32::from_be_bytes(socket.msg.req_id.chain),
+									u32::from_be_bytes(socket.msg.ins_code.chain),
+								);
 								self.send_socket_message(socket.msg.clone()).await;
 							},
 						},
@@ -114,30 +100,23 @@ impl<T: JsonRpcClient> Handler for CCCPHandler<T> {
 		}
 	}
 
-	async fn request_send_transaction(&self, dst_chain_id: u32, request: TransactionRequest) {
-		// TODO: Make it works
-		match self
-			.event_senders
-			.iter()
-			.find(|sender| sender.id == dst_chain_id)
-			.unwrap_or_else(|| {
-				panic!(
-					"[{:?}] invalid dst_chain_id received : {:?}",
-					self.client.config.name, dst_chain_id
-				)
-			})
-			.sender
-			.send(request)
+	fn request_send_transaction(&self, chain_id: u32, tx_request: TransactionRequest) {
+		if let Some(event_sender) =
+			self.event_senders.iter().find(|event_sender| event_sender.id == chain_id)
 		{
-			Ok(()) => println!("Request sent successfully"),
-			Err(e) => println!("Failed to send request: {}", e),
+			event_sender
+				.sender
+				.send(EventMessage::new(DEFAULT_RETRIES, tx_request))
+				.unwrap();
+		} else {
+			panic!("[{:?}] invalid chain_id received : {:?}", self.client.config.name, chain_id)
 		}
 	}
 
 	fn is_target_contract(&self, receipt: &TransactionReceipt) -> bool {
 		if let Some(to) = receipt.to {
 			if ethers::utils::to_checksum(&to, None) ==
-				ethers::utils::to_checksum(&self.contract, None)
+				ethers::utils::to_checksum(&self.target_contract, None)
 			{
 				return true
 			}
@@ -153,6 +132,22 @@ impl<T: JsonRpcClient> Handler for CCCPHandler<T> {
 	}
 }
 
+#[async_trait::async_trait]
+impl<T: JsonRpcClient> SocketClient for CCCPHandler<T> {
+	fn build_poll_call_data(&self, msg: SocketMessage, sigs: Signatures) -> Bytes {
+		let poll_submit = PollSubmit { msg, sigs, option: U256::default() };
+		self.target_socket.poll(poll_submit).calldata().unwrap()
+	}
+
+	async fn get_signatures(&self, msg: SocketMessage) -> Signatures {
+		self.target_socket
+			.get_signatures(msg.req_id, msg.status)
+			.call()
+			.await
+			.unwrap_or_default()
+	}
+}
+
 impl<T: JsonRpcClient> CCCPHandler<T> {
 	/// Sends the `SocketMessage` to the target chain channel.
 	async fn send_socket_message(&self, msg: SocketMessage) {
@@ -161,16 +156,6 @@ impl<T: JsonRpcClient> CCCPHandler<T> {
 			// do nothing if protocol sequence ended
 			return
 		}
-
-		let send_to_channel = |chain_id: u32, msg: TransactionRequest| {
-			if let Some(event_sender) =
-				self.event_senders.iter().find(|event_sender| event_sender.id == chain_id)
-			{
-				event_sender.sender.send(msg)
-			} else {
-				panic!("[{:?}] invalid chain_id received : {:?}", self.client.config.name, chain_id)
-			}
-		};
 
 		let src_chain_id = u32::from_be_bytes(msg.req_id.chain);
 		let dst_chain_id = u32::from_be_bytes(msg.ins_code.chain);
@@ -181,8 +166,20 @@ impl<T: JsonRpcClient> CCCPHandler<T> {
 		} else {
 			self.get_outbound_relay_tx_chain_id(status, src_chain_id, dst_chain_id)
 		};
-		// TODO: request_send_transaction
-		// send_to_channel(relay_tx_chain_id, msg).expect("Something wrong");
+
+		let to_socket = self
+			.socket_contracts
+			.iter()
+			.find(|socket| socket.chain_id == relay_tx_chain_id)
+			.unwrap()
+			.address;
+		// TODO: check how to set sigs. For now we just set as default.
+		let mut tx_request = TransactionRequest::new();
+		tx_request = tx_request
+			.data(self.build_poll_call_data(msg, Signatures::default()))
+			.to(to_socket);
+
+		self.request_send_transaction(relay_tx_chain_id, tx_request);
 	}
 
 	/// Get the chain ID of the inbound sequence relay transaction.
@@ -231,10 +228,9 @@ impl<T: JsonRpcClient> CCCPHandler<T> {
 
 	/// Verifies whether the socket event is an inbound sequence.
 	fn is_inbound_sequence(&self, dst_chain_id: u32) -> bool {
-		match (self.client.get_chain_id() == dst_chain_id, self.client.config.if_destination_chain)
-		{
-			(true, BridgeDirection::Inbound) | (false, BridgeDirection::Outbound) => true,
-			_ => false,
-		}
+		matches!(
+			(self.client.get_chain_id() == dst_chain_id, self.client.config.if_destination_chain),
+			(true, BridgeDirection::Inbound) | (false, BridgeDirection::Outbound)
+		)
 	}
 }
