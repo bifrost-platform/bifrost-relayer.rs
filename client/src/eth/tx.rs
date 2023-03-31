@@ -69,10 +69,6 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> {
 			// return? panic? etc?
 		}
 
-		// set the next nonce to be used
-		let nonce = self.middleware.next();
-		msg.tx_request = msg.tx_request.nonce(nonce);
-
 		// set the gas price to be used
 		let gas_price = self.middleware.get_gas_price().await.unwrap();
 		msg.tx_request = msg.tx_request.gas_price(gas_price);
