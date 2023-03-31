@@ -3,14 +3,13 @@ use async_trait::async_trait;
 use cccp_client::eth::{EventMessage, EventSender};
 use cccp_primitives::{
 	cli::PriceFeederConfig,
-	offchain::{OffchainWorker, PriceFetcher, TimeDrivenOffchainWorker},
+	offchain::{get_asset_oids, OffchainWorker, PriceFetcher, TimeDrivenOffchainWorker},
 };
 use cron::Schedule;
 use ethers::{
 	prelude::abigen,
 	providers::{JsonRpcClient, Provider},
 	types::{TransactionRequest, H160, U256},
-	utils::hex,
 };
 use std::{collections::HashMap, str::FromStr, sync::Arc};
 use tokio::time::sleep;
@@ -69,71 +68,7 @@ impl<T: JsonRpcClient> OraclePriceFeeder<T> {
 		config: PriceFeederConfig,
 		client: Arc<Provider<T>>,
 	) -> Self {
-		let asset_oid: HashMap<String, [u8; 32]> = HashMap::from([
-			(
-				"BFC".to_string(),
-				hex::decode("0100010000000000000000000000000000000000000000000000000000000001")
-					.unwrap()
-					.try_into()
-					.unwrap(),
-			),
-			(
-				"BIFI".to_string(),
-				hex::decode("0100010000000000000000000000000000000000000000000000000000000002")
-					.unwrap()
-					.try_into()
-					.unwrap(),
-			),
-			(
-				"BTC".to_string(),
-				hex::decode("0100010000000000000000000000000000000000000000000000000000000003")
-					.unwrap()
-					.try_into()
-					.unwrap(),
-			),
-			(
-				"ETH".to_string(),
-				hex::decode("0100010000000000000000000000000000000000000000000000000000000004")
-					.unwrap()
-					.try_into()
-					.unwrap(),
-			),
-			(
-				"BNB".to_string(),
-				hex::decode("0100010000000000000000000000000000000000000000000000000000000005")
-					.unwrap()
-					.try_into()
-					.unwrap(),
-			),
-			(
-				"MATIC".to_string(),
-				hex::decode("0100010000000000000000000000000000000000000000000000000000000006")
-					.unwrap()
-					.try_into()
-					.unwrap(),
-			),
-			(
-				"AVAX".to_string(),
-				hex::decode("0100010000000000000000000000000000000000000000000000000000000007")
-					.unwrap()
-					.try_into()
-					.unwrap(),
-			),
-			(
-				"USDC".to_string(),
-				hex::decode("0100010000000000000000000000000000000000000000000000000000000008")
-					.unwrap()
-					.try_into()
-					.unwrap(),
-			),
-			(
-				"BUSD".to_string(),
-				hex::decode("0100010000000000000000000000000000000000000000000000000000000009")
-					.unwrap()
-					.try_into()
-					.unwrap(),
-			),
-		]);
+		let asset_oid = get_asset_oids();
 
 		Self {
 			schedule: Schedule::from_str(&config.schedule).unwrap(),
