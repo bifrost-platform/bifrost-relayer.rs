@@ -5,14 +5,15 @@ use cccp_primitives::{
 	cli::PriceFeederConfig,
 	offchain::{OffchainWorker, PriceFetcher, TimeDrivenOffchainWorker},
 };
+use cron::Schedule;
 use ethers::{
 	prelude::abigen,
 	providers::{JsonRpcClient, Provider},
 	types::{TransactionRequest, H160, U256},
 	utils::hex,
 };
-use std::{collections::HashMap, str::FromStr, sync::Arc, time::SystemTime};
-use tokio::time::{sleep, Duration};
+use std::{collections::HashMap, str::FromStr, sync::Arc};
+use tokio::time::sleep;
 
 abigen!(
 	SocketBifrost,
@@ -21,7 +22,7 @@ abigen!(
 );
 
 pub struct OraclePriceFeeder<T> {
-	pub feed_interval: Duration,
+	pub schedule: Schedule,
 	pub contract: SocketBifrost<Provider<T>>,
 	pub fetchers: Vec<PriceFetchers>,
 	pub event_sender: Arc<EventSender>,
@@ -54,13 +55,11 @@ impl<T: JsonRpcClient> OffchainWorker for OraclePriceFeeder<T> {
 #[async_trait]
 impl<T: JsonRpcClient> TimeDrivenOffchainWorker for OraclePriceFeeder<T> {
 	async fn wait_until_next_time(&self) {
-		let current_time = SystemTime::now();
-		let duration = self
-			.feed_interval
-			.checked_sub(current_time.duration_since(SystemTime::UNIX_EPOCH).unwrap())
-			.unwrap_or_else(|| Duration::from_secs(0));
+		// calculate sleep duration for next schedule
+		let sleep_duration =
+			self.schedule.upcoming(chrono::Utc).next().unwrap() - chrono::Utc::now();
 
-		sleep(duration).await;
+		sleep(sleep_duration.to_std().unwrap()).await;
 	}
 }
 
@@ -137,7 +136,7 @@ impl<T: JsonRpcClient> OraclePriceFeeder<T> {
 		]);
 
 		Self {
-			feed_interval: Duration::from_secs(config.feed_interval),
+			schedule: Schedule::from_str(&config.schedule).unwrap(),
 			contract: SocketBifrost::new(H160::from_str(&config.contract).unwrap(), client.clone()),
 			fetchers: vec![],
 			event_sender,
@@ -194,8 +193,7 @@ mod tests {
 	use ethers::providers::Http;
 	use tokio::sync::mpsc::{self};
 
-	#[tokio::test]
-	async fn build_price_feeding_transaction() {
+	async fn initialize_feeder() -> OraclePriceFeeder<Http> {
 		let config_file =
 			std::fs::File::open("../config.yaml").expect("Could not open config file.");
 		let relayer_config: RelayerConfig =
@@ -213,9 +211,15 @@ mod tests {
 			relayer_config.offchain_configs.unwrap().oracle_price_feeder.unwrap()[0].clone(),
 			Arc::new(Provider::<Http>::try_from(evm_provider.provider).unwrap()),
 		);
-		println!("oid_bytes: {:?}", oracle_price_feeder.asset_oid);
-
 		oracle_price_feeder.initialize_fetchers().await;
+
+		oracle_price_feeder
+	}
+
+	#[tokio::test]
+	async fn build_price_feeding_transaction() {
+		let oracle_price_feeder = initialize_feeder().await;
+		println!("oid_bytes: {:?}", oracle_price_feeder.asset_oid);
 
 		let price_responses = oracle_price_feeder.fetchers[0].get_price().await;
 		println!("price_responses: {:#?}", price_responses);
@@ -233,5 +237,14 @@ mod tests {
 		println!("price_bytes_list: {:?}", price_bytes_list);
 
 		println!("price relay transaction: {:#?}", request);
+	}
+
+	#[tokio::test]
+	async fn test_scheduler() {
+		let oracle_price_feeder = initialize_feeder().await;
+
+		println!("{:#?}", chrono::Utc::now());
+		oracle_price_feeder.wait_until_next_time().await;
+		println!("{:#?}", chrono::Utc::now());
 	}
 }

@@ -13,6 +13,8 @@ async-trait = "0.1.57"
 cc-cli = { path = "../client/cli" }
 cccp-client = { path = "../client" }
 cccp-primitives = { path = "../primitives" }
+chrono = "0.4.24"
+cron = "0.12.0"
 ethers = "2.0"
 reqwest = { version = "0.11.15", features = ["json"] }
 serde = { version = "1.0.153", features = ["derive"] }
