@@ -228,10 +228,9 @@ impl<T: JsonRpcClient> CCCPHandler<T> {
 
 	/// Verifies whether the socket event is an inbound sequence.
 	fn is_inbound_sequence(&self, dst_chain_id: u32) -> bool {
-		match (self.client.get_chain_id() == dst_chain_id, self.client.config.if_destination_chain)
-		{
-			(true, BridgeDirection::Inbound) | (false, BridgeDirection::Outbound) => true,
-			_ => false,
-		}
+		matches!(
+			(self.client.get_chain_id() == dst_chain_id, self.client.config.if_destination_chain),
+			(true, BridgeDirection::Inbound) | (false, BridgeDirection::Outbound)
+		)
 	}
 }

@@ -99,7 +99,7 @@ impl<T: JsonRpcClient> BlockManager<T> {
 	fn is_in_target_contracts(&self, receipt: &TransactionReceipt) -> bool {
 		if let Some(to) = receipt.to {
 			return self.target_contracts.iter().any(|c| {
-				ethers::utils::to_checksum(&c, None) == ethers::utils::to_checksum(&to, None)
+				ethers::utils::to_checksum(c, None) == ethers::utils::to_checksum(&to, None)
 			})
 		}
 		false

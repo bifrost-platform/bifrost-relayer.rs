@@ -33,15 +33,13 @@ fn get_target_contracts_by_chain_id(
 fn build_socket_contracts(handler_configs: &Vec<HandlerConfig>) -> Vec<Contract> {
 	let mut contracts = vec![];
 	for handler_config in handler_configs {
-		match handler_config.handler_type {
-			HandlerType::Socket =>
-				for socket in &handler_config.watch_list {
-					contracts.push(Contract::new(
-						socket.chain_id,
-						H160::from_str(&socket.contract).unwrap(),
-					));
-				},
-			_ => {},
+		if let HandlerType::Socket = handler_config.handler_type {
+			for socket in &handler_config.watch_list {
+				contracts.push(Contract::new(
+					socket.chain_id,
+					H160::from_str(&socket.contract).unwrap(),
+				));
+			}
 		}
 	}
 	contracts
@@ -78,7 +76,7 @@ pub fn new_relay_base(config: Configuration) -> Result<RelayBase, ServiceError> 
 					name: evm_provider.name,
 					id: evm_provider.id,
 					call_interval: evm_provider.interval,
-					if_destination_chain: match evm_provider.is_native.unwrap_or_else(|| false) {
+					if_destination_chain: match evm_provider.is_native.unwrap_or(false) {
 						true => BridgeDirection::Inbound,
 						_ => BridgeDirection::Outbound,
 					},

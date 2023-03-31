@@ -12,14 +12,16 @@ use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
 
 use super::{EthClient, EventMessage};
 
+type TransactionMiddleware<T> = NonceManagerMiddleware<
+	SignerMiddleware<GasEscalatorMiddleware<Arc<Provider<T>>, GeometricGasPrice>, LocalWallet>,
+>;
+
 /// The essential task that sends asynchronous transactions.
 pub struct TransactionManager<T> {
 	/// The ethereum client for the connected chain.
 	pub client: Arc<EthClient<T>>,
 	/// The client signs transaction for the connected chain with local nonce manager.
-	pub middleware: NonceManagerMiddleware<
-		SignerMiddleware<GasEscalatorMiddleware<Arc<Provider<T>>, GeometricGasPrice>, LocalWallet>,
-	>,
+	pub middleware: TransactionMiddleware<T>,
 	/// The sender connected to the event channel.
 	pub sender: UnboundedSender<EventMessage>,
 	/// The receiver connected to the event channel.

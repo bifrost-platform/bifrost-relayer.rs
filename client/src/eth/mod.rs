@@ -44,7 +44,7 @@ impl<T: JsonRpcClient> EthClient<T> {
 		provider: Arc<Provider<T>>,
 		config: EthClientConfiguration,
 	) -> Self {
-		Self { wallet, provider: provider.clone(), config }
+		Self { wallet, provider, config }
 	}
 
 	/// Returns name which chain this client interacts with.
