@@ -9,7 +9,7 @@ use cron::Schedule;
 use ethers::{
 	prelude::abigen,
 	providers::{JsonRpcClient, Provider},
-	types::{TransactionRequest, H160, U256},
+	types::{TransactionRequest, H160, H256, U256},
 };
 use std::{collections::HashMap, str::FromStr, sync::Arc};
 use tokio::time::sleep;
@@ -26,7 +26,7 @@ pub struct OraclePriceFeeder<T> {
 	pub fetchers: Vec<PriceFetchers>,
 	pub event_sender: Arc<EventSender>,
 	pub config: PriceFeederConfig,
-	pub asset_oid: HashMap<String, [u8; 32]>,
+	pub asset_oid: HashMap<String, H256>,
 }
 
 #[async_trait]
@@ -41,7 +41,8 @@ impl<T: JsonRpcClient> OffchainWorker for OraclePriceFeeder<T> {
 
 			let (mut oid_bytes_list, mut price_bytes_list) = (vec![], vec![]);
 			price_responses.iter().for_each(|price_response| {
-				oid_bytes_list.push(self.asset_oid.get(&price_response.symbol).unwrap().clone());
+				oid_bytes_list
+					.push(self.asset_oid.get(&price_response.symbol).unwrap().to_fixed_bytes());
 				price_bytes_list.push(self.float_to_wei_bytes(&price_response.price));
 			});
 
@@ -161,8 +162,13 @@ mod tests {
 
 		let (mut oid_bytes_list, mut price_bytes_list) = (vec![], vec![]);
 		for price_response in price_responses {
-			oid_bytes_list
-				.push(oracle_price_feeder.asset_oid.get(&price_response.symbol).unwrap().clone());
+			oid_bytes_list.push(
+				oracle_price_feeder
+					.asset_oid
+					.get(&price_response.symbol)
+					.unwrap()
+					.to_fixed_bytes(),
+			);
 			price_bytes_list.push(oracle_price_feeder.float_to_wei_bytes(&price_response.price));
 		}
 		let request = oracle_price_feeder
