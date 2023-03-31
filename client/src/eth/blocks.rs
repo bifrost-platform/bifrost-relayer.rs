@@ -61,11 +61,17 @@ impl<T: JsonRpcClient> BlockManager<T> {
 	/// publish to the block channel.
 	pub async fn run(&self) {
 		// TODO: follow-up to the highest block
+		println!("target contracts -> {:?}", self.target_contracts);
 		loop {
 			// TODO: handle block reorgs
 			let latest_block = self.client.get_latest_block_number().await.unwrap();
 			self.process_confirmed_block(latest_block).await;
 
+			println!(
+				"[{:?}]-[block-manager] processed block: {:?}",
+				self.client.get_chain_name(),
+				latest_block
+			);
 			sleep(Duration::from_millis(self.client.config.call_interval)).await;
 		}
 	}
@@ -93,7 +99,7 @@ impl<T: JsonRpcClient> BlockManager<T> {
 	fn is_in_target_contracts(&self, receipt: &TransactionReceipt) -> bool {
 		if let Some(to) = receipt.to {
 			return self.target_contracts.iter().any(|c| {
-				ethers::utils::to_checksum(&c, None) == ethers::utils::to_checksum(&to, None)
+				ethers::utils::to_checksum(c, None) == ethers::utils::to_checksum(&to, None)
 			})
 		}
 		false

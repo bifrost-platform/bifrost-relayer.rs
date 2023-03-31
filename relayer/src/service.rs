@@ -3,7 +3,7 @@ use cccp_client::eth::{
 };
 use cccp_primitives::{
 	cli::{Configuration, HandlerConfig, HandlerType},
-	eth::{BridgeDirection, EthClientConfiguration},
+	eth::{BridgeDirection, Contract, EthClientConfiguration},
 };
 
 use ethers::{
@@ -13,6 +13,7 @@ use ethers::{
 use sc_service::{Error as ServiceError, TaskManager};
 use std::{str::FromStr, sync::Arc};
 
+/// Get the target contracts for the `BlockManager` to monitor.
 fn get_target_contracts_by_chain_id(
 	chain_id: u32,
 	handler_configs: &Vec<HandlerConfig>,
@@ -26,6 +27,22 @@ fn get_target_contracts_by_chain_id(
 		}
 	}
 	target_contracts
+}
+
+/// Builds socket `Contract` instances that supports CCCP.
+fn build_socket_contracts(handler_configs: &Vec<HandlerConfig>) -> Vec<Contract> {
+	let mut contracts = vec![];
+	for handler_config in handler_configs {
+		if let HandlerType::Socket = handler_config.handler_type {
+			for socket in &handler_config.watch_list {
+				contracts.push(Contract::new(
+					socket.chain_id,
+					H160::from_str(&socket.contract).unwrap(),
+				));
+			}
+		}
+	}
+	contracts
 }
 
 pub fn relay(config: Configuration) -> Result<TaskManager, ServiceError> {
@@ -46,11 +63,11 @@ pub fn new_relay_base(config: Configuration) -> Result<RelayBase, ServiceError> 
 				&config.relayer_config.handler_configs,
 			);
 
-			let wallet = WalletManager::from_phrase_or_file(
+			let wallet = WalletManager::from_private_key(
 				config.relayer_config.mnemonic.as_str(),
 				evm_provider.id,
 			)
-			.expect("Should exist");
+			.expect("Failed to initialize wallet manager");
 
 			let client = Arc::new(EthClient::new(
 				wallet,
@@ -59,7 +76,7 @@ pub fn new_relay_base(config: Configuration) -> Result<RelayBase, ServiceError> 
 					name: evm_provider.name,
 					id: evm_provider.id,
 					call_interval: evm_provider.interval,
-					if_destination_chain: match evm_provider.is_native.unwrap_or_else(|| false) {
+					if_destination_chain: match evm_provider.is_native.unwrap_or(false) {
 						true => BridgeDirection::Inbound,
 						_ => BridgeDirection::Outbound,
 					},
@@ -89,6 +106,8 @@ pub fn new_relay_base(config: Configuration) -> Result<RelayBase, ServiceError> 
 		)
 	});
 
+	let socket_contracts = build_socket_contracts(&config.relayer_config.handler_configs);
+
 	// Initialize handlers & spawn tasks
 	config.relayer_config.handler_configs.iter().for_each(|handler_config| {
 		match handler_config.handler_type {
@@ -113,11 +132,18 @@ pub fn new_relay_base(config: Configuration) -> Result<RelayBase, ServiceError> 
 							target.chain_id
 						));
 
+					let target_socket = socket_contracts
+						.iter()
+						.find(|socket| socket.chain_id == client.get_chain_id())
+						.unwrap();
+
 					let mut cccp_handler = CCCPHandler::new(
 						event_channels.clone(),
 						block_receiver,
 						client.clone(),
 						H160::from_str(&target.contract).unwrap(),
+						target_socket.address,
+						socket_contracts.clone(),
 					);
 					task_manager.spawn_essential_handle().spawn(
 						Box::leak(
