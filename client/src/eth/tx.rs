@@ -53,7 +53,11 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> {
 	/// Starts the transaction manager. Listens to every new consumed event message.
 	pub async fn run(&mut self) {
 		while let Some(msg) = self.receiver.recv().await {
-			println!("msg -> {:?}", msg);
+			log::info!(
+				target: &self.client.get_chain_name(),
+				"-[transaction-manager] 🔖 Received transaction request: {}",
+				msg.metadata,
+			);
 
 			self.send_transaction(msg).await;
 		}
@@ -63,7 +67,11 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> {
 	/// be re-published to the event channel if the transaction fails to be mined in a block.
 	async fn send_transaction(&self, mut msg: EventMessage) {
 		if msg.retries_remaining == 0 {
-			println!("Exceeded the retry limit for sending a transaction");
+			log::error!(
+				target: &self.client.get_chain_name(),
+				"-[transaction-manager] ❗️ Exceeded the retry limit to send a transaction: {}",
+				msg.metadata
+			);
 			return
 			// TODO: retry 전부 소모시 정책 결정 필요
 			// return? panic? etc?
@@ -87,27 +95,59 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> {
 			Ok(pending_tx) => match pending_tx.await {
 				Ok(receipt) =>
 					if let Some(receipt) = receipt {
-						println!(
-							"The requested transaction has successfully mined in a block: {:?}",
+						log::info!(
+							target: &self.client.get_chain_name(),
+							"-[transaction-manager] 🎁 The requested transaction has been successfully mined in block: {}, {:?}-{:?}",
+							msg.metadata.to_string(),
+							receipt.block_number.unwrap(),
 							receipt.transaction_hash
 						);
 					} else {
-						println!("The requested transaction has been dropped from the mempool");
+						log::error!(
+							target: &self.client.get_chain_name(),
+							"-[transaction-manager] ♻️ The requested transaction has been dropped from the mempool: {}, Retries left: {:?}",
+							msg.metadata,
+							msg.retries_remaining - 1,
+						);
 						self.sender
-							.send(EventMessage::new(msg.retries_remaining - 1, msg.tx_request))
+							.send(EventMessage::new(
+								msg.retries_remaining - 1,
+								msg.tx_request,
+								msg.metadata,
+							))
 							.unwrap();
 					},
 				Err(error) => {
-					println!("Unknown error while waiting for transaction receipt: {:?}", error);
+					log::error!(
+						target: &self.client.get_chain_name(),
+						"-[transaction-manager] ♻️ Unknown error while waiting for transaction receipt: {}, Retries left: {:?}, Error: {}",
+						msg.metadata,
+						msg.retries_remaining - 1,
+						error.to_string()
+					);
 					self.sender
-						.send(EventMessage::new(msg.retries_remaining - 1, msg.tx_request))
+						.send(EventMessage::new(
+							msg.retries_remaining - 1,
+							msg.tx_request,
+							msg.metadata,
+						))
 						.unwrap();
 				},
 			},
 			Err(error) => {
-				println!("Unknown error while sending transaction: {:?}", error);
+				log::error!(
+					target: &self.client.get_chain_name(),
+					"-[transaction-manager] ♻️ Unknown error while sending transaction: {}, Retries left: {:?}, Error: {}",
+					msg.metadata,
+					msg.retries_remaining - 1,
+					error.to_string()
+				);
 				self.sender
-					.send(EventMessage::new(msg.retries_remaining - 1, msg.tx_request))
+					.send(EventMessage::new(
+						msg.retries_remaining - 1,
+						msg.tx_request,
+						msg.metadata,
+					))
 					.unwrap();
 			},
 		}

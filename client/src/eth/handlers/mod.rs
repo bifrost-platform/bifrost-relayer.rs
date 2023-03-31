@@ -3,6 +3,8 @@ pub use cccp_handler::*;
 
 use ethers::types::{TransactionReceipt, TransactionRequest, H256};
 
+use super::RelayMetadata;
+
 #[async_trait::async_trait]
 pub trait Handler {
 	/// Starts the event handler and listens to every new consumed block.
@@ -12,7 +14,12 @@ pub trait Handler {
 	async fn process_confirmed_transaction(&self, receipt: TransactionReceipt);
 
 	/// Request send relay transaction to the target event channel.
-	fn request_send_transaction(&self, chain_id: u32, raw_tx: TransactionRequest);
+	fn request_send_transaction(
+		&self,
+		chain_id: u32,
+		tx_request: TransactionRequest,
+		metadata: RelayMetadata,
+	);
 
 	/// Verifies whether the given transaction interacted with the target contract.
 	fn is_target_contract(&self, receipt: &TransactionReceipt) -> bool;

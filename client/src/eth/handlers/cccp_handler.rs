@@ -12,8 +12,9 @@ use tokio::sync::broadcast::Receiver;
 use tokio_stream::StreamExt;
 
 use crate::eth::{
-	BlockMessage, EthClient, EventMessage, EventSender, Handler, PollSubmit, Signatures,
-	SocketClient, SocketEvents, SocketExternal, SocketMessage, DEFAULT_RETRIES,
+	BlockMessage, EthClient, EventMessage, EventMetadata, EventSender, Handler, PollSubmit,
+	RelayMetadata, Signatures, SocketClient, SocketEvents, SocketExternal, SocketMessage,
+	DEFAULT_RETRIES,
 };
 
 /// The essential task that handles CCCP-related events.
@@ -59,14 +60,15 @@ impl<T: JsonRpcClient> Handler for CCCPHandler<T> {
 		loop {
 			let block_msg = self.block_receiver.recv().await.unwrap();
 
-			let mut stream = tokio_stream::iter(block_msg.target_receipts);
-
-			println!(
-				"[{:?}]-[cccp-handler] received block: {:?}",
-				self.client.get_chain_name(),
-				block_msg.raw_block.number
+			log::info!(
+				target: &self.client.get_chain_name(),
+				"-[cccp-handler       ] ✨ Imported #{:?} ({}) with target transactions({:?})",
+				block_msg.raw_block.number.unwrap(),
+				block_msg.raw_block.hash.unwrap(),
+				block_msg.target_receipts.len(),
 			);
 
+			let mut stream = tokio_stream::iter(block_msg.target_receipts);
 			while let Some(receipt) = stream.next().await {
 				self.process_confirmed_transaction(receipt).await;
 			}
@@ -83,33 +85,68 @@ impl<T: JsonRpcClient> Handler for CCCPHandler<T> {
 					match decode_logs::<SocketEvents>(&[raw_log]) {
 						Ok(decoded) => match &decoded[0] {
 							SocketEvents::Socket(socket) => {
-								println!(
-									"[{:?}]-[cccp-handler] detected socket event: {:?}-{:?}-{:?}",
-									self.client.get_chain_name(),
-									socket.msg.status,
-									u32::from_be_bytes(socket.msg.req_id.chain),
-									u32::from_be_bytes(socket.msg.ins_code.chain),
+								let src_chain_id = u32::from_be_bytes(socket.msg.req_id.chain);
+								let dst_chain_id = u32::from_be_bytes(socket.msg.ins_code.chain);
+								let is_inbound = self.is_inbound_sequence(dst_chain_id);
+
+								let metadata = RelayMetadata::new(
+									if is_inbound {
+										"Inbound".to_string()
+									} else {
+										"Outbound".to_string()
+									},
+									SocketEventStatus::from_u8(socket.msg.status),
+									socket.msg.req_id.sequence,
+									src_chain_id,
+									dst_chain_id,
 								);
-								self.send_socket_message(socket.msg.clone()).await;
+
+								log::info!(
+									target: &self.client.get_chain_name(),
+									"-[cccp-handler       ] 🔖 Detected socket event: {}, {:?}-{:?}",
+									metadata,
+									receipt.block_number.unwrap(),
+									receipt.transaction_hash,
+								);
+
+								self.send_socket_message(socket.msg.clone(), metadata, is_inbound)
+									.await;
 							},
 						},
-						Err(error) => panic!("failed to decode socket event: {:?}", error),
+						Err(error) => panic!(
+								"{}]-[cccp-handler       ] Unknown error while decoding socket event: {:?}",
+								self.client.get_chain_name(),
+								error
+							),
 					}
 				}
 			}
 		}
 	}
 
-	fn request_send_transaction(&self, chain_id: u32, tx_request: TransactionRequest) {
+	fn request_send_transaction(
+		&self,
+		chain_id: u32,
+		tx_request: TransactionRequest,
+		metadata: RelayMetadata,
+	) {
 		if let Some(event_sender) =
 			self.event_senders.iter().find(|event_sender| event_sender.id == chain_id)
 		{
 			event_sender
 				.sender
-				.send(EventMessage::new(DEFAULT_RETRIES, tx_request))
+				.send(EventMessage::new(
+					DEFAULT_RETRIES,
+					tx_request,
+					EventMetadata::Relay(metadata),
+				))
 				.unwrap();
 		} else {
-			panic!("[{:?}] invalid chain_id received : {:?}", self.client.config.name, chain_id)
+			panic!(
+				"{}]-[cccp-handler       ] Unknown chain ID received: {:?}",
+				self.client.get_chain_name(),
+				chain_id
+			)
 		}
 	}
 
@@ -150,21 +187,26 @@ impl<T: JsonRpcClient> SocketClient for CCCPHandler<T> {
 
 impl<T: JsonRpcClient> CCCPHandler<T> {
 	/// Sends the `SocketMessage` to the target chain channel.
-	async fn send_socket_message(&self, msg: SocketMessage) {
+	async fn send_socket_message(
+		&self,
+		msg: SocketMessage,
+		metadata: RelayMetadata,
+		is_inbound: bool,
+	) {
 		let status = SocketEventStatus::from_u8(msg.status);
 		if Self::is_sequence_ended(status) {
 			// do nothing if protocol sequence ended
 			return
 		}
 
-		let src_chain_id = u32::from_be_bytes(msg.req_id.chain);
-		let dst_chain_id = u32::from_be_bytes(msg.ins_code.chain);
-		let is_inbound = self.is_inbound_sequence(dst_chain_id);
-
 		let relay_tx_chain_id = if is_inbound {
-			self.get_inbound_relay_tx_chain_id(status, src_chain_id, dst_chain_id)
+			self.get_inbound_relay_tx_chain_id(status, metadata.src_chain_id, metadata.dst_chain_id)
 		} else {
-			self.get_outbound_relay_tx_chain_id(status, src_chain_id, dst_chain_id)
+			self.get_outbound_relay_tx_chain_id(
+				status,
+				metadata.src_chain_id,
+				metadata.dst_chain_id,
+			)
 		};
 
 		let to_socket = self
@@ -176,10 +218,17 @@ impl<T: JsonRpcClient> CCCPHandler<T> {
 		// TODO: check how to set sigs. For now we just set as default.
 		let mut tx_request = TransactionRequest::new();
 		tx_request = tx_request
-			.data(self.build_poll_call_data(msg, Signatures::default()))
+			.data(self.build_poll_call_data(msg.clone(), Signatures::default()))
 			.to(to_socket);
 
-		self.request_send_transaction(relay_tx_chain_id, tx_request);
+		self.request_send_transaction(relay_tx_chain_id, tx_request, metadata.clone());
+
+		log::info!(
+			target: &self.client.get_chain_name(),
+			"-[cccp-handler       ] 🔖 Request relay transaction to chain({:?}): {}",
+			relay_tx_chain_id,
+			metadata
+		);
 	}
 
 	/// Get the chain ID of the inbound sequence relay transaction.
@@ -195,8 +244,9 @@ impl<T: JsonRpcClient> CCCPHandler<T> {
 			SocketEventStatus::Reverted => dst_chain_id,
 			SocketEventStatus::Accepted | SocketEventStatus::Rejected => src_chain_id,
 			_ => panic!(
-				"[{:?}] invalid socket event status received: {:?}",
-				self.client.config.name, status
+				"{}]-[cccp-handler       ] Unknown socket event status received: {:?}",
+				self.client.get_chain_name(),
+				status
 			),
 		}
 	}
@@ -214,8 +264,9 @@ impl<T: JsonRpcClient> CCCPHandler<T> {
 			SocketEventStatus::Reverted => src_chain_id,
 			SocketEventStatus::Accepted | SocketEventStatus::Rejected => dst_chain_id,
 			_ => panic!(
-				"[{:?}] invalid socket event status received: {:?}",
-				self.client.config.name, status
+				"{}]-[cccp-handler       ] Unknown socket event status received: {:?}",
+				self.client.get_chain_name(),
+				status
 			),
 		}
 	}
