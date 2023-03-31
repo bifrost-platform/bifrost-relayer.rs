@@ -85,7 +85,10 @@ impl CoingeckoPriceFetcher {
 		loop {
 			match reqwest::get("https://api.coingecko.com/api/v3/coins/list").await {
 				Ok(response) => match response.json::<Vec<SupportCoin>>().await {
-					Ok(coins) => return coins,
+					Ok(mut coins) => {
+						coins.retain(|x| &x.name != "Beefy.Finance");
+						return coins
+					},
 					Err(e) => {
 						println!("Error decoding support coin list: {}", e);
 						println!("Retry in {:?} secs...", retry_interval);
