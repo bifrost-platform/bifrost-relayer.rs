@@ -679,12 +679,14 @@ name = "cccp-offchain"
 version = "0.1.0"
 dependencies = [
  "async-trait",
+ "cc-cli",
  "cccp-client",
  "cccp-primitives",
  "ethers",
  "reqwest",
  "serde",
  "serde_json",
+ "serde_yaml",
  "tokio",
 ]
 

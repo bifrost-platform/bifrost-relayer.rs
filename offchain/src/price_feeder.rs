@@ -6,8 +6,8 @@ use cccp_primitives::{
 };
 use ethers::{
 	prelude::abigen,
-	providers::{Http, Provider},
-	types::{Eip1559TransactionRequest, H160},
+	providers::{JsonRpcClient, Provider},
+	types::{Eip1559TransactionRequest, H160, U256},
 	utils::hex,
 };
 use std::{collections::HashMap, str::FromStr, sync::Arc, time::SystemTime};
@@ -22,9 +22,9 @@ abigen!(
 	event_derives(serde::Deserialize, serde::Serialize)
 );
 
-pub struct OraclePriceFeeder {
+pub struct OraclePriceFeeder<T> {
 	pub feed_interval: Duration,
-	pub contract: SocketBifrost<Provider<Http>>,
+	pub contract: SocketBifrost<Provider<T>>,
 	pub fetchers: Vec<PriceFetchers>,
 	pub sender: Arc<UnboundedSender<Eip1559TransactionRequest>>,
 	pub config: PriceFeederConfig,
@@ -32,7 +32,7 @@ pub struct OraclePriceFeeder {
 }
 
 #[async_trait]
-impl OffchainWorker for OraclePriceFeeder {
+impl<T: JsonRpcClient> OffchainWorker for OraclePriceFeeder<T> {
 	async fn run(&mut self) {
 		self.initialize_fetchers().await;
 
@@ -54,7 +54,7 @@ impl OffchainWorker for OraclePriceFeeder {
 }
 
 #[async_trait]
-impl TimeDrivenOffchainWorker for OraclePriceFeeder {
+impl<T: JsonRpcClient> TimeDrivenOffchainWorker for OraclePriceFeeder<T> {
 	async fn wait_until_next_time(&self) {
 		let current_time = SystemTime::now();
 		let duration = self
@@ -66,11 +66,11 @@ impl TimeDrivenOffchainWorker for OraclePriceFeeder {
 	}
 }
 
-impl OraclePriceFeeder {
+impl<T: JsonRpcClient> OraclePriceFeeder<T> {
 	fn new(
 		sender: Arc<UnboundedSender<Eip1559TransactionRequest>>,
 		config: PriceFeederConfig,
-		client: Arc<Provider<Http>>,
+		client: Arc<Provider<T>>,
 	) -> Self {
 		let asset_oid: HashMap<String, [u8; 32]> = HashMap::from([
 			(
@@ -159,13 +159,7 @@ impl OraclePriceFeeder {
 	}
 
 	fn float_to_wei_bytes(&self, value: &str) -> [u8; 32] {
-		let float_price = f64::from_str(value).unwrap();
-		let wei_price = (float_price * 1_000_000_000_000_000_000f64) as u64;
-
-		let mut bytes_price = [0u8; 32];
-		bytes_price[24..32].copy_from_slice(&wei_price.to_be_bytes());
-
-		bytes_price
+		U256::from((f64::from_str(value).unwrap() * 1_000_000_000_000_000_000f64) as u128).into()
 	}
 
 	/// Build transaction.
@@ -191,34 +185,49 @@ impl OraclePriceFeeder {
 	}
 }
 
-// #[cfg(test)]
-// mod tests {
-// 	use super::*;
-// 	use cccp_primitives::offchain::PriceSource;
-// 	use tokio::sync::mpsc::{self};
-//
-// 	#[tokio::test]
-// 	async fn wei_price_bytes_conversion() {
-// 		todo!();
-//
-// 		let config = PriceFeederConfig {
-// 			network_id: 49088,
-// 			feed_interval: 300,
-// 			contract: "0x252a402B80d081F672e7874E94214054FdB78C77".to_string(),
-// 			price_sources: vec![PriceSource::Coingecko],
-// 			symbols: vec!["BFC".to_string()],
-// 		};
-// 		let (sender, _) = mpsc::unbounded_channel::<Eip1559TransactionRequest>();
-//
-// 		let mut oracle_price_feeder = OraclePriceFeeder::new(Arc::new(sender), config);
-// 		oracle_price_feeder.initialize_fetchers().await;
-//
-// 		let price_responses = oracle_price_feeder.fetchers[0].get_price().await;
-//
-// 		for price_response in price_responses {
-// 			let bytes_price = oracle_price_feeder.float_to_wei_bytes(&price_response.price);
-// 			assert_eq!(bytes_price.len(), 32, "Byte slice length must be 32 bytes");
-// 			println!("String price: {:?}, Bytes price: {:?}", price_response.price, bytes_price);
-// 		}
-// 	}
-// }
+#[cfg(test)]
+mod tests {
+	use super::*;
+	use cccp_primitives::cli::RelayerConfig;
+	use ethers::providers::Http;
+	use tokio::sync::mpsc::{self};
+
+	#[tokio::test]
+	async fn build_price_feeding_transaction() {
+		let config_file =
+			std::fs::File::open("../config.yaml").expect("Could not open config file.");
+		let relayer_config: RelayerConfig =
+			serde_yaml::from_reader(config_file).expect("Config file not valid.");
+		let evm_provider = relayer_config
+			.evm_providers
+			.into_iter()
+			.find(|evm_provider| evm_provider.name == "bfc-testnet")
+			.unwrap();
+		let (sender, _) = mpsc::unbounded_channel::<Eip1559TransactionRequest>();
+		let mut oracle_price_feeder = OraclePriceFeeder::new(
+			Arc::new(sender),
+			relayer_config.oracle_price_feeder.unwrap(),
+			Arc::new(Provider::<Http>::try_from(evm_provider.provider).unwrap()),
+		);
+		println!("oid_bytes: {:?}", oracle_price_feeder.asset_oid);
+
+		oracle_price_feeder.initialize_fetchers().await;
+
+		let price_responses = oracle_price_feeder.fetchers[0].get_price().await;
+		println!("price_responses: {:#?}", price_responses);
+
+		let (mut oid_bytes_list, mut price_bytes_list) = (vec![], vec![]);
+		for price_response in price_responses {
+			oid_bytes_list
+				.push(oracle_price_feeder.asset_oid.get(&price_response.symbol).unwrap().clone());
+			price_bytes_list.push(oracle_price_feeder.float_to_wei_bytes(&price_response.price));
+		}
+		let request = oracle_price_feeder
+			.build_transaction(oid_bytes_list.clone(), price_bytes_list.clone())
+			.await;
+		println!("oid_bytes_list: {:?}", oid_bytes_list);
+		println!("price_bytes_list: {:?}", price_bytes_list);
+
+		println!("price relay transaction: {:#?}", request);
+	}
+}
