@@ -81,7 +81,7 @@ impl CoingeckoPriceFetcher {
 	}
 
 	async fn get_all_coin_list() -> Vec<SupportCoin> {
-		let mut retry_interval = Duration::from_secs(1);
+		let mut retry_interval = Duration::from_secs(30);
 		loop {
 			match reqwest::get("https://api.coingecko.com/api/v3/coins/list").await {
 				Ok(response) => match response.json::<Vec<SupportCoin>>().await {
@@ -107,7 +107,7 @@ impl CoingeckoPriceFetcher {
 	}
 
 	async fn _send_request(&self, url: Url) -> HashMap<String, HashMap<String, f64>> {
-		let mut retry_interval = Duration::from_secs(1);
+		let mut retry_interval = Duration::from_secs(30);
 		loop {
 			match reqwest::get(url.clone()).await {
 				Ok(response) =>
