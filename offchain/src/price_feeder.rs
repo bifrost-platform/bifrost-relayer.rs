@@ -40,10 +40,10 @@ impl<T: JsonRpcClient> OffchainWorker for OraclePriceFeeder<T> {
 			let price_responses = self.fetchers[0].get_price().await;
 
 			let (mut oid_bytes_list, mut price_bytes_list) = (vec![], vec![]);
-			for price_response in price_responses {
+			price_responses.iter().for_each(|price_response| {
 				oid_bytes_list.push(self.asset_oid.get(&price_response.symbol).unwrap().clone());
 				price_bytes_list.push(self.float_to_wei_bytes(&price_response.price));
-			}
+			});
 
 			let request = self.build_transaction(oid_bytes_list, price_bytes_list).await;
 			self.request_send_transaction(request).await;
