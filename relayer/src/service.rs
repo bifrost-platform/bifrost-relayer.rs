@@ -1,11 +1,13 @@
 use cccp_client::eth::{
 	BlockManager, CCCPHandler, EthClient, EventSender, Handler, TransactionManager, WalletManager,
 };
+use cccp_offchain::OraclePriceFeeder;
 use cccp_primitives::{
 	cli::{Configuration, HandlerConfig, HandlerType},
 	eth::{BridgeDirection, Contract, EthClientConfiguration},
 };
 
+use cccp_primitives::offchain::OffchainWorker;
 use ethers::{
 	providers::{Http, Provider},
 	types::H160,
@@ -105,6 +107,37 @@ pub fn new_relay_base(config: Configuration) -> Result<RelayBase, ServiceError> 
 			async move { tx_manager.run().await },
 		)
 	});
+
+	// initialize oracle price feeder & spawn tasks
+	config
+		.relayer_config
+		.offchain_configs
+		.unwrap()
+		.oracle_price_feeder
+		.unwrap()
+		.iter()
+		.for_each(|price_feeder_config| {
+			let client = clients
+				.iter()
+				.find(|client| client.get_chain_id() == price_feeder_config.network_id)
+				.unwrap()
+				.clone();
+			let channel = event_channels
+				.iter()
+				.find(|channel| channel.id == price_feeder_config.network_id)
+				.expect("Invalid network_id on oracle_price_feeder config")
+				.clone();
+
+			let mut oracle_price_feeder =
+				OraclePriceFeeder::new(channel, price_feeder_config.clone(), client.get_provider());
+			task_manager.spawn_essential_handle().spawn(
+				Box::leak(
+					format!("{}-Oracle-price-feeder", client.get_chain_name()).into_boxed_str(),
+				),
+				Some("offchain"),
+				async move { oracle_price_feeder.run().await },
+			);
+		});
 
 	let socket_contracts = build_socket_contracts(&config.relayer_config.handler_configs);
 

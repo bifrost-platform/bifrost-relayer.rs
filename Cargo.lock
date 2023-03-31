@@ -710,6 +710,7 @@ version = "0.1.0"
 dependencies = [
  "cc-cli",
  "cccp-client",
+ "cccp-offchain",
  "cccp-primitives",
  "ethers",
  "sc-cli",

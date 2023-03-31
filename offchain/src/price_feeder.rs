@@ -1,5 +1,6 @@
 use crate::price_source::PriceFetchers;
 use async_trait::async_trait;
+use cccp_client::eth::EventSender;
 use cccp_primitives::{
 	cli::PriceFeederConfig,
 	offchain::{OffchainWorker, PriceFetcher, TimeDrivenOffchainWorker},
@@ -7,14 +8,11 @@ use cccp_primitives::{
 use ethers::{
 	prelude::abigen,
 	providers::{JsonRpcClient, Provider},
-	types::{Eip1559TransactionRequest, H160, U256},
+	types::{TransactionRequest, H160, U256},
 	utils::hex,
 };
 use std::{collections::HashMap, str::FromStr, sync::Arc, time::SystemTime};
-use tokio::{
-	sync::mpsc::UnboundedSender,
-	time::{sleep, Duration},
-};
+use tokio::time::{sleep, Duration};
 
 abigen!(
 	SocketBifrost,
@@ -26,7 +24,7 @@ pub struct OraclePriceFeeder<T> {
 	pub feed_interval: Duration,
 	pub contract: SocketBifrost<Provider<T>>,
 	pub fetchers: Vec<PriceFetchers>,
-	pub sender: Arc<UnboundedSender<Eip1559TransactionRequest>>,
+	pub event_sender: Arc<EventSender>,
 	pub config: PriceFeederConfig,
 	pub asset_oid: HashMap<String, [u8; 32]>,
 }
@@ -67,8 +65,8 @@ impl<T: JsonRpcClient> TimeDrivenOffchainWorker for OraclePriceFeeder<T> {
 }
 
 impl<T: JsonRpcClient> OraclePriceFeeder<T> {
-	fn new(
-		sender: Arc<UnboundedSender<Eip1559TransactionRequest>>,
+	pub fn new(
+		event_sender: Arc<EventSender>,
 		config: PriceFeederConfig,
 		client: Arc<Provider<T>>,
 	) -> Self {
@@ -142,7 +140,7 @@ impl<T: JsonRpcClient> OraclePriceFeeder<T> {
 			feed_interval: Duration::from_secs(config.feed_interval),
 			contract: SocketBifrost::new(H160::from_str(&config.contract).unwrap(), client.clone()),
 			fetchers: vec![],
-			sender,
+			event_sender,
 			config,
 			asset_oid,
 		}
@@ -167,8 +165,8 @@ impl<T: JsonRpcClient> OraclePriceFeeder<T> {
 		&self,
 		oid_bytes_list: Vec<[u8; 32]>,
 		price_bytes_list: Vec<[u8; 32]>,
-	) -> Eip1559TransactionRequest {
-		Eip1559TransactionRequest::new().to(self.contract.address()).data(
+	) -> TransactionRequest {
+		TransactionRequest::new().to(self.contract.address()).data(
 			self.contract
 				.oracle_aggregate_feeding(oid_bytes_list, price_bytes_list)
 				.calldata()
@@ -177,8 +175,8 @@ impl<T: JsonRpcClient> OraclePriceFeeder<T> {
 	}
 
 	/// Request send transaction to the target event channel.
-	async fn request_send_transaction(&self, request: Eip1559TransactionRequest) {
-		match self.sender.send(request) {
+	async fn request_send_transaction(&self, request: TransactionRequest) {
+		match self.event_sender.sender.send(request) {
 			Ok(()) => println!("Oracle price feed request sent successfully"),
 			Err(e) => println!("Failed to send oracle price feed request: {}", e),
 		}
@@ -203,10 +201,12 @@ mod tests {
 			.into_iter()
 			.find(|evm_provider| evm_provider.name == "bfc-testnet")
 			.unwrap();
-		let (sender, _) = mpsc::unbounded_channel::<Eip1559TransactionRequest>();
+		let (sender, _) = mpsc::unbounded_channel::<TransactionRequest>();
+		let event_sender = EventSender { id: evm_provider.id, sender };
+
 		let mut oracle_price_feeder = OraclePriceFeeder::new(
-			Arc::new(sender),
-			relayer_config.oracle_price_feeder.unwrap(),
+			Arc::new(event_sender),
+			relayer_config.offchain_configs.unwrap().oracle_price_feeder.unwrap()[0].clone(),
 			Arc::new(Provider::<Http>::try_from(evm_provider.provider).unwrap()),
 		);
 		println!("oid_bytes: {:?}", oracle_price_feeder.asset_oid);

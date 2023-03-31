@@ -55,8 +55,7 @@ pub struct RelayerConfig {
 	pub handler_configs: Vec<HandlerConfig>,
 	pub mnemonic: String,
 	/// Offchain worker configs
-	pub oracle_price_feeder: Option<PriceFeederConfig>,
-	// pub offchain_configs: Option<Vec<OffchainWorkerConfig>>,
+	pub offchain_configs: Option<OffchainWorkerConfig>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -126,7 +125,7 @@ pub struct PriceFeederConfig {
 }
 
 #[derive(Debug, Clone, Deserialize)]
-pub enum OffchainWorkerConfig {
+pub struct OffchainWorkerConfig {
 	/// Oracle price feeder
-	OraclePriceFeeder(PriceFeederConfig),
+	pub oracle_price_feeder: Option<Vec<PriceFeederConfig>>,
 }
