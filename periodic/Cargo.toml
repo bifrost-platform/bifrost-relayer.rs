@@ -1,5 +1,5 @@
 [package]
-name = "cccp-offchain"
+name = "cccp-periodic"
 version = "0.1.0"
 description = "The offchain implementation for BIFROST relayer"
 authors = ["bifrost-platform"]

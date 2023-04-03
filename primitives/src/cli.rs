@@ -1,4 +1,4 @@
-use crate::offchain::PriceSource;
+use crate::periodic::PriceSource;
 use ethers::types::U64;
 use serde::Deserialize;
 
@@ -55,8 +55,8 @@ pub struct RelayerConfig {
 	/// Handler configs
 	pub handler_configs: Vec<HandlerConfig>,
 	pub mnemonic: String,
-	/// Offchain worker configs
-	pub offchain_configs: Option<OffchainWorkerConfig>,
+	/// Periodic worker configs
+	pub periodic_configs: Option<PeriodicWorkerConfig>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -128,7 +128,7 @@ pub struct PriceFeederConfig {
 }
 
 #[derive(Debug, Clone, Deserialize)]
-pub struct OffchainWorkerConfig {
+pub struct PeriodicWorkerConfig {
 	/// Oracle price feeder
 	pub oracle_price_feeder: Option<Vec<PriceFeederConfig>>,
 }

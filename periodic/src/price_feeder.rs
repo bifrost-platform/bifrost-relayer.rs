@@ -5,8 +5,8 @@ use cccp_client::eth::{
 };
 use cccp_primitives::{
 	cli::PriceFeederConfig,
-	contracts::socket_bifrost::SocketBifrost,
-	offchain::{get_asset_oids, OffchainWorker, PriceFetcher, TimeDrivenOffchainWorker},
+	contracts::socket_bifrost::{get_asset_oids, SocketBifrost},
+	periodic::{PeriodicWorker, PriceFetcher},
 };
 use cron::Schedule;
 use ethers::{
@@ -35,7 +35,7 @@ pub struct OraclePriceFeeder<T> {
 }
 
 #[async_trait]
-impl<T: JsonRpcClient> OffchainWorker for OraclePriceFeeder<T> {
+impl<T: JsonRpcClient> PeriodicWorker for OraclePriceFeeder<T> {
 	async fn run(&mut self) {
 		self.initialize_fetchers().await;
 
@@ -56,10 +56,6 @@ impl<T: JsonRpcClient> OffchainWorker for OraclePriceFeeder<T> {
 				.await;
 		}
 	}
-}
-
-#[async_trait]
-impl<T: JsonRpcClient> TimeDrivenOffchainWorker for OraclePriceFeeder<T> {
 	async fn wait_until_next_time(&self) {
 		// calculate sleep duration for next schedule
 		let sleep_duration =
@@ -192,7 +188,7 @@ mod tests {
 
 		let mut oracle_price_feeder = OraclePriceFeeder::new(
 			Arc::new(event_sender),
-			relayer_config.offchain_configs.unwrap().oracle_price_feeder.unwrap()[0].clone(),
+			relayer_config.periodic_configs.unwrap().oracle_price_feeder.unwrap()[0].clone(),
 			client,
 		);
 		oracle_price_feeder.initialize_fetchers().await;

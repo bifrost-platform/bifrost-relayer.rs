@@ -2,11 +2,11 @@ use cccp_client::eth::{
 	BlockManager, BridgeRelayHandler, EthClient, EventSender, Handler, TransactionManager,
 	WalletManager,
 };
-use cccp_offchain::OraclePriceFeeder;
+use cccp_periodic::OraclePriceFeeder;
 use cccp_primitives::{
 	cli::{Configuration, HandlerConfig, HandlerType},
 	eth::{BridgeDirection, Contract, EthClientConfiguration},
-	offchain::OffchainWorker,
+	periodic::PeriodicWorker,
 };
 
 use ethers::{
@@ -113,7 +113,7 @@ pub fn new_relay_base(config: Configuration) -> Result<RelayBase, ServiceError> 
 	// initialize oracle price feeder & spawn tasks
 	config
 		.relayer_config
-		.offchain_configs
+		.periodic_configs
 		.unwrap()
 		.oracle_price_feeder
 		.unwrap()
@@ -136,7 +136,7 @@ pub fn new_relay_base(config: Configuration) -> Result<RelayBase, ServiceError> 
 				Box::leak(
 					format!("{}-Oracle-price-feeder", client.get_chain_name()).into_boxed_str(),
 				),
-				Some("offchain"),
+				Some("periodic"),
 				async move { oracle_price_feeder.run().await },
 			);
 		});

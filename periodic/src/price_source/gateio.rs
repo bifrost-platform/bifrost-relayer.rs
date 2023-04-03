@@ -1,4 +1,4 @@
-use cccp_primitives::offchain::{PriceFetcher, PriceResponse};
+use cccp_primitives::periodic::{PriceFetcher, PriceResponse};
 use reqwest::Url;
 use serde::Deserialize;
 
