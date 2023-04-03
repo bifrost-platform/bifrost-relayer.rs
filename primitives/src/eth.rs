@@ -362,3 +362,19 @@ impl BuiltRelayTransaction {
 		Self { tx_request, is_external }
 	}
 }
+
+const CLIENT_NAME_MAX_LENGTH: usize = 15;
+
+impl EthClientConfiguration {
+	pub fn new(
+		mut name: String,
+		id: u32,
+		call_interval: u64,
+		if_destination_chain: BridgeDirection,
+	) -> Self {
+		let space = " ".repeat(CLIENT_NAME_MAX_LENGTH - name.len());
+		name.push_str(&space);
+
+		Self { name, id, call_interval, if_destination_chain }
+	}
+}
