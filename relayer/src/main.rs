@@ -6,6 +6,8 @@ use cc_cli::{
 };
 
 fn main() {
+	env_logger::init();
+
 	let tokio_runtime = build_runtime().unwrap();
 	let configuration = create_configuration(tokio_runtime.handle().clone()).unwrap();
 

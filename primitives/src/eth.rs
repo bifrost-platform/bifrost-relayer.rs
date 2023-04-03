@@ -45,16 +45,17 @@ impl SocketEventStatus {
 			6 => SocketEventStatus::Rejected,
 			7 => SocketEventStatus::Committed,
 			8 => SocketEventStatus::Rollbacked,
-			_ => panic!("invalid socket event status received: {:?}", status),
+			_ => panic!("Unknown socket event status received: {:?}", status),
 		}
 	}
 }
 
 #[derive(Clone, Copy, Debug)]
+/// The CCCP protocols bridge direction.
 pub enum BridgeDirection {
-	/// From external network, to bifrost network
+	/// From external network, to bifrost network.
 	Inbound,
-	/// From bifrost network, to external network
+	/// From bifrost network, to external network.
 	Outbound,
 }
 
@@ -69,4 +70,20 @@ pub struct EthClientConfiguration {
 	pub call_interval: u64,
 	/// Bridge direction when bridge event points this chain as destination.
 	pub if_destination_chain: BridgeDirection,
+}
+
+const CLIENT_NAME_MAX_LENGTH: usize = 15;
+
+impl EthClientConfiguration {
+	pub fn new(
+		mut name: String,
+		id: u32,
+		call_interval: u64,
+		if_destination_chain: BridgeDirection,
+	) -> Self {
+		let space = " ".repeat(CLIENT_NAME_MAX_LENGTH - name.len());
+		name.push_str(&space);
+
+		Self { name, id, call_interval, if_destination_chain }
+	}
 }

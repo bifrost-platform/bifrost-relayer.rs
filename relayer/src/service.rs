@@ -74,15 +74,15 @@ pub fn new_relay_base(config: Configuration) -> Result<RelayBase, ServiceError> 
 			let client = Arc::new(EthClient::new(
 				wallet,
 				Arc::new(Provider::<Http>::try_from(evm_provider.provider).unwrap()),
-				EthClientConfiguration {
-					name: evm_provider.name,
-					id: evm_provider.id,
-					call_interval: evm_provider.interval,
-					if_destination_chain: match evm_provider.is_native.unwrap_or(false) {
+				EthClientConfiguration::new(
+					evm_provider.name,
+					evm_provider.id,
+					evm_provider.interval,
+					match evm_provider.is_native.unwrap_or(false) {
 						true => BridgeDirection::Inbound,
 						_ => BridgeDirection::Outbound,
 					},
-				},
+				),
 			));
 			let (tx_manager, event_sender) = TransactionManager::new(client.clone());
 			let block_manager = BlockManager::new(client.clone(), target_contracts);
@@ -129,7 +129,7 @@ pub fn new_relay_base(config: Configuration) -> Result<RelayBase, ServiceError> 
 				.clone();
 
 			let mut oracle_price_feeder =
-				OraclePriceFeeder::new(channel, price_feeder_config.clone(), client.get_provider());
+				OraclePriceFeeder::new(channel, price_feeder_config.clone(), client.clone());
 			task_manager.spawn_essential_handle().spawn(
 				Box::leak(
 					format!("{}-Oracle-price-feeder", client.get_chain_name()).into_boxed_str(),
@@ -197,7 +197,7 @@ pub fn new_relay_base(config: Configuration) -> Result<RelayBase, ServiceError> 
 	block_managers.into_iter().for_each(|block_manager| {
 		task_manager.spawn_essential_handle().spawn(
 			Box::leak(
-				format!("{}-tx-manager", block_manager.client.get_chain_name()).into_boxed_str(),
+				format!("{}-block-manager", block_manager.client.get_chain_name()).into_boxed_str(),
 			),
 			Some("block-managers"),
 			async move { block_manager.run().await },
