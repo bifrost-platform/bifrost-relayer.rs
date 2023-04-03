@@ -1,6 +1,8 @@
 use crate::price_source::PriceFetchers;
 use async_trait::async_trait;
-use cccp_client::eth::{EventMessage, EventSender};
+use cccp_client::eth::{
+	EthClient, EventMessage, EventMetadata, EventSender, PriceFeedMetadata, DEFAULT_RETRIES,
+};
 use cccp_primitives::{
 	cli::PriceFeederConfig,
 	offchain::{get_asset_oids, OffchainWorker, PriceFetcher, TimeDrivenOffchainWorker},
@@ -20,13 +22,22 @@ abigen!(
 	event_derives(serde::Deserialize, serde::Serialize)
 );
 
+/// The essential task that handles oracle price feedings.
 pub struct OraclePriceFeeder<T> {
+	/// The time schedule that represents when to send price feeds.
 	pub schedule: Schedule,
+	/// The target oracle contract instance.
 	pub contract: SocketBifrost<Provider<T>>,
+	/// The source for fetching prices.
 	pub fetchers: Vec<PriceFetchers>,
+	/// The event sender that sends messages to the event channel.
 	pub event_sender: Arc<EventSender>,
+	/// The price feeder configurations.
 	pub config: PriceFeederConfig,
+	/// The pre-defined oracle ID's for each asset.
 	pub asset_oid: HashMap<String, H256>,
+	/// The `EthClient` to interact with the connected blockchain.
+	pub client: Arc<EthClient<T>>,
 }
 
 #[async_trait]
@@ -47,7 +58,8 @@ impl<T: JsonRpcClient> OffchainWorker for OraclePriceFeeder<T> {
 			});
 
 			let request = self.build_transaction(oid_bytes_list, price_bytes_list).await;
-			self.request_send_transaction(request).await;
+			self.request_send_transaction(request, PriceFeedMetadata::new(price_responses))
+				.await;
 		}
 	}
 }
@@ -67,17 +79,21 @@ impl<T: JsonRpcClient> OraclePriceFeeder<T> {
 	pub fn new(
 		event_sender: Arc<EventSender>,
 		config: PriceFeederConfig,
-		client: Arc<Provider<T>>,
+		client: Arc<EthClient<T>>,
 	) -> Self {
 		let asset_oid = get_asset_oids();
 
 		Self {
 			schedule: Schedule::from_str(&config.schedule).unwrap(),
-			contract: SocketBifrost::new(H160::from_str(&config.contract).unwrap(), client.clone()),
+			contract: SocketBifrost::new(
+				H160::from_str(&config.contract).unwrap(),
+				client.get_provider().clone(),
+			),
 			fetchers: vec![],
 			event_sender,
 			config,
 			asset_oid,
+			client,
 		}
 	}
 
@@ -95,7 +111,7 @@ impl<T: JsonRpcClient> OraclePriceFeeder<T> {
 		U256::from((f64::from_str(value).unwrap() * 1_000_000_000_000_000_000f64) as u128).into()
 	}
 
-	/// Build transaction.
+	/// Build price feed transaction.
 	async fn build_transaction(
 		&self,
 		oid_bytes_list: Vec<[u8; 32]>,
@@ -110,14 +126,29 @@ impl<T: JsonRpcClient> OraclePriceFeeder<T> {
 	}
 
 	/// Request send transaction to the target event channel.
-	async fn request_send_transaction(&self, request: TransactionRequest) {
-		match self
-			.event_sender
-			.sender
-			.send(EventMessage { retries_remaining: 10, tx_request: request })
-		{
-			Ok(()) => println!("Oracle price feed request sent successfully"),
-			Err(e) => println!("Failed to send oracle price feed request: {}", e),
+	async fn request_send_transaction(
+		&self,
+		tx_request: TransactionRequest,
+		metadata: PriceFeedMetadata,
+	) {
+		match self.event_sender.sender.send(EventMessage::new(
+			DEFAULT_RETRIES,
+			tx_request,
+			EventMetadata::PriceFeed(metadata.clone()),
+		)) {
+			Ok(()) => log::info!(
+				target: &self.client.get_chain_name(),
+				"-[price-oracle       ] 💵 Request price feed transaction to chain({:?}): {}",
+				self.config.chain_id,
+				metadata
+			),
+			Err(error) => log::error!(
+				target: &self.client.get_chain_name(),
+				"-[price-oracle       ] ❗️ Failed to request price feed transaction to chain({:?}): {}, Error: {}",
+				self.config.chain_id,
+				metadata,
+				error.to_string()
+			),
 		}
 	}
 }
@@ -125,7 +156,11 @@ impl<T: JsonRpcClient> OraclePriceFeeder<T> {
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use cccp_primitives::cli::RelayerConfig;
+	use cccp_client::eth::WalletManager;
+	use cccp_primitives::{
+		cli::RelayerConfig,
+		eth::{BridgeDirection, EthClientConfiguration},
+	};
 	use ethers::providers::Http;
 	use tokio::sync::mpsc::{self};
 
@@ -142,10 +177,28 @@ mod tests {
 		let (sender, _) = mpsc::unbounded_channel::<EventMessage>();
 		let event_sender = EventSender { id: evm_provider.id, sender };
 
+		let wallet =
+			WalletManager::from_private_key(relayer_config.mnemonic.as_str(), evm_provider.id)
+				.expect("Failed to initialize wallet manager");
+
+		let client = Arc::new(EthClient::new(
+			wallet,
+			Arc::new(Provider::<Http>::try_from(evm_provider.provider).unwrap()),
+			EthClientConfiguration::new(
+				evm_provider.name,
+				evm_provider.id,
+				evm_provider.interval,
+				match evm_provider.is_native.unwrap_or(false) {
+					true => BridgeDirection::Inbound,
+					_ => BridgeDirection::Outbound,
+				},
+			),
+		));
+
 		let mut oracle_price_feeder = OraclePriceFeeder::new(
 			Arc::new(event_sender),
 			relayer_config.offchain_configs.unwrap().oracle_price_feeder.unwrap()[0].clone(),
-			Arc::new(Provider::<Http>::try_from(evm_provider.provider).unwrap()),
+			client,
 		);
 		oracle_price_feeder.initialize_fetchers().await;
 
