@@ -5,22 +5,16 @@ use cccp_client::eth::{
 };
 use cccp_primitives::{
 	cli::PriceFeederConfig,
+	contracts::socket_bifrost::SocketBifrost,
 	offchain::{get_asset_oids, OffchainWorker, PriceFetcher, TimeDrivenOffchainWorker},
 };
 use cron::Schedule;
 use ethers::{
-	prelude::abigen,
 	providers::{JsonRpcClient, Provider},
 	types::{TransactionRequest, H160, H256, U256},
 };
 use std::{collections::HashMap, str::FromStr, sync::Arc};
 use tokio::time::sleep;
-
-abigen!(
-	SocketBifrost,
-	"../abi/abi.socket.bifrost.json",
-	event_derives(serde::Deserialize, serde::Serialize)
-);
 
 /// The essential task that handles oracle price feedings.
 pub struct OraclePriceFeeder<T> {

@@ -1,7 +1,12 @@
 use std::{str::FromStr, sync::Arc};
 
 // TODO: Move event sig into handler structure (Initialize from config.yaml)
-use cccp_primitives::eth::{BridgeDirection, Contract, SocketEventStatus, SOCKET_EVENT_SIG};
+use cccp_primitives::{
+	contracts::socket_external::{
+		PollSubmit, Signatures, SocketClient, SocketEvents, SocketExternal, SocketMessage,
+	},
+	eth::{BridgeDirection, Contract, SocketEventStatus, SOCKET_EVENT_SIG},
+};
 use ethers::{
 	abi::{encode, RawLog, Token},
 	prelude::decode_logs,
@@ -13,12 +18,11 @@ use tokio::sync::broadcast::Receiver;
 use tokio_stream::StreamExt;
 
 use crate::eth::{
-	BlockMessage, EthClient, EventMessage, EventMetadata, EventSender, Handler, PollSubmit,
-	RelayMetadata, Signatures, SocketClient, SocketEvents, SocketExternal, SocketMessage,
+	BlockMessage, EthClient, EventMessage, EventMetadata, EventSender, Handler, RelayMetadata,
 	DEFAULT_RETRIES,
 };
 
-/// The essential task that handles `bridge relay`-related events.
+/// The essential task that handles `bridge relay` related events.
 pub struct BridgeRelayHandler<T> {
 	/// The event senders that sends messages to the event channel.
 	pub event_senders: Vec<Arc<EventSender>>,
