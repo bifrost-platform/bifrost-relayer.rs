@@ -10,7 +10,7 @@ pub struct BinancePriceFetcher {
 impl PriceFetcher for BinancePriceFetcher {
 	async fn get_price_with_symbol(&self, symbol: String) -> String {
 		let mut url = self.base_url.join("ticker/price").unwrap();
-		url.query_pairs_mut().append_pair("symbol", symbol.replace("_", "").as_str());
+		url.query_pairs_mut().append_pair("symbol", symbol.replace('_', "").as_str());
 
 		self._send_request(url).await.price
 	}
@@ -26,7 +26,7 @@ impl PriceFetcher for BinancePriceFetcher {
 impl BinancePriceFetcher {
 	pub async fn new(mut symbols: Vec<String>) -> Self {
 		for s in symbols.iter_mut() {
-			*s = s.replace("_", "");
+			*s = s.replace('_', "");
 		}
 
 		Self {

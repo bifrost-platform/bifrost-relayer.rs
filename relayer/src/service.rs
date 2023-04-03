@@ -146,24 +146,24 @@ pub fn new_relay_base(config: Configuration) -> Result<RelayBase, ServiceError> 
 		match handler_config.handler_type {
 			HandlerType::Socket | HandlerType::Vault =>
 				handler_config.watch_list.iter().for_each(|target| {
-					let block_manager = block_managers
-						.iter()
-						.find(|manager| manager.client.get_chain_id() == target.chain_id)
-						.expect(&format!(
-							"Unknown chain id ({:?}) required on initializing socket handler.",
-							target.chain_id
-						));
+					let block_manager =
+						block_managers
+							.iter()
+							.find(|manager| manager.client.get_chain_id() == target.chain_id)
+							.unwrap_or_else(|| {
+								panic!("Unknown chain id ({:?}) required on initializing socket handler.",target.chain_id)
+							});
 					// initialize a new block receiver
 					let block_receiver = block_manager.sender.subscribe();
 
-					let client = clients
-						.iter()
-						.find(|client| client.get_chain_id() == target.chain_id)
-						.cloned()
-						.expect(&format!(
-							"Unknown chain id ({:?}) required on initializing socket handler.",
-							target.chain_id
-						));
+					let client =
+						clients
+							.iter()
+							.find(|client| client.get_chain_id() == target.chain_id)
+							.cloned()
+							.unwrap_or_else(|| {
+								panic!("Unknown chain id ({:?}) required on initializing socket handler.",target.chain_id)
+							});
 
 					let target_socket = socket_contracts
 						.iter()

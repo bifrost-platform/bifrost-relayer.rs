@@ -60,7 +60,7 @@ impl Display for PriceFeedMetadata {
 		let result = self
 			.prices
 			.iter()
-			.map(|price| format!("{}: {}", price.symbol, price.price).to_string())
+			.map(|price| format!("{}: {}", price.symbol, price.price))
 			.collect::<Vec<String>>();
 		write!(f, "PriceFeed({})", result.join(", "),)
 	}

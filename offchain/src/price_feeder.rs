@@ -87,7 +87,7 @@ impl<T: JsonRpcClient> OraclePriceFeeder<T> {
 			schedule: Schedule::from_str(&config.schedule).unwrap(),
 			contract: SocketBifrost::new(
 				H160::from_str(&config.contract).unwrap(),
-				client.get_provider().clone(),
+				client.get_provider(),
 			),
 			fetchers: vec![],
 			event_sender,
