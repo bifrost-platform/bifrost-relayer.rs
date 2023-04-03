@@ -11,6 +11,7 @@ repository = "https://github.com/bifrost-platform/cccp-relayer"
 [dependencies]
 cc-cli = { path = "../client/cli" }
 cccp-client = { path = "../client" }
+cccp-offchain = { path = "../offchain" }
 cccp-primitives = { path = "../primitives" }
 sc-cli = { git = "https://github.com/bifrost-platform/bifrost-substrate", branch = "bifrost-polkadot-v0.9.35" }
 sc-service = { git = "https://github.com/bifrost-platform/bifrost-substrate", branch = "bifrost-polkadot-v0.9.35" }

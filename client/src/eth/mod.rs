@@ -57,6 +57,11 @@ impl<T: JsonRpcClient> EthClient<T> {
 		self.config.id
 	}
 
+	/// Returns Arc<Provider>
+	pub fn get_provider(&self) -> Arc<Provider<T>> {
+		self.provider.clone()
+	}
+
 	/// Retrieves the latest mined block number of the connected chain.
 	pub async fn get_latest_block_number(&self) -> EthResult<U64> {
 		self.provider.get_block_number().await
