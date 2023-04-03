@@ -18,8 +18,8 @@ use crate::eth::{
 	DEFAULT_RETRIES,
 };
 
-/// The essential task that handles CCCP-related events.
-pub struct CCCPHandler<T> {
+/// The essential task that handles `bridge relay`-related events.
+pub struct BridgeRelayHandler<T> {
 	/// The event senders that sends messages to the event channel.
 	pub event_senders: Vec<Arc<EventSender>>,
 	/// The block receiver that consumes new blocks from the block channel.
@@ -34,8 +34,8 @@ pub struct CCCPHandler<T> {
 	pub socket_contracts: Vec<Contract>,
 }
 
-impl<T: JsonRpcClient> CCCPHandler<T> {
-	/// Instantiates a new `CCCPHandler` instance.
+impl<T: JsonRpcClient> BridgeRelayHandler<T> {
+	/// Instantiates a new `BridgeRelayHandler` instance.
 	pub fn new(
 		event_senders: Vec<Arc<EventSender>>,
 		block_receiver: Receiver<BlockMessage>,
@@ -56,7 +56,7 @@ impl<T: JsonRpcClient> CCCPHandler<T> {
 }
 
 #[async_trait::async_trait]
-impl<T: JsonRpcClient> Handler for CCCPHandler<T> {
+impl<T: JsonRpcClient> Handler for BridgeRelayHandler<T> {
 	async fn run(&mut self) {
 		loop {
 			let block_msg = self.block_receiver.recv().await.unwrap();
@@ -171,7 +171,7 @@ impl<T: JsonRpcClient> Handler for CCCPHandler<T> {
 }
 
 #[async_trait::async_trait]
-impl<T: JsonRpcClient> SocketClient for CCCPHandler<T> {
+impl<T: JsonRpcClient> SocketClient for BridgeRelayHandler<T> {
 	fn build_poll_call_data(&self, msg: SocketMessage, sigs: Signatures) -> Bytes {
 		let poll_submit = PollSubmit { msg, sigs, option: U256::default() };
 		self.target_socket.poll(poll_submit).calldata().unwrap()
@@ -260,7 +260,7 @@ impl<T: JsonRpcClient> SocketClient for CCCPHandler<T> {
 	}
 }
 
-impl<T: JsonRpcClient> CCCPHandler<T> {
+impl<T: JsonRpcClient> BridgeRelayHandler<T> {
 	/// Sends the `SocketMessage` to the target chain channel.
 	async fn send_socket_message(
 		&self,

@@ -1,5 +1,6 @@
 use cccp_client::eth::{
-	BlockManager, CCCPHandler, EthClient, EventSender, Handler, TransactionManager, WalletManager,
+	BlockManager, BridgeRelayHandler, EthClient, EventSender, Handler, TransactionManager,
+	WalletManager,
 };
 use cccp_offchain::OraclePriceFeeder;
 use cccp_primitives::{
@@ -174,7 +175,7 @@ pub fn new_relay_base(config: Configuration) -> Result<RelayBase, ServiceError> 
 						.find(|socket| socket.chain_id == client.get_chain_id())
 						.unwrap();
 
-					let mut cccp_handler = CCCPHandler::new(
+					let mut bridge_relay_handler = BridgeRelayHandler::new(
 						event_channels.clone(),
 						block_receiver,
 						client.clone(),
@@ -192,7 +193,7 @@ pub fn new_relay_base(config: Configuration) -> Result<RelayBase, ServiceError> 
 							.into_boxed_str(),
 						),
 						Some("handlers"),
-						async move { cccp_handler.run().await },
+						async move { bridge_relay_handler.run().await },
 					);
 				}),
 		}
