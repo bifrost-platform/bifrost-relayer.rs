@@ -1,6 +1,6 @@
 use std::fmt::Display;
 
-use cccp_primitives::eth::SocketEventStatus;
+use cccp_primitives::{eth::SocketEventStatus, PriceResponse};
 use ethers::types::TransactionRequest;
 use tokio::sync::mpsc::UnboundedSender;
 
@@ -44,9 +44,32 @@ impl Display for RelayMetadata {
 }
 
 #[derive(Clone, Debug)]
+pub struct PriceFeedMetadata {
+	/// The fetched price responses mapped to token symbol.
+	pub prices: Vec<PriceResponse>,
+}
+
+impl PriceFeedMetadata {
+	pub fn new(prices: Vec<PriceResponse>) -> Self {
+		Self { prices }
+	}
+}
+
+impl Display for PriceFeedMetadata {
+	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		let result = self
+			.prices
+			.iter()
+			.map(|price| format!("{}: {}", price.symbol, price.price).to_string())
+			.collect::<Vec<String>>();
+		write!(f, "PriceFeed({})", result.join(", "),)
+	}
+}
+
+#[derive(Clone, Debug)]
 pub enum EventMetadata {
 	Relay(RelayMetadata),
-	// TODO: add PriceFeed
+	PriceFeed(PriceFeedMetadata),
 }
 
 impl Display for EventMetadata {
@@ -56,6 +79,7 @@ impl Display for EventMetadata {
 			"{}",
 			match self {
 				EventMetadata::Relay(metadata) => metadata.to_string(),
+				EventMetadata::PriceFeed(metadata) => metadata.to_string(),
 			}
 		)
 	}

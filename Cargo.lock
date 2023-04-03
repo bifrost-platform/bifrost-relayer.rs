@@ -686,6 +686,7 @@ dependencies = [
  "chrono",
  "cron",
  "ethers",
+ "log",
  "reqwest",
  "serde",
  "serde_json",

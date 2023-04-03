@@ -61,13 +61,15 @@ pub trait OffchainWorker {
 
 #[async_trait]
 pub trait TimeDrivenOffchainWorker {
-	/// Wait until next schedule
+	/// Wait until it reaches the next schedule.
 	async fn wait_until_next_time(&self);
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize)]
 pub struct PriceResponse {
+	/// The token symbol.
 	pub symbol: String,
+	/// The current price of the token.
 	pub price: String,
 }
 
@@ -81,9 +83,9 @@ pub enum PriceSource {
 
 #[async_trait]
 pub trait PriceFetcher {
-	/// Get price with ticker symbol
+	/// Get price with ticker symbol.
 	async fn get_price_with_symbol(&self, symbol: String) -> String;
 
-	/// Get all prices of support coin/token
+	/// Get all prices of support coin/token.
 	async fn get_price(&self) -> Vec<PriceResponse>;
 }

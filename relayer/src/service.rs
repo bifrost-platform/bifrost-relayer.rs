@@ -129,7 +129,7 @@ pub fn new_relay_base(config: Configuration) -> Result<RelayBase, ServiceError> 
 				.clone();
 
 			let mut oracle_price_feeder =
-				OraclePriceFeeder::new(channel, price_feeder_config.clone(), client.get_provider());
+				OraclePriceFeeder::new(channel, price_feeder_config.clone(), client.clone());
 			task_manager.spawn_essential_handle().spawn(
 				Box::leak(
 					format!("{}-Oracle-price-feeder", client.get_chain_name()).into_boxed_str(),
