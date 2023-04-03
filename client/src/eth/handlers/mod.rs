@@ -1,8 +1,6 @@
 mod bridge_relay_handler;
-mod vsp_handler;
 
 pub use bridge_relay_handler::*;
-pub use vsp_handler::*;
 
 use ethers::types::{TransactionReceipt, TransactionRequest, H256};
 
