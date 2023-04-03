@@ -22,7 +22,7 @@ use crate::eth::{
 	DEFAULT_RETRIES,
 };
 
-/// The essential task that handles `bridge relay`-related events.
+/// The essential task that handles `bridge relay` related events.
 pub struct BridgeRelayHandler<T> {
 	/// The event senders that sends messages to the event channel.
 	pub event_senders: Vec<Arc<EventSender>>,
