@@ -1,3 +1,4 @@
+use crate::offchain::PriceSource;
 use serde::Deserialize;
 use std::{borrow::Cow, fmt::Display};
 
@@ -237,4 +238,19 @@ pub struct PrometheusConfig {
 	pub is_external: Option<bool>,
 	/// Prometheus exporter TCP Port.
 	pub port: Option<u16>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct PriceFeederConfig {
+	pub chain_id: u32,
+	pub schedule: String,
+	pub contract: String,
+	pub price_sources: Vec<PriceSource>,
+	pub symbols: Vec<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct OffchainWorkerConfig {
+	/// Oracle price feeder
+	pub oracle_price_feeder: Option<Vec<PriceFeederConfig>>,
 }
