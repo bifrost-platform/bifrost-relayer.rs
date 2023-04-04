@@ -234,7 +234,7 @@ impl<T: JsonRpcClient> SocketClient for CCCPHandler<T> {
 			Token::FixedBytes(msg.params.token_idx1.into()),
 			Token::Address(msg.params.refund),
 			Token::Address(msg.params.to),
-			Token::Uint(msg.params.amount.into()),
+			Token::Uint(msg.params.amount),
 			Token::Bytes(msg.params.variants.to_vec()),
 		]);
 		let msg_token =
