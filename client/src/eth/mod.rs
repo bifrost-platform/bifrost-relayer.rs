@@ -4,8 +4,7 @@ pub use events::*;
 mod handlers;
 pub use handlers::*;
 
-mod contracts;
-pub use contracts::*;
+pub use cccp_primitives::contracts::*;
 
 mod tx;
 pub use tx::*;

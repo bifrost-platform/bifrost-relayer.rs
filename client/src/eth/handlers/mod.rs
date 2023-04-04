@@ -1,5 +1,6 @@
-mod cccp_handler;
-pub use cccp_handler::*;
+mod bridge_relay_handler;
+
+pub use bridge_relay_handler::*;
 
 use ethers::types::{TransactionReceipt, TransactionRequest, H256};
 
