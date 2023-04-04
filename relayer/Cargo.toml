@@ -13,7 +13,7 @@ log = "0.4.17"
 env_logger = "0.10.0"
 cc-cli = { path = "../client/cli" }
 cccp-client = { path = "../client" }
-cccp-offchain = { path = "../offchain" }
+cccp-periodic = { path = "../periodic" }
 cccp-primitives = { path = "../primitives" }
 sc-cli = { git = "https://github.com/bifrost-platform/bifrost-substrate", branch = "bifrost-polkadot-v0.9.35" }
 sc-service = { git = "https://github.com/bifrost-platform/bifrost-substrate", branch = "bifrost-polkadot-v0.9.35" }

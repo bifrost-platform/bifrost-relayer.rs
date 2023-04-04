@@ -3,7 +3,7 @@ use crate::price_source::{
 	upbit::UpbitPriceFetcher,
 };
 use async_trait::async_trait;
-use cccp_primitives::offchain::{PriceFetcher, PriceResponse, PriceSource};
+use cccp_primitives::periodic::{PriceFetcher, PriceResponse, PriceSource};
 
 pub mod binance;
 pub mod chainlink;

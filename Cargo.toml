@@ -2,7 +2,7 @@
 members = [
 	"client",
 	"client/cli",
-	"offchain",
+	"periodic",
 	"primitives",
     "relayer",
 ]
