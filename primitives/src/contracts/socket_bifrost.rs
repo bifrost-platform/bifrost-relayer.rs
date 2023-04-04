@@ -1,7 +1,12 @@
-use async_trait::async_trait;
-use ethers::types::H256;
-use serde::Deserialize;
-use std::{collections::HashMap, str::FromStr};
+use ethers::prelude::{abigen, H256};
+use std::collections::HashMap;
+use std::str::FromStr;
+
+abigen!(
+	SocketBifrost,
+	"../abi/abi.socket.bifrost.json",
+	event_derives(serde::Deserialize, serde::Serialize)
+);
 
 pub fn get_asset_oids() -> HashMap<String, H256> {
 	HashMap::from([
@@ -51,41 +56,4 @@ pub fn get_asset_oids() -> HashMap<String, H256> {
 				.unwrap(),
 		),
 	])
-}
-
-#[async_trait]
-pub trait OffchainWorker {
-	/// Starts the offchain worker.
-	async fn run(&mut self);
-}
-
-#[async_trait]
-pub trait TimeDrivenOffchainWorker {
-	/// Wait until it reaches the next schedule.
-	async fn wait_until_next_time(&self);
-}
-
-#[derive(Clone, Debug, Deserialize)]
-pub struct PriceResponse {
-	/// The token symbol.
-	pub symbol: String,
-	/// The current price of the token.
-	pub price: String,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-pub enum PriceSource {
-	Binance,
-	Coingecko,
-	Gateio,
-	Upbit,
-}
-
-#[async_trait]
-pub trait PriceFetcher {
-	/// Get price with ticker symbol.
-	async fn get_price_with_symbol(&self, symbol: String) -> String;
-
-	/// Get all prices of support coin/token.
-	async fn get_price(&self) -> Vec<PriceResponse>;
 }
