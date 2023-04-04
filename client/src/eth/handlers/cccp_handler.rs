@@ -3,10 +3,11 @@ use std::{str::FromStr, sync::Arc};
 // TODO: Move event sig into handler structure (Initialize from config.yaml)
 use cccp_primitives::eth::{BridgeDirection, Contract, SocketEventStatus, SOCKET_EVENT_SIG};
 use ethers::{
-	abi::RawLog,
+	abi::{RawLog, Token, Tokenizable},
 	prelude::decode_logs,
 	providers::{JsonRpcClient, Provider},
-	types::{Bytes, TransactionReceipt, TransactionRequest, H160, H256, U256},
+	signers::Signer,
+	types::{Bytes, Signature, TransactionReceipt, TransactionRequest, H160, H256, U256},
 };
 use tokio::sync::broadcast::Receiver;
 use tokio_stream::StreamExt;
@@ -174,6 +175,39 @@ impl<T: JsonRpcClient> SocketClient for CCCPHandler<T> {
 	fn build_poll_call_data(&self, msg: SocketMessage, sigs: Signatures) -> Bytes {
 		let poll_submit = PollSubmit { msg, sigs, option: U256::default() };
 		self.target_socket.poll(poll_submit).calldata().unwrap()
+	}
+
+	fn encode_socket_message(&self, msg: SocketMessage) -> Bytes {
+		let req_id_token = Token::Tuple(vec![
+			Token::FixedBytes(msg.req_id.chain.into()),
+			Token::Uint(msg.req_id.round_id.into()),
+			Token::Uint(msg.req_id.sequence.into()),
+		]);
+		let status_token = Token::Uint(msg.status.into());
+		let ins_code_token = Token::Tuple(vec![
+			Token::FixedBytes(msg.ins_code.chain.into()),
+			Token::FixedBytes(msg.ins_code.method.into()),
+		]);
+		let params_token = Token::Tuple(vec![
+			Token::FixedBytes(msg.params.token_idx0.into()),
+			Token::FixedBytes(msg.params.token_idx1.into()),
+			Token::Address(msg.params.refund),
+			Token::Address(msg.params.to),
+			Token::Uint(msg.params.amount.into()),
+			Token::Bytes(msg.params.variants.to_vec()),
+		]);
+		let msg_token =
+			Token::Tuple(vec![req_id_token, status_token, ins_code_token, params_token]);
+		Bytes::from_token(msg_token).unwrap()
+	}
+
+	async fn sign_socket_message(&self, msg: SocketMessage) -> Signature {
+		self.client
+			.wallet
+			.signer
+			.sign_message(self.encode_socket_message(msg))
+			.await
+			.unwrap()
 	}
 
 	async fn get_signatures(&self, msg: SocketMessage) -> Signatures {

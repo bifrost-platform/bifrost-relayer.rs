@@ -1,4 +1,8 @@
-use ethers::{abi::RawLog, prelude::abigen, types::Bytes};
+use ethers::{
+	abi::RawLog,
+	prelude::abigen,
+	types::{Bytes, Signature},
+};
 
 abigen!(
 	SocketExternal,
@@ -48,6 +52,12 @@ impl ethers::contract::EthLogDecode for SocketEvents {
 pub trait SocketClient {
 	/// Builds the `poll()` function call data.
 	fn build_poll_call_data(&self, msg: SocketMessage, sigs: Signatures) -> Bytes;
+
+	/// Encodes the given socket message to bytes.
+	fn encode_socket_message(&self, msg: SocketMessage) -> Bytes;
+
+	/// Signs the given socket message.
+	async fn sign_socket_message(&self, msg: SocketMessage) -> Signature;
 
 	/// Get the signatures of the given message.
 	async fn get_signatures(&self, msg: SocketMessage) -> Signatures;
