@@ -1,4 +1,5 @@
 use crate::offchain::PriceSource;
+use ethers::types::U64;
 use serde::Deserialize;
 
 pub type Result<T> = std::result::Result<T, Error>;
@@ -77,7 +78,9 @@ pub struct EVMProvider {
 	/// Endpoint provider
 	pub provider: String,
 	/// The time interval(ms) used when to request a new block
-	pub interval: u64,
+	pub call_interval: u64,
+	/// The number of confirmations required for a block to be processed.
+	pub block_confirmations: U64,
 	/// True if bifrost network. False for else networks.
 	pub is_native: Option<bool>,
 }

@@ -30,7 +30,7 @@ impl PriceFetcher for GateioPriceFetcher {
 			.filter_map(|ticker| {
 				if self.symbols.contains(&ticker.currency_pair) {
 					Some(PriceResponse {
-						symbol: ticker.currency_pair.replace("_", ""),
+						symbol: ticker.currency_pair.replace('_', ""),
 						price: ticker.last.clone(),
 					})
 				} else {
