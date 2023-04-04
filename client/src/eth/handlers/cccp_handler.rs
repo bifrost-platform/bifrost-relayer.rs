@@ -177,6 +177,47 @@ impl<T: JsonRpcClient> SocketClient for CCCPHandler<T> {
 		self.target_socket.poll(poll_submit).calldata().unwrap()
 	}
 
+	async fn build_signatures(&self, mut msg: SocketMessage, is_inbound: bool) -> Signatures {
+		let status = SocketEventStatus::from_u8(msg.status);
+		if is_inbound {
+			// build signatures for inbound requests
+			match status {
+				SocketEventStatus::Requested => Signatures::default(),
+				SocketEventStatus::Executed => {
+					msg.status = SocketEventStatus::Accepted.into();
+					Signatures::from(self.sign_socket_message(msg).await)
+				},
+				SocketEventStatus::Reverted => {
+					msg.status = SocketEventStatus::Rejected.into();
+					Signatures::from(self.sign_socket_message(msg).await)
+				},
+				SocketEventStatus::Accepted | SocketEventStatus::Rejected =>
+					self.get_signatures(msg).await,
+				_ => panic!(
+					"{}]-[cccp-handler       ] Unknown socket event status received: {:?}",
+					self.client.get_chain_name(),
+					status
+				),
+			}
+		} else {
+			// build signatures for outbound requests
+			match status {
+				SocketEventStatus::Requested => {
+					msg.status = SocketEventStatus::Accepted.into();
+					Signatures::from(self.sign_socket_message(msg).await)
+				},
+				SocketEventStatus::Accepted | SocketEventStatus::Rejected =>
+					self.get_signatures(msg).await,
+				SocketEventStatus::Executed | SocketEventStatus::Reverted => Signatures::default(),
+				_ => panic!(
+					"{}]-[cccp-handler       ] Unknown socket event status received: {:?}",
+					self.client.get_chain_name(),
+					status
+				),
+			}
+		}
+	}
+
 	fn encode_socket_message(&self, msg: SocketMessage) -> Bytes {
 		let req_id_token = Token::Tuple(vec![
 			Token::FixedBytes(msg.req_id.chain.into()),

@@ -53,6 +53,20 @@ impl SocketEventStatus {
 	}
 }
 
+impl From<SocketEventStatus> for u8 {
+	fn from(status: SocketEventStatus) -> Self {
+		match status {
+			SocketEventStatus::Requested => 1,
+			SocketEventStatus::Executed => 3,
+			SocketEventStatus::Reverted => 4,
+			SocketEventStatus::Accepted => 5,
+			SocketEventStatus::Rejected => 6,
+			SocketEventStatus::Committed => 7,
+			SocketEventStatus::Rollbacked => 8,
+		}
+	}
+}
+
 #[derive(Clone, Copy, Debug)]
 /// The CCCP protocols bridge direction.
 pub enum BridgeDirection {
