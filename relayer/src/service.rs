@@ -77,7 +77,8 @@ pub fn new_relay_base(config: Configuration) -> Result<RelayBase, ServiceError> 
 				EthClientConfiguration::new(
 					evm_provider.name,
 					evm_provider.id,
-					evm_provider.interval,
+					evm_provider.call_interval,
+					evm_provider.block_confirmations,
 					match evm_provider.is_native.unwrap_or(false) {
 						true => BridgeDirection::Inbound,
 						_ => BridgeDirection::Outbound,
@@ -148,10 +149,12 @@ pub fn new_relay_base(config: Configuration) -> Result<RelayBase, ServiceError> 
 					let block_manager = block_managers
 						.iter()
 						.find(|manager| manager.client.get_chain_id() == target.chain_id)
-						.expect(&format!(
-							"Unknown chain id ({:?}) required on initializing socket handler.",
-							target.chain_id
-						));
+						.unwrap_or_else(|| {
+							panic!(
+								"Unknown chain id ({:?}) required on initializing socket handler.",
+								target.chain_id
+							)
+						});
 					// initialize a new block receiver
 					let block_receiver = block_manager.sender.subscribe();
 
@@ -159,10 +162,12 @@ pub fn new_relay_base(config: Configuration) -> Result<RelayBase, ServiceError> 
 						.iter()
 						.find(|client| client.get_chain_id() == target.chain_id)
 						.cloned()
-						.expect(&format!(
-							"Unknown chain id ({:?}) required on initializing socket handler.",
-							target.chain_id
-						));
+						.unwrap_or_else(|| {
+							panic!(
+								"Unknown chain id ({:?}) required on initializing socket handler.",
+								target.chain_id
+							)
+						});
 
 					let target_socket = socket_contracts
 						.iter()
@@ -194,7 +199,7 @@ pub fn new_relay_base(config: Configuration) -> Result<RelayBase, ServiceError> 
 	});
 
 	// spawn block managers' tasks
-	block_managers.into_iter().for_each(|block_manager| {
+	block_managers.into_iter().for_each(|mut block_manager| {
 		task_manager.spawn_essential_handle().spawn(
 			Box::leak(
 				format!("{}-block-manager", block_manager.client.get_chain_name()).into_boxed_str(),

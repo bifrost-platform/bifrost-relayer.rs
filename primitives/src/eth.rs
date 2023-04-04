@@ -1,4 +1,7 @@
-use ethers::{providers::ProviderError, types::H160};
+use ethers::{
+	providers::ProviderError,
+	types::{H160, U64},
+};
 
 pub type EthResult<T = ()> = Result<T, ProviderError>;
 
@@ -66,6 +69,8 @@ pub struct EthClientConfiguration {
 	pub name: String,
 	/// Id of chain which this client interact with.
 	pub id: u32,
+	/// The number of confirmations required for a block to be processed.
+	pub block_confirmations: U64,
 	/// The `get_block` request interval in milliseconds.
 	pub call_interval: u64,
 	/// Bridge direction when bridge event points this chain as destination.
@@ -79,11 +84,12 @@ impl EthClientConfiguration {
 		mut name: String,
 		id: u32,
 		call_interval: u64,
+		block_confirmations: U64,
 		if_destination_chain: BridgeDirection,
 	) -> Self {
 		let space = " ".repeat(CLIENT_NAME_MAX_LENGTH - name.len());
 		name.push_str(&space);
 
-		Self { name, id, call_interval, if_destination_chain }
+		Self { name, id, call_interval, block_confirmations, if_destination_chain }
 	}
 }

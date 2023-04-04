@@ -7,20 +7,24 @@ evm_providers:
   - name: "bfc-testnet"
     id: 49088
     provider: ""
-    interval: 2000
+    call_interval: 2000
+    block_confirmations: 10
     is_native: true
   - name: "eth-goerli"
     id: 5
     provider: ""
-    interval: 5000
+    call_interval: 5000
+    block_confirmations: 2
   - name: "bsc-testnet"
     id: 97
     provider: ""
-    interval: 2000
+    call_interval: 2000
+    block_confirmations: 10
   - name: "matic-mumbai"
     id: 80001
     provider: ""
-    interval: 1000
+    call_interval: 1000
+    block_confirmations: 15
 
 handler_configs:
   - handler_type: Socket
@@ -51,5 +55,5 @@ offchain_configs:
     - chain_id: 49088
       schedule: "0 */5 * * * * *"
       contract: "0x0218371b18340aBD460961bdF3Bd5F01858dAB53"
-      price_sources: [ Coingecko ]
-      symbols: [ "ETH", "BFC", "BNB", "MATIC", "USDC", "BIFI" ]
+      price_sources: [Coingecko]
+      symbols: ["ETH", "BFC", "BNB", "MATIC", "USDC", "BIFI"]

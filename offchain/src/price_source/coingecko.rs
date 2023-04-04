@@ -44,7 +44,7 @@ impl PriceFetcher for CoingeckoPriceFetcher {
 
 		self.ids
 			.iter()
-			.filter_map(|id| {
+			.map(|id| {
 				let price = response.get(id).unwrap().get("usd").unwrap().to_string();
 				let symbol = self
 					.supported_coins
@@ -53,7 +53,7 @@ impl PriceFetcher for CoingeckoPriceFetcher {
 					.unwrap()
 					.symbol
 					.to_uppercase();
-				Some(PriceResponse { symbol, price })
+				PriceResponse { symbol, price }
 			})
 			.collect()
 	}
@@ -61,7 +61,8 @@ impl PriceFetcher for CoingeckoPriceFetcher {
 
 impl CoingeckoPriceFetcher {
 	pub async fn new(symbols: Vec<String>) -> Self {
-		let support_coin_list: Vec<SupportedCoin> = CoingeckoPriceFetcher::get_all_coin_list().await;
+		let support_coin_list: Vec<SupportedCoin> =
+			CoingeckoPriceFetcher::get_all_coin_list().await;
 
 		let ids: Vec<String> = symbols
 			.iter()

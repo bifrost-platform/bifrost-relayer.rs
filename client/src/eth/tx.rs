@@ -97,9 +97,10 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> {
 					if let Some(receipt) = receipt {
 						log::info!(
 							target: &self.client.get_chain_name(),
-							"-[transaction-manager] 🎁 The requested transaction has been successfully mined in block: {}, {:?}-{:?}",
+							"-[transaction-manager] 🎁 The requested transaction has been successfully mined in block: {}, {:?}-{:?}-{:?}",
 							msg.metadata.to_string(),
 							receipt.block_number.unwrap(),
+							receipt.status.unwrap(),
 							receipt.transaction_hash
 						);
 					} else {
