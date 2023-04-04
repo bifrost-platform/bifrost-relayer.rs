@@ -59,9 +59,8 @@ impl<T: JsonRpcClient> BlockManager<T> {
 		Self { client, sender, target_contracts, pending_block: U64::default() }
 	}
 
-	/// Starts the block manager. Reads every new mined block of the connected chain and starts to
-	/// publish to the block channel.
-	pub async fn run(&mut self) {
+	/// Initialize block manager.
+	async fn initialize(&mut self) {
 		// TODO: follow-up to the highest block
 		log::info!(
 			target: &self.client.get_chain_name(),
@@ -79,6 +78,12 @@ impl<T: JsonRpcClient> BlockManager<T> {
 				block.hash.unwrap(),
 			);
 		}
+	}
+
+	/// Starts the block manager. Reads every new mined block of the connected chain and starts to
+	/// publish to the block channel.
+	pub async fn run(&mut self) {
+		self.initialize().await;
 
 		loop {
 			let latest_block = self.client.get_latest_block_number().await.unwrap();
@@ -132,10 +137,6 @@ impl<T: JsonRpcClient> BlockManager<T> {
 
 	/// Verifies if the stored pending block waited for confirmations.
 	fn is_block_confirmed(&self, latest_block: U64) -> bool {
-		if latest_block.saturating_sub(self.pending_block) > self.client.config.block_confirmations
-		{
-			return true
-		}
-		false
+		latest_block.saturating_sub(self.pending_block) > self.client.config.block_confirmations
 	}
 }
