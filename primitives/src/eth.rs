@@ -370,11 +370,12 @@ impl EthClientConfiguration {
 		mut name: String,
 		id: u32,
 		call_interval: u64,
+		block_confirmations: U64,
 		if_destination_chain: BridgeDirection,
 	) -> Self {
 		let space = " ".repeat(CLIENT_NAME_MAX_LENGTH - name.len());
 		name.push_str(&space);
 
-		Self { name, id, call_interval, if_destination_chain }
+		Self { name, id, call_interval, block_confirmations, if_destination_chain }
 	}
 }

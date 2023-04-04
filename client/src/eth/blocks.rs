@@ -48,35 +48,56 @@ pub struct BlockManager<T> {
 	pub sender: Sender<BlockMessage>,
 	/// The target contracts this chain is watching.
 	pub target_contracts: Vec<H160>,
+	/// The pending block waiting for some confirmations.
+	pub pending_block: U64,
 }
 
 impl<T: JsonRpcClient> BlockManager<T> {
 	/// Instantiates a new `BlockManager` instance.
 	pub fn new(client: Arc<EthClient<T>>, target_contracts: Vec<H160>) -> Self {
 		let (sender, _receiver) = broadcast::channel(512); // TODO: size?
-		Self { client, sender, target_contracts }
+		Self { client, sender, target_contracts, pending_block: U64::default() }
 	}
 
-	/// Starts the block manager. Reads every new mined block of the connected chain and starts to
-	/// publish to the block channel.
-	pub async fn run(&self) {
+	/// Initialize block manager.
+	async fn initialize(&mut self) {
 		// TODO: follow-up to the highest block
 		log::info!(
 			target: &self.client.get_chain_name(),
 			"-[block-manager      ] 📃 Target contracts: {:?}",
 			self.target_contracts
 		);
+
+		// initialize pending block to the latest block
+		self.pending_block = self.client.get_latest_block_number().await.unwrap();
+		if let Some(block) = self.client.get_block(self.pending_block.into()).await.unwrap() {
+			log::info!(
+				target: &self.client.get_chain_name(),
+				"-[block-manager      ] 💤 Idle, best: #{:?} ({})",
+				block.number.unwrap(),
+				block.hash.unwrap(),
+			);
+		}
+	}
+
+	/// Starts the block manager. Reads every new mined block of the connected chain and starts to
+	/// publish to the block channel.
+	pub async fn run(&mut self) {
+		self.initialize().await;
+
 		loop {
-			// TODO: handle block reorgs
 			let latest_block = self.client.get_latest_block_number().await.unwrap();
-			self.process_confirmed_block(latest_block).await;
+			if self.is_block_confirmed(latest_block) {
+				self.process_pending_block().await;
+				self.increment_pending_block();
+			}
 			sleep(Duration::from_millis(self.client.config.call_interval)).await;
 		}
 	}
 
-	/// Process the confirmed block and verifies if any action occurred from the target contracts.
-	async fn process_confirmed_block(&self, block: U64) {
-		if let Some(block) = self.client.get_block(block.into()).await.unwrap() {
+	/// Process the pending block and verifies if any action occurred from the target contracts.
+	async fn process_pending_block(&self) {
+		if let Some(block) = self.client.get_block(self.pending_block.into()).await.unwrap() {
 			let mut target_receipts = vec![];
 			let mut stream = tokio_stream::iter(block.clone().transactions);
 
@@ -99,6 +120,11 @@ impl<T: JsonRpcClient> BlockManager<T> {
 		}
 	}
 
+	/// Increment the pending block.
+	fn increment_pending_block(&mut self) {
+		self.pending_block = self.pending_block.saturating_add(U64::from(1u64));
+	}
+
 	/// Verifies if the transaction was occurred from the target contracts.
 	fn is_in_target_contracts(&self, receipt: &TransactionReceipt) -> bool {
 		if let Some(to) = receipt.to {
@@ -107,5 +133,10 @@ impl<T: JsonRpcClient> BlockManager<T> {
 			})
 		}
 		false
+	}
+
+	/// Verifies if the stored pending block waited for confirmations.
+	fn is_block_confirmed(&self, latest_block: U64) -> bool {
+		latest_block.saturating_sub(self.pending_block) > self.client.config.block_confirmations
 	}
 }
