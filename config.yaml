@@ -8,23 +8,23 @@ evm_providers:
     id: 49088
     provider: ""
     call_interval: 2000
-    block_confirmations: 10
+    block_confirmations: 5
     is_native: true
   - name: "eth-goerli"
     id: 5
     provider: ""
     call_interval: 5000
-    block_confirmations: 2
+    block_confirmations: 1
   - name: "bsc-testnet"
     id: 97
     provider: ""
     call_interval: 2000
-    block_confirmations: 10
+    block_confirmations: 5
   - name: "matic-mumbai"
     id: 80001
     provider: ""
     call_interval: 1000
-    block_confirmations: 15
+    block_confirmations: 7
 
 handler_configs:
   - handler_type: Socket
@@ -48,7 +48,7 @@ handler_configs:
       - chain_id: 80001
         contract: "0xB2ba0020560cF6c164DC48D1E29559AbA8472208"
 
-mnemonic: ""
+mnemonic: "0x5fb92d6e98884f76de468fa3f6278f8807c48bebc13595d45af5bdc4da702133"
 
 offchain_configs:
   oracle_price_feeder:
