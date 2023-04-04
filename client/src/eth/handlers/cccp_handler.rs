@@ -3,10 +3,11 @@ use std::{str::FromStr, sync::Arc};
 // TODO: Move event sig into handler structure (Initialize from config.yaml)
 use cccp_primitives::eth::{BridgeDirection, Contract, SocketEventStatus, SOCKET_EVENT_SIG};
 use ethers::{
-	abi::RawLog,
+	abi::{encode, RawLog, Token},
 	prelude::decode_logs,
 	providers::{JsonRpcClient, Provider},
-	types::{Bytes, TransactionReceipt, TransactionRequest, H160, H256, U256},
+	signers::Signer,
+	types::{Bytes, Signature, TransactionReceipt, TransactionRequest, H160, H256, U256},
 };
 use tokio::sync::broadcast::Receiver;
 use tokio_stream::StreamExt;
@@ -176,6 +177,80 @@ impl<T: JsonRpcClient> SocketClient for CCCPHandler<T> {
 		self.target_socket.poll(poll_submit).calldata().unwrap()
 	}
 
+	async fn build_signatures(&self, mut msg: SocketMessage, is_inbound: bool) -> Signatures {
+		let status = SocketEventStatus::from_u8(msg.status);
+		if is_inbound {
+			// build signatures for inbound requests
+			match status {
+				SocketEventStatus::Requested => Signatures::default(),
+				SocketEventStatus::Executed => {
+					msg.status = SocketEventStatus::Accepted.into();
+					Signatures::from(self.sign_socket_message(msg).await)
+				},
+				SocketEventStatus::Reverted => {
+					msg.status = SocketEventStatus::Rejected.into();
+					Signatures::from(self.sign_socket_message(msg).await)
+				},
+				SocketEventStatus::Accepted | SocketEventStatus::Rejected =>
+					self.get_signatures(msg).await,
+				_ => panic!(
+					"{}]-[cccp-handler       ] Unknown socket event status received: {:?}",
+					self.client.get_chain_name(),
+					status
+				),
+			}
+		} else {
+			// build signatures for outbound requests
+			match status {
+				SocketEventStatus::Requested => {
+					msg.status = SocketEventStatus::Accepted.into();
+					Signatures::from(self.sign_socket_message(msg).await)
+				},
+				SocketEventStatus::Accepted | SocketEventStatus::Rejected =>
+					self.get_signatures(msg).await,
+				SocketEventStatus::Executed | SocketEventStatus::Reverted => Signatures::default(),
+				_ => panic!(
+					"{}]-[cccp-handler       ] Unknown socket event status received: {:?}",
+					self.client.get_chain_name(),
+					status
+				),
+			}
+		}
+	}
+
+	fn encode_socket_message(&self, msg: SocketMessage) -> Bytes {
+		let req_id_token = Token::Tuple(vec![
+			Token::FixedBytes(msg.req_id.chain.into()),
+			Token::Uint(msg.req_id.round_id.into()),
+			Token::Uint(msg.req_id.sequence.into()),
+		]);
+		let status_token = Token::Uint(msg.status.into());
+		let ins_code_token = Token::Tuple(vec![
+			Token::FixedBytes(msg.ins_code.chain.into()),
+			Token::FixedBytes(msg.ins_code.method.into()),
+		]);
+		let params_token = Token::Tuple(vec![
+			Token::FixedBytes(msg.params.token_idx0.into()),
+			Token::FixedBytes(msg.params.token_idx1.into()),
+			Token::Address(msg.params.refund),
+			Token::Address(msg.params.to),
+			Token::Uint(msg.params.amount),
+			Token::Bytes(msg.params.variants.to_vec()),
+		]);
+		let msg_token =
+			Token::Tuple(vec![req_id_token, status_token, ins_code_token, params_token]);
+		encode(&[msg_token]).into()
+	}
+
+	async fn sign_socket_message(&self, msg: SocketMessage) -> Signature {
+		self.client
+			.wallet
+			.signer
+			.sign_message(self.encode_socket_message(msg))
+			.await
+			.unwrap()
+	}
+
 	async fn get_signatures(&self, msg: SocketMessage) -> Signatures {
 		self.target_socket
 			.get_signatures(msg.req_id, msg.status)
@@ -209,17 +284,19 @@ impl<T: JsonRpcClient> CCCPHandler<T> {
 			)
 		};
 
+		// build transaction request
 		let to_socket = self
 			.socket_contracts
 			.iter()
 			.find(|socket| socket.chain_id == relay_tx_chain_id)
 			.unwrap()
 			.address;
-		// TODO: check how to set sigs. For now we just set as default.
+		// the original msg must be used for building calldata
+		let origin_msg = msg.clone();
 		let mut tx_request = TransactionRequest::new();
-		tx_request = tx_request
-			.data(self.build_poll_call_data(msg, Signatures::default()))
-			.to(to_socket);
+		let signatures = self.build_signatures(msg, is_inbound).await;
+		tx_request =
+			tx_request.data(self.build_poll_call_data(origin_msg, signatures)).to(to_socket);
 
 		self.request_send_transaction(relay_tx_chain_id, tx_request, metadata.clone());
 
