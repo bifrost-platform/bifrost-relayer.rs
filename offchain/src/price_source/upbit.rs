@@ -44,7 +44,7 @@ impl UpbitPriceFetcher {
 
 		Self {
 			base_url: Url::parse("https://api.upbit.com/v1/").unwrap(),
-			symbols: symbols_flipped.join(",").to_string(),
+			symbols: symbols_flipped.join(","),
 		}
 	}
 

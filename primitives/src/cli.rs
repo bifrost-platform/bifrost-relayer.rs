@@ -1,4 +1,5 @@
 use crate::offchain::PriceSource;
+use ethers::types::U64;
 use serde::Deserialize;
 use std::{borrow::Cow, fmt::Display};
 

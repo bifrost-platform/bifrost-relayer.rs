@@ -218,7 +218,7 @@ impl<T: JsonRpcClient> CCCPHandler<T> {
 		// TODO: check how to set sigs. For now we just set as default.
 		let mut tx_request = TransactionRequest::new();
 		tx_request = tx_request
-			.data(self.build_poll_call_data(msg.clone(), Signatures::default()))
+			.data(self.build_poll_call_data(msg, Signatures::default()))
 			.to(to_socket);
 
 		self.request_send_transaction(relay_tx_chain_id, tx_request, metadata.clone());
