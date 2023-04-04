@@ -87,7 +87,7 @@ impl<T: JsonRpcClient> OraclePriceFeeder<T> {
 			schedule: Schedule::from_str(&config.schedule).unwrap(),
 			contract: SocketBifrost::new(
 				H160::from_str(&config.contract).unwrap(),
-				client.get_provider().clone(),
+				client.get_provider(),
 			),
 			fetchers: vec![],
 			event_sender,
@@ -187,7 +187,8 @@ mod tests {
 			EthClientConfiguration::new(
 				evm_provider.name,
 				evm_provider.id,
-				evm_provider.interval,
+				evm_provider.call_interval,
+				evm_provider.block_confirmations,
 				match evm_provider.is_native.unwrap_or(false) {
 					true => BridgeDirection::Inbound,
 					_ => BridgeDirection::Outbound,
