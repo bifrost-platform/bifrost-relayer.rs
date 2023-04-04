@@ -3,7 +3,7 @@ use std::{str::FromStr, sync::Arc};
 // TODO: Move event sig into handler structure (Initialize from config.yaml)
 use cccp_primitives::eth::{BridgeDirection, Contract, SocketEventStatus, SOCKET_EVENT_SIG};
 use ethers::{
-	abi::{RawLog, Token, Tokenizable},
+	abi::{encode, RawLog, Token},
 	prelude::decode_logs,
 	providers::{JsonRpcClient, Provider},
 	signers::Signer,
@@ -239,7 +239,7 @@ impl<T: JsonRpcClient> SocketClient for CCCPHandler<T> {
 		]);
 		let msg_token =
 			Token::Tuple(vec![req_id_token, status_token, ins_code_token, params_token]);
-		Bytes::from_token(msg_token).unwrap()
+		encode(&[msg_token]).into()
 	}
 
 	async fn sign_socket_message(&self, msg: SocketMessage) -> Signature {
