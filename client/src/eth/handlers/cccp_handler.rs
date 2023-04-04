@@ -284,17 +284,19 @@ impl<T: JsonRpcClient> CCCPHandler<T> {
 			)
 		};
 
+		// build transaction request
 		let to_socket = self
 			.socket_contracts
 			.iter()
 			.find(|socket| socket.chain_id == relay_tx_chain_id)
 			.unwrap()
 			.address;
-		// TODO: check how to set sigs. For now we just set as default.
+		// the original msg must be used for building calldata
+		let origin_msg = msg.clone();
 		let mut tx_request = TransactionRequest::new();
-		tx_request = tx_request
-			.data(self.build_poll_call_data(msg, Signatures::default()))
-			.to(to_socket);
+		let signatures = self.build_signatures(msg, is_inbound).await;
+		tx_request =
+			tx_request.data(self.build_poll_call_data(origin_msg, signatures)).to(to_socket);
 
 		self.request_send_transaction(relay_tx_chain_id, tx_request, metadata.clone());
 
