@@ -1,4 +1,4 @@
-use crate::offchain::PriceSource;
+use crate::periodic::PriceSource;
 use ethers::types::U64;
 use serde::Deserialize;
 use std::{borrow::Cow, fmt::Display};
@@ -215,7 +215,7 @@ pub struct PriceFeederConfig {
 }
 
 #[derive(Debug, Clone, Deserialize)]
-pub struct OffchainWorkerConfig {
+pub struct PeriodicWorkerConfig {
 	/// Oracle price feeder
 	pub oracle_price_feeder: Option<Vec<PriceFeederConfig>>,
 }

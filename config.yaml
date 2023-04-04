@@ -50,7 +50,7 @@ handler_configs:
 
 mnemonic: "0x5fb92d6e98884f76de468fa3f6278f8807c48bebc13595d45af5bdc4da702133"
 
-offchain_configs:
+periodic_configs:
   oracle_price_feeder:
     - chain_id: 49088
       schedule: "0 */5 * * * * *"
