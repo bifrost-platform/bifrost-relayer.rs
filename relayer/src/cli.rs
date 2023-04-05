@@ -129,8 +129,8 @@ impl Cli {
 	}
 }
 
-const LOG_TARGET: &str = "cccp-relayer";
-const SUB_LOG_TARGET: &str = "main";
+pub const LOG_TARGET: &str = "cccp-relayer";
+pub const SUB_LOG_TARGET: &str = "main";
 
 #[derive(Debug, Clone, Parser)]
 /// The `run` command used to run a relayer.

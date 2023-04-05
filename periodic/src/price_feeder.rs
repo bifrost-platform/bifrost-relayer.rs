@@ -173,7 +173,7 @@ mod tests {
 		let event_sender = EventSender { id: evm_provider.id, sender };
 
 		let wallet =
-			WalletManager::from_private_key(relayer_config.mnemonic.as_str(), evm_provider.id)
+			WalletManager::from_private_key(relayer_config.private_key.as_str(), evm_provider.id)
 				.expect("Failed to initialize wallet manager");
 
 		let client = Arc::new(EthClient::new(

@@ -72,7 +72,8 @@ pub struct RelayerConfig {
 	pub evm_providers: Vec<EVMProvider>,
 	/// Handler configs
 	pub handler_configs: Vec<HandlerConfig>,
-	pub mnemonic: String,
+	/// The private key of the relayer
+	pub private_key: String,
 	/// Periodic worker configs
 	pub periodic_configs: Option<PeriodicWorkerConfig>,
 }

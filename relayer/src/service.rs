@@ -7,6 +7,7 @@ use cccp_primitives::{
 	cli::{Configuration, HandlerConfig, HandlerType},
 	eth::{BridgeDirection, Contract, EthClientConfiguration},
 	periodic::PeriodicWorker,
+	sub_display_format, target_display_format,
 };
 
 use cccp_periodic::roundup_emitter::RoundupEmitter;
@@ -18,7 +19,7 @@ use ethers::{
 use sc_service::{Error as ServiceError, TaskManager};
 use std::{str::FromStr, sync::Arc};
 
-use crate::cli::Cli;
+use crate::cli::{Cli, LOG_TARGET, SUB_LOG_TARGET};
 
 /// Get the target contracts for the `BlockManager` to monitor.
 fn get_target_contracts_by_chain_id(
@@ -71,7 +72,7 @@ pub fn new_relay_base(config: Configuration, cli: Cli) -> Result<RelayBase, Serv
 			);
 
 			let wallet = WalletManager::from_private_key(
-				config.relayer_config.mnemonic.as_str(),
+				config.relayer_config.private_key.as_str(),
 				evm_provider.id,
 			)
 			.expect("Failed to initialize wallet manager");
@@ -106,6 +107,13 @@ pub fn new_relay_base(config: Configuration, cli: Cli) -> Result<RelayBase, Serv
 
 		(clients, tx_managers, block_managers, event_senders)
 	};
+
+	log::info!(
+		target: &target_display_format(LOG_TARGET),
+		"-[{}] 👤 Relayer: {:?}",
+		sub_display_format(SUB_LOG_TARGET),
+		clients[0].address()
+	);
 
 	// Initialize `TaskManager`
 	let task_manager = TaskManager::new(config.tokio_handle, None)?;
