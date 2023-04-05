@@ -1,5 +1,5 @@
 use cccp_primitives::periodic::{PriceFetcher, PriceResponse};
-use reqwest::Url;
+use reqwest::{Response, Url};
 use serde::Deserialize;
 use std::collections::HashMap;
 use tokio::time::{sleep, Duration};
@@ -84,22 +84,41 @@ impl CoingeckoPriceFetcher {
 	async fn get_all_coin_list() -> Vec<SupportedCoin> {
 		let mut retry_interval = Duration::from_secs(30);
 		loop {
-			match reqwest::get("https://api.coingecko.com/api/v3/coins/list").await {
+			match reqwest::get("https://api.coingecko.com/api/v3/coins/list")
+				.await
+				.and_then(Response::error_for_status)
+			{
 				Ok(response) => match response.json::<Vec<SupportedCoin>>().await {
 					Ok(mut coins) => {
 						coins.retain(|x| &x.name != "Beefy.Finance");
 						return coins
 					},
 					Err(e) => {
-						println!("Error decoding support coin list: {}", e);
-						println!("Retry in {:?} secs...", retry_interval);
+						log::error!(
+							target: &format!("{:<015}", "coingecko"),
+							"-[PriceFetcher       ] ❗️ Error decoding support coin list: {}",
+							e
+						);
+						log::error!(
+							target: &format!("{:<015}", "coingecko"),
+							"-[PriceFetcher       ] ❗️ Retry in {:?} secs...",
+							retry_interval
+						);
 						sleep(retry_interval).await;
 						retry_interval *= 2;
 					},
 				},
 				Err(e) => {
-					println!("Error fetching support coin list: {}", e);
-					println!("Retry in {:?} secs...", retry_interval);
+					log::error!(
+						target: &format!("{:<015}", "coingecko"),
+						"-[PriceFetcher       ] ❗️ Error fetching support coin list: {}",
+						e
+					);
+					log::error!(
+						target: &format!("{:<015}", "coingecko"),
+						"-[PriceFetcher       ] ❗️ Retry in {:?} secs...",
+						retry_interval
+					);
 					sleep(retry_interval).await;
 					retry_interval *= 2;
 				},
@@ -110,23 +129,36 @@ impl CoingeckoPriceFetcher {
 	async fn _send_request(&self, url: Url) -> HashMap<String, HashMap<String, f64>> {
 		let mut retry_interval = Duration::from_secs(30);
 		loop {
-			match reqwest::get(url.clone()).await {
+			match reqwest::get(url.clone()).await.and_then(Response::error_for_status) {
 				Ok(response) =>
 					match response.json::<HashMap<String, HashMap<String, f64>>>().await {
 						Ok(result) => return result,
 						Err(e) => {
-							println!(
-								"Error decoding coingecko response. Maybe rete limit exceeds?: {}",
+							log::error!(
+								target: &format!("{:<015}", "coingecko"),
+								"-[PriceFetcher       ] ❗️ Error decoding coingecko response. Maybe rete limit exceeds?: {}",
 								e
 							);
-							println!("Retry in {:?} secs...", retry_interval);
+							log::error!(
+								target: &format!("{:<015}", "coingecko"),
+								"-[PriceFetcher       ] ❗️ Retry in {:?} secs...",
+								retry_interval
+							);
 							sleep(retry_interval).await;
 							retry_interval *= 2;
 						},
 					},
 				Err(e) => {
-					println!("Error fetching from coingecko: {}", e);
-					println!("Retry in {:?} secs...", retry_interval);
+					log::error!(
+						target: &format!("{:<015}", "coingecko"),
+						"-[PriceFetcher       ] ❗️ Error fetching from coingecko: {}",
+						e
+					);
+					log::error!(
+						target: &format!("{:<015}", "coingecko"),
+						"-[PriceFetcher       ] ❗️ Retry in {:?} secs...",
+						retry_interval
+					);
 					sleep(retry_interval).await;
 					retry_interval *= 2;
 				},

@@ -14,7 +14,7 @@ serde = { version = "1.0.153", features = ["derive"] }
 serde_yaml = "0.9.19"
 tokio-stream = "0.1"
 tokio = { version = "1.22.0", features = ["signal", "rt-multi-thread", "parking_lot"] }
-ethers = "2.0"
+ethers = "2.0.2"
 async-trait = "0.1.57"
 
 # local
