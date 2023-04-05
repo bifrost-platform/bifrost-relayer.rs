@@ -12,9 +12,8 @@ use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
 
 use super::{EthClient, EventMessage};
 
-type TransactionMiddleware<T> = NonceManagerMiddleware<
-	SignerMiddleware<GasEscalatorMiddleware<Arc<Provider<T>>, GeometricGasPrice>, LocalWallet>,
->;
+type TransactionMiddleware<T> =
+	NonceManagerMiddleware<SignerMiddleware<GasEscalatorMiddleware<Arc<Provider<T>>>, LocalWallet>>;
 
 /// The essential task that sends asynchronous transactions.
 pub struct TransactionManager<T> {
