@@ -1,7 +1,7 @@
 use ethers::{
 	abi::RawLog,
 	prelude::abigen,
-	types::{Bytes, Signature},
+	types::{Bytes, Signature, TransactionRequest},
 };
 
 abigen!(
@@ -52,6 +52,14 @@ impl ethers::contract::EthLogDecode for SocketEvents {
 pub trait BridgeRelayBuilder {
 	/// Builds the `poll()` function call data.
 	fn build_poll_call_data(&self, msg: SocketMessage, sigs: Signatures) -> Bytes;
+
+	/// Builds the `poll()` transaction request.
+	async fn build_transaction(
+		&self,
+		msg: SocketMessage,
+		is_inbound: bool,
+		relay_tx_chain_id: u32,
+	) -> TransactionRequest;
 
 	/// Build the signatures required to request `poll()`.
 	async fn build_signatures(&self, msg: SocketMessage, is_inbound: bool) -> Signatures;

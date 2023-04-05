@@ -152,6 +152,26 @@ impl<T: JsonRpcClient> BridgeRelayBuilder for BridgeRelayHandler<T> {
 		self.target_socket.poll(poll_submit).calldata().unwrap()
 	}
 
+	async fn build_transaction(
+		&self,
+		msg: SocketMessage,
+		is_inbound: bool,
+		relay_tx_chain_id: u32,
+	) -> TransactionRequest {
+		// build transaction request
+		let to_socket = self
+			.socket_contracts
+			.iter()
+			.find(|socket| socket.chain_id == relay_tx_chain_id)
+			.unwrap()
+			.address;
+		// the original msg must be used for building calldata
+		let origin_msg = msg.clone();
+		let tx_request = TransactionRequest::new();
+		let signatures = self.build_signatures(msg, is_inbound).await;
+		tx_request.data(self.build_poll_call_data(origin_msg, signatures)).to(to_socket)
+	}
+
 	async fn build_signatures(&self, mut msg: SocketMessage, is_inbound: bool) -> Signatures {
 		let status = SocketEventStatus::from_u8(msg.status);
 		if is_inbound {
@@ -260,19 +280,7 @@ impl<T: JsonRpcClient> BridgeRelayHandler<T> {
 		};
 
 		// build transaction request
-		let to_socket = self
-			.socket_contracts
-			.iter()
-			.find(|socket| socket.chain_id == relay_tx_chain_id)
-			.unwrap()
-			.address;
-		// the original msg must be used for building calldata
-		let origin_msg = msg.clone();
-		let mut tx_request = TransactionRequest::new();
-		let signatures = self.build_signatures(msg, is_inbound).await;
-		tx_request =
-			tx_request.data(self.build_poll_call_data(origin_msg, signatures)).to(to_socket);
-
+		let tx_request = self.build_transaction(msg, is_inbound, relay_tx_chain_id).await;
 		self.request_send_transaction(relay_tx_chain_id, tx_request, metadata.clone());
 
 		log::info!(
