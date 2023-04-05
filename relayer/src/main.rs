@@ -1,3 +1,4 @@
+mod cli;
 mod service;
 
 use cc_cli::{
@@ -5,8 +6,14 @@ use cc_cli::{
 	runner::{build_runtime, Runner},
 };
 
+use crate::cli::Cli;
+
 fn main() {
 	env_logger::init();
+
+	let cli = Cli::from_args();
+	println!("cli -> {:?}", cli);
+	cli.print_relayer_infos();
 
 	let tokio_runtime = build_runtime().unwrap();
 	let configuration = create_configuration(tokio_runtime.handle().clone()).unwrap();

@@ -91,7 +91,7 @@ pub struct EthClientConfiguration {
 	pub if_destination_chain: BridgeDirection,
 }
 
-const CLIENT_NAME_MAX_LENGTH: usize = 15;
+pub const CLIENT_NAME_MAX_LENGTH: usize = 15;
 
 impl EthClientConfiguration {
 	pub fn new(

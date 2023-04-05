@@ -7,10 +7,13 @@ homepage = "https://thebifrost.io"
 edition = "2021"
 license = "Unlicense"
 repository = "https://github.com/bifrost-platform/cccp-relayer"
+build = "build.rs"
 
 [dependencies]
 log = "0.4.17"
 env_logger = "0.10.0"
+chrono = "0.4.24"
+clap = { version = "4.2.1", features = ["derive"] }
 cc-cli = { path = "../client/cli" }
 cccp-client = { path = "../client" }
 cccp-periodic = { path = "../periodic" }
@@ -20,6 +23,9 @@ sc-service = { git = "https://github.com/bifrost-platform/bifrost-substrate", br
 serde_yaml = "0.9.19"
 ethers = "2.0.2"
 tokio = { version = "1.22.0", features = ["signal", "rt-multi-thread", "parking_lot"] }
+
+[build-dependencies]
+substrate-build-script-utils = { git = "https://github.com/bifrost-platform/bifrost-substrate", branch = "bifrost-polkadot-v0.9.35" }
 
 [[bin]]
 name = "cccp-relayer"
