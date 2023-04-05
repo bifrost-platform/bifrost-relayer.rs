@@ -124,7 +124,7 @@ impl<T: JsonRpcClient> RoundupEmitter<T> {
 		let sigs = Signatures {
 			r: vec![signed_sigs.r.into()],
 			s: vec![signed_sigs.s.into()],
-			v: Bytes::from((signed_sigs.v + 27).to_be_bytes()),
+			v: Bytes::from(signed_sigs.v.to_be_bytes()),
 		};
 		let round_up_submit = RoundUpSubmit { round, new_relayers, sigs };
 
