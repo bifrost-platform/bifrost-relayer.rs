@@ -29,7 +29,7 @@ pub type TxResult<T = ()> = Result<T, Box<dyn std::error::Error + Send + Sync>>;
 /// The core client for EVM-based chain interactions.
 pub struct EthClient<T> {
 	/// The wallet manager for the connected relayer.
-	wallet: WalletManager,
+	pub wallet: WalletManager,
 	/// The ethers.rs wrapper for the connected chain.
 	provider: Arc<Provider<T>>,
 	/// The specific configuration details for the connected chain.

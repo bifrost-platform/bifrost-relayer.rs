@@ -1,7 +1,7 @@
 use std::fmt::Display;
 
 use cccp_primitives::{eth::SocketEventStatus, PriceResponse};
-use ethers::types::TransactionRequest;
+use ethers::types::{Address, TransactionRequest};
 use tokio::sync::mpsc::UnboundedSender;
 
 /// The default retries of a single transaction request.
@@ -57,12 +57,29 @@ impl PriceFeedMetadata {
 
 impl Display for PriceFeedMetadata {
 	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		write!(f, "PriceFeed({:?})", self.prices)
+	}
+}
+
+#[derive(Clone, Debug)]
+pub struct VSPPhase1Metadata {
+	pub relayer_addresses: Vec<Address>,
+}
+
+impl VSPPhase1Metadata {
+	pub fn new(relayer_addresses: Vec<Address>) -> Self {
+		Self { relayer_addresses }
+	}
+}
+
+impl Display for VSPPhase1Metadata {
+	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
 		let result = self
-			.prices
+			.relayer_addresses
 			.iter()
-			.map(|price| format!("{}: {}", price.symbol, price.price))
+			.map(|address| address.to_string())
 			.collect::<Vec<String>>();
-		write!(f, "PriceFeed({})", result.join(", "),)
+		write!(f, "VSPPhase1({:?})", result,)
 	}
 }
 
@@ -70,6 +87,7 @@ impl Display for PriceFeedMetadata {
 pub enum EventMetadata {
 	Relay(RelayMetadata),
 	PriceFeed(PriceFeedMetadata),
+	VSPPhase1(VSPPhase1Metadata),
 }
 
 impl Display for EventMetadata {
@@ -80,6 +98,7 @@ impl Display for EventMetadata {
 			match self {
 				EventMetadata::Relay(metadata) => metadata.to_string(),
 				EventMetadata::PriceFeed(metadata) => metadata.to_string(),
+				EventMetadata::VSPPhase1(metadata) => metadata.to_string(),
 			}
 		)
 	}
