@@ -6,7 +6,7 @@ use cccp_primitives::{
 		BridgeRelayBuilder, PollSubmit, Signatures, SocketEvents, SocketExternal, SocketMessage,
 	},
 	eth::{BridgeDirection, Contract, SocketEventStatus, SOCKET_EVENT_SIG},
-	target_display_format,
+	sub_display_format, target_display_format,
 };
 use ethers::{
 	abi::{encode, RawLog, Token},
@@ -73,9 +73,9 @@ impl<T: JsonRpcClient> Handler for BridgeRelayHandler<T> {
 			let block_msg = self.block_receiver.recv().await.unwrap();
 
 			log::info!(
-				target: &self.client.get_chain_name(),
+				target: &target_display_format(&self.client.get_chain_name()),
 				"-[{}] ✨ Imported #{:?} ({}) with target transactions({:?})",
-				target_display_format(SUB_LOG_TARGET),
+				sub_display_format(SUB_LOG_TARGET),
 				block_msg.raw_block.number.unwrap(),
 				block_msg.raw_block.hash.unwrap(),
 				block_msg.target_receipts.len(),
@@ -115,9 +115,9 @@ impl<T: JsonRpcClient> Handler for BridgeRelayHandler<T> {
 								);
 
 								log::info!(
-									target: &self.client.get_chain_name(),
+									target: &target_display_format(&self.client.get_chain_name()),
 									"-[{}] 🔖 Detected socket event: {}, {:?}-{:?}",
-									target_display_format(SUB_LOG_TARGET),
+									sub_display_format(SUB_LOG_TARGET),
 									metadata,
 									receipt.block_number.unwrap(),
 									receipt.transaction_hash,
@@ -130,7 +130,7 @@ impl<T: JsonRpcClient> Handler for BridgeRelayHandler<T> {
 						Err(error) => panic!(
 							"{}]-[{}] Unknown error while decoding socket event: {:?}",
 							self.client.get_chain_name(),
-							target_display_format(SUB_LOG_TARGET),
+							sub_display_format(SUB_LOG_TARGET),
 							error
 						),
 					}
@@ -157,17 +157,17 @@ impl<T: JsonRpcClient> Handler for BridgeRelayHandler<T> {
 				))
 				.unwrap();
 			log::info!(
-				target: &self.client.get_chain_name(),
+				target: &target_display_format(&self.client.get_chain_name()),
 				"-[{}] 🔖 Request relay transaction to chain({:?}): {}",
-				target_display_format(SUB_LOG_TARGET),
+				sub_display_format(SUB_LOG_TARGET),
 				chain_id,
 				metadata
 			);
 		} else {
 			panic!(
 				"{}]-[{}] Unknown chain ID received: {:?}",
-				self.client.get_chain_name(),
-				target_display_format(SUB_LOG_TARGET),
+				&target_display_format(&self.client.get_chain_name()),
+				sub_display_format(SUB_LOG_TARGET),
 				chain_id
 			)
 		}
@@ -244,8 +244,8 @@ impl<T: JsonRpcClient> BridgeRelayBuilder for BridgeRelayHandler<T> {
 				},
 				_ => panic!(
 					"{}]-[{}] Unknown socket event status received: {:?}",
-					self.client.get_chain_name(),
-					target_display_format(SUB_LOG_TARGET),
+					&target_display_format(&self.client.get_chain_name()),
+					sub_display_format(SUB_LOG_TARGET),
 					status
 				),
 			};
@@ -264,8 +264,8 @@ impl<T: JsonRpcClient> BridgeRelayBuilder for BridgeRelayHandler<T> {
 				SocketEventStatus::Executed | SocketEventStatus::Reverted => Signatures::default(),
 				_ => panic!(
 					"{}]-[{}] Unknown socket event status received: {:?}",
-					self.client.get_chain_name(),
-					target_display_format(SUB_LOG_TARGET),
+					&target_display_format(&self.client.get_chain_name()),
+					sub_display_format(SUB_LOG_TARGET),
 					status
 				),
 			};
@@ -367,8 +367,8 @@ impl<T: JsonRpcClient> BridgeRelayHandler<T> {
 			SocketEventStatus::Accepted | SocketEventStatus::Rejected => src_chain_id,
 			_ => panic!(
 				"{}]-[{}] Unknown socket event status received: {:?}",
-				self.client.get_chain_name(),
-				target_display_format(SUB_LOG_TARGET),
+				&target_display_format(&self.client.get_chain_name()),
+				sub_display_format(SUB_LOG_TARGET),
 				status
 			),
 		}
@@ -388,8 +388,8 @@ impl<T: JsonRpcClient> BridgeRelayHandler<T> {
 			SocketEventStatus::Accepted | SocketEventStatus::Rejected => dst_chain_id,
 			_ => panic!(
 				"{}]-[{}] Unknown socket event status received: {:?}",
-				self.client.get_chain_name(),
-				target_display_format(SUB_LOG_TARGET),
+				&target_display_format(&self.client.get_chain_name()),
+				sub_display_format(SUB_LOG_TARGET),
 				status
 			),
 		}

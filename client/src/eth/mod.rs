@@ -59,7 +59,7 @@ impl<T: JsonRpcClient> EthClient<T> {
 		self.config.id
 	}
 
-	/// Returns Arc<Provider>
+	/// Returns `Arc<Provider>`.
 	pub fn get_provider(&self) -> Arc<Provider<T>> {
 		self.provider.clone()
 	}

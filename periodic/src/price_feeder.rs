@@ -7,7 +7,7 @@ use cccp_primitives::{
 	cli::PriceFeederConfig,
 	contracts::socket_bifrost::{get_asset_oids, SocketBifrost},
 	periodic::{PeriodicWorker, PriceFetcher},
-	target_display_format,
+	sub_display_format, target_display_format,
 };
 use cron::Schedule;
 use ethers::{
@@ -130,16 +130,16 @@ impl<T: JsonRpcClient> OraclePriceFeeder<T> {
 			EventMetadata::PriceFeed(metadata.clone()),
 		)) {
 			Ok(()) => log::info!(
-				target: &self.client.get_chain_name(),
+				target: &target_display_format(&self.client.get_chain_name()),
 				"-[{}] 💵 Request price feed transaction to chain({:?}): {}",
-				target_display_format(SUB_LOG_TARGET),
+				sub_display_format(SUB_LOG_TARGET),
 				self.config.chain_id,
 				metadata
 			),
 			Err(error) => log::error!(
-				target: &self.client.get_chain_name(),
+				target: &target_display_format(&self.client.get_chain_name()),
 				"-[{}] ❗️ Failed to request price feed transaction to chain({:?}): {}, Error: {}",
-				target_display_format(SUB_LOG_TARGET),
+				sub_display_format(SUB_LOG_TARGET),
 				self.config.chain_id,
 				metadata,
 				error.to_string()

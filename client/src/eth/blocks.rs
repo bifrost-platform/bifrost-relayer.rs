@@ -1,4 +1,4 @@
-use cccp_primitives::target_display_format;
+use cccp_primitives::{sub_display_format, target_display_format};
 use ethers::{
 	providers::JsonRpcClient,
 	types::{Block, TransactionReceipt, H160, H256, U64},
@@ -66,9 +66,9 @@ impl<T: JsonRpcClient> BlockManager<T> {
 	async fn initialize(&mut self) {
 		// TODO: follow-up to the highest block
 		log::info!(
-			target: &self.client.get_chain_name(),
+			target: &target_display_format(&self.client.get_chain_name()),
 			"-[{}] 📃 Target contracts: {:?}",
-			target_display_format(SUB_LOG_TARGET),
+			sub_display_format(SUB_LOG_TARGET),
 			self.target_contracts
 		);
 
@@ -76,9 +76,9 @@ impl<T: JsonRpcClient> BlockManager<T> {
 		self.pending_block = self.client.get_latest_block_number().await.unwrap();
 		if let Some(block) = self.client.get_block(self.pending_block.into()).await.unwrap() {
 			log::info!(
-				target: &self.client.get_chain_name(),
+				target: &target_display_format(&self.client.get_chain_name()),
 				"-[{}] 💤 Idle, best: #{:?} ({})",
-				target_display_format(SUB_LOG_TARGET),
+				sub_display_format(SUB_LOG_TARGET),
 				block.number.unwrap(),
 				block.hash.unwrap(),
 			);
@@ -117,9 +117,9 @@ impl<T: JsonRpcClient> BlockManager<T> {
 				self.sender.send(BlockMessage::new(block.clone(), target_receipts)).unwrap();
 			}
 			log::info!(
-				target: &self.client.get_chain_name(),
+				target: &target_display_format(&self.client.get_chain_name()),
 				"-[{}] ✨ Imported #{:?} ({})",
-				target_display_format(SUB_LOG_TARGET),
+				sub_display_format(SUB_LOG_TARGET),
 				block.number.unwrap(),
 				block.hash.unwrap()
 			);

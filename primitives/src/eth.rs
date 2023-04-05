@@ -3,8 +3,6 @@ use ethers::{
 	types::{H160, U64},
 };
 
-use crate::sub_display_format;
-
 pub type EthResult<T = ()> = Result<T, ProviderError>;
 
 #[derive(Clone, Copy, Debug)]
@@ -101,12 +99,6 @@ impl EthClientConfiguration {
 		block_confirmations: U64,
 		if_destination_chain: BridgeDirection,
 	) -> Self {
-		Self {
-			name: sub_display_format(&name),
-			id,
-			call_interval,
-			block_confirmations,
-			if_destination_chain,
-		}
+		Self { name, id, call_interval, block_confirmations, if_destination_chain }
 	}
 }

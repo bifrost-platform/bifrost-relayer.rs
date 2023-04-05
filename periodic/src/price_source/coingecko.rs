@@ -102,15 +102,15 @@ impl CoingeckoPriceFetcher {
 					},
 					Err(e) => {
 						log::error!(
-							target: &sub_display_format(LOG_TARGET),
+							target: &target_display_format(LOG_TARGET),
 							"-[{}] ❗️ Error decoding support coin list: {}",
-							target_display_format(SUB_LOG_TARGET),
+							sub_display_format(SUB_LOG_TARGET),
 							e
 						);
 						log::error!(
-							target: &sub_display_format(LOG_TARGET),
+							target: &target_display_format(LOG_TARGET),
 							"-[{}] ❗️ Retry in {:?} secs...",
-							target_display_format(SUB_LOG_TARGET),
+							sub_display_format(SUB_LOG_TARGET),
 							retry_interval
 						);
 						sleep(retry_interval).await;
@@ -119,15 +119,15 @@ impl CoingeckoPriceFetcher {
 				},
 				Err(e) => {
 					log::error!(
-						target: &sub_display_format(LOG_TARGET),
+						target: &target_display_format(LOG_TARGET),
 						"-[{}] ❗️ Error fetching support coin list: {}",
-						target_display_format(SUB_LOG_TARGET),
+						sub_display_format(SUB_LOG_TARGET),
 						e
 					);
 					log::error!(
-						target: &sub_display_format(LOG_TARGET),
+						target: &target_display_format(LOG_TARGET),
 						"-[{}] ❗️ Retry in {:?} secs...",
-						target_display_format(SUB_LOG_TARGET),
+						sub_display_format(SUB_LOG_TARGET),
 						retry_interval
 					);
 					sleep(retry_interval).await;
@@ -146,15 +146,15 @@ impl CoingeckoPriceFetcher {
 						Ok(result) => return result,
 						Err(e) => {
 							log::error!(
-								target: &sub_display_format(LOG_TARGET),
+								target: &target_display_format(LOG_TARGET),
 								"-[{}] ❗️ Error decoding coingecko response. Maybe rete limit exceeds?: {}",
-								target_display_format(SUB_LOG_TARGET),
+								sub_display_format(SUB_LOG_TARGET),
 								e
 							);
 							log::error!(
-								target: &sub_display_format(LOG_TARGET),
+								target: &target_display_format(LOG_TARGET),
 								"-[{}] ❗️ Retry in {:?} secs...",
-								target_display_format(SUB_LOG_TARGET),
+								sub_display_format(SUB_LOG_TARGET),
 								retry_interval
 							);
 							sleep(retry_interval).await;
@@ -163,15 +163,15 @@ impl CoingeckoPriceFetcher {
 					},
 				Err(e) => {
 					log::error!(
-						target: &sub_display_format(LOG_TARGET),
+						target: &target_display_format(LOG_TARGET),
 						"-[{}] ❗️ Error fetching from coingecko: {}",
-						target_display_format(SUB_LOG_TARGET),
+						sub_display_format(SUB_LOG_TARGET),
 						e
 					);
 					log::error!(
-						target: &sub_display_format(LOG_TARGET),
+						target: &target_display_format(LOG_TARGET),
 						"-[{}] ❗️ Retry in {:?} secs...",
-						target_display_format(SUB_LOG_TARGET),
+						sub_display_format(SUB_LOG_TARGET),
 						retry_interval
 					);
 					sleep(retry_interval).await;
