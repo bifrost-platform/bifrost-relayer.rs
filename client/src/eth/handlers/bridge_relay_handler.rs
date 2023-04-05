@@ -36,6 +36,8 @@ pub struct BridgeRelayHandler<T> {
 	pub target_socket: SocketExternal<Provider<T>>,
 	/// The socket contracts supporting CCCP.
 	pub socket_contracts: Vec<Contract>,
+	/// The flag whether it will handle aggregated relay transactions to external chains.
+	pub external_enabled: bool,
 }
 
 impl<T: JsonRpcClient> BridgeRelayHandler<T> {
@@ -47,6 +49,7 @@ impl<T: JsonRpcClient> BridgeRelayHandler<T> {
 		target_contract: H160,
 		target_socket: H160,
 		socket_contracts: Vec<Contract>,
+		external_enabled: bool,
 	) -> Self {
 		Self {
 			event_senders,
@@ -55,6 +58,7 @@ impl<T: JsonRpcClient> BridgeRelayHandler<T> {
 			target_contract,
 			target_socket: SocketExternal::new(target_socket, client.provider.clone()),
 			socket_contracts,
+			external_enabled,
 		}
 	}
 }
@@ -129,6 +133,38 @@ impl<T: JsonRpcClient> Handler for BridgeRelayHandler<T> {
 		}
 	}
 
+	fn request_send_transaction(
+		&self,
+		chain_id: u32,
+		tx_request: TransactionRequest,
+		metadata: RelayMetadata,
+	) {
+		if let Some(event_sender) =
+			self.event_senders.iter().find(|event_sender| event_sender.id == chain_id)
+		{
+			event_sender
+				.sender
+				.send(EventMessage::new(
+					DEFAULT_RETRIES,
+					tx_request,
+					EventMetadata::Relay(metadata.clone()),
+				))
+				.unwrap();
+			log::info!(
+				target: &self.client.get_chain_name(),
+				"-[cccp-handler       ] 🔖 Request relay transaction to chain({:?}): {}",
+				chain_id,
+				metadata
+			);
+		} else {
+			panic!(
+				"{}]-[cccp-handler       ] Unknown chain ID received: {:?}",
+				self.client.get_chain_name(),
+				chain_id
+			)
+		}
+	}
+
 	fn is_target_contract(&self, receipt: &TransactionReceipt) -> bool {
 		if let Some(to) = receipt.to {
 			if ethers::utils::to_checksum(&to, None) ==
@@ -157,7 +193,7 @@ impl<T: JsonRpcClient> BridgeRelayBuilder for BridgeRelayHandler<T> {
 		msg: SocketMessage,
 		is_inbound: bool,
 		relay_tx_chain_id: u32,
-	) -> TransactionRequest {
+	) -> (TransactionRequest, bool) {
 		// build transaction request
 		let to_socket = self
 			.socket_contracts
@@ -168,15 +204,23 @@ impl<T: JsonRpcClient> BridgeRelayBuilder for BridgeRelayHandler<T> {
 		// the original msg must be used for building calldata
 		let origin_msg = msg.clone();
 		let tx_request = TransactionRequest::new();
-		let signatures = self.build_signatures(msg, is_inbound).await;
-		tx_request.data(self.build_poll_call_data(origin_msg, signatures)).to(to_socket)
+		let (signatures, to_external) = self.build_signatures(msg, is_inbound).await;
+		(
+			tx_request.data(self.build_poll_call_data(origin_msg, signatures)).to(to_socket),
+			to_external,
+		)
 	}
 
-	async fn build_signatures(&self, mut msg: SocketMessage, is_inbound: bool) -> Signatures {
+	async fn build_signatures(
+		&self,
+		mut msg: SocketMessage,
+		is_inbound: bool,
+	) -> (Signatures, bool) {
 		let status = SocketEventStatus::from_u8(msg.status);
+		let mut to_external = false;
 		if is_inbound {
 			// build signatures for inbound requests
-			match status {
+			let signatures = match status {
 				SocketEventStatus::Requested => Signatures::default(),
 				SocketEventStatus::Executed => {
 					msg.status = SocketEventStatus::Accepted.into();
@@ -186,30 +230,36 @@ impl<T: JsonRpcClient> BridgeRelayBuilder for BridgeRelayHandler<T> {
 					msg.status = SocketEventStatus::Rejected.into();
 					Signatures::from(self.sign_socket_message(msg).await)
 				},
-				SocketEventStatus::Accepted | SocketEventStatus::Rejected =>
-					self.get_signatures(msg).await,
+				SocketEventStatus::Accepted | SocketEventStatus::Rejected => {
+					to_external = true;
+					self.get_signatures(msg).await
+				},
 				_ => panic!(
 					"{}]-[cccp-handler       ] Unknown socket event status received: {:?}",
 					self.client.get_chain_name(),
 					status
 				),
-			}
+			};
+			(signatures, to_external)
 		} else {
 			// build signatures for outbound requests
-			match status {
+			let signatures = match status {
 				SocketEventStatus::Requested => {
 					msg.status = SocketEventStatus::Accepted.into();
 					Signatures::from(self.sign_socket_message(msg).await)
 				},
-				SocketEventStatus::Accepted | SocketEventStatus::Rejected =>
-					self.get_signatures(msg).await,
+				SocketEventStatus::Accepted | SocketEventStatus::Rejected => {
+					to_external = true;
+					self.get_signatures(msg).await
+				},
 				SocketEventStatus::Executed | SocketEventStatus::Reverted => Signatures::default(),
 				_ => panic!(
 					"{}]-[cccp-handler       ] Unknown socket event status received: {:?}",
 					self.client.get_chain_name(),
 					status
 				),
-			}
+			};
+			(signatures, to_external)
 		}
 	}
 
@@ -279,16 +329,18 @@ impl<T: JsonRpcClient> BridgeRelayHandler<T> {
 			)
 		};
 
-		// build transaction request
-		let tx_request = self.build_transaction(msg, is_inbound, relay_tx_chain_id).await;
-		self.request_send_transaction(relay_tx_chain_id, tx_request, metadata.clone());
+		// build and send transaction request
+		let (tx_request, to_external) =
+			self.build_transaction(msg, is_inbound, relay_tx_chain_id).await;
 
-		log::info!(
-			target: &self.client.get_chain_name(),
-			"-[cccp-handler       ] 🔖 Request relay transaction to chain({:?}): {}",
-			relay_tx_chain_id,
-			metadata
-		);
+		if to_external {
+			// send aggregated relay transaction only when `--enable-external` is true.
+			if self.external_enabled {
+				self.request_send_transaction(relay_tx_chain_id, tx_request, metadata);
+			}
+		} else {
+			self.request_send_transaction(relay_tx_chain_id, tx_request, metadata);
+		}
 	}
 
 	/// Get the chain ID of the inbound sequence relay transaction.

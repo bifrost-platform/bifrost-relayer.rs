@@ -18,6 +18,8 @@ use ethers::{
 use sc_service::{Error as ServiceError, TaskManager};
 use std::{str::FromStr, sync::Arc};
 
+use crate::cli::Cli;
+
 /// Get the target contracts for the `BlockManager` to monitor.
 fn get_target_contracts_by_chain_id(
 	chain_id: u32,
@@ -50,11 +52,11 @@ fn build_socket_contracts(handler_configs: &Vec<HandlerConfig>) -> Vec<Contract>
 	contracts
 }
 
-pub fn relay(config: Configuration) -> Result<TaskManager, ServiceError> {
-	new_relay_base(config).map(|RelayBase { task_manager, .. }| task_manager)
+pub fn relay(config: Configuration, cli: Cli) -> Result<TaskManager, ServiceError> {
+	new_relay_base(config, cli).map(|RelayBase { task_manager, .. }| task_manager)
 }
 
-pub fn new_relay_base(config: Configuration) -> Result<RelayBase, ServiceError> {
+pub fn new_relay_base(config: Configuration, cli: Cli) -> Result<RelayBase, ServiceError> {
 	// initialize `EthClient`, `TransactionManager`, `BlockManager`
 	let (clients, tx_managers, block_managers, event_channels) = {
 		let mut clients = vec![];
@@ -190,6 +192,7 @@ pub fn new_relay_base(config: Configuration) -> Result<RelayBase, ServiceError> 
 						H160::from_str(&target.contract).unwrap(),
 						target_socket.address,
 						socket_contracts.clone(),
+						cli.run.enable_external,
 					);
 					task_manager.spawn_essential_handle().spawn(
 						Box::leak(

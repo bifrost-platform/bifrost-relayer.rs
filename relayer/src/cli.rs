@@ -1,4 +1,4 @@
-use cccp_primitives::eth::CLIENT_NAME_MAX_LENGTH;
+use cccp_primitives::{cli::Role, eth::CLIENT_NAME_MAX_LENGTH};
 use chrono::{Datelike, Local};
 use clap::{CommandFactory, FromArgMatches, Parser};
 
@@ -62,10 +62,18 @@ impl Cli {
 		<Self as FromArgMatches>::from_arg_matches(&matches).unwrap_or_else(|e| e.exit())
 	}
 
+	/// Implementation name.
 	fn impl_name() -> String {
 		"BIFROST Relayer".into()
 	}
 
+	/// Implementation version.
+	///
+	/// By default this will look like this:
+	///
+	/// `2.0.0-b950f731c`
+	///
+	/// Where the hash is the short commit hash of the commit of in the Git repository.
 	fn impl_version() -> String {
 		env!("SUBSTRATE_CLI_IMPL_VERSION").into()
 	}
@@ -82,14 +90,17 @@ impl Cli {
 			.unwrap_or_else(|| env!("CARGO_PKG_NAME").into())
 	}
 
+	/// Executable file description.
 	fn description() -> String {
 		env!("CARGO_PKG_DESCRIPTION").into()
 	}
 
+	/// Executable file author.
 	fn author() -> String {
 		env!("CARGO_PKG_AUTHORS").into()
 	}
 
+	/// Copyright starting year (x-current year)
 	fn copyright_start_year() -> i32 {
 		2023
 	}
@@ -97,18 +108,26 @@ impl Cli {
 	/// Log information about the relayer itself.
 	pub fn print_relayer_infos(&self) {
 		let mut target = String::from("cccp-relayer");
+		let sub_target = String::from("[main               ]");
 		let space = " ".repeat(CLIENT_NAME_MAX_LENGTH - target.len());
 		target.push_str(&space);
 
-		log::info!(target: &target, "{}", Self::impl_name());
-		log::info!(target: &target, "✌️  version {}", Self::impl_version());
+		log::info!(target: &target, "-{} {}", sub_target, Self::impl_name());
+		log::info!(target: &target, "-{} ✌️  version {}", sub_target, Self::impl_version());
 		log::info!(
 			target: &target,
-			"❤️  by {}, {}-{}",
+			"-{} ❤️  by {}, {}-{}",
+			sub_target,
 			Self::author(),
 			Self::copyright_start_year(),
 			Local::now().year()
 		);
+
+		if self.run.enable_external {
+			log::info!(target: &target, "-{} 👤 Role: {}", sub_target, Role::External);
+		} else {
+			log::info!(target: &target, "-{} 👤 Role: {}", sub_target, Role::Native);
+		}
 	}
 }
 
