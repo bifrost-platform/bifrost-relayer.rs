@@ -1,4 +1,4 @@
-use std::{str::FromStr, sync::Arc};
+use std::{fmt::Display, str::FromStr, sync::Arc};
 
 // TODO: Move event sig into handler structure (Initialize from config.yaml)
 use cccp_primitives::{
@@ -6,6 +6,7 @@ use cccp_primitives::{
 		BridgeRelayBuilder, PollSubmit, Signatures, SocketEvents, SocketExternal, SocketMessage,
 	},
 	eth::{BridgeDirection, Contract, SocketEventStatus, SOCKET_EVENT_SIG},
+	MODULE_NAME_MAX_LENGTH,
 };
 use ethers::{
 	abi::{encode, RawLog, Token},
@@ -21,6 +22,16 @@ use crate::eth::{
 	BlockMessage, BridgeRelayMetadata, EthClient, EventMessage, EventMetadata, EventSender,
 	Handler, DEFAULT_RETRIES,
 };
+
+const SUB_LOG_TARGET: &str = "bridge-handler";
+
+impl<T: JsonRpcClient> Display for BridgeRelayHandler<T> {
+	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		let mut sub_target = String::from(SUB_LOG_TARGET);
+		sub_target.push_str(&" ".repeat(MODULE_NAME_MAX_LENGTH - sub_target.len()));
+		write!(f, "{sub_target}")
+	}
+}
 
 /// The essential task that handles `bridge relay` related events.
 pub struct BridgeRelayHandler<T> {
@@ -71,7 +82,8 @@ impl<T: JsonRpcClient> Handler for BridgeRelayHandler<T> {
 
 			log::info!(
 				target: &self.client.get_chain_name(),
-				"-[cccp-handler       ] ✨ Imported #{:?} ({}) with target transactions({:?})",
+				"-[{}] ✨ Imported #{:?} ({}) with target transactions({:?})",
+				self,
 				block_msg.raw_block.number.unwrap(),
 				block_msg.raw_block.hash.unwrap(),
 				block_msg.target_receipts.len(),
@@ -112,7 +124,8 @@ impl<T: JsonRpcClient> Handler for BridgeRelayHandler<T> {
 
 								log::info!(
 									target: &self.client.get_chain_name(),
-									"-[cccp-handler       ] 🔖 Detected socket event: {}, {:?}-{:?}",
+									"-[{}] 🔖 Detected socket event: {}, {:?}-{:?}",
+									self,
 									metadata,
 									receipt.block_number.unwrap(),
 									receipt.transaction_hash,
@@ -123,10 +136,11 @@ impl<T: JsonRpcClient> Handler for BridgeRelayHandler<T> {
 							},
 						},
 						Err(error) => panic!(
-								"{}]-[cccp-handler       ] Unknown error while decoding socket event: {:?}",
-								self.client.get_chain_name(),
-								error
-							),
+							"{}]-[{}] Unknown error while decoding socket event: {:?}",
+							self.client.get_chain_name(),
+							self,
+							error
+						),
 					}
 				}
 			}
@@ -152,14 +166,16 @@ impl<T: JsonRpcClient> Handler for BridgeRelayHandler<T> {
 				.unwrap();
 			log::info!(
 				target: &self.client.get_chain_name(),
-				"-[cccp-handler       ] 🔖 Request relay transaction to chain({:?}): {}",
+				"-[{}] 🔖 Request relay transaction to chain({:?}): {}",
+				self,
 				chain_id,
 				metadata
 			);
 		} else {
 			panic!(
-				"{}]-[cccp-handler       ] Unknown chain ID received: {:?}",
+				"{}]-[{}] Unknown chain ID received: {:?}",
 				self.client.get_chain_name(),
+				self,
 				chain_id
 			)
 		}
@@ -235,8 +251,9 @@ impl<T: JsonRpcClient> BridgeRelayBuilder for BridgeRelayHandler<T> {
 					self.get_signatures(msg).await
 				},
 				_ => panic!(
-					"{}]-[cccp-handler       ] Unknown socket event status received: {:?}",
+					"{}]-[{}] Unknown socket event status received: {:?}",
 					self.client.get_chain_name(),
+					self,
 					status
 				),
 			};
@@ -254,8 +271,9 @@ impl<T: JsonRpcClient> BridgeRelayBuilder for BridgeRelayHandler<T> {
 				},
 				SocketEventStatus::Executed | SocketEventStatus::Reverted => Signatures::default(),
 				_ => panic!(
-					"{}]-[cccp-handler       ] Unknown socket event status received: {:?}",
+					"{}]-[{}] Unknown socket event status received: {:?}",
 					self.client.get_chain_name(),
+					self,
 					status
 				),
 			};
@@ -356,8 +374,9 @@ impl<T: JsonRpcClient> BridgeRelayHandler<T> {
 			SocketEventStatus::Reverted => dst_chain_id,
 			SocketEventStatus::Accepted | SocketEventStatus::Rejected => src_chain_id,
 			_ => panic!(
-				"{}]-[cccp-handler       ] Unknown socket event status received: {:?}",
+				"{}]-[{}] Unknown socket event status received: {:?}",
 				self.client.get_chain_name(),
+				self,
 				status
 			),
 		}
@@ -376,8 +395,9 @@ impl<T: JsonRpcClient> BridgeRelayHandler<T> {
 			SocketEventStatus::Reverted => src_chain_id,
 			SocketEventStatus::Accepted | SocketEventStatus::Rejected => dst_chain_id,
 			_ => panic!(
-				"{}]-[cccp-handler       ] Unknown socket event status received: {:?}",
+				"{}]-[{}] Unknown socket event status received: {:?}",
 				self.client.get_chain_name(),
+				self,
 				status
 			),
 		}

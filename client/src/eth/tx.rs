@@ -1,3 +1,4 @@
+use cccp_primitives::MODULE_NAME_MAX_LENGTH;
 use ethers::{
 	prelude::{
 		gas_escalator::{Frequency, GasEscalatorMiddleware, GeometricGasPrice},
@@ -7,13 +8,23 @@ use ethers::{
 	signers::{LocalWallet, Signer},
 	types::U256,
 };
-use std::sync::Arc;
+use std::{fmt::Display, sync::Arc};
 use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
 
 use super::{EthClient, EventMessage};
 
 type TransactionMiddleware<T> =
 	NonceManagerMiddleware<SignerMiddleware<GasEscalatorMiddleware<Arc<Provider<T>>>, LocalWallet>>;
+
+const SUB_LOG_TARGET: &str = "transaction-manager";
+
+impl<T: JsonRpcClient> Display for TransactionManager<T> {
+	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		let mut sub_target = String::from(SUB_LOG_TARGET);
+		sub_target.push_str(&" ".repeat(MODULE_NAME_MAX_LENGTH - sub_target.len()));
+		write!(f, "{sub_target}")
+	}
+}
 
 /// The essential task that sends asynchronous transactions.
 pub struct TransactionManager<T> {
@@ -54,7 +65,8 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> {
 		while let Some(msg) = self.receiver.recv().await {
 			log::info!(
 				target: &self.client.get_chain_name(),
-				"-[transaction-manager] 🔖 Received transaction request: {}",
+				"-[{}] 🔖 Received transaction request: {}",
+				self,
 				msg.metadata,
 			);
 
@@ -68,7 +80,8 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> {
 		if msg.retries_remaining == 0 {
 			log::error!(
 				target: &self.client.get_chain_name(),
-				"-[transaction-manager] ❗️ Exceeded the retry limit to send a transaction: {}",
+				"-[{}] ❗️ Exceeded the retry limit to send a transaction: {}",
+				self,
 				msg.metadata
 			);
 			return
@@ -96,7 +109,8 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> {
 					if let Some(receipt) = receipt {
 						log::info!(
 							target: &self.client.get_chain_name(),
-							"-[transaction-manager] 🎁 The requested transaction has been successfully mined in block: {}, {:?}-{:?}-{:?}",
+							"-[{}] 🎁 The requested transaction has been successfully mined in block: {}, {:?}-{:?}-{:?}",
+							self,
 							msg.metadata.to_string(),
 							receipt.block_number.unwrap(),
 							receipt.status.unwrap(),
@@ -105,7 +119,8 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> {
 					} else {
 						log::error!(
 							target: &self.client.get_chain_name(),
-							"-[transaction-manager] ♻️ The requested transaction has been dropped from the mempool: {}, Retries left: {:?}",
+							"-[{}] ♻️ The requested transaction has been dropped from the mempool: {}, Retries left: {:?}",
+							self,
 							msg.metadata,
 							msg.retries_remaining - 1,
 						);
@@ -120,7 +135,8 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> {
 				Err(error) => {
 					log::error!(
 						target: &self.client.get_chain_name(),
-						"-[transaction-manager] ♻️ Unknown error while waiting for transaction receipt: {}, Retries left: {:?}, Error: {}",
+						"-[{}] ♻️ Unknown error while waiting for transaction receipt: {}, Retries left: {:?}, Error: {}",
+						self,
 						msg.metadata,
 						msg.retries_remaining - 1,
 						error.to_string()
@@ -137,7 +153,8 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> {
 			Err(error) => {
 				log::error!(
 					target: &self.client.get_chain_name(),
-					"-[transaction-manager] ♻️ Unknown error while sending transaction: {}, Retries left: {:?}, Error: {}",
+					"-[{}] ♻️ Unknown error while sending transaction: {}, Retries left: {:?}, Error: {}",
+					self,
 					msg.metadata,
 					msg.retries_remaining - 1,
 					error.to_string()

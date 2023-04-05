@@ -1,8 +1,9 @@
+use cccp_primitives::MODULE_NAME_MAX_LENGTH;
 use ethers::{
 	providers::JsonRpcClient,
 	types::{Block, TransactionReceipt, H160, H256, U64},
 };
-use std::sync::Arc;
+use std::{fmt::Display, sync::Arc};
 use tokio::{
 	sync::broadcast::{self, Receiver, Sender},
 	time::{sleep, Duration},
@@ -40,6 +41,16 @@ impl BlockReceiver {
 	}
 }
 
+const SUB_LOG_TARGET: &str = "block-manager";
+
+impl<T: JsonRpcClient> Display for BlockManager<T> {
+	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		let mut sub_target = String::from(SUB_LOG_TARGET);
+		sub_target.push_str(&" ".repeat(MODULE_NAME_MAX_LENGTH - sub_target.len()));
+		write!(f, "{sub_target}")
+	}
+}
+
 /// The essential task that listens and handle new blocks.
 pub struct BlockManager<T> {
 	/// The ethereum client for the connected chain.
@@ -64,7 +75,8 @@ impl<T: JsonRpcClient> BlockManager<T> {
 		// TODO: follow-up to the highest block
 		log::info!(
 			target: &self.client.get_chain_name(),
-			"-[block-manager      ] 📃 Target contracts: {:?}",
+			"-[{}] 📃 Target contracts: {:?}",
+			self,
 			self.target_contracts
 		);
 
@@ -73,7 +85,8 @@ impl<T: JsonRpcClient> BlockManager<T> {
 		if let Some(block) = self.client.get_block(self.pending_block.into()).await.unwrap() {
 			log::info!(
 				target: &self.client.get_chain_name(),
-				"-[block-manager      ] 💤 Idle, best: #{:?} ({})",
+				"-[{}] 💤 Idle, best: #{:?} ({})",
+				self,
 				block.number.unwrap(),
 				block.hash.unwrap(),
 			);
@@ -113,7 +126,8 @@ impl<T: JsonRpcClient> BlockManager<T> {
 			}
 			log::info!(
 				target: &self.client.get_chain_name(),
-				"-[block-manager      ] ✨ Imported #{:?} ({})",
+				"-[{}] ✨ Imported #{:?} ({})",
+				self,
 				block.number.unwrap(),
 				block.hash.unwrap()
 			);

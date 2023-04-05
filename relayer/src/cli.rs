@@ -1,4 +1,4 @@
-use cccp_primitives::{cli::Role, eth::CLIENT_NAME_MAX_LENGTH};
+use cccp_primitives::{cli::Role, eth::CLIENT_NAME_MAX_LENGTH, MODULE_NAME_MAX_LENGTH};
 use chrono::{Datelike, Local};
 use clap::{CommandFactory, FromArgMatches, Parser};
 
@@ -107,16 +107,16 @@ impl Cli {
 
 	/// Log information about the relayer itself.
 	pub fn print_relayer_infos(&self) {
-		let mut target = String::from("cccp-relayer");
-		let sub_target = String::from("[main               ]");
-		let space = " ".repeat(CLIENT_NAME_MAX_LENGTH - target.len());
-		target.push_str(&space);
+		let mut target = String::from(LOG_TARGET);
+		let mut sub_target = String::from(SUB_LOG_TARGET);
+		target.push_str(&" ".repeat(CLIENT_NAME_MAX_LENGTH - target.len()));
+		sub_target.push_str(&" ".repeat(MODULE_NAME_MAX_LENGTH - sub_target.len()));
 
-		log::info!(target: &target, "-{} {}", sub_target, Self::impl_name());
-		log::info!(target: &target, "-{} ✌️  version {}", sub_target, Self::impl_version());
+		log::info!(target: &target, "-[{}] {}", sub_target, Self::impl_name());
+		log::info!(target: &target, "-[{}] ✌️  version {}", sub_target, Self::impl_version());
 		log::info!(
 			target: &target,
-			"-{} ❤️  by {}, {}-{}",
+			"-[{}] ❤️  by {}, {}-{}",
 			sub_target,
 			Self::author(),
 			Self::copyright_start_year(),
@@ -124,16 +124,23 @@ impl Cli {
 		);
 
 		if self.run.enable_external {
-			log::info!(target: &target, "-{} 👤 Role: {}", sub_target, Role::External);
+			log::info!(target: &target, "-[{}] 👤 Role: {}", sub_target, Role::External);
 		} else {
-			log::info!(target: &target, "-{} 👤 Role: {}", sub_target, Role::Native);
+			log::info!(target: &target, "-[{}] 👤 Role: {}", sub_target, Role::Native);
 		}
 	}
 }
 
+const LOG_TARGET: &str = "cccp-relayer";
+const SUB_LOG_TARGET: &str = "main";
+
 #[derive(Debug, Clone, Parser)]
 /// The `run` command used to run a relayer.
 pub struct RunCmd {
+	/// Enable transaction requests to external chains. ex) Relay transactions to Ethereum.
+	///
+	/// If enabled, the system will verify your relayer accounts balance whether it's empty or not
+	/// on initialization. By default it's disabled.
 	#[arg(long)]
 	pub enable_external: bool,
 }
