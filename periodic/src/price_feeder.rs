@@ -7,25 +7,17 @@ use cccp_primitives::{
 	cli::PriceFeederConfig,
 	contracts::socket_bifrost::{get_asset_oids, SocketBifrost},
 	periodic::{PeriodicWorker, PriceFetcher},
-	MODULE_NAME_MAX_LENGTH,
+	target_display_format,
 };
 use cron::Schedule;
 use ethers::{
 	providers::{JsonRpcClient, Provider},
 	types::{TransactionRequest, H160, H256, U256},
 };
-use std::{collections::HashMap, fmt::Display, str::FromStr, sync::Arc};
+use std::{collections::HashMap, str::FromStr, sync::Arc};
 use tokio::time::sleep;
 
 const SUB_LOG_TARGET: &str = "price-oracle";
-
-impl<T: JsonRpcClient> Display for OraclePriceFeeder<T> {
-	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-		let mut sub_target = String::from(SUB_LOG_TARGET);
-		sub_target.push_str(&" ".repeat(MODULE_NAME_MAX_LENGTH - sub_target.len()));
-		write!(f, "{sub_target}")
-	}
-}
 
 /// The essential task that handles oracle price feedings.
 pub struct OraclePriceFeeder<T> {
@@ -140,14 +132,14 @@ impl<T: JsonRpcClient> OraclePriceFeeder<T> {
 			Ok(()) => log::info!(
 				target: &self.client.get_chain_name(),
 				"-[{}] 💵 Request price feed transaction to chain({:?}): {}",
-				self,
+				target_display_format(SUB_LOG_TARGET),
 				self.config.chain_id,
 				metadata
 			),
 			Err(error) => log::error!(
 				target: &self.client.get_chain_name(),
 				"-[{}] ❗️ Failed to request price feed transaction to chain({:?}): {}, Error: {}",
-				self,
+				target_display_format(SUB_LOG_TARGET),
 				self.config.chain_id,
 				metadata,
 				error.to_string()

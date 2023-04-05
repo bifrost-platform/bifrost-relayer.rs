@@ -1,4 +1,4 @@
-use cccp_primitives::MODULE_NAME_MAX_LENGTH;
+use cccp_primitives::target_display_format;
 use ethers::{
 	prelude::{
 		gas_escalator::{Frequency, GasEscalatorMiddleware, GeometricGasPrice},
@@ -8,7 +8,7 @@ use ethers::{
 	signers::{LocalWallet, Signer},
 	types::U256,
 };
-use std::{fmt::Display, sync::Arc};
+use std::sync::Arc;
 use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
 
 use super::{EthClient, EventMessage};
@@ -17,14 +17,6 @@ type TransactionMiddleware<T> =
 	NonceManagerMiddleware<SignerMiddleware<GasEscalatorMiddleware<Arc<Provider<T>>>, LocalWallet>>;
 
 const SUB_LOG_TARGET: &str = "transaction-manager";
-
-impl<T: JsonRpcClient> Display for TransactionManager<T> {
-	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-		let mut sub_target = String::from(SUB_LOG_TARGET);
-		sub_target.push_str(&" ".repeat(MODULE_NAME_MAX_LENGTH - sub_target.len()));
-		write!(f, "{sub_target}")
-	}
-}
 
 /// The essential task that sends asynchronous transactions.
 pub struct TransactionManager<T> {
@@ -66,7 +58,7 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> {
 			log::info!(
 				target: &self.client.get_chain_name(),
 				"-[{}] 🔖 Received transaction request: {}",
-				self,
+				target_display_format(SUB_LOG_TARGET),
 				msg.metadata,
 			);
 
@@ -81,7 +73,7 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> {
 			log::error!(
 				target: &self.client.get_chain_name(),
 				"-[{}] ❗️ Exceeded the retry limit to send a transaction: {}",
-				self,
+				target_display_format(SUB_LOG_TARGET),
 				msg.metadata
 			);
 			return
@@ -110,7 +102,7 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> {
 						log::info!(
 							target: &self.client.get_chain_name(),
 							"-[{}] 🎁 The requested transaction has been successfully mined in block: {}, {:?}-{:?}-{:?}",
-							self,
+							target_display_format(SUB_LOG_TARGET),
 							msg.metadata.to_string(),
 							receipt.block_number.unwrap(),
 							receipt.status.unwrap(),
@@ -120,7 +112,7 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> {
 						log::error!(
 							target: &self.client.get_chain_name(),
 							"-[{}] ♻️ The requested transaction has been dropped from the mempool: {}, Retries left: {:?}",
-							self,
+							target_display_format(SUB_LOG_TARGET),
 							msg.metadata,
 							msg.retries_remaining - 1,
 						);
@@ -136,7 +128,7 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> {
 					log::error!(
 						target: &self.client.get_chain_name(),
 						"-[{}] ♻️ Unknown error while waiting for transaction receipt: {}, Retries left: {:?}, Error: {}",
-						self,
+						target_display_format(SUB_LOG_TARGET),
 						msg.metadata,
 						msg.retries_remaining - 1,
 						error.to_string()
@@ -154,7 +146,7 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> {
 				log::error!(
 					target: &self.client.get_chain_name(),
 					"-[{}] ♻️ Unknown error while sending transaction: {}, Retries left: {:?}, Error: {}",
-					self,
+					target_display_format(SUB_LOG_TARGET),
 					msg.metadata,
 					msg.retries_remaining - 1,
 					error.to_string()

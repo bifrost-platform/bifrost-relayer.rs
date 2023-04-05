@@ -11,6 +11,8 @@ pub mod coingecko;
 pub mod gateio;
 pub mod upbit;
 
+pub const LOG_TARGET: &str = "price-fetcher";
+
 pub enum PriceFetchers {
 	Binance(BinancePriceFetcher),
 	CoinGecko(CoingeckoPriceFetcher),

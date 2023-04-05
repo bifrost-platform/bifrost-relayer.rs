@@ -7,4 +7,10 @@ pub use cli::{RoundupHandlerUtilType, RoundupHandlerUtilityConfig};
 pub use contracts::*;
 pub use periodic::*;
 
-pub const MODULE_NAME_MAX_LENGTH: usize = 19;
+pub fn target_display_format(log_target: &str) -> String {
+	format!("{:<019}", log_target)
+}
+
+pub fn sub_display_format(log_target: &str) -> String {
+	format!("{:<015}", log_target)
+}

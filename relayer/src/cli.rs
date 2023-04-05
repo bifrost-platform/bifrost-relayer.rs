@@ -1,4 +1,4 @@
-use cccp_primitives::{cli::Role, eth::CLIENT_NAME_MAX_LENGTH, MODULE_NAME_MAX_LENGTH};
+use cccp_primitives::{cli::Role, sub_display_format, target_display_format};
 use chrono::{Datelike, Local};
 use clap::{CommandFactory, FromArgMatches, Parser};
 
@@ -107,10 +107,8 @@ impl Cli {
 
 	/// Log information about the relayer itself.
 	pub fn print_relayer_infos(&self) {
-		let mut target = String::from(LOG_TARGET);
-		let mut sub_target = String::from(SUB_LOG_TARGET);
-		target.push_str(&" ".repeat(CLIENT_NAME_MAX_LENGTH - target.len()));
-		sub_target.push_str(&" ".repeat(MODULE_NAME_MAX_LENGTH - sub_target.len()));
+		let target = target_display_format(LOG_TARGET);
+		let sub_target = sub_display_format(SUB_LOG_TARGET);
 
 		log::info!(target: &target, "-[{}] {}", sub_target, Self::impl_name());
 		log::info!(target: &target, "-[{}] ✌️  version {}", sub_target, Self::impl_version());
