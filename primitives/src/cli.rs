@@ -91,6 +91,8 @@ pub enum HandlerType {
 	Socket,
 	/// Vault handler
 	Vault,
+	/// Roundup handler
+	Roundup,
 }
 
 impl ToString for HandlerType {
@@ -98,6 +100,7 @@ impl ToString for HandlerType {
 		match *self {
 			HandlerType::Socket => "Socket".to_string(),
 			HandlerType::Vault => "Vault".to_string(),
+			HandlerType::Roundup => "Roundup".to_string(),
 		}
 	}
 }

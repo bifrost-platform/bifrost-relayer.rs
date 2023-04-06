@@ -2,7 +2,7 @@ use cccp_client::eth::{
 	EthClient, EventMessage, EventMetadata, EventSender, VSPPhase1Metadata, DEFAULT_RETRIES,
 };
 use cccp_primitives::{
-	authority::Authority,
+	authority_bifrost::AuthorityBifrost,
 	relayer_bifrost::RelayerManager,
 	socket_bifrost::{RoundUpSubmit, Signatures, SocketBifrost},
 	PeriodicWorker,
@@ -27,7 +27,7 @@ pub struct RoundupEmitter<T> {
 	/// The time schedule that represents when to check round info.
 	pub schedule: Schedule,
 	/// Relayer_authority contract instance
-	pub authority_contract: Authority<Provider<T>>,
+	pub authority_contract: AuthorityBifrost<Provider<T>>,
 	/// Socket contract(bifrost) instance
 	pub socket_contract: SocketBifrost<Provider<T>>,
 	/// RelayerManager contract(bifrost) instance
@@ -84,7 +84,7 @@ impl<T: JsonRpcClient> RoundupEmitter<T> {
 			client,
 			event_sender,
 			schedule: Schedule::from_str(schedule).unwrap(),
-			authority_contract: Authority::new(
+			authority_contract: AuthorityBifrost::new(
 				H160::from_str(authority_address).unwrap(),
 				provider.clone(),
 			),

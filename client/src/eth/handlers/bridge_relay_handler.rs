@@ -3,7 +3,7 @@ use std::{str::FromStr, sync::Arc};
 // TODO: Move event sig into handler structure (Initialize from config.yaml)
 use cccp_primitives::{
 	contracts::socket_external::{
-		PollSubmit, Signatures, SocketClient, SocketEvents, SocketExternal, SocketMessage,
+		BridgeRelayBuilder, PollSubmit, Signatures, SocketEvents, SocketExternal, SocketMessage,
 	},
 	eth::{BridgeDirection, Contract, SocketEventStatus, SOCKET_EVENT_SIG},
 };
@@ -18,8 +18,8 @@ use tokio::sync::broadcast::Receiver;
 use tokio_stream::StreamExt;
 
 use crate::eth::{
-	BlockMessage, EthClient, EventMessage, EventMetadata, EventSender, Handler, RelayMetadata,
-	DEFAULT_RETRIES,
+	BlockMessage, BridgeRelayMetadata, EthClient, EventMessage, EventMetadata, EventSender,
+	Handler, DEFAULT_RETRIES,
 };
 
 /// The essential task that handles `bridge relay` related events.
@@ -85,7 +85,7 @@ impl<T: JsonRpcClient> Handler for BridgeRelayHandler<T> {
 			let mut stream = tokio_stream::iter(receipt.logs);
 
 			while let Some(log) = stream.next().await {
-				if Self::is_target_event(log.topics[0]) {
+				if self.is_target_event(log.topics[0]) {
 					let raw_log: RawLog = log.clone().into();
 					match decode_logs::<SocketEvents>(&[raw_log]) {
 						Ok(decoded) => match &decoded[0] {
@@ -94,7 +94,7 @@ impl<T: JsonRpcClient> Handler for BridgeRelayHandler<T> {
 								let dst_chain_id = u32::from_be_bytes(socket.msg.ins_code.chain);
 								let is_inbound = self.is_inbound_sequence(dst_chain_id);
 
-								let metadata = RelayMetadata::new(
+								let metadata = BridgeRelayMetadata::new(
 									if is_inbound {
 										"Inbound".to_string()
 									} else {
@@ -129,32 +129,6 @@ impl<T: JsonRpcClient> Handler for BridgeRelayHandler<T> {
 		}
 	}
 
-	fn request_send_transaction(
-		&self,
-		chain_id: u32,
-		tx_request: TransactionRequest,
-		metadata: RelayMetadata,
-	) {
-		if let Some(event_sender) =
-			self.event_senders.iter().find(|event_sender| event_sender.id == chain_id)
-		{
-			event_sender
-				.sender
-				.send(EventMessage::new(
-					DEFAULT_RETRIES,
-					tx_request,
-					EventMetadata::Relay(metadata),
-				))
-				.unwrap();
-		} else {
-			panic!(
-				"{}]-[cccp-handler       ] Unknown chain ID received: {:?}",
-				self.client.get_chain_name(),
-				chain_id
-			)
-		}
-	}
-
 	fn is_target_contract(&self, receipt: &TransactionReceipt) -> bool {
 		if let Some(to) = receipt.to {
 			if ethers::utils::to_checksum(&to, None) ==
@@ -172,7 +146,7 @@ impl<T: JsonRpcClient> Handler for BridgeRelayHandler<T> {
 }
 
 #[async_trait::async_trait]
-impl<T: JsonRpcClient> SocketClient for BridgeRelayHandler<T> {
+impl<T: JsonRpcClient> BridgeRelayBuilder for BridgeRelayHandler<T> {
 	fn build_poll_call_data(&self, msg: SocketMessage, sigs: Signatures) -> Bytes {
 		let poll_submit = PollSubmit { msg, sigs, option: U256::default() };
 		self.target_socket.poll(poll_submit).calldata().unwrap()
@@ -266,7 +240,7 @@ impl<T: JsonRpcClient> BridgeRelayHandler<T> {
 	async fn send_socket_message(
 		&self,
 		msg: SocketMessage,
-		metadata: RelayMetadata,
+		metadata: BridgeRelayMetadata,
 		is_inbound: bool,
 	) {
 		let status = SocketEventStatus::from_u8(msg.status);
@@ -361,5 +335,32 @@ impl<T: JsonRpcClient> BridgeRelayHandler<T> {
 			(self.client.get_chain_id() == dst_chain_id, self.client.config.if_destination_chain),
 			(true, BridgeDirection::Inbound) | (false, BridgeDirection::Outbound)
 		)
+	}
+
+	/// Request send bridge relay transaction to the target event channel.
+	fn request_send_transaction(
+		&self,
+		chain_id: u32,
+		tx_request: TransactionRequest,
+		metadata: BridgeRelayMetadata,
+	) {
+		if let Some(event_sender) =
+			self.event_senders.iter().find(|event_sender| event_sender.id == chain_id)
+		{
+			event_sender
+				.sender
+				.send(EventMessage::new(
+					DEFAULT_RETRIES,
+					tx_request,
+					EventMetadata::BridgeRelay(metadata),
+				))
+				.unwrap();
+		} else {
+			panic!(
+				"{}]-[cccp-handler       ] Unknown chain ID received: {:?}",
+				self.client.get_chain_name(),
+				chain_id
+			)
+		}
 	}
 }

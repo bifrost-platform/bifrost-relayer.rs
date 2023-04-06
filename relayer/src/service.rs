@@ -196,6 +196,7 @@ pub fn new_relay_base(config: Configuration) -> Result<RelayBase, ServiceError> 
 						async move { bridge_relay_handler.run().await },
 					);
 				}),
+			HandlerType::Roundup => todo!(),
 		}
 	});
 
