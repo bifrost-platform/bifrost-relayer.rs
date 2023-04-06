@@ -14,7 +14,6 @@ use log::Level;
 use crate::cli::Cli;
 
 fn main() {
-	// env_logger::init();
 	env_logger::Builder::new()
 		.format(|buf, record| {
 			let mut level_style = buf.style();
@@ -27,7 +26,7 @@ fn main() {
 
 			writeln!(
 				buf,
-				"{} {:05} {:015} {:019}",
+				"{} {:05} {:015}]{:019}",
 				Local::now().format("%Y-%m-%dT%H:%M:%S"),
 				level_style.value(record.level()),
 				record.target(),
