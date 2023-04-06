@@ -114,11 +114,29 @@ pub struct WatchTarget {
 }
 
 #[derive(Debug, Clone, Deserialize)]
+pub enum RoundupUtilType {
+	Socket,
+	RelayManager,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct RoundupUtilityConfig {
+	/// Roundup relay target's util contract type.
+	pub contract_type: RoundupUtilType,
+	/// Roundup relay target's util contract address.
+	pub contract: String,
+	/// Roundup relay target's chain id.
+	pub chain_id: u32,
+}
+
+#[derive(Debug, Clone, Deserialize)]
 pub struct HandlerConfig {
 	/// Handle type
 	pub handler_type: HandlerType,
-	/// Target list
+	/// Watch target list
 	pub watch_list: Vec<WatchTarget>,
+	/// Roundup relay utils (Only needs for RoundupHandler)
+	pub roundup_utils: Option<Vec<RoundupUtilityConfig>>,
 }
 
 #[derive(Debug, Clone, Deserialize)]

@@ -4,45 +4,44 @@ use crate::eth::{
 };
 use async_trait::async_trait;
 use cccp_primitives::{
+	cli::RoundupUtilityConfig,
 	relayer_external::RelayerManager,
 	socket_bifrost::{SerializedRoundUp, SocketBifrost, SocketBifrostEvents, SOCKETBIFROST_ABI},
 	socket_external::{RoundUpSubmit, Signatures, SocketExternal},
+	RoundupUtilType,
 };
 use ethers::{
 	abi::{Detokenize, Tokenize},
 	contract::EthLogDecode,
 	prelude::{TransactionReceipt, H256},
 	providers::{JsonRpcClient, Provider},
-	types::{Address, Log, TransactionRequest, U256},
+	types::{Address, Log, TransactionRequest, H160, U256},
 };
-use std::sync::Arc;
+use std::{str::FromStr, sync::Arc};
 use tokio::sync::broadcast::Receiver;
 use tokio_stream::StreamExt;
 
-pub struct SocketExternalInstance<T> {
-	pub contract: SocketExternal<Provider<T>>,
-	pub id: u32,
-}
-
-pub struct RelayerExternalInstance<T> {
-	pub contract: RelayerManager<Provider<T>>,
+pub struct RoundupUtility<T> {
+	/// The event senders that sends messages to the event channel.
+	pub event_sender: Arc<EventSender>,
+	/// Socket contract on external chain.
+	pub socket_external: SocketExternal<Provider<T>>,
+	/// Relayer contracts on external chain.
+	pub relayer_external: RelayerManager<Provider<T>>,
+	/// External chain id.
 	pub id: u32,
 }
 
 /// The essential task that handles `roundup relay` related events.
 pub struct RoundupRelayHandler<T> {
-	/// The event senders that sends messages to the event channel.
-	pub event_senders: Vec<Arc<EventSender>>,
 	/// The block receiver that consumes new blocks from the block channel.
 	pub block_receiver: Receiver<BlockMessage>,
 	/// The `EthClient` to interact with the connected blockchain.
 	pub client: Arc<EthClient<T>>,
-	/// The target `Socket` contract instance.
+	/// The `Socket` contract instance on bifrost network.
 	pub socket_bifrost: SocketBifrost<Provider<T>>,
-	/// External socket contracts.
-	pub socket_externals: Vec<SocketExternalInstance<T>>,
-	/// Relayer contracts on external chains.
-	pub relayer_externals: Vec<RelayerExternalInstance<T>>,
+	/// Utils for relay transaction to external
+	pub roundup_utils: Vec<RoundupUtility<T>>,
 	/// Signature of RoundUp Event.
 	pub roundup_signature: H256,
 }
@@ -133,19 +132,62 @@ impl<T: JsonRpcClient> RoundupRelayHandler<T> {
 		event_senders: Vec<Arc<EventSender>>,
 		block_receiver: Receiver<BlockMessage>,
 		client: Arc<EthClient<T>>,
+		external_clients: Vec<Arc<EthClient<T>>>,
 		socket_bifrost: SocketBifrost<Provider<T>>,
-		socket_externals: Vec<SocketExternalInstance<T>>,
-		relayer_externals: Vec<RelayerExternalInstance<T>>,
+		roundup_util_configs: Vec<RoundupUtilityConfig>,
 	) -> Self {
-		Self {
-			event_senders,
-			block_receiver,
-			client: client.clone(),
-			socket_bifrost,
-			socket_externals,
-			relayer_externals,
-			roundup_signature: SOCKETBIFROST_ABI.event("RoundUp").unwrap().signature(),
-		}
+		let roundup_signature = SOCKETBIFROST_ABI.event("RoundUp").unwrap().signature();
+		let roundup_utils = event_senders
+			.iter()
+			.map(|sender| {
+				let (socket_external, relayer_external) = roundup_util_configs.iter().fold(
+					(None, None),
+					|(socket_ext, relay_ext), config| {
+						if config.chain_id == sender.id {
+							match config.contract_type {
+								RoundupUtilType::Socket => (
+									Some(SocketExternal::new(
+										H160::from_str(&config.contract).unwrap(),
+										external_clients
+											.iter()
+											.find(|client| client.get_chain_id() == config.chain_id)
+											.unwrap()
+											.get_provider(),
+									)),
+									relay_ext,
+								),
+								RoundupUtilType::RelayManager => (
+									socket_ext,
+									Some(RelayerManager::new(
+										H160::from_str(&config.contract).unwrap(),
+										external_clients
+											.iter()
+											.find(|client| client.get_chain_id() == config.chain_id)
+											.unwrap()
+											.get_provider(),
+									)),
+								),
+							}
+						} else {
+							(socket_ext, relay_ext)
+						}
+					},
+				);
+
+				let socket_external = socket_external.expect("socket_external must be initialized");
+				let relayer_external =
+					relayer_external.expect("relayer_external must be initialized");
+
+				RoundupUtility {
+					event_sender: sender.clone(),
+					socket_external,
+					relayer_external,
+					id: sender.id,
+				}
+			})
+			.collect();
+
+		Self { block_receiver, client, socket_bifrost, roundup_utils, roundup_signature }
 	}
 
 	/// Decode & Serialize log to `SerializedRoundUp` struct.
@@ -183,57 +225,30 @@ impl<T: JsonRpcClient> RoundupRelayHandler<T> {
 
 	/// Check roundup submitted before. If not, call `round_control_relay`.
 	async fn broadcast_roundup(&self, roundup_submit: RoundUpSubmit) {
-		let mut stream = tokio_stream::iter(self.event_senders.clone());
-		while let Some(sender) = stream.next().await {
-			let relayer_manager = self
-				.relayer_externals
-				.iter()
-				.find(|relayer_manager| relayer_manager.id == sender.id)
-				.unwrap();
-			let target_round = relayer_manager.contract.latest_round().call().await.unwrap();
-
+		let mut stream = tokio_stream::iter(&self.roundup_utils);
+		while let Some(target_chain) = stream.next().await {
 			// Check roundup submitted to target chain before.
-			if roundup_submit.round > target_round {
-				let target_socket =
-					self.socket_externals.iter().find(|socket| socket.id == sender.id).unwrap();
+			if roundup_submit.round >
+				target_chain.relayer_external.latest_round().call().await.unwrap()
+			{
 				let transaction_request = self.build_transaction_request(
-					target_socket.contract.clone(),
+					target_chain.socket_external.clone(),
 					roundup_submit.clone(),
 				);
 
-				self.request_send_transaction(
-					sender.id,
-					transaction_request,
-					VSPPhase2Metadata::new(roundup_submit.round, sender.id),
-				)
+				target_chain
+					.event_sender
+					.sender
+					.send(EventMessage::new(
+						DEFAULT_RETRIES,
+						transaction_request,
+						EventMetadata::VSPPhase2(VSPPhase2Metadata::new(
+							roundup_submit.round,
+							target_chain.event_sender.id,
+						)),
+					))
+					.unwrap();
 			}
-		}
-	}
-
-	/// Request send bridge relay transaction to the target event channel.
-	fn request_send_transaction(
-		&self,
-		chain_id: u32,
-		tx_request: TransactionRequest,
-		metadata: VSPPhase2Metadata,
-	) {
-		if let Some(event_sender) =
-			self.event_senders.iter().find(|event_sender| event_sender.id == chain_id)
-		{
-			event_sender
-				.sender
-				.send(EventMessage::new(
-					DEFAULT_RETRIES,
-					tx_request,
-					EventMetadata::VSPPhase2(metadata),
-				))
-				.unwrap();
-		} else {
-			panic!(
-				"{}]-[Roundup-handler    ] Unknown chain ID received: {:?}",
-				self.client.get_chain_name(),
-				chain_id
-			)
 		}
 	}
 }

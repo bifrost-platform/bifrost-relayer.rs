@@ -152,11 +152,13 @@ pub struct EventSender {
 	pub id: u32,
 	/// The message sender.
 	pub sender: UnboundedSender<EventMessage>,
+	/// Is Bifrost network?
+	pub is_native: bool,
 }
 
 impl EventSender {
 	/// Instantiates a new `EventSender` instance.
-	pub fn new(id: u32, sender: UnboundedSender<EventMessage>) -> Self {
-		Self { id, sender }
+	pub fn new(id: u32, sender: UnboundedSender<EventMessage>, is_native: bool) -> Self {
+		Self { id, sender, is_native }
 	}
 }
