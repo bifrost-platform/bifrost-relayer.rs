@@ -6,7 +6,7 @@ use cccp_primitives::{
 		BridgeRelayBuilder, PollSubmit, Signatures, SocketEvents, SocketExternal, SocketMessage,
 	},
 	eth::{BridgeDirection, Contract, SocketEventStatus, SOCKET_EVENT_SIG},
-	sub_display_format, target_display_format,
+	sub_display_format,
 };
 use ethers::{
 	abi::{encode, RawLog, Token},
@@ -73,7 +73,7 @@ impl<T: JsonRpcClient> Handler for BridgeRelayHandler<T> {
 			let block_msg = self.block_receiver.recv().await.unwrap();
 
 			log::info!(
-				target: &target_display_format(&self.client.get_chain_name()),
+				target: &self.client.get_chain_name(),
 				"-[{}] ✨ Imported #{:?} ({}) with target transactions({:?})",
 				sub_display_format(SUB_LOG_TARGET),
 				block_msg.raw_block.number.unwrap(),
@@ -115,7 +115,7 @@ impl<T: JsonRpcClient> Handler for BridgeRelayHandler<T> {
 								);
 
 								log::info!(
-									target: &target_display_format(&self.client.get_chain_name()),
+									target: &self.client.get_chain_name(),
 									"-[{}] 🔖 Detected socket event: {}, {:?}-{:?}",
 									sub_display_format(SUB_LOG_TARGET),
 									metadata,
@@ -157,7 +157,7 @@ impl<T: JsonRpcClient> Handler for BridgeRelayHandler<T> {
 				))
 				.unwrap();
 			log::info!(
-				target: &target_display_format(&self.client.get_chain_name()),
+				target: &self.client.get_chain_name(),
 				"-[{}] 🔖 Request relay transaction to chain({:?}): {}",
 				sub_display_format(SUB_LOG_TARGET),
 				chain_id,
@@ -166,7 +166,7 @@ impl<T: JsonRpcClient> Handler for BridgeRelayHandler<T> {
 		} else {
 			panic!(
 				"{}]-[{}] Unknown chain ID received: {:?}",
-				&target_display_format(&self.client.get_chain_name()),
+				&self.client.get_chain_name(),
 				sub_display_format(SUB_LOG_TARGET),
 				chain_id
 			)
@@ -244,7 +244,7 @@ impl<T: JsonRpcClient> BridgeRelayBuilder for BridgeRelayHandler<T> {
 				},
 				_ => panic!(
 					"{}]-[{}] Unknown socket event status received: {:?}",
-					&target_display_format(&self.client.get_chain_name()),
+					&self.client.get_chain_name(),
 					sub_display_format(SUB_LOG_TARGET),
 					status
 				),
@@ -264,7 +264,7 @@ impl<T: JsonRpcClient> BridgeRelayBuilder for BridgeRelayHandler<T> {
 				SocketEventStatus::Executed | SocketEventStatus::Reverted => Signatures::default(),
 				_ => panic!(
 					"{}]-[{}] Unknown socket event status received: {:?}",
-					&target_display_format(&self.client.get_chain_name()),
+					&self.client.get_chain_name(),
 					sub_display_format(SUB_LOG_TARGET),
 					status
 				),
@@ -367,7 +367,7 @@ impl<T: JsonRpcClient> BridgeRelayHandler<T> {
 			SocketEventStatus::Accepted | SocketEventStatus::Rejected => src_chain_id,
 			_ => panic!(
 				"{}]-[{}] Unknown socket event status received: {:?}",
-				&target_display_format(&self.client.get_chain_name()),
+				&self.client.get_chain_name(),
 				sub_display_format(SUB_LOG_TARGET),
 				status
 			),
@@ -388,7 +388,7 @@ impl<T: JsonRpcClient> BridgeRelayHandler<T> {
 			SocketEventStatus::Accepted | SocketEventStatus::Rejected => dst_chain_id,
 			_ => panic!(
 				"{}]-[{}] Unknown socket event status received: {:?}",
-				&target_display_format(&self.client.get_chain_name()),
+				&self.client.get_chain_name(),
 				sub_display_format(SUB_LOG_TARGET),
 				status
 			),

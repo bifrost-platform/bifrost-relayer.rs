@@ -1,6 +1,6 @@
 use cccp_primitives::{
 	periodic::{PriceFetcher, PriceResponse},
-	sub_display_format, target_display_format,
+	sub_display_format,
 };
 use reqwest::{Response, Url};
 use serde::Deserialize;
@@ -102,13 +102,13 @@ impl CoingeckoPriceFetcher {
 					},
 					Err(e) => {
 						log::error!(
-							target: &target_display_format(LOG_TARGET),
+							target: LOG_TARGET,
 							"-[{}] ❗️ Error decoding support coin list: {}",
 							sub_display_format(SUB_LOG_TARGET),
 							e
 						);
 						log::error!(
-							target: &target_display_format(LOG_TARGET),
+							target: LOG_TARGET,
 							"-[{}] ❗️ Retry in {:?} secs...",
 							sub_display_format(SUB_LOG_TARGET),
 							retry_interval
@@ -119,13 +119,13 @@ impl CoingeckoPriceFetcher {
 				},
 				Err(e) => {
 					log::error!(
-						target: &target_display_format(LOG_TARGET),
+						target: LOG_TARGET,
 						"-[{}] ❗️ Error fetching support coin list: {}",
 						sub_display_format(SUB_LOG_TARGET),
 						e
 					);
 					log::error!(
-						target: &target_display_format(LOG_TARGET),
+						target: LOG_TARGET,
 						"-[{}] ❗️ Retry in {:?} secs...",
 						sub_display_format(SUB_LOG_TARGET),
 						retry_interval
@@ -146,13 +146,13 @@ impl CoingeckoPriceFetcher {
 						Ok(result) => return result,
 						Err(e) => {
 							log::error!(
-								target: &target_display_format(LOG_TARGET),
+								target: LOG_TARGET,
 								"-[{}] ❗️ Error decoding coingecko response. Maybe rete limit exceeds?: {}",
 								sub_display_format(SUB_LOG_TARGET),
 								e
 							);
 							log::error!(
-								target: &target_display_format(LOG_TARGET),
+								target: LOG_TARGET,
 								"-[{}] ❗️ Retry in {:?} secs...",
 								sub_display_format(SUB_LOG_TARGET),
 								retry_interval
@@ -163,13 +163,13 @@ impl CoingeckoPriceFetcher {
 					},
 				Err(e) => {
 					log::error!(
-						target: &target_display_format(LOG_TARGET),
+						target: LOG_TARGET,
 						"-[{}] ❗️ Error fetching from coingecko: {}",
 						sub_display_format(SUB_LOG_TARGET),
 						e
 					);
 					log::error!(
-						target: &target_display_format(LOG_TARGET),
+						target: LOG_TARGET,
 						"-[{}] ❗️ Retry in {:?} secs...",
 						sub_display_format(SUB_LOG_TARGET),
 						retry_interval

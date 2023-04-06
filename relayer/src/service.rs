@@ -7,7 +7,7 @@ use cccp_primitives::{
 	cli::{Configuration, HandlerConfig, HandlerType},
 	eth::{BridgeDirection, Contract, EthClientConfiguration},
 	periodic::PeriodicWorker,
-	sub_display_format, target_display_format,
+	sub_display_format,
 };
 
 use cccp_periodic::roundup_emitter::RoundupEmitter;
@@ -109,7 +109,7 @@ pub fn new_relay_base(config: Configuration, cli: Cli) -> Result<RelayBase, Serv
 	};
 
 	log::info!(
-		target: &target_display_format(LOG_TARGET),
+		target: LOG_TARGET,
 		"-[{}] 👤 Relayer: {:?}",
 		sub_display_format(SUB_LOG_TARGET),
 		clients[0].address()

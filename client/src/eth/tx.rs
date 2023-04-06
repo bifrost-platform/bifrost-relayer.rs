@@ -1,4 +1,4 @@
-use cccp_primitives::{sub_display_format, target_display_format};
+use cccp_primitives::sub_display_format;
 use ethers::{
 	prelude::{
 		gas_escalator::{Frequency, GasEscalatorMiddleware, GeometricGasPrice},
@@ -56,7 +56,7 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> {
 	pub async fn run(&mut self) {
 		while let Some(msg) = self.receiver.recv().await {
 			log::info!(
-				target: &target_display_format(&self.client.get_chain_name()),
+				target: &self.client.get_chain_name(),
 				"-[{}] 🔖 Received transaction request: {}",
 				sub_display_format(SUB_LOG_TARGET),
 				msg.metadata,
@@ -71,7 +71,7 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> {
 	async fn send_transaction(&self, mut msg: EventMessage) {
 		if msg.retries_remaining == 0 {
 			log::error!(
-				target: &target_display_format(&self.client.get_chain_name()),
+				target: &self.client.get_chain_name(),
 				"-[{}] ❗️ Exceeded the retry limit to send a transaction: {}",
 				sub_display_format(SUB_LOG_TARGET),
 				msg.metadata
@@ -100,7 +100,7 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> {
 				Ok(receipt) =>
 					if let Some(receipt) = receipt {
 						log::info!(
-							target: &target_display_format(&self.client.get_chain_name()),
+							target: &self.client.get_chain_name(),
 							"-[{}] 🎁 The requested transaction has been successfully mined in block: {}, {:?}-{:?}-{:?}",
 							sub_display_format(SUB_LOG_TARGET),
 							msg.metadata.to_string(),
@@ -110,7 +110,7 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> {
 						);
 					} else {
 						log::error!(
-							target: &target_display_format(&self.client.get_chain_name()),
+							target: &self.client.get_chain_name(),
 							"-[{}] ♻️ The requested transaction has been dropped from the mempool: {}, Retries left: {:?}",
 							sub_display_format(SUB_LOG_TARGET),
 							msg.metadata,
@@ -126,7 +126,7 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> {
 					},
 				Err(error) => {
 					log::error!(
-						target: &target_display_format(&self.client.get_chain_name()),
+						target: &self.client.get_chain_name(),
 						"-[{}] ♻️ Unknown error while waiting for transaction receipt: {}, Retries left: {:?}, Error: {}",
 						sub_display_format(SUB_LOG_TARGET),
 						msg.metadata,
@@ -144,7 +144,7 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> {
 			},
 			Err(error) => {
 				log::error!(
-					target: &target_display_format(&self.client.get_chain_name()),
+					target: &self.client.get_chain_name(),
 					"-[{}] ♻️ Unknown error while sending transaction: {}, Retries left: {:?}, Error: {}",
 					sub_display_format(SUB_LOG_TARGET),
 					msg.metadata,

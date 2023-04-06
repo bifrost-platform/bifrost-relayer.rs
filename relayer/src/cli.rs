@@ -1,4 +1,4 @@
-use cccp_primitives::{cli::Role, sub_display_format, target_display_format};
+use cccp_primitives::{cli::Role, sub_display_format};
 use chrono::{Datelike, Local};
 use clap::{CommandFactory, FromArgMatches, Parser};
 
@@ -107,24 +107,39 @@ impl Cli {
 
 	/// Log information about the relayer itself.
 	pub fn print_relayer_infos(&self) {
-		let target = target_display_format(LOG_TARGET);
-		let sub_target = sub_display_format(SUB_LOG_TARGET);
+		let target = LOG_TARGET;
+		let sub_target = SUB_LOG_TARGET;
 
-		log::info!(target: &target, "-[{}] {}", sub_target, Self::impl_name());
-		log::info!(target: &target, "-[{}] ✌️  version {}", sub_target, Self::impl_version());
+		log::info!(target: target, "-[{}] {}", sub_display_format(sub_target), Self::impl_name());
 		log::info!(
-			target: &target,
+			target: target,
+			"-[{}] ✌️  version {}",
+			sub_display_format(sub_target),
+			Self::impl_version()
+		);
+		log::info!(
+			target: target,
 			"-[{}] ❤️  by {}, {}-{}",
-			sub_target,
+			sub_display_format(sub_target),
 			Self::author(),
 			Self::copyright_start_year(),
 			Local::now().year()
 		);
 
 		if self.run.enable_external {
-			log::info!(target: &target, "-[{}] 👤 Role: {}", sub_target, Role::External);
+			log::info!(
+				target: target,
+				"-[{}] 👤 Role: {}",
+				sub_display_format(sub_target),
+				Role::External
+			);
 		} else {
-			log::info!(target: &target, "-[{}] 👤 Role: {}", sub_target, Role::Native);
+			log::info!(
+				target: target,
+				"-[{}] 👤 Role: {}",
+				sub_display_format(sub_target),
+				Role::Native
+			);
 		}
 	}
 }
