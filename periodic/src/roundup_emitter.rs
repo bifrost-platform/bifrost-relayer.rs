@@ -3,6 +3,7 @@ use cccp_client::eth::{
 };
 use cccp_primitives::{
 	authority_bifrost::AuthorityBifrost,
+	cli::RoundupEmitterConfig,
 	relayer_bifrost::RelayerManager,
 	socket_bifrost::{RoundUpSubmit, Signatures, SocketBifrost},
 	PeriodicWorker,
@@ -72,10 +73,7 @@ impl<T: JsonRpcClient> RoundupEmitter<T> {
 	pub fn new(
 		event_sender: Arc<EventSender>,
 		client: Arc<EthClient<T>>,
-		schedule: &str,
-		authority_address: &str,
-		socket_address: &str,
-		relayer_manager_address: &str,
+		config: RoundupEmitterConfig,
 	) -> Self {
 		let provider = client.get_provider();
 
@@ -83,17 +81,17 @@ impl<T: JsonRpcClient> RoundupEmitter<T> {
 			current_round: U256::default(),
 			client,
 			event_sender,
-			schedule: Schedule::from_str(schedule).unwrap(),
+			schedule: Schedule::from_str(&config.schedule).unwrap(),
 			authority_contract: AuthorityBifrost::new(
-				H160::from_str(authority_address).unwrap(),
+				H160::from_str(&config.authority_address).unwrap(),
 				provider.clone(),
 			),
 			socket_contract: SocketBifrost::new(
-				H160::from_str(socket_address).unwrap(),
+				H160::from_str(&config.socket_address).unwrap(),
 				provider.clone(),
 			),
 			relayer_contract: RelayerManager::new(
-				H160::from_str(relayer_manager_address).unwrap(),
+				H160::from_str(&config.relayer_manager_address).unwrap(),
 				provider.clone(),
 			),
 		}

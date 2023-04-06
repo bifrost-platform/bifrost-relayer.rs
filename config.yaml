@@ -76,7 +76,12 @@ mnemonic: "0x5fb92d6e98884f76de468fa3f6278f8807c48bebc13595d45af5bdc4da702133"
 periodic_configs:
   oracle_price_feeder:
     - chain_id: 49088
-      schedule: "0 */5 * * * * *"
+      schedule: "0 */5 * * * * *" # Every 5th minute.
       contract: "0x0218371b18340aBD460961bdF3Bd5F01858dAB53"
       price_sources: [ Coingecko ]
       symbols: [ "ETH", "BFC", "BNB", "MATIC", "USDC", "BIFI" ]
+  roundup_emitter:
+    schedule: "*/15 * * * * * *" # Every 15th seconds.
+    authority_address: "0x0000000000000000000000000000000000000400"
+    socket_address: "0x0218371b18340aBD460961bdF3Bd5F01858dAB53"
+    relayer_manager_address: "0x0000000000000000000000000000000000002000"

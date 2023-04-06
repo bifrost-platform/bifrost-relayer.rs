@@ -140,7 +140,7 @@ impl<T: JsonRpcClient> Handler for BridgeRelayHandler<T> {
 		false
 	}
 
-	fn is_target_event(topic: H256) -> bool {
+	fn is_target_event(&self, topic: H256) -> bool {
 		topic == H256::from_str(SOCKET_EVENT_SIG).unwrap()
 	}
 }

@@ -114,15 +114,15 @@ pub struct WatchTarget {
 }
 
 #[derive(Debug, Clone, Deserialize)]
-pub enum RoundupUtilType {
+pub enum RoundupHandlerUtilType {
 	Socket,
 	RelayManager,
 }
 
 #[derive(Debug, Clone, Deserialize)]
-pub struct RoundupUtilityConfig {
+pub struct RoundupHandlerUtilityConfig {
 	/// Roundup relay target's util contract type.
-	pub contract_type: RoundupUtilType,
+	pub contract_type: RoundupHandlerUtilType,
 	/// Roundup relay target's util contract address.
 	pub contract: String,
 	/// Roundup relay target's chain id.
@@ -136,20 +136,39 @@ pub struct HandlerConfig {
 	/// Watch target list
 	pub watch_list: Vec<WatchTarget>,
 	/// Roundup relay utils (Only needs for RoundupHandler)
-	pub roundup_utils: Option<Vec<RoundupUtilityConfig>>,
+	pub roundup_utils: Option<Vec<RoundupHandlerUtilityConfig>>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct PriceFeederConfig {
+	/// Chain id where oracle contract deployed on
 	pub chain_id: u32,
+	/// Periodic schedule in cron expression.
 	pub schedule: String,
+	/// Oracle contract address
 	pub contract: String,
+	/// Price source enum. (Coingecko is only available now.)
 	pub price_sources: Vec<PriceSource>,
+	/// Token/Coin symbols needs to get price
 	pub symbols: Vec<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct RoundupEmitterConfig {
+	/// Periodic schedule in cron expression.
+	pub schedule: String,
+	/// Authority contract address (Bifrost network's)
+	pub authority_address: String,
+	/// Socket contract address (Bifrost network's)
+	pub socket_address: String,
+	/// RelayerManger contract address (Bifrost network's)
+	pub relayer_manager_address: String,
 }
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct PeriodicWorkerConfig {
 	/// Oracle price feeder
 	pub oracle_price_feeder: Option<Vec<PriceFeederConfig>>,
+	/// Roundup Phase1 feeder
+	pub roundup_emitter: RoundupEmitterConfig,
 }

@@ -9,6 +9,7 @@ use cccp_primitives::{
 	periodic::PeriodicWorker,
 };
 
+use cccp_periodic::roundup_emitter::RoundupEmitter;
 use cccp_primitives::socket_bifrost::SocketBifrost;
 use ethers::{
 	providers::{Http, Provider},
@@ -86,6 +87,7 @@ pub fn new_relay_base(config: Configuration) -> Result<RelayBase, ServiceError> 
 						_ => BridgeDirection::Outbound,
 					},
 				),
+				evm_provider.is_native.unwrap_or(false),
 			));
 			let (tx_manager, event_sender) = TransactionManager::new(client.clone());
 			let block_manager = BlockManager::new(client.clone(), target_contracts);
@@ -119,6 +121,7 @@ pub fn new_relay_base(config: Configuration) -> Result<RelayBase, ServiceError> 
 	config
 		.relayer_config
 		.periodic_configs
+		.clone()
 		.unwrap()
 		.oracle_price_feeder
 		.unwrap()
@@ -257,6 +260,18 @@ pub fn new_relay_base(config: Configuration) -> Result<RelayBase, ServiceError> 
 			},
 		}
 	});
+
+	// initialize roundup feeder & spawn tasks
+	let mut roundup_emitter = RoundupEmitter::new(
+		event_channels.iter().find(|sender| sender.is_native).unwrap().clone(),
+		clients.iter().find(|client| client.is_native).unwrap().clone(),
+		config.relayer_config.periodic_configs.unwrap().roundup_emitter.clone(),
+	);
+	task_manager.spawn_essential_handle().spawn(
+		"Roundup-Emitter",
+		Some("roundup-emitter"),
+		async move { roundup_emitter.run().await },
+	);
 
 	// spawn block managers' tasks
 	block_managers.into_iter().for_each(|mut block_manager| {

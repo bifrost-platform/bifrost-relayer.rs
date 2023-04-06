@@ -4,11 +4,11 @@ use crate::eth::{
 };
 use async_trait::async_trait;
 use cccp_primitives::{
-	cli::RoundupUtilityConfig,
+	cli::RoundupHandlerUtilityConfig,
 	relayer_external::RelayerManager,
 	socket_bifrost::{SerializedRoundUp, SocketBifrost, SocketBifrostEvents, SOCKETBIFROST_ABI},
 	socket_external::{RoundUpSubmit, Signatures, SocketExternal},
-	RoundupUtilType,
+	RoundupHandlerUtilType,
 };
 use ethers::{
 	abi::{Detokenize, Tokenize},
@@ -134,7 +134,7 @@ impl<T: JsonRpcClient> RoundupRelayHandler<T> {
 		client: Arc<EthClient<T>>,
 		external_clients: Vec<Arc<EthClient<T>>>,
 		socket_bifrost: SocketBifrost<Provider<T>>,
-		roundup_util_configs: Vec<RoundupUtilityConfig>,
+		roundup_util_configs: Vec<RoundupHandlerUtilityConfig>,
 	) -> Self {
 		let roundup_signature = SOCKETBIFROST_ABI.event("RoundUp").unwrap().signature();
 		let roundup_utils = event_senders
@@ -145,7 +145,7 @@ impl<T: JsonRpcClient> RoundupRelayHandler<T> {
 					|(socket_ext, relay_ext), config| {
 						if config.chain_id == sender.id {
 							match config.contract_type {
-								RoundupUtilType::Socket => (
+								RoundupHandlerUtilType::Socket => (
 									Some(SocketExternal::new(
 										H160::from_str(&config.contract).unwrap(),
 										external_clients
@@ -156,7 +156,7 @@ impl<T: JsonRpcClient> RoundupRelayHandler<T> {
 									)),
 									relay_ext,
 								),
-								RoundupUtilType::RelayManager => (
+								RoundupHandlerUtilType::RelayManager => (
 									socket_ext,
 									Some(RelayerManager::new(
 										H160::from_str(&config.contract).unwrap(),
