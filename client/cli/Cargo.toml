@@ -1,17 +1,27 @@
 [package]
 name = "cc-cli"
 version = "0.1.0"
-edition = "2021"
+description = "The client CLI module for BIFROST relayer"
+authors = { workspace = true }
+homepage = { workspace = true }
+edition = { workspace = true }
+license = { workspace = true }
+repository = { workspace = true }
 
 [dependencies]
+# General
+log = { workspace = true }
+chrono = { workspace = true }
+futures = { workspace = true }
+thiserror = { workspace = true }
+serde_yaml = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+tokio = { workspace = true, features = ["signal", "rt-multi-thread", "parking_lot"] }
+
+# CCCP
 cccp-client = { path = "../../client" }
 cccp-primitives = { path = "../../primitives" }
-chrono = "0.4.23"
-futures = "0.3.26"
-log = "0.4.17"
-sc-service = { git = "https://github.com/bifrost-platform/bifrost-substrate", branch = "bifrost-polkadot-v0.9.35" }
-sc-utils = { git = "https://github.com/bifrost-platform/bifrost-substrate", branch = "bifrost-polkadot-v0.9.35" }
-serde = { version = "1.0.153", features = ["derive"] }
-serde_yaml = "0.9.19"
-thiserror = "1.0.39"
-tokio = { version = "1.22.0", features = ["signal", "rt-multi-thread", "parking_lot"] }
+
+# Substrate
+sc-service = { workspace = true }
+sc-utils = { workspace = true }

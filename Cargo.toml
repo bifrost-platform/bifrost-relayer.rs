@@ -7,6 +7,43 @@ members = [
     "relayer",
 ]
 
-
 [profile.release]
 panic = "unwind"
+
+[workspace.package]
+authors = ["bifrost-platform"]
+homepage = "https://thebifrost.io"
+edition = "2021"
+license = "Apache-2.0"
+repository = "https://github.com/bifrost-platform/cccp-relayer"
+
+[workspace.dependencies]
+# General
+log = "0.4.17"
+env_logger = "0.10.0"
+async-trait = "0.1.57"
+clap = "4.2.1"
+cron = "0.12.0"
+chrono = "0.4.24"
+thiserror = "1.0.39"
+futures = "0.3.26"
+reqwest = "0.11.15"
+
+serde_yaml = "0.9.19"
+serde = "1.0.153"
+serde_json = "1.0.94"
+
+hex = "0.4.3"
+ethers = "2.0.2"
+
+
+tokio = "1.22.0"
+tokio-stream = "0.1"
+
+# Substrate Client
+sc-cli = { git = "https://github.com/bifrost-platform/bifrost-substrate", branch = "bifrost-polkadot-v0.9.37" }
+sc-utils = { git = "https://github.com/bifrost-platform/bifrost-substrate", branch = "bifrost-polkadot-v0.9.37" }
+sc-service = { git = "https://github.com/bifrost-platform/bifrost-substrate", branch = "bifrost-polkadot-v0.9.37" }
+
+# Substrate Builds
+substrate-build-script-utils = { git = "https://github.com/bifrost-platform/bifrost-substrate", branch = "bifrost-polkadot-v0.9.37" }
