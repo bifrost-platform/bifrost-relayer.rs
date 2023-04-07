@@ -49,7 +49,7 @@ impl ethers::contract::EthLogDecode for SocketEvents {
 
 #[async_trait::async_trait]
 /// The client to interact with the `Socket` contract instance.
-pub trait SocketClient {
+pub trait BridgeRelayBuilder {
 	/// Builds the `poll()` function call data.
 	fn build_poll_call_data(&self, msg: SocketMessage, sigs: Signatures) -> Bytes;
 
