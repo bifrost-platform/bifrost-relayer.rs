@@ -77,7 +77,7 @@ impl<T: JsonRpcClient> Handler for RoundupRelayHandler<T> {
 		while let Some(log) = stream.next().await {
 			// Pass if emitted event is not `RoundUp`
 			if !self.is_target_event(log.topics[0]) {
-				break
+				continue
 			}
 
 			match self.decode_log(log).await {
@@ -97,7 +97,7 @@ impl<T: JsonRpcClient> Handler for RoundupRelayHandler<T> {
 							"-[roundup-handler    ] RoundUp event emitted. However, the majority has not yet been met. ({:?})",
 							receipt.transaction_hash,
 						);
-						break
+						continue
 					},
 				},
 				Err(e) => {
@@ -107,7 +107,7 @@ impl<T: JsonRpcClient> Handler for RoundupRelayHandler<T> {
 						receipt.transaction_hash,
 						e,
 					);
-					break
+					continue
 				},
 			}
 		}
