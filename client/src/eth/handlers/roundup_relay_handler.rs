@@ -6,7 +6,7 @@ use async_trait::async_trait;
 use cccp_primitives::{
 	cli::RoundupHandlerUtilityConfig,
 	relayer_external::RelayerManagerExternal,
-	socket_bifrost::{SerializedRoundUp, SocketBifrost, SocketBifrostEvents, SOCKETBIFROST_ABI},
+	socket_bifrost::{SerializedRoundUp, SocketBifrost, SocketBifrostEvents},
 	socket_external::{RoundUpSubmit, Signatures, SocketExternal},
 	RoundupHandlerUtilType,
 };
@@ -136,7 +136,7 @@ impl<T: JsonRpcClient> RoundupRelayHandler<T> {
 		socket_bifrost: SocketBifrost<Provider<T>>,
 		roundup_util_configs: Vec<RoundupHandlerUtilityConfig>,
 	) -> Self {
-		let roundup_signature = SOCKETBIFROST_ABI.event("RoundUp").unwrap().signature();
+		let roundup_signature = socket_bifrost.abi().event("RoundUp").unwrap().signature();
 		let roundup_utils = event_senders
 			.iter()
 			.map(|sender| {
