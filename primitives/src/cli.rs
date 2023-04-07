@@ -4,24 +4,6 @@ use serde::Deserialize;
 
 pub type Result<T> = std::result::Result<T, Error>;
 
-/// Role of the local relayer.
-#[derive(Debug, Clone)]
-pub enum Role {
-	/// A relayer that only handles native actions.
-	Native,
-	/// A relayer that handles both native and external actions.
-	External,
-}
-
-impl std::fmt::Display for Role {
-	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-		match self {
-			Self::Native => write!(f, "NATIVE-ONLY"),
-			Self::External => write!(f, "NATIVE-AND-EXTERNAL"),
-		}
-	}
-}
-
 /// Error type for the CLI.
 #[derive(Debug, thiserror::Error)]
 #[allow(missing_docs)]
@@ -102,6 +84,8 @@ pub struct EVMProvider {
 	pub block_confirmations: U64,
 	/// True if bifrost network. False for else networks.
 	pub is_native: Option<bool>,
+	/// The flag whether it will handle relay transactions to the current chain.
+	pub is_relay_target: bool,
 }
 
 #[derive(Debug, Clone, Deserialize)]

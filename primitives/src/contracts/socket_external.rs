@@ -59,10 +59,10 @@ pub trait BridgeRelayBuilder {
 		msg: SocketMessage,
 		is_inbound: bool,
 		relay_tx_chain_id: u32,
-	) -> (TransactionRequest, bool);
+	) -> TransactionRequest;
 
 	/// Build the signatures required to request `poll()`.
-	async fn build_signatures(&self, msg: SocketMessage, is_inbound: bool) -> (Signatures, bool);
+	async fn build_signatures(&self, msg: SocketMessage, is_inbound: bool) -> Signatures;
 
 	/// Encodes the given socket message to bytes.
 	fn encode_socket_message(&self, msg: SocketMessage) -> Bytes;

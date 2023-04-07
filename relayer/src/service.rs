@@ -19,7 +19,7 @@ use ethers::{
 use sc_service::{Error as ServiceError, TaskManager};
 use std::{str::FromStr, sync::Arc};
 
-use crate::cli::{Cli, LOG_TARGET, SUB_LOG_TARGET};
+use crate::cli::{LOG_TARGET, SUB_LOG_TARGET};
 
 /// Get the target contracts for the `BlockManager` to monitor.
 fn get_target_contracts_by_chain_id(
@@ -53,11 +53,11 @@ fn build_socket_contracts(handler_configs: &Vec<HandlerConfig>) -> Vec<Contract>
 	contracts
 }
 
-pub fn relay(config: Configuration, cli: Cli) -> Result<TaskManager, ServiceError> {
-	new_relay_base(config, cli).map(|RelayBase { task_manager, .. }| task_manager)
+pub fn relay(config: Configuration) -> Result<TaskManager, ServiceError> {
+	new_relay_base(config).map(|RelayBase { task_manager, .. }| task_manager)
 }
 
-pub fn new_relay_base(config: Configuration, cli: Cli) -> Result<RelayBase, ServiceError> {
+pub fn new_relay_base(config: Configuration) -> Result<RelayBase, ServiceError> {
 	// initialize `EthClient`, `TransactionManager`, `BlockManager`
 	let (clients, tx_managers, block_managers, event_channels) = {
 		let mut clients = vec![];
@@ -77,6 +77,7 @@ pub fn new_relay_base(config: Configuration, cli: Cli) -> Result<RelayBase, Serv
 			)
 			.expect("Failed to initialize wallet manager");
 
+			let is_native = evm_provider.is_native.unwrap_or(false);
 			let client = Arc::new(EthClient::new(
 				wallet,
 				Arc::new(Provider::<Http>::try_from(evm_provider.provider).unwrap()),
@@ -85,24 +86,27 @@ pub fn new_relay_base(config: Configuration, cli: Cli) -> Result<RelayBase, Serv
 					evm_provider.id,
 					evm_provider.call_interval,
 					evm_provider.block_confirmations,
-					match evm_provider.is_native.unwrap_or(false) {
+					match is_native {
 						true => BridgeDirection::Inbound,
 						_ => BridgeDirection::Outbound,
 					},
 				),
 				evm_provider.is_native.unwrap_or(false),
 			));
-			let (tx_manager, event_sender) = TransactionManager::new(client.clone());
+
+			if evm_provider.is_relay_target {
+				let (tx_manager, event_sender) = TransactionManager::new(client.clone());
+				tx_managers.push((tx_manager, client.get_chain_name()));
+				event_senders.push(Arc::new(EventSender::new(
+					evm_provider.id,
+					event_sender,
+					is_native,
+				)));
+			}
 			let block_manager = BlockManager::new(client.clone(), target_contracts);
 
-			tx_managers.push((tx_manager, client.get_chain_name()));
 			clients.push(client);
 			block_managers.push(block_manager);
-			event_senders.push(Arc::new(EventSender::new(
-				evm_provider.id,
-				event_sender,
-				evm_provider.is_native.unwrap_or(false),
-			)));
 		});
 
 		(clients, tx_managers, block_managers, event_senders)
@@ -113,6 +117,16 @@ pub fn new_relay_base(config: Configuration, cli: Cli) -> Result<RelayBase, Serv
 		"-[{}] 👤 Relayer: {:?}",
 		sub_display_format(SUB_LOG_TARGET),
 		clients[0].address()
+	);
+	log::info!(
+		target: LOG_TARGET,
+		"-[{}] 🔨 Relay Targets: {}",
+		sub_display_format(SUB_LOG_TARGET),
+		tx_managers
+			.iter()
+			.map(|tx_manager| tx_manager.0.client.get_chain_name())
+			.collect::<Vec<String>>()
+			.join(", ")
 	);
 
 	// Initialize `TaskManager`
@@ -200,7 +214,6 @@ pub fn new_relay_base(config: Configuration, cli: Cli) -> Result<RelayBase, Serv
 						H160::from_str(&target.contract).unwrap(),
 						target_socket.address,
 						socket_contracts.clone(),
-						cli.run.enable_external,
 					);
 					task_manager.spawn_essential_handle().spawn(
 						Box::leak(

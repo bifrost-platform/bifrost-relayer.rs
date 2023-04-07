@@ -1,11 +1,10 @@
-use cccp_primitives::{cli::Role, sub_display_format};
+use cccp_primitives::sub_display_format;
 use chrono::{Datelike, Local};
 use clap::{CommandFactory, FromArgMatches, Parser};
 
 #[derive(Debug, Parser)]
 pub struct Cli {
-	#[clap(flatten)]
-	pub run: RunCmd,
+	// TODO: add params
 }
 
 impl Cli {
@@ -125,35 +124,8 @@ impl Cli {
 			Self::copyright_start_year(),
 			Local::now().year()
 		);
-
-		if self.run.enable_external {
-			log::info!(
-				target: target,
-				"-[{}] 👤 Role: {}",
-				sub_display_format(sub_target),
-				Role::External
-			);
-		} else {
-			log::info!(
-				target: target,
-				"-[{}] 👤 Role: {}",
-				sub_display_format(sub_target),
-				Role::Native
-			);
-		}
 	}
 }
 
 pub const LOG_TARGET: &str = "cccp-relayer";
 pub const SUB_LOG_TARGET: &str = "main";
-
-#[derive(Debug, Clone, Parser)]
-/// The `run` command used to run a relayer.
-pub struct RunCmd {
-	/// Enable transaction requests to external chains. ex) Relay transactions to Ethereum.
-	///
-	/// If enabled, the system will verify your relayer accounts balance whether it's empty or not
-	/// on initialization. By default it's disabled.
-	#[arg(long)]
-	pub enable_external: bool,
-}
