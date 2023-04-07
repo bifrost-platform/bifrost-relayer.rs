@@ -1,6 +1,6 @@
 use cccp_client::eth::{
-	BlockManager, BridgeRelayHandler, EthClient, EventSender, Handler, TransactionManager,
-	WalletManager,
+	BlockManager, BridgeRelayHandler, EthClient, EventSender, Handler, RoundupRelayHandler,
+	TransactionManager, WalletManager,
 };
 use cccp_periodic::OraclePriceFeeder;
 use cccp_primitives::{
@@ -9,6 +9,8 @@ use cccp_primitives::{
 	periodic::PeriodicWorker,
 };
 
+use cccp_periodic::roundup_emitter::RoundupEmitter;
+use cccp_primitives::socket_bifrost::SocketBifrost;
 use ethers::{
 	providers::{Http, Provider},
 	types::H160,
@@ -85,6 +87,7 @@ pub fn new_relay_base(config: Configuration) -> Result<RelayBase, ServiceError> 
 						_ => BridgeDirection::Outbound,
 					},
 				),
+				evm_provider.is_native.unwrap_or(false),
 			));
 			let (tx_manager, event_sender) = TransactionManager::new(client.clone());
 			let block_manager = BlockManager::new(client.clone(), target_contracts);
@@ -92,7 +95,11 @@ pub fn new_relay_base(config: Configuration) -> Result<RelayBase, ServiceError> 
 			tx_managers.push((tx_manager, client.get_chain_name()));
 			clients.push(client);
 			block_managers.push(block_manager);
-			event_senders.push(Arc::new(EventSender::new(evm_provider.id, event_sender)));
+			event_senders.push(Arc::new(EventSender::new(
+				evm_provider.id,
+				event_sender,
+				evm_provider.is_native.unwrap_or(false),
+			)));
 		});
 
 		(clients, tx_managers, block_managers, event_senders)
@@ -114,6 +121,7 @@ pub fn new_relay_base(config: Configuration) -> Result<RelayBase, ServiceError> 
 	config
 		.relayer_config
 		.periodic_configs
+		.clone()
 		.unwrap()
 		.oracle_price_feeder
 		.unwrap()
@@ -196,8 +204,74 @@ pub fn new_relay_base(config: Configuration) -> Result<RelayBase, ServiceError> 
 						async move { bridge_relay_handler.run().await },
 					);
 				}),
+			HandlerType::Roundup => {
+				let client = clients
+					.iter()
+					.find(|client| client.get_chain_id() == handler_config.watch_list[0].chain_id)
+					.cloned()
+					.unwrap_or_else(|| {
+						panic!(
+							"Unknown chain id ({:?}) required on initializing roundup handler.",
+							handler_config.watch_list[0].chain_id
+						)
+					});
+				let block_receiver = block_managers
+					.iter()
+					.find(|manager| {
+						manager.client.get_chain_id() == handler_config.watch_list[0].chain_id
+					})
+					.unwrap_or_else(|| {
+						panic!(
+							"Unknown chain id ({:?}) required on initializing socket handler.",
+							handler_config.watch_list[0].chain_id
+						)
+					})
+					.sender
+					.subscribe();
+
+				let mut external_event_channels = event_channels.clone();
+				external_event_channels.retain(|channel| !channel.is_native); // Remove bifrost network sender.
+
+				// Initialize SocketBifrost instance
+				let socket_bifrost = SocketBifrost::new(
+					H160::from_str(&handler_config.watch_list[0].contract).unwrap(),
+					client.get_provider(),
+				);
+
+				let mut external_clients = clients.clone();
+				external_clients.retain(|external_client| {
+					// Remove bifrost network client.
+					external_client.get_chain_id() != client.get_chain_id()
+				});
+
+				let mut roundup_relay_handler = RoundupRelayHandler::new(
+					external_event_channels,
+					block_receiver,
+					client.clone(),
+					external_clients,
+					socket_bifrost,
+					handler_config.roundup_utils.clone().unwrap(),
+				);
+				task_manager.spawn_essential_handle().spawn(
+					"Roundup-handler",
+					Some("handlers"),
+					async move { roundup_relay_handler.run().await },
+				);
+			},
 		}
 	});
+
+	// initialize roundup feeder & spawn tasks
+	let mut roundup_emitter = RoundupEmitter::new(
+		event_channels.iter().find(|sender| sender.is_native).unwrap().clone(),
+		clients.iter().find(|client| client.is_native).unwrap().clone(),
+		config.relayer_config.periodic_configs.unwrap().roundup_emitter.clone(),
+	);
+	task_manager.spawn_essential_handle().spawn(
+		"Roundup-Emitter",
+		Some("roundup-emitter"),
+		async move { roundup_emitter.run().await },
+	);
 
 	// spawn block managers' tasks
 	block_managers.into_iter().for_each(|mut block_manager| {
