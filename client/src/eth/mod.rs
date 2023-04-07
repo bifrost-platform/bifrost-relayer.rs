@@ -29,11 +29,13 @@ pub type TxResult<T = ()> = Result<T, Box<dyn std::error::Error + Send + Sync>>;
 /// The core client for EVM-based chain interactions.
 pub struct EthClient<T> {
 	/// The wallet manager for the connected relayer.
-	wallet: WalletManager,
+	pub wallet: WalletManager,
 	/// The ethers.rs wrapper for the connected chain.
 	provider: Arc<Provider<T>>,
 	/// The specific configuration details for the connected chain.
 	config: EthClientConfiguration,
+	/// Is bifrost network client?
+	pub is_native: bool,
 }
 
 impl<T: JsonRpcClient> EthClient<T> {
@@ -42,8 +44,9 @@ impl<T: JsonRpcClient> EthClient<T> {
 		wallet: WalletManager,
 		provider: Arc<Provider<T>>,
 		config: EthClientConfiguration,
+		is_native: bool,
 	) -> Self {
-		Self { wallet, provider, config }
+		Self { wallet, provider, config, is_native }
 	}
 
 	/// Returns name which chain this client interacts with.

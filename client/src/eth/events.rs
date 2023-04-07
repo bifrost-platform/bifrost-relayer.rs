@@ -1,14 +1,14 @@
 use std::fmt::Display;
 
 use cccp_primitives::{eth::SocketEventStatus, PriceResponse};
-use ethers::types::TransactionRequest;
+use ethers::types::{Address, TransactionRequest, U256};
 use tokio::sync::mpsc::UnboundedSender;
 
 /// The default retries of a single transaction request.
 pub const DEFAULT_RETRIES: u8 = 3;
 
 #[derive(Clone, Debug)]
-pub struct RelayMetadata {
+pub struct BridgeRelayMetadata {
 	/// The bridge direction.
 	pub direction: String,
 	/// The bridge request status.
@@ -21,7 +21,7 @@ pub struct RelayMetadata {
 	pub dst_chain_id: u32,
 }
 
-impl RelayMetadata {
+impl BridgeRelayMetadata {
 	pub fn new(
 		direction: String,
 		status: SocketEventStatus,
@@ -33,7 +33,7 @@ impl RelayMetadata {
 	}
 }
 
-impl Display for RelayMetadata {
+impl Display for BridgeRelayMetadata {
 	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
 		write!(
 			f,
@@ -57,19 +57,56 @@ impl PriceFeedMetadata {
 
 impl Display for PriceFeedMetadata {
 	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		write!(f, "PriceFeed({:?})", self.prices)
+	}
+}
+
+#[derive(Clone, Debug)]
+pub struct VSPPhase1Metadata {
+	pub relayer_addresses: Vec<Address>,
+}
+
+impl VSPPhase1Metadata {
+	pub fn new(relayer_addresses: Vec<Address>) -> Self {
+		Self { relayer_addresses }
+	}
+}
+
+impl Display for VSPPhase1Metadata {
+	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
 		let result = self
-			.prices
+			.relayer_addresses
 			.iter()
-			.map(|price| format!("{}: {}", price.symbol, price.price))
+			.map(|address| address.to_string())
 			.collect::<Vec<String>>();
-		write!(f, "PriceFeed({})", result.join(", "),)
+		write!(f, "VSPPhase1({:?})", result,)
+	}
+}
+
+#[derive(Clone, Debug)]
+pub struct VSPPhase2Metadata {
+	pub round: U256,
+	pub dst_chain_id: u32,
+}
+
+impl VSPPhase2Metadata {
+	pub fn new(round: U256, dst_chain_id: u32) -> Self {
+		Self { round, dst_chain_id }
+	}
+}
+
+impl Display for VSPPhase2Metadata {
+	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		write!(f, "VSPPhase2({:?}, On chain:{:?})", self.round, self.dst_chain_id)
 	}
 }
 
 #[derive(Clone, Debug)]
 pub enum EventMetadata {
-	Relay(RelayMetadata),
+	BridgeRelay(BridgeRelayMetadata),
 	PriceFeed(PriceFeedMetadata),
+	VSPPhase1(VSPPhase1Metadata),
+	VSPPhase2(VSPPhase2Metadata),
 }
 
 impl Display for EventMetadata {
@@ -78,8 +115,10 @@ impl Display for EventMetadata {
 			f,
 			"{}",
 			match self {
-				EventMetadata::Relay(metadata) => metadata.to_string(),
+				EventMetadata::BridgeRelay(metadata) => metadata.to_string(),
 				EventMetadata::PriceFeed(metadata) => metadata.to_string(),
+				EventMetadata::VSPPhase1(metadata) => metadata.to_string(),
+				EventMetadata::VSPPhase2(metadata) => metadata.to_string(),
 			}
 		)
 	}
@@ -113,11 +152,13 @@ pub struct EventSender {
 	pub id: u32,
 	/// The message sender.
 	pub sender: UnboundedSender<EventMessage>,
+	/// Is Bifrost network?
+	pub is_native: bool,
 }
 
 impl EventSender {
 	/// Instantiates a new `EventSender` instance.
-	pub fn new(id: u32, sender: UnboundedSender<EventMessage>) -> Self {
-		Self { id, sender }
+	pub fn new(id: u32, sender: UnboundedSender<EventMessage>, is_native: bool) -> Self {
+		Self { id, sender, is_native }
 	}
 }

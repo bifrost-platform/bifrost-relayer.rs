@@ -47,13 +47,41 @@ handler_configs:
         contract: "0x27C66cb5caa07C9B332939c357c789C606f5054C"
       - chain_id: 80001
         contract: "0xB2ba0020560cF6c164DC48D1E29559AbA8472208"
+  - handler_type: Roundup
+    watch_list:
+      - chain_id: 49088
+        contract: "0x0218371b18340aBD460961bdF3Bd5F01858dAB53"
+    roundup_utils:
+      - contract_type: Socket
+        contract: "0xeF5260Db045200142a6B5DDB297e860099ffd51d"
+        chain_id: 5
+      - contract_type: Socket
+        contract: "0x8039c3AD8ED55509fD3f6Daa78867923fDe6E61c"
+        chain_id: 97
+      - contract_type: Socket
+        contract: "0xA25357F3C313Bd13885678f935178211f0dF6722"
+        chain_id: 80001
+      - contract_type: RelayManager
+        contract: "0xF51f7e267D2D966f8d3Ff2fea42B410bB14800e1"
+        chain_id: 5
+      - contract_type: RelayManager
+        contract: "0xCf9f6428A309b6652a1dfaA4d8aB8B61C9c7E8CF"
+        chain_id: 97
+      - contract_type: RelayManager
+        contract: "0x2FD5232fDFa6e1c127e7821CC48108Ca79281a38"
+        chain_id: 80001
 
 mnemonic: "0x5fb92d6e98884f76de468fa3f6278f8807c48bebc13595d45af5bdc4da702133"
 
 periodic_configs:
   oracle_price_feeder:
     - chain_id: 49088
-      schedule: "0 */5 * * * * *"
+      schedule: "0 */5 * * * * *" # Every 5th minute.
       contract: "0x0218371b18340aBD460961bdF3Bd5F01858dAB53"
-      price_sources: [Coingecko]
-      symbols: ["ETH", "BFC", "BNB", "MATIC", "USDC", "BIFI"]
+      price_sources: [ Coingecko ]
+      symbols: [ "ETH", "BFC", "BNB", "MATIC", "USDC", "BIFI" ]
+  roundup_emitter:
+    schedule: "*/15 * * * * * *" # Every 15th seconds.
+    authority_address: "0x0000000000000000000000000000000000000400"
+    socket_address: "0x0218371b18340aBD460961bdF3Bd5F01858dAB53"
+    relayer_manager_address: "0x0000000000000000000000000000000000002000"
