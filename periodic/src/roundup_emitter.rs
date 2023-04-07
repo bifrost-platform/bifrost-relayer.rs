@@ -4,7 +4,7 @@ use cccp_client::eth::{
 use cccp_primitives::{
 	authority_bifrost::AuthorityBifrost,
 	cli::RoundupEmitterConfig,
-	relayer_bifrost::RelayerManager,
+	relayer_bifrost::RelayerManagerBifrost,
 	socket_bifrost::{RoundUpSubmit, Signatures, SocketBifrost},
 	PeriodicWorker,
 };
@@ -32,7 +32,7 @@ pub struct RoundupEmitter<T> {
 	/// Socket contract(bifrost) instance
 	pub socket_contract: SocketBifrost<Provider<T>>,
 	/// RelayerManager contract(bifrost) instance
-	pub relayer_contract: RelayerManager<Provider<T>>,
+	pub relayer_contract: RelayerManagerBifrost<Provider<T>>,
 }
 
 #[async_trait::async_trait]
@@ -90,7 +90,7 @@ impl<T: JsonRpcClient> RoundupEmitter<T> {
 				H160::from_str(&config.socket_address).unwrap(),
 				provider.clone(),
 			),
-			relayer_contract: RelayerManager::new(
+			relayer_contract: RelayerManagerBifrost::new(
 				H160::from_str(&config.relayer_manager_address).unwrap(),
 				provider.clone(),
 			),

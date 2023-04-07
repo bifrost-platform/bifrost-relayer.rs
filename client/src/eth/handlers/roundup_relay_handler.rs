@@ -5,7 +5,7 @@ use crate::eth::{
 use async_trait::async_trait;
 use cccp_primitives::{
 	cli::RoundupHandlerUtilityConfig,
-	relayer_external::RelayerManager,
+	relayer_external::RelayerManagerExternal,
 	socket_bifrost::{SerializedRoundUp, SocketBifrost, SocketBifrostEvents, SOCKETBIFROST_ABI},
 	socket_external::{RoundUpSubmit, Signatures, SocketExternal},
 	RoundupHandlerUtilType,
@@ -27,7 +27,7 @@ pub struct RoundupUtility<T> {
 	/// Socket contract on external chain.
 	pub socket_external: SocketExternal<Provider<T>>,
 	/// Relayer contracts on external chain.
-	pub relayer_external: RelayerManager<Provider<T>>,
+	pub relayer_external: RelayerManagerExternal<Provider<T>>,
 	/// External chain id.
 	pub id: u32,
 }
@@ -158,7 +158,7 @@ impl<T: JsonRpcClient> RoundupRelayHandler<T> {
 								),
 								RoundupHandlerUtilType::RelayManager => (
 									socket_ext,
-									Some(RelayerManager::new(
+									Some(RelayerManagerExternal::new(
 										H160::from_str(&config.contract).unwrap(),
 										external_clients
 											.iter()
