@@ -135,35 +135,6 @@ impl<T: JsonRpcClient> Handler for BridgeRelayHandler<T> {
 		}
 	}
 
-	fn request_send_transaction(
-		&self,
-		chain_id: u32,
-		tx_request: TransactionRequest,
-		metadata: RelayMetadata,
-	) {
-		if let Some(event_sender) =
-			self.event_senders.iter().find(|event_sender| event_sender.id == chain_id)
-		{
-			event_sender
-				.sender
-				.send(EventMessage::new(
-					DEFAULT_RETRIES,
-					tx_request,
-					EventMetadata::Relay(metadata.clone()),
-				))
-				.unwrap();
-			log::info!(
-				target: &self.client.get_chain_name(),
-				"-[{}] 🔖 Request relay transaction to chain({:?}): {}",
-				sub_display_format(SUB_LOG_TARGET),
-				chain_id,
-				metadata
-			);
-		} else {
-			log::error!("invalid chain: {:?}", chain_id);
-		}
-	}
-
 	fn is_target_contract(&self, receipt: &TransactionReceipt) -> bool {
 		if let Some(to) = receipt.to {
 			if ethers::utils::to_checksum(&to, None) ==
@@ -392,14 +363,23 @@ impl<T: JsonRpcClient> BridgeRelayHandler<T> {
 				.send(EventMessage::new(
 					DEFAULT_RETRIES,
 					tx_request,
-					EventMetadata::BridgeRelay(metadata),
+					EventMetadata::BridgeRelay(metadata.clone()),
 				))
 				.unwrap();
+			log::info!(
+				target: &self.client.get_chain_name(),
+				"-[{}] 🔖 Request relay transaction to chain({:?}): {}",
+				sub_display_format(SUB_LOG_TARGET),
+				chain_id,
+				metadata
+			);
 		} else {
-			panic!(
-				"{}]-[cccp-handler       ] Unknown chain ID received: {:?}",
-				self.client.get_chain_name(),
-				chain_id
+			log::warn!(
+				target: &self.client.get_chain_name(),
+				"-[{}] Relaying to target chain({:?}) is disabled: {}",
+				sub_display_format(SUB_LOG_TARGET),
+				chain_id,
+				metadata
 			)
 		}
 	}

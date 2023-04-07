@@ -34,7 +34,7 @@ pub struct EthClient<T> {
 	provider: Arc<Provider<T>>,
 	/// The specific configuration details for the connected chain.
 	config: EthClientConfiguration,
-	/// Is bifrost network client?
+	/// The flag whether the chain is BIFROST(native) or an external chain.
 	pub is_native: bool,
 }
 

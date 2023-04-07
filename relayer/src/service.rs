@@ -29,8 +29,9 @@ fn get_target_contracts_by_chain_id(
 	let mut target_contracts = vec![];
 	for handler_config in handler_configs {
 		for target in &handler_config.watch_list {
-			if target.chain_id == chain_id {
-				target_contracts.push(H160::from_str(&target.contract).unwrap());
+			let target_contract = H160::from_str(&target.contract).unwrap();
+			if target.chain_id == chain_id && !target_contracts.contains(&target_contract) {
+				target_contracts.push(target_contract);
 			}
 		}
 	}
@@ -91,7 +92,7 @@ pub fn new_relay_base(config: Configuration) -> Result<RelayBase, ServiceError> 
 						_ => BridgeDirection::Outbound,
 					},
 				),
-				evm_provider.is_native.unwrap_or(false),
+				is_native,
 			));
 
 			if evm_provider.is_relay_target {
@@ -159,7 +160,7 @@ pub fn new_relay_base(config: Configuration) -> Result<RelayBase, ServiceError> 
 			let channel = event_channels
 				.iter()
 				.find(|channel| channel.id == price_feeder_config.chain_id)
-				.expect("Invalid network_id on oracle_price_feeder config")
+				.expect("Invalid chain_id on oracle_price_feeder config")
 				.clone();
 
 			let mut oracle_price_feeder =

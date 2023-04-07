@@ -170,7 +170,8 @@ mod tests {
 			.find(|evm_provider| evm_provider.name == "bfc-testnet")
 			.unwrap();
 		let (sender, _) = mpsc::unbounded_channel::<EventMessage>();
-		let event_sender = EventSender { id: evm_provider.id, sender };
+		let is_native = evm_provider.is_native.unwrap_or(false);
+		let event_sender = EventSender { id: evm_provider.id, sender, is_native };
 
 		let wallet =
 			WalletManager::from_private_key(relayer_config.private_key.as_str(), evm_provider.id)
@@ -184,11 +185,12 @@ mod tests {
 				evm_provider.id,
 				evm_provider.call_interval,
 				evm_provider.block_confirmations,
-				match evm_provider.is_native.unwrap_or(false) {
+				match is_native {
 					true => BridgeDirection::Inbound,
 					_ => BridgeDirection::Outbound,
 				},
 			),
+			is_native,
 		));
 
 		let mut oracle_price_feeder = OraclePriceFeeder::new(

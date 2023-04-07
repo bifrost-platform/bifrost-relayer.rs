@@ -82,7 +82,7 @@ pub struct EVMProvider {
 	pub call_interval: u64,
 	/// The number of confirmations required for a block to be processed.
 	pub block_confirmations: U64,
-	/// True if bifrost network. False for else networks.
+	/// The flag whether the chain is BIFROST(native) or an external chain.
 	pub is_native: Option<bool>,
 	/// The flag whether it will handle relay transactions to the current chain.
 	pub is_relay_target: bool,

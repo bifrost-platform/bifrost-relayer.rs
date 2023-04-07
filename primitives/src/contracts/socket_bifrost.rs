@@ -79,7 +79,6 @@ pub fn get_asset_oids() -> HashMap<String, H256> {
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use crate::eth::ROUNDUP_EVENT_SIG;
 	use ethers::{
 		abi::{Detokenize, Tokenize},
 		contract::EthLogDecode,
@@ -103,7 +102,11 @@ mod tests {
 			.unwrap();
 
 		let roundup_event_abi = SOCKETBIFROST_ABI.event("RoundUp").unwrap().clone();
-		assert_eq!(H256::from_str(ROUNDUP_EVENT_SIG).unwrap(), roundup_event_abi.signature());
+		assert_eq!(
+			H256::from_str("0xd1f50abae69cf199b6758e9d7a1cb28f0201cd2f48f1c1a359be45adc985b0eb")
+				.unwrap(),
+			roundup_event_abi.signature()
+		);
 
 		match SocketBifrostEvents::decode_log(&tx.logs[0].clone().into()) {
 			Ok(roundup) => match SerializedRoundUp::from_tokens(roundup.into_tokens()) {
