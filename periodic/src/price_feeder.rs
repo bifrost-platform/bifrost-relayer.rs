@@ -7,6 +7,7 @@ use cccp_primitives::{
 	cli::PriceFeederConfig,
 	contracts::socket_bifrost::{get_asset_oids, SocketBifrost},
 	periodic::{PeriodicWorker, PriceFetcher},
+	sub_display_format,
 };
 use cron::Schedule;
 use ethers::{
@@ -15,6 +16,8 @@ use ethers::{
 };
 use std::{collections::HashMap, str::FromStr, sync::Arc};
 use tokio::time::sleep;
+
+const SUB_LOG_TARGET: &str = "price-oracle";
 
 /// The essential task that handles oracle price feedings.
 pub struct OraclePriceFeeder<T> {
@@ -128,13 +131,15 @@ impl<T: JsonRpcClient> OraclePriceFeeder<T> {
 		)) {
 			Ok(()) => log::info!(
 				target: &self.client.get_chain_name(),
-				"-[price-oracle       ] 💵 Request price feed transaction to chain({:?}): {}",
+				"-[{}] 💵 Request price feed transaction to chain({:?}): {}",
+				sub_display_format(SUB_LOG_TARGET),
 				self.config.chain_id,
 				metadata
 			),
 			Err(error) => log::error!(
 				target: &self.client.get_chain_name(),
-				"-[price-oracle       ] ❗️ Failed to request price feed transaction to chain({:?}): {}, Error: {}",
+				"-[{}] ❗️ Failed to request price feed transaction to chain({:?}): {}, Error: {}",
+				sub_display_format(SUB_LOG_TARGET),
 				self.config.chain_id,
 				metadata,
 				error.to_string()
@@ -165,10 +170,11 @@ mod tests {
 			.find(|evm_provider| evm_provider.name == "bfc-testnet")
 			.unwrap();
 		let (sender, _) = mpsc::unbounded_channel::<EventMessage>();
-		let event_sender = EventSender { id: evm_provider.id, sender };
+		let is_native = evm_provider.is_native.unwrap_or(false);
+		let event_sender = EventSender { id: evm_provider.id, sender, is_native };
 
 		let wallet =
-			WalletManager::from_private_key(relayer_config.mnemonic.as_str(), evm_provider.id)
+			WalletManager::from_private_key(relayer_config.private_key.as_str(), evm_provider.id)
 				.expect("Failed to initialize wallet manager");
 
 		let client = Arc::new(EthClient::new(
@@ -179,11 +185,12 @@ mod tests {
 				evm_provider.id,
 				evm_provider.call_interval,
 				evm_provider.block_confirmations,
-				match evm_provider.is_native.unwrap_or(false) {
+				match is_native {
 					true => BridgeDirection::Inbound,
 					_ => BridgeDirection::Outbound,
 				},
 			),
+			is_native,
 		));
 
 		let mut oracle_price_feeder = OraclePriceFeeder::new(

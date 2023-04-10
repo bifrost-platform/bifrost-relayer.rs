@@ -17,7 +17,7 @@ pub use wallet::*;
 
 use ethers::{
 	providers::{JsonRpcClient, Middleware, Provider},
-	types::{Block, BlockId, TransactionReceipt, H256, U64},
+	types::{Block, BlockId, TransactionReceipt, H160, H256, U64},
 };
 use std::sync::Arc;
 
@@ -34,7 +34,7 @@ pub struct EthClient<T> {
 	provider: Arc<Provider<T>>,
 	/// The specific configuration details for the connected chain.
 	config: EthClientConfiguration,
-	/// Is bifrost network client?
+	/// The flag whether the chain is BIFROST(native) or an external chain.
 	pub is_native: bool,
 }
 
@@ -49,6 +49,11 @@ impl<T: JsonRpcClient> EthClient<T> {
 		Self { wallet, provider, config, is_native }
 	}
 
+	/// Returns the relayer address.
+	pub fn address(&self) -> H160 {
+		self.wallet.address()
+	}
+
 	/// Returns name which chain this client interacts with.
 	pub fn get_chain_name(&self) -> String {
 		self.config.name.clone()
@@ -59,7 +64,7 @@ impl<T: JsonRpcClient> EthClient<T> {
 		self.config.id
 	}
 
-	/// Returns Arc<Provider>
+	/// Returns `Arc<Provider>`.
 	pub fn get_provider(&self) -> Arc<Provider<T>> {
 		self.provider.clone()
 	}

@@ -1,7 +1,7 @@
 use ethers::{
 	prelude::{k256::ecdsa::SigningKey, rand},
 	signers::{coins_bip39::English, LocalWallet, MnemonicBuilder, Signer},
-	types::PathOrString,
+	types::{PathOrString, H160},
 };
 use std::{fs, path::PathBuf};
 
@@ -38,5 +38,9 @@ impl WalletManager {
 		let wallet = input_path.parse::<LocalWallet>()?;
 
 		Ok(Self { signer: wallet.with_chain_id(chain_id) })
+	}
+
+	pub fn address(&self) -> H160 {
+		self.signer.address()
 	}
 }

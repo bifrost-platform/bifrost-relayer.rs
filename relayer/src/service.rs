@@ -7,6 +7,7 @@ use cccp_primitives::{
 	cli::{Configuration, HandlerConfig, HandlerType},
 	eth::{BridgeDirection, Contract, EthClientConfiguration},
 	periodic::PeriodicWorker,
+	sub_display_format,
 };
 
 use cccp_periodic::roundup_emitter::RoundupEmitter;
@@ -18,6 +19,8 @@ use ethers::{
 use sc_service::{Error as ServiceError, TaskManager};
 use std::{str::FromStr, sync::Arc};
 
+use crate::cli::{LOG_TARGET, SUB_LOG_TARGET};
+
 /// Get the target contracts for the `BlockManager` to monitor.
 fn get_target_contracts_by_chain_id(
 	chain_id: u32,
@@ -26,8 +29,9 @@ fn get_target_contracts_by_chain_id(
 	let mut target_contracts = vec![];
 	for handler_config in handler_configs {
 		for target in &handler_config.watch_list {
-			if target.chain_id == chain_id {
-				target_contracts.push(H160::from_str(&target.contract).unwrap());
+			let target_contract = H160::from_str(&target.contract).unwrap();
+			if target.chain_id == chain_id && !target_contracts.contains(&target_contract) {
+				target_contracts.push(target_contract);
 			}
 		}
 	}
@@ -69,11 +73,12 @@ pub fn new_relay_base(config: Configuration) -> Result<RelayBase, ServiceError> 
 			);
 
 			let wallet = WalletManager::from_private_key(
-				config.relayer_config.mnemonic.as_str(),
+				config.relayer_config.private_key.as_str(),
 				evm_provider.id,
 			)
 			.expect("Failed to initialize wallet manager");
 
+			let is_native = evm_provider.is_native.unwrap_or(false);
 			let client = Arc::new(EthClient::new(
 				wallet,
 				Arc::new(Provider::<Http>::try_from(evm_provider.provider).unwrap()),
@@ -82,28 +87,48 @@ pub fn new_relay_base(config: Configuration) -> Result<RelayBase, ServiceError> 
 					evm_provider.id,
 					evm_provider.call_interval,
 					evm_provider.block_confirmations,
-					match evm_provider.is_native.unwrap_or(false) {
+					match is_native {
 						true => BridgeDirection::Inbound,
 						_ => BridgeDirection::Outbound,
 					},
 				),
-				evm_provider.is_native.unwrap_or(false),
+				is_native,
 			));
-			let (tx_manager, event_sender) = TransactionManager::new(client.clone());
+
+			if evm_provider.is_relay_target {
+				let (tx_manager, event_sender) = TransactionManager::new(client.clone());
+				tx_managers.push((tx_manager, client.get_chain_name()));
+				event_senders.push(Arc::new(EventSender::new(
+					evm_provider.id,
+					event_sender,
+					is_native,
+				)));
+			}
 			let block_manager = BlockManager::new(client.clone(), target_contracts);
 
-			tx_managers.push((tx_manager, client.get_chain_name()));
 			clients.push(client);
 			block_managers.push(block_manager);
-			event_senders.push(Arc::new(EventSender::new(
-				evm_provider.id,
-				event_sender,
-				evm_provider.is_native.unwrap_or(false),
-			)));
 		});
 
 		(clients, tx_managers, block_managers, event_senders)
 	};
+
+	log::info!(
+		target: LOG_TARGET,
+		"-[{}] 👤 Relayer: {:?}",
+		sub_display_format(SUB_LOG_TARGET),
+		clients[0].address()
+	);
+	log::info!(
+		target: LOG_TARGET,
+		"-[{}] 🔨 Relay Targets: {}",
+		sub_display_format(SUB_LOG_TARGET),
+		tx_managers
+			.iter()
+			.map(|tx_manager| tx_manager.0.client.get_chain_name())
+			.collect::<Vec<String>>()
+			.join(", ")
+	);
 
 	// Initialize `TaskManager`
 	let task_manager = TaskManager::new(config.tokio_handle, None)?;
@@ -135,7 +160,7 @@ pub fn new_relay_base(config: Configuration) -> Result<RelayBase, ServiceError> 
 			let channel = event_channels
 				.iter()
 				.find(|channel| channel.id == price_feeder_config.chain_id)
-				.expect("Invalid network_id on oracle_price_feeder config")
+				.expect("Invalid chain_id on oracle_price_feeder config")
 				.clone();
 
 			let mut oracle_price_feeder =
