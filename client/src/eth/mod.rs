@@ -201,6 +201,11 @@ impl<T: JsonRpcClient> EthClient<T> {
 		self.rpc_call("eth_getBalance", (who, "latest")).await
 	}
 
+	/// Returns the relayer address.
+	pub fn address(&self) -> H160 {
+		self.wallet.address()
+	}
+
 	/// Returns name which chain this client interacts with.
 	pub fn get_chain_name(&self) -> String {
 		self.config.name.clone()
@@ -211,7 +216,7 @@ impl<T: JsonRpcClient> EthClient<T> {
 		self.config.id
 	}
 
-	/// Returns Arc<Provider>
+	/// Returns `Arc<Provider>`.
 	pub fn get_provider(&self) -> Arc<Provider<T>> {
 		self.provider.clone()
 	}
