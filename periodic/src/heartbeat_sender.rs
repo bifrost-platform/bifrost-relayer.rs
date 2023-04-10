@@ -2,7 +2,8 @@ use cccp_client::eth::{
 	EthClient, EventMessage, EventMetadata, EventSender, HeartbeatMetadata, DEFAULT_RETRIES,
 };
 use cccp_primitives::{
-	cli::HeartbeatSenderConfig, relayer_bifrost::RelayerManagerBifrost, PeriodicWorker,
+	cli::HeartbeatSenderConfig, relayer_bifrost::RelayerManagerBifrost, sub_display_format,
+	PeriodicWorker,
 };
 use cron::Schedule;
 use ethers::{
@@ -11,6 +12,8 @@ use ethers::{
 };
 use std::{str::FromStr, sync::Arc};
 use tokio::time::sleep;
+
+const SUB_LOG_TARGET: &str = "heartbeat";
 
 /// The essential task that sending heartbeat transaction.
 pub struct HeartbeatSender<T> {
@@ -93,13 +96,15 @@ impl<T: JsonRpcClient> HeartbeatSender<T> {
 			EventMetadata::Heartbeat(metadata.clone()),
 		)) {
 			Ok(()) => log::info!(
-				target: format!("{}::Heartbeat", &self.client.get_chain_name()).as_str(),
-				"💓 Request Heartbeat transaction: {}",
+				target: &self.client.get_chain_name(),
+				"-[{}] 💓 Request Heartbeat transaction: {}",
+				sub_display_format(SUB_LOG_TARGET),
 				metadata
 			),
 			Err(error) => log::error!(
-				target: format!("{}::Heartbeat", &self.client.get_chain_name()).as_str(),
-				"❗️ Failed to request Heartbeat transaction: {}, Error: {}",
+				target: &self.client.get_chain_name(),
+				"-[{}] ❗️ Failed to request Heartbeat transaction: {}, Error: {}",
+				sub_display_format(SUB_LOG_TARGET),
 				metadata,
 				error.to_string()
 			),
