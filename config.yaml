@@ -82,8 +82,8 @@ periodic_configs:
     - chain_id: 49088
       schedule: "0 */5 * * * * *" # Every 5th minute.
       contract: "0x0218371b18340aBD460961bdF3Bd5F01858dAB53"
-      price_sources: [ Coingecko ]
-      symbols: [ "ETH", "BFC", "BNB", "MATIC", "USDC", "BIFI" ]
+      price_sources: [Coingecko]
+      symbols: ["ETH", "BFC", "BNB", "MATIC", "USDC", "BIFI"]
   roundup_emitter:
     schedule: "*/15 * * * * * *" # Every 15th seconds.
     authority_address: "0x0000000000000000000000000000000000000400"
@@ -93,3 +93,6 @@ periodic_configs:
     schedule: "0 * * * * * *" # Every minute.
     authority_address: "0x0000000000000000000000000000000000000400"
     relayer_manager_address: "0x0000000000000000000000000000000000002000"
+
+sentry_config:
+  dsn: ""

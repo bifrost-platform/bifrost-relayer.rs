@@ -36,11 +36,22 @@ fn main() {
 		.filter(None, log::LevelFilter::Info)
 		.init();
 
-	let cli = Cli::from_args();
-	cli.print_relayer_infos();
-
 	let tokio_runtime = build_runtime().unwrap();
 	let configuration = create_configuration(tokio_runtime.handle().clone()).unwrap();
+
+	if let Some(sentry_config) = &configuration.relayer_config.sentry_config {
+		let _guard = sentry::init((
+			sentry_config.dsn.clone(),
+			sentry::ClientOptions {
+				release: sentry::release_name!(),
+				environment: Some("development".into()),
+				..Default::default()
+			},
+		));
+	}
+
+	let cli = Cli::from_args();
+	cli.print_relayer_infos();
 
 	let runner = Runner::new(configuration, tokio_runtime).unwrap();
 	runner

@@ -13,6 +13,7 @@ build = "build.rs"
 # General
 log = { workspace = true }
 env_logger = { workspace = true }
+sentry = { workspace = true }
 chrono = { workspace = true }
 serde_yaml = { workspace = true }
 ethers = { workspace = true }
