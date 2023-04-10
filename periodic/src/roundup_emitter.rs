@@ -6,7 +6,7 @@ use cccp_primitives::{
 	cli::RoundupEmitterConfig,
 	relayer_bifrost::RelayerManagerBifrost,
 	socket_bifrost::{RoundUpSubmit, Signatures, SocketBifrost},
-	PeriodicWorker,
+	sub_display_format, PeriodicWorker,
 };
 use cron::Schedule;
 use ethers::{
@@ -17,6 +17,8 @@ use ethers::{
 };
 use std::{str::FromStr, sync::Arc};
 use tokio::time::sleep;
+
+const SUB_LOG_TARGET: &str = "roundup-emitter";
 
 pub struct RoundupEmitter<T> {
 	/// Current round number
@@ -144,12 +146,14 @@ impl<T: JsonRpcClient> RoundupEmitter<T> {
 		)) {
 			Ok(()) => log::info!(
 				target: format!("{}::VSP-Phase1", &self.client.get_chain_name()).as_str(),
-				"💵 Request VSP phase1 transaction: {}",
+				"-[{}] 👤 Request VSP phase1 transaction: {}",
+				sub_display_format(SUB_LOG_TARGET),
 				metadata
 			),
 			Err(error) => log::error!(
 				target: format!("{}::VSP-Phase1", &self.client.get_chain_name()).as_str(),
-				"❗️ Failed to request VSP phase1 transaction: {}, Error: {}",
+				"-[{}] ❗️ Failed to request VSP phase1 transaction: {}, Error: {}",
+				sub_display_format(SUB_LOG_TARGET),
 				metadata,
 				error.to_string()
 			),

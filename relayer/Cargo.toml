@@ -2,24 +2,35 @@
 name = "cccp-relayer"
 version = "0.1.0"
 description = "The core rust implementation for BIFROST relayer"
-authors = ["bifrost-platform"]
-homepage = "https://thebifrost.io"
-edition = "2021"
-license = "Unlicense"
-repository = "https://github.com/bifrost-platform/cccp-relayer"
+authors = { workspace = true }
+homepage = { workspace = true }
+edition = { workspace = true }
+license = { workspace = true }
+repository = { workspace = true }
+build = "build.rs"
 
 [dependencies]
-log = "0.4.17"
-env_logger = "0.10.0"
+# General
+log = { workspace = true }
+env_logger = { workspace = true }
+chrono = { workspace = true }
+serde_yaml = { workspace = true }
+ethers = { workspace = true }
+clap = { workspace = true, features = ["derive"] }
+tokio = { workspace = true, features = ["signal", "rt-multi-thread", "parking_lot"] }
+
+# CCCP
 cc-cli = { path = "../client/cli" }
 cccp-client = { path = "../client" }
 cccp-periodic = { path = "../periodic" }
 cccp-primitives = { path = "../primitives" }
-sc-cli = { git = "https://github.com/bifrost-platform/bifrost-substrate", branch = "bifrost-polkadot-v0.9.35" }
-sc-service = { git = "https://github.com/bifrost-platform/bifrost-substrate", branch = "bifrost-polkadot-v0.9.35" }
-serde_yaml = "0.9.19"
-ethers = "2.0.2"
-tokio = { version = "1.22.0", features = ["signal", "rt-multi-thread", "parking_lot"] }
+
+# Substrate
+sc-cli = { workspace = true }
+sc-service = { workspace = true }
+
+[build-dependencies]
+substrate-build-script-utils = { workspace = true }
 
 [[bin]]
 name = "cccp-relayer"

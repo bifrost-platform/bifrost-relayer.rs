@@ -1,8 +1,15 @@
-use cccp_primitives::periodic::{PriceFetcher, PriceResponse};
+use cccp_primitives::{
+	periodic::{PriceFetcher, PriceResponse},
+	sub_display_format,
+};
 use reqwest::{Response, Url};
 use serde::Deserialize;
 use std::collections::HashMap;
 use tokio::time::{sleep, Duration};
+
+use crate::price_source::LOG_TARGET;
+
+const SUB_LOG_TARGET: &str = "coingecko";
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct SupportedCoin {
@@ -95,13 +102,15 @@ impl CoingeckoPriceFetcher {
 					},
 					Err(e) => {
 						log::error!(
-							target: &format!("{:<015}", "coingecko"),
-							"-[PriceFetcher       ] ❗️ Error decoding support coin list: {}",
+							target: LOG_TARGET,
+							"-[{}] ❗️ Error decoding support coin list: {}",
+							sub_display_format(SUB_LOG_TARGET),
 							e
 						);
 						log::error!(
-							target: &format!("{:<015}", "coingecko"),
-							"-[PriceFetcher       ] ❗️ Retry in {:?} secs...",
+							target: LOG_TARGET,
+							"-[{}] ❗️ Retry in {:?} secs...",
+							sub_display_format(SUB_LOG_TARGET),
 							retry_interval
 						);
 						sleep(retry_interval).await;
@@ -110,13 +119,15 @@ impl CoingeckoPriceFetcher {
 				},
 				Err(e) => {
 					log::error!(
-						target: &format!("{:<015}", "coingecko"),
-						"-[PriceFetcher       ] ❗️ Error fetching support coin list: {}",
+						target: LOG_TARGET,
+						"-[{}] ❗️ Error fetching support coin list: {}",
+						sub_display_format(SUB_LOG_TARGET),
 						e
 					);
 					log::error!(
-						target: &format!("{:<015}", "coingecko"),
-						"-[PriceFetcher       ] ❗️ Retry in {:?} secs...",
+						target: LOG_TARGET,
+						"-[{}] ❗️ Retry in {:?} secs...",
+						sub_display_format(SUB_LOG_TARGET),
 						retry_interval
 					);
 					sleep(retry_interval).await;
@@ -135,13 +146,15 @@ impl CoingeckoPriceFetcher {
 						Ok(result) => return result,
 						Err(e) => {
 							log::error!(
-								target: &format!("{:<015}", "coingecko"),
-								"-[PriceFetcher       ] ❗️ Error decoding coingecko response. Maybe rete limit exceeds?: {}",
+								target: LOG_TARGET,
+								"-[{}] ❗️ Error decoding coingecko response. Maybe rete limit exceeds?: {}",
+								sub_display_format(SUB_LOG_TARGET),
 								e
 							);
 							log::error!(
-								target: &format!("{:<015}", "coingecko"),
-								"-[PriceFetcher       ] ❗️ Retry in {:?} secs...",
+								target: LOG_TARGET,
+								"-[{}] ❗️ Retry in {:?} secs...",
+								sub_display_format(SUB_LOG_TARGET),
 								retry_interval
 							);
 							sleep(retry_interval).await;
@@ -150,13 +163,15 @@ impl CoingeckoPriceFetcher {
 					},
 				Err(e) => {
 					log::error!(
-						target: &format!("{:<015}", "coingecko"),
-						"-[PriceFetcher       ] ❗️ Error fetching from coingecko: {}",
+						target: LOG_TARGET,
+						"-[{}] ❗️ Error fetching from coingecko: {}",
+						sub_display_format(SUB_LOG_TARGET),
 						e
 					);
 					log::error!(
-						target: &format!("{:<015}", "coingecko"),
-						"-[PriceFetcher       ] ❗️ Retry in {:?} secs...",
+						target: LOG_TARGET,
+						"-[{}] ❗️ Retry in {:?} secs...",
+						sub_display_format(SUB_LOG_TARGET),
 						retry_interval
 					);
 					sleep(retry_interval).await;

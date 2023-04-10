@@ -1,3 +1,4 @@
+use cccp_primitives::sub_display_format;
 use ethers::{
 	prelude::{
 		gas_escalator::{Frequency, GasEscalatorMiddleware, GeometricGasPrice},
@@ -14,6 +15,8 @@ use super::{EthClient, EventMessage};
 
 type TransactionMiddleware<T> =
 	NonceManagerMiddleware<SignerMiddleware<GasEscalatorMiddleware<Arc<Provider<T>>>, LocalWallet>>;
+
+const SUB_LOG_TARGET: &str = "transaction-manager";
 
 /// The essential task that sends asynchronous transactions.
 pub struct TransactionManager<T> {
@@ -54,7 +57,8 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> {
 		while let Some(msg) = self.receiver.recv().await {
 			log::info!(
 				target: &self.client.get_chain_name(),
-				"-[transaction-manager] 🔖 Received transaction request: {}",
+				"-[{}] 🔖 Received transaction request: {}",
+				sub_display_format(SUB_LOG_TARGET),
 				msg.metadata,
 			);
 
@@ -68,7 +72,8 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> {
 		if msg.retries_remaining == 0 {
 			log::error!(
 				target: &self.client.get_chain_name(),
-				"-[transaction-manager] ❗️ Exceeded the retry limit to send a transaction: {}",
+				"-[{}] ❗️ Exceeded the retry limit to send a transaction: {}",
+				sub_display_format(SUB_LOG_TARGET),
 				msg.metadata
 			);
 			return
@@ -96,7 +101,8 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> {
 					if let Some(receipt) = receipt {
 						log::info!(
 							target: &self.client.get_chain_name(),
-							"-[transaction-manager] 🎁 The requested transaction has been successfully mined in block: {}, {:?}-{:?}-{:?}",
+							"-[{}] 🎁 The requested transaction has been successfully mined in block: {}, {:?}-{:?}-{:?}",
+							sub_display_format(SUB_LOG_TARGET),
 							msg.metadata.to_string(),
 							receipt.block_number.unwrap(),
 							receipt.status.unwrap(),
@@ -105,7 +111,8 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> {
 					} else {
 						log::error!(
 							target: &self.client.get_chain_name(),
-							"-[transaction-manager] ♻️ The requested transaction has been dropped from the mempool: {}, Retries left: {:?}",
+							"-[{}] ♻️ The requested transaction has been dropped from the mempool: {}, Retries left: {:?}",
+							sub_display_format(SUB_LOG_TARGET),
 							msg.metadata,
 							msg.retries_remaining - 1,
 						);
@@ -120,7 +127,8 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> {
 				Err(error) => {
 					log::error!(
 						target: &self.client.get_chain_name(),
-						"-[transaction-manager] ♻️ Unknown error while waiting for transaction receipt: {}, Retries left: {:?}, Error: {}",
+						"-[{}] ♻️ Unknown error while waiting for transaction receipt: {}, Retries left: {:?}, Error: {}",
+						sub_display_format(SUB_LOG_TARGET),
 						msg.metadata,
 						msg.retries_remaining - 1,
 						error.to_string()
@@ -137,7 +145,8 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> {
 			Err(error) => {
 				log::error!(
 					target: &self.client.get_chain_name(),
-					"-[transaction-manager] ♻️ Unknown error while sending transaction: {}, Retries left: {:?}, Error: {}",
+					"-[{}] ♻️ Unknown error while sending transaction: {}, Retries left: {:?}, Error: {}",
+					sub_display_format(SUB_LOG_TARGET),
 					msg.metadata,
 					msg.retries_remaining - 1,
 					error.to_string()

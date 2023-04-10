@@ -8,7 +8,7 @@ use cccp_primitives::{
 	relayer_external::RelayerManagerExternal,
 	socket_bifrost::{SerializedRoundUp, SocketBifrost, SocketBifrostEvents},
 	socket_external::{RoundUpSubmit, Signatures, SocketExternal},
-	RoundupHandlerUtilType,
+	sub_display_format, RoundupHandlerUtilType,
 };
 use ethers::{
 	abi::{Detokenize, Tokenize},
@@ -20,6 +20,8 @@ use ethers::{
 use std::{str::FromStr, sync::Arc};
 use tokio::sync::broadcast::Receiver;
 use tokio_stream::StreamExt;
+
+const SUB_LOG_TARGET: &str = "roundup-handler";
 
 pub struct RoundupUtility<T> {
 	/// The event senders that sends messages to the event channel.
@@ -54,7 +56,8 @@ impl<T: JsonRpcClient> Handler for RoundupRelayHandler<T> {
 
 			log::info!(
 				target: &self.client.get_chain_name(),
-				"-[roundup-handler    ] ✨ Imported #{:?} ({}) with target transactions({:?})",
+				"-[{}] ✨ Imported #{:?} ({}) with target transactions({:?})",
+				sub_display_format(SUB_LOG_TARGET),
 				block_msg.raw_block.number.unwrap(),
 				block_msg.raw_block.hash.unwrap(),
 				block_msg.target_receipts.len(),
@@ -94,7 +97,8 @@ impl<T: JsonRpcClient> Handler for RoundupRelayHandler<T> {
 					_ => {
 						log::info!(
 							target: &self.client.get_chain_name(),
-							"-[roundup-handler    ] RoundUp event emitted. However, the majority has not yet been met. ({:?})",
+							"-[{}] RoundUp event emitted. However, the majority has not yet been met. ({:?})",
+							sub_display_format(SUB_LOG_TARGET),
 							receipt.transaction_hash,
 						);
 						continue
@@ -103,7 +107,8 @@ impl<T: JsonRpcClient> Handler for RoundupRelayHandler<T> {
 				Err(e) => {
 					log::error!(
 						target: &self.client.get_chain_name(),
-						"-[roundup-handler    ] Error on decoding RoundUp event ({:?}):{:?}",
+						"-[{}] Error on decoding RoundUp event ({:?}):{:?}",
+						sub_display_format(SUB_LOG_TARGET),
 						receipt.transaction_hash,
 						e,
 					);
