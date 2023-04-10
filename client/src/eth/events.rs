@@ -1,4 +1,4 @@
-use std::fmt::Display;
+use std::fmt::{Display, Formatter};
 
 use cccp_primitives::{eth::SocketEventStatus, PriceResponse};
 use ethers::types::{Address, TransactionRequest, U256};
@@ -102,11 +102,29 @@ impl Display for VSPPhase2Metadata {
 }
 
 #[derive(Clone, Debug)]
+pub struct HeartbeatMetadata {
+	pub address: Address,
+}
+
+impl HeartbeatMetadata {
+	pub fn new(address: Address) -> Self {
+		Self { address }
+	}
+}
+
+impl Display for HeartbeatMetadata {
+	fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+		write!(f, "Heartbeat({:?})", self.address)
+	}
+}
+
+#[derive(Clone, Debug)]
 pub enum EventMetadata {
 	BridgeRelay(BridgeRelayMetadata),
 	PriceFeed(PriceFeedMetadata),
 	VSPPhase1(VSPPhase1Metadata),
 	VSPPhase2(VSPPhase2Metadata),
+	Heartbeat(HeartbeatMetadata),
 }
 
 impl Display for EventMetadata {
@@ -119,6 +137,7 @@ impl Display for EventMetadata {
 				EventMetadata::PriceFeed(metadata) => metadata.to_string(),
 				EventMetadata::VSPPhase1(metadata) => metadata.to_string(),
 				EventMetadata::VSPPhase2(metadata) => metadata.to_string(),
+				EventMetadata::Heartbeat(metadata) => metadata.to_string(),
 			}
 		)
 	}

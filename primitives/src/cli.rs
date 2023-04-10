@@ -169,9 +169,19 @@ pub struct RoundupEmitterConfig {
 }
 
 #[derive(Debug, Clone, Deserialize)]
+pub struct HeartbeatSenderConfig {
+	/// Periodic schedule in cron expression. (Must be common factor of session duration)
+	pub schedule: String,
+	/// RelayerManager contract address (Bifrost network's)
+	pub relayer_manager_address: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
 pub struct PeriodicWorkerConfig {
 	/// Oracle price feeder
 	pub oracle_price_feeder: Option<Vec<PriceFeederConfig>>,
 	/// Roundup Phase1 feeder
 	pub roundup_emitter: RoundupEmitterConfig,
+	/// Heartbeat sender
+	pub heartbeat: HeartbeatSenderConfig,
 }
