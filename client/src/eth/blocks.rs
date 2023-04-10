@@ -5,7 +5,10 @@ use ethers::{
 };
 use std::sync::Arc;
 use tokio::{
-	sync::broadcast::{self, Receiver, Sender},
+	sync::{
+		broadcast::{self, Receiver, Sender},
+		Mutex,
+	},
 	time::{sleep, Duration},
 };
 use tokio_stream::StreamExt;
@@ -53,13 +56,19 @@ pub struct BlockManager<T> {
 	pub target_contracts: Vec<H160>,
 	/// The pending block waiting for some confirmations.
 	pub pending_block: U64,
+	/// Bootstrap round
+	pub bootstrap_offset: Arc<Mutex<U64>>,
 }
 
 impl<T: JsonRpcClient> BlockManager<T> {
 	/// Instantiates a new `BlockManager` instance.
-	pub fn new(client: Arc<EthClient<T>>, target_contracts: Vec<H160>) -> Self {
-		let (sender, _receiver) = broadcast::channel(512);
-		Self { client, sender, target_contracts, pending_block: U64::default() }
+	pub fn new(
+		client: Arc<EthClient<T>>,
+		target_contracts: Vec<H160>,
+		bootstrap_offset: Arc<Mutex<U64>>,
+	) -> Self {
+		let (sender, _receiver) = broadcast::channel(512); // TODO: size?
+		Self { client, sender, target_contracts, pending_block: U64::default(), bootstrap_offset }
 	}
 
 	/// Initialize block manager.
@@ -71,8 +80,22 @@ impl<T: JsonRpcClient> BlockManager<T> {
 			self.target_contracts
 		);
 
-		// initialize pending block to the latest block
-		self.pending_block = self.client.get_latest_block_number().await.unwrap();
+		// initialize pending block to the bootstrapping block
+		self.pending_block = self
+			.client
+			.get_latest_block_number()
+			.await
+			.unwrap()
+			.saturating_sub(*self.bootstrap_offset.lock().await);
+
+		log::info!(
+			target: &self.client.get_chain_name(),
+			"-[{}] 📃 latest: #{:?}, bootstrap: #{:?}",
+			sub_display_format(SUB_LOG_TARGET),
+			self.client.get_latest_block_number().await.unwrap(),
+			self.pending_block,
+		);
+
 		if let Some(block) = self.client.get_block(self.pending_block.into()).await.unwrap() {
 			log::info!(
 				target: &self.client.get_chain_name(),

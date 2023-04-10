@@ -14,10 +14,11 @@ use cccp_periodic::{heartbeat_sender::HeartbeatSender, roundup_emitter::RoundupE
 use cccp_primitives::socket_bifrost::SocketBifrost;
 use ethers::{
 	providers::{Http, Provider},
-	types::H160,
+	types::{H160, U64},
 };
 use sc_service::{Error as ServiceError, TaskManager};
 use std::{str::FromStr, sync::Arc};
+use tokio::sync::Mutex;
 
 use crate::cli::{LOG_TARGET, SUB_LOG_TARGET};
 
@@ -59,6 +60,8 @@ pub fn relay(config: Configuration) -> Result<TaskManager, ServiceError> {
 }
 
 pub fn new_relay_base(config: Configuration) -> Result<RelayBase, ServiceError> {
+	let bootstrap_offset = Arc::new(Mutex::new(U64::default()));
+
 	// initialize `EthClient`, `TransactionManager`, `BlockManager`
 	let (clients, tx_managers, block_managers, event_channels) = {
 		let mut clients = vec![];
@@ -104,7 +107,8 @@ pub fn new_relay_base(config: Configuration) -> Result<RelayBase, ServiceError> 
 					is_native,
 				)));
 			}
-			let block_manager = BlockManager::new(client.clone(), target_contracts);
+			let block_manager =
+				BlockManager::new(client.clone(), target_contracts, bootstrap_offset.clone());
 
 			clients.push(client);
 			block_managers.push(block_manager);
@@ -301,11 +305,16 @@ pub fn new_relay_base(config: Configuration) -> Result<RelayBase, ServiceError> 
 		event_channels.iter().find(|sender| sender.is_native).unwrap().clone(),
 		clients.iter().find(|client| client.is_native).unwrap().clone(),
 		config.relayer_config.periodic_configs.unwrap().roundup_emitter,
+		bootstrap_offset,
 	);
+
 	task_manager.spawn_essential_handle().spawn(
 		"Roundup-Emitter",
 		Some("roundup-emitter"),
-		async move { roundup_emitter.run().await },
+		async move {
+			roundup_emitter.set_bootstrap_height().await;
+			roundup_emitter.run().await
+		},
 	);
 
 	// spawn block managers' tasks
