@@ -128,7 +128,7 @@ impl<T: JsonRpcClient> RoundupEmitter<T> {
 		};
 		let round_up_submit = RoundUpSubmit { round, new_relayers, sigs };
 
-		TransactionRequest::new()
+		TransactionRequest::default()
 			.to(self.socket_contract.address())
 			.data(self.socket_contract.round_control_poll(round_up_submit).calldata().unwrap())
 	}
