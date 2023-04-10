@@ -10,21 +10,25 @@ evm_providers:
     call_interval: 2000
     block_confirmations: 5
     is_native: true
+    is_relay_target: true
   - name: "eth-goerli"
     id: 5
     provider: ""
     call_interval: 5000
     block_confirmations: 1
+    is_relay_target: true
   - name: "bsc-testnet"
     id: 97
     provider: ""
     call_interval: 2000
     block_confirmations: 5
+    is_relay_target: true
   - name: "matic-mumbai"
     id: 80001
     provider: ""
     call_interval: 1000
     block_confirmations: 7
+    is_relay_target: true
 
 handler_configs:
   - handler_type: Socket
@@ -71,7 +75,7 @@ handler_configs:
         contract: "0x2FD5232fDFa6e1c127e7821CC48108Ca79281a38"
         chain_id: 80001
 
-mnemonic: "0x5fb92d6e98884f76de468fa3f6278f8807c48bebc13595d45af5bdc4da702133"
+private_key: "0x5fb92d6e98884f76de468fa3f6278f8807c48bebc13595d45af5bdc4da702133"
 
 periodic_configs:
   oracle_price_feeder:

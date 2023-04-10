@@ -1,3 +1,4 @@
+use cccp_primitives::sub_display_format;
 use ethers::{
 	providers::JsonRpcClient,
 	types::{Block, TransactionReceipt, H160, H256, U64},
@@ -40,6 +41,8 @@ impl BlockReceiver {
 	}
 }
 
+const SUB_LOG_TARGET: &str = "block-manager";
+
 /// The essential task that listens and handle new blocks.
 pub struct BlockManager<T> {
 	/// The ethereum client for the connected chain.
@@ -64,7 +67,8 @@ impl<T: JsonRpcClient> BlockManager<T> {
 		// TODO: follow-up to the highest block
 		log::info!(
 			target: &self.client.get_chain_name(),
-			"-[block-manager      ] 📃 Target contracts: {:?}",
+			"-[{}] 📃 Target contracts: {:?}",
+			sub_display_format(SUB_LOG_TARGET),
 			self.target_contracts
 		);
 
@@ -73,7 +77,8 @@ impl<T: JsonRpcClient> BlockManager<T> {
 		if let Some(block) = self.client.get_block(self.pending_block.into()).await.unwrap() {
 			log::info!(
 				target: &self.client.get_chain_name(),
-				"-[block-manager      ] 💤 Idle, best: #{:?} ({})",
+				"-[{}] 💤 Idle, best: #{:?} ({})",
+				sub_display_format(SUB_LOG_TARGET),
 				block.number.unwrap(),
 				block.hash.unwrap(),
 			);
@@ -113,7 +118,8 @@ impl<T: JsonRpcClient> BlockManager<T> {
 			}
 			log::info!(
 				target: &self.client.get_chain_name(),
-				"-[block-manager      ] ✨ Imported #{:?} ({})",
+				"-[{}] ✨ Imported #{:?} ({})",
+				sub_display_format(SUB_LOG_TARGET),
 				block.number.unwrap(),
 				block.hash.unwrap()
 			);

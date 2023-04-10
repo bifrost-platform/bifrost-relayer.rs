@@ -93,4 +93,8 @@ impl WalletManager {
 	pub fn address(&self) -> Address {
 		self.signer.address()
 	}
+
+	pub fn address(&self) -> H160 {
+		self.signer.address()
+	}
 }

@@ -147,6 +147,11 @@ pub struct EthClient<T> {
 		self.wallet.address()
 	}
 
+	/// Returns the relayer address.
+	pub fn address(&self) -> H160 {
+		self.wallet.address()
+	}
+
 	/// Returns name which chain this client interacts with.
 	pub fn get_chain_name(&self) -> String {
 		self.metadata.name.clone()
@@ -282,7 +287,7 @@ pub struct EthClient<T> {
 		self.config.id
 	}
 
-	/// Returns Arc<Provider>
+	/// Returns `Arc<Provider>`.
 	pub fn get_provider(&self) -> Arc<Provider<T>> {
 		self.provider.clone()
 	}
