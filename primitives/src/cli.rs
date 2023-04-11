@@ -174,6 +174,8 @@ pub struct HeartbeatSenderConfig {
 	pub schedule: String,
 	/// RelayerManager contract address (Bifrost network's)
 	pub relayer_manager_address: String,
+	/// Authority contract address (Bifrost network's)
+	pub authority_address: String,
 }
 
 #[derive(Debug, Clone, Deserialize)]

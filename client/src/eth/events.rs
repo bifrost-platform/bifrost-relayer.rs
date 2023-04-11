@@ -103,18 +103,23 @@ impl Display for VSPPhase2Metadata {
 
 #[derive(Clone, Debug)]
 pub struct HeartbeatMetadata {
-	pub address: Address,
+	pub current_round_index: U256,
+	pub current_session_index: U256,
 }
 
 impl HeartbeatMetadata {
-	pub fn new(address: Address) -> Self {
-		Self { address }
+	pub fn new(current_round_index: U256, current_session_index: U256) -> Self {
+		Self { current_round_index, current_session_index }
 	}
 }
 
 impl Display for HeartbeatMetadata {
 	fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-		write!(f, "Heartbeat({:?})", self.address)
+		write!(
+			f,
+			"Heartbeat(Round: {:?}, Session: {:?})",
+			self.current_round_index, self.current_session_index
+		)
 	}
 }
 

@@ -91,4 +91,5 @@ periodic_configs:
     relayer_manager_address: "0x0000000000000000000000000000000000002000"
   heartbeat:
     schedule: "0 * * * * * *" # Every minute.
+    authority_address: "0x0000000000000000000000000000000000000400"
     relayer_manager_address: "0x0000000000000000000000000000000000002000"
