@@ -81,7 +81,7 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> {
 		if status.is_zero() {
 			log::warn!(
 				target: &self.client.get_chain_name(),
-				"-[{}] ⚠️ Warning! Error encountered during contract execution [execution reverted]: {}, {:?}-{:?}-{:?}",
+				"-[{}] ⚠️  Warning! Error encountered during contract execution [execution reverted]: {}, {:?}-{:?}-{:?}",
 				sub_display_format(SUB_LOG_TARGET),
 				metadata.to_string(),
 				receipt.block_number.unwrap(),
@@ -90,7 +90,7 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> {
 			);
 			sentry::capture_message(
 				format!(
-					"[{}]-[{}] ⚠️ Warning! Error encountered during contract execution [execution reverted]: {}, {:?}-{:?}-{:?}",
+					"[{}]-[{}] ⚠️  Warning! Error encountered during contract execution [execution reverted]: {}, {:?}-{:?}-{:?}",
 					&self.client.get_chain_name(),
 					SUB_LOG_TARGET,
 					metadata.to_string(),
