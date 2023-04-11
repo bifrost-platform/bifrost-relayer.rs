@@ -4,7 +4,7 @@ use cccp_client::eth::{
 };
 use cccp_periodic::OraclePriceFeeder;
 use cccp_primitives::{
-	cli::{Configuration, HandlerConfig, HandlerType},
+	cli::{Configuration, HandlerConfig, HandlerType, SentryConfig},
 	eth::{BridgeDirection, Contract, EthClientConfiguration},
 	periodic::PeriodicWorker,
 	sub_display_format,
@@ -17,6 +17,7 @@ use ethers::{
 	types::H160,
 };
 use sc_service::{Error as ServiceError, TaskManager};
+use sentry::ClientInitGuard;
 use std::{str::FromStr, sync::Arc};
 
 use crate::cli::{LOG_TARGET, SUB_LOG_TARGET};
@@ -54,11 +55,31 @@ fn build_socket_contracts(handler_configs: &Vec<HandlerConfig>) -> Vec<Contract>
 	contracts
 }
 
+/// Builds a sentry client only when the sentry config exists.
+fn build_sentry_client(sentry_config: Option<SentryConfig>) -> Option<ClientInitGuard> {
+	if let Some(sentry_config) = sentry_config {
+		// TODO: set to `production`
+		let sentry_client = sentry::init((
+			sentry_config.dsn.unwrap(),
+			sentry::ClientOptions {
+				release: sentry::release_name!(),
+				debug: true,
+				environment: Some("development".into()),
+				..Default::default()
+			},
+		));
+		return Some(sentry_client)
+	}
+	None
+}
+
 pub fn relay(config: Configuration) -> Result<TaskManager, ServiceError> {
 	new_relay_base(config).map(|RelayBase { task_manager, .. }| task_manager)
 }
 
 pub fn new_relay_base(config: Configuration) -> Result<RelayBase, ServiceError> {
+	let sentry_client = Arc::new(build_sentry_client(config.relayer_config.sentry_config));
+
 	// initialize `EthClient`, `TransactionManager`, `BlockManager`
 	let (clients, tx_managers, block_managers, event_channels) = {
 		let mut clients = vec![];
@@ -93,6 +114,7 @@ pub fn new_relay_base(config: Configuration) -> Result<RelayBase, ServiceError> 
 					},
 				),
 				is_native,
+				sentry_client.clone(),
 			));
 
 			if evm_provider.is_relay_target {

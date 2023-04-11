@@ -75,7 +75,7 @@ handler_configs:
         contract: "0x2FD5232fDFa6e1c127e7821CC48108Ca79281a38"
         chain_id: 80001
 
-private_key: "0x5fb92d6e98884f76de468fa3f6278f8807c48bebc13595d45af5bdc4da702133"
+private_key: ""
 
 periodic_configs:
   oracle_price_feeder:

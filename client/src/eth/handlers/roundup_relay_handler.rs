@@ -107,11 +107,12 @@ impl<T: JsonRpcClient> Handler for RoundupRelayHandler<T> {
 				Err(e) => {
 					log::error!(
 						target: &self.client.get_chain_name(),
-						"-[{}] Error on decoding RoundUp event ({:?}):{:?}",
+						"-[{}] Error on decoding RoundUp event ({:?}):{}",
 						sub_display_format(SUB_LOG_TARGET),
 						receipt.transaction_hash,
-						e,
+						e.to_string(),
 					);
+					sentry::capture_error(&e);
 					continue
 				},
 			}
@@ -241,19 +242,33 @@ impl<T: JsonRpcClient> RoundupRelayHandler<T> {
 					roundup_submit.clone(),
 				);
 
-				target_chain
-					.event_sender
-					.sender
-					.send(EventMessage::new(
-						DEFAULT_RETRIES,
-						transaction_request,
-						EventMetadata::VSPPhase2(VSPPhase2Metadata::new(
-							roundup_submit.round,
-							target_chain.event_sender.id,
-						)),
-						true,
-					))
-					.unwrap();
+				let metadata =
+					VSPPhase2Metadata::new(roundup_submit.round, target_chain.event_sender.id);
+				match target_chain.event_sender.sender.send(EventMessage::new(
+					DEFAULT_RETRIES,
+					transaction_request,
+					EventMetadata::VSPPhase2(metadata.clone()),
+					true,
+				)) {
+					Ok(()) => log::info!(
+						target: &self.client.get_chain_name(),
+						"-[{}] 🔖 Request roundup transaction to chain({:?}): {}",
+						sub_display_format(SUB_LOG_TARGET),
+						target_chain.id,
+						metadata,
+					),
+					Err(error) => {
+						log::error!(
+							target: &self.client.get_chain_name(),
+							"-[{}] ❗️ Failed to request roundup transaction to chain({:?}): {}, Error: {}",
+							sub_display_format(SUB_LOG_TARGET),
+							target_chain.id,
+							metadata,
+							error.to_string()
+						);
+						sentry::capture_error(&error);
+					},
+				}
 			}
 		}
 	}

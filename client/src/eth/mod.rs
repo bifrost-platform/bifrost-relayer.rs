@@ -7,6 +7,7 @@ pub use handlers::*;
 pub use cccp_primitives::contracts::*;
 
 mod tx;
+use sentry::ClientInitGuard;
 pub use tx::*;
 
 mod blocks;
@@ -25,7 +26,6 @@ use cccp_primitives::eth::{EthClientConfiguration, EthResult};
 
 pub type TxResult<T = ()> = Result<T, Box<dyn std::error::Error + Send + Sync>>;
 
-#[derive(Debug)]
 /// The core client for EVM-based chain interactions.
 pub struct EthClient<T> {
 	/// The wallet manager for the connected relayer.
@@ -36,6 +36,8 @@ pub struct EthClient<T> {
 	config: EthClientConfiguration,
 	/// The flag whether the chain is BIFROST(native) or an external chain.
 	pub is_native: bool,
+	/// The sentry client.
+	pub sentry_client: Arc<Option<ClientInitGuard>>,
 }
 
 impl<T: JsonRpcClient> EthClient<T> {
@@ -45,8 +47,9 @@ impl<T: JsonRpcClient> EthClient<T> {
 		provider: Arc<Provider<T>>,
 		config: EthClientConfiguration,
 		is_native: bool,
+		sentry_client: Arc<Option<ClientInitGuard>>,
 	) -> Self {
-		Self { wallet, provider, config, is_native }
+		Self { wallet, provider, config, is_native, sentry_client }
 	}
 
 	/// Returns the relayer address.

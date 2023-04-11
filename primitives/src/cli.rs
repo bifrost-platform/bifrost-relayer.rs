@@ -193,5 +193,5 @@ pub struct PeriodicWorkerConfig {
 #[derive(Debug, Clone, Deserialize)]
 pub struct SentryConfig {
 	/// The DSN that tells Sentry where to send the events to.
-	pub dsn: String,
+	pub dsn: Option<String>,
 }

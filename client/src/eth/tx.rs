@@ -6,12 +6,12 @@ use ethers::{
 	},
 	providers::{JsonRpcClient, Middleware, Provider},
 	signers::{LocalWallet, Signer},
-	types::{TransactionRequest, U256},
+	types::{TransactionReceipt, TransactionRequest, U256},
 };
-use std::sync::Arc;
+use std::{error::Error, sync::Arc};
 use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
 
-use super::{EthClient, EventMessage};
+use super::{EthClient, EventMessage, EventMetadata};
 
 type TransactionMiddleware<T> =
 	NonceManagerMiddleware<SignerMiddleware<GasEscalatorMiddleware<Arc<Provider<T>>>, LocalWallet>>;
@@ -66,6 +66,98 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> {
 		}
 	}
 
+	/// Handles the successfully mined transaction.
+	fn handle_success_tx_receipt(&self, receipt: TransactionReceipt, metadata: EventMetadata) {
+		let status = receipt.status.unwrap();
+		log::info!(
+			target: &self.client.get_chain_name(),
+			"-[{}] 🎁 The requested transaction has been successfully mined in block: {}, {:?}-{:?}-{:?}",
+			sub_display_format(SUB_LOG_TARGET),
+			metadata.to_string(),
+			receipt.block_number.unwrap(),
+			status,
+			receipt.transaction_hash
+		);
+		if status.is_zero() {
+			log::warn!(
+				target: &self.client.get_chain_name(),
+				"-[{}] ⚠️ Warning! Error encountered during contract execution [execution reverted]: {}, {:?}-{:?}-{:?}",
+				sub_display_format(SUB_LOG_TARGET),
+				metadata.to_string(),
+				receipt.block_number.unwrap(),
+				status,
+				receipt.transaction_hash
+			);
+			sentry::capture_message(
+				format!(
+					"[{}]-[{}] ⚠️ Warning! Error encountered during contract execution [execution reverted]: {}, {:?}-{:?}-{:?}",
+					&self.client.get_chain_name(),
+					SUB_LOG_TARGET,
+					metadata.to_string(),
+					receipt.block_number.unwrap(),
+					status,
+					receipt.transaction_hash
+				)
+				.as_str(),
+				sentry::Level::Warning,
+			);
+		}
+	}
+
+	/// Handles the dropped transaction.
+	fn handle_failed_tx_receipt(&self, msg: EventMessage) {
+		log::error!(
+			target: &self.client.get_chain_name(),
+			"-[{}] ♻️ The requested transaction has been dropped from the mempool: {}, Retries left: {:?}",
+			sub_display_format(SUB_LOG_TARGET),
+			msg.metadata,
+			msg.retries_remaining - 1,
+		);
+		sentry::capture_message(
+			format!(
+				"[{}]-[{}] ♻️ The requested transaction has been dropped from the mempool: {}, Retries left: {:?}",
+				&self.client.get_chain_name(),
+				SUB_LOG_TARGET,
+				msg.metadata,
+				msg.retries_remaining - 1,
+			)
+			.as_str(),
+			sentry::Level::Error,
+		);
+		self.sender
+			.send(EventMessage::new(
+				msg.retries_remaining - 1,
+				msg.tx_request,
+				msg.metadata,
+				msg.check_mempool,
+			))
+			.unwrap();
+	}
+
+	/// Handles the failed transaction request.
+	fn handle_failed_tx_request<E>(&self, msg: EventMessage, error: &E)
+	where
+		E: Error + ?Sized,
+	{
+		log::error!(
+			target: &self.client.get_chain_name(),
+			"-[{}] ♻️ Unknown error while requesting a transaction request: {}, Retries left: {:?}, Error: {}",
+			sub_display_format(SUB_LOG_TARGET),
+			msg.metadata,
+			msg.retries_remaining - 1,
+			error.to_string()
+		);
+		sentry::capture_error(&error);
+		self.sender
+			.send(EventMessage::new(
+				msg.retries_remaining - 1,
+				msg.tx_request,
+				msg.metadata,
+				msg.check_mempool,
+			))
+			.unwrap();
+	}
+
 	/// Sends the consumed transaction request to the connected chain. The transaction request will
 	/// be re-published to the event channel if the transaction fails to be mined in a block.
 	async fn send_transaction(&self, mut msg: EventMessage) {
@@ -75,6 +167,16 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> {
 				"-[{}] ❗️ Exceeded the retry limit to send a transaction: {}",
 				sub_display_format(SUB_LOG_TARGET),
 				msg.metadata
+			);
+			sentry::capture_message(
+				format!(
+					"[{}]-[{}] ❗️ Exceeded the retry limit to send a transaction: {}",
+					&self.client.get_chain_name(),
+					SUB_LOG_TARGET,
+					msg.metadata
+				)
+				.as_str(),
+				sentry::Level::Error,
 			);
 			return
 			// TODO: retry 전부 소모시 정책 결정 필요
@@ -100,77 +202,18 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> {
 				Ok(pending_tx) => match pending_tx.await {
 					Ok(receipt) =>
 						if let Some(receipt) = receipt {
-							log::info!(
-								target: &self.client.get_chain_name(),
-								"-[{}] 🎁 The requested transaction has been successfully mined in block: {}, {:?}-{:?}-{:?}",
-								sub_display_format(SUB_LOG_TARGET),
-								msg.metadata.to_string(),
-								receipt.block_number.unwrap(),
-								receipt.status.unwrap(),
-								receipt.transaction_hash
-							);
+							self.handle_success_tx_receipt(receipt, msg.metadata);
 						} else {
-							log::error!(
-								target: &self.client.get_chain_name(),
-								"-[{}] ♻️ The requested transaction has been dropped from the mempool: {}, Retries left: {:?}",
-								sub_display_format(SUB_LOG_TARGET),
-								msg.metadata,
-								msg.retries_remaining - 1,
-							);
-							self.sender
-								.send(EventMessage::new(
-									msg.retries_remaining - 1,
-									msg.tx_request,
-									msg.metadata,
-									msg.check_mempool,
-								))
-								.unwrap();
+							self.handle_failed_tx_receipt(msg);
 						},
 					Err(error) => {
-						log::error!(
-							target: &self.client.get_chain_name(),
-							"-[{}] ♻️ Unknown error while waiting for transaction receipt: {}, Retries left: {:?}, Error: {}",
-							sub_display_format(SUB_LOG_TARGET),
-							msg.metadata,
-							msg.retries_remaining - 1,
-							error.to_string()
-						);
-						self.sender
-							.send(EventMessage::new(
-								msg.retries_remaining - 1,
-								msg.tx_request,
-								msg.metadata,
-								msg.check_mempool,
-							))
-							.unwrap();
+						self.handle_failed_tx_request(msg, &error);
 					},
 				},
 				Err(error) => {
-					log::error!(
-						target: &self.client.get_chain_name(),
-						"-[{}] ♻️ Unknown error while sending transaction: {}, Retries left: {:?}, Error: {}",
-						sub_display_format(SUB_LOG_TARGET),
-						msg.metadata,
-						msg.retries_remaining - 1,
-						error.to_string()
-					);
-					self.sender
-						.send(EventMessage::new(
-							msg.retries_remaining - 1,
-							msg.tx_request,
-							msg.metadata,
-							msg.check_mempool,
-						))
-						.unwrap();
+					self.handle_failed_tx_request(msg, &error);
 				},
-			}
-		} else {
-			log::info!(
-				target: &self.client.get_chain_name(),
-				"-[{}] 🐌 The requested relay has been already processed by another relayer: {}",
-				sub_display_format(SUB_LOG_TARGET),
-				msg.metadata.to_string(),
-			);
+			};
 		}
 	}
 
