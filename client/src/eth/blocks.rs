@@ -1,6 +1,6 @@
 use cccp_primitives::sub_display_format;
 use ethers::{
-	providers::JsonRpcClient,
+	providers::{JsonRpcClient, Middleware},
 	types::{Block, TransactionReceipt, H160, H256, U64},
 };
 use std::sync::Arc;
@@ -80,13 +80,17 @@ impl<T: JsonRpcClient> BlockManager<T> {
 			self.target_contracts
 		);
 
+		let bootstrap_offset_height = self
+			.get_bootstrap_offset_height_based_on_block_time(*self.bootstrap_offset.lock().await)
+			.await;
+
 		// initialize pending block to the bootstrapping block
 		self.pending_block = self
 			.client
 			.get_latest_block_number()
 			.await
 			.unwrap()
-			.saturating_sub(*self.bootstrap_offset.lock().await);
+			.saturating_sub(bootstrap_offset_height);
 
 		log::info!(
 			target: &self.client.get_chain_name(),
@@ -166,5 +170,34 @@ impl<T: JsonRpcClient> BlockManager<T> {
 	/// Verifies if the stored pending block waited for confirmations.
 	fn is_block_confirmed(&self, latest_block: U64) -> bool {
 		latest_block.saturating_sub(self.pending_block) > self.client.config.block_confirmations
+	}
+
+	/// Get factor between the block time of native-chain and block time of this chain
+	async fn get_bootstrap_offset_height_based_on_block_time(&self, offset: U64) -> U64 {
+		let block_offset = 100;
+		let native_block_time = 3;
+
+		let block_number = self.client.provider.get_block_number().await.unwrap();
+
+		let current_block = self.client.get_block((block_number).into()).await.unwrap().unwrap();
+		let prev_block = self
+			.client
+			.get_block((block_number - block_offset).into())
+			.await
+			.unwrap()
+			.unwrap();
+
+		let diff = current_block
+			.timestamp
+			.checked_sub(prev_block.timestamp)
+			.unwrap()
+			.checked_div(block_offset.into())
+			.unwrap();
+
+		offset
+			.checked_div(diff.as_u64().into())
+			.unwrap()
+			.checked_mul(native_block_time.into())
+			.unwrap()
 	}
 }

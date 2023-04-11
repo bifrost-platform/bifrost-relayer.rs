@@ -16,7 +16,7 @@ use std::{str::FromStr, sync::Arc};
 use tokio::{sync::Mutex, time::sleep};
 
 const SUB_LOG_TARGET: &str = "roundup-emitter";
-const BOOTSTRAP_ROUND_OFFSET: u64 = 16;
+const BOOTSTRAP_ROUND_OFFSET: u64 = 6;
 
 pub struct RoundupEmitter<T> {
 	/// Current round number
