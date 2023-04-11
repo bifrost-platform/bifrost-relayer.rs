@@ -26,19 +26,10 @@ pub struct HeartbeatSender<T> {
 	client: Arc<EthClient<T>>,
 }
 
-#[async_trait::async_trait]
 impl<T: JsonRpcClient> PeriodicWorker for HeartbeatSender<T> {
 	fn schedule(&self) -> Schedule {
 		self.schedule.clone()
 	}
-
-	async fn run(&mut self) {
-		loop {
-			let address = self.client.address();
-
-			let relayer_manager = self.client.protocol_contracts.relayer_manager.as_ref().unwrap();
-			let is_selected = self
-				.client
 				.contract_call(
 					relayer_manager.is_selected_relayer(address, false),
 					"relayer_manager.is_selected_relayer",
