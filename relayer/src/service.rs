@@ -10,7 +10,7 @@ use cccp_primitives::{
 	sub_display_format,
 };
 
-use cccp_periodic::roundup_emitter::RoundupEmitter;
+use cccp_periodic::{heartbeat_sender::HeartbeatSender, roundup_emitter::RoundupEmitter};
 use cccp_primitives::socket_bifrost::SocketBifrost;
 use ethers::{
 	providers::{Http, Provider},
@@ -141,6 +141,16 @@ pub fn new_relay_base(config: Configuration) -> Result<RelayBase, ServiceError> 
 			async move { tx_manager.run().await },
 		)
 	});
+
+	// initialize heartbeat sender & spawn task
+	let mut heartbeat_sender = HeartbeatSender::new(
+		config.relayer_config.periodic_configs.clone().unwrap().heartbeat,
+		clients.iter().find(|client| client.is_native).unwrap().clone(),
+		event_channels.clone(),
+	);
+	task_manager
+		.spawn_essential_handle()
+		.spawn("Heartbeat", Some("heartbeat"), async move { heartbeat_sender.run().await });
 
 	// initialize oracle price feeder & spawn tasks
 	config

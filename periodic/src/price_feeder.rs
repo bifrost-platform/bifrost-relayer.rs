@@ -110,7 +110,7 @@ impl<T: JsonRpcClient> OraclePriceFeeder<T> {
 		oid_bytes_list: Vec<[u8; 32]>,
 		price_bytes_list: Vec<[u8; 32]>,
 	) -> TransactionRequest {
-		TransactionRequest::new().to(self.contract.address()).data(
+		TransactionRequest::default().to(self.contract.address()).data(
 			self.contract
 				.oracle_aggregate_feeding(oid_bytes_list, price_bytes_list)
 				.calldata()
