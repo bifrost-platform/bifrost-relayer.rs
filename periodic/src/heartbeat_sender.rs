@@ -8,7 +8,7 @@ use cccp_primitives::{
 use cron::Schedule;
 use ethers::{
 	providers::{JsonRpcClient, Provider},
-	types::{TransactionRequest, H160},
+	types::{TransactionRequest, H160, U256},
 };
 use std::{str::FromStr, sync::Arc};
 use tokio::time::sleep;
@@ -37,7 +37,8 @@ impl<T: JsonRpcClient> PeriodicWorker for HeartbeatSender<T> {
 
 			if self.relayer_manager.is_selected_relayer(address, true).call().await.unwrap() {
 				if !(self.relayer_manager.is_heartbeat_pulsed(address).call().await.unwrap()) {
-					let round_info = self.authority.round_info().call().await.unwrap();
+					let round_info: (U256, U256, U256, U256, U256, U256, U256, U256) =
+						self.authority.round_info().call().await.unwrap();
 					self.request_send_transaction(
 						self.build_transaction(),
 						HeartbeatMetadata::new(round_info.0, round_info.2),
