@@ -173,7 +173,7 @@ impl<T: JsonRpcClient> BridgeRelayBuilder for BridgeRelayHandler<T> {
 			.address;
 		// the original msg must be used for building calldata
 		let origin_msg = msg.clone();
-		let tx_request = TransactionRequest::new();
+		let tx_request = TransactionRequest::default();
 		let signatures = self.build_signatures(msg, is_inbound).await;
 		tx_request.data(self.build_poll_call_data(origin_msg, signatures)).to(to_socket)
 	}
