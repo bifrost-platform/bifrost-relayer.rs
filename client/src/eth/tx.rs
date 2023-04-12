@@ -95,7 +95,7 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> {
 		let estimated_gas = U256::from(300_000);
 		msg.tx_request = msg.tx_request.gas(estimated_gas);
 
-		if !(self.is_duplicate_relay(&msg.tx_request).await) {
+		if !(self.is_duplicate_relay(&msg.tx_request, msg.check_mempool).await) {
 			match self.middleware.send_transaction(msg.tx_request.clone(), None).await {
 				Ok(pending_tx) => match pending_tx.await {
 					Ok(receipt) =>
@@ -122,6 +122,7 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> {
 									msg.retries_remaining - 1,
 									msg.tx_request,
 									msg.metadata,
+									msg.check_mempool,
 								))
 								.unwrap();
 						},
@@ -139,6 +140,7 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> {
 								msg.retries_remaining - 1,
 								msg.tx_request,
 								msg.metadata,
+								msg.check_mempool,
 							))
 							.unwrap();
 					},
@@ -157,6 +159,7 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> {
 							msg.retries_remaining - 1,
 							msg.tx_request,
 							msg.metadata,
+							msg.check_mempool,
 						))
 						.unwrap();
 				},
@@ -173,7 +176,15 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> {
 
 	/// Function that query mempool for check if the relay event that this relayer is about to send
 	/// has already been processed by another relayer.
-	async fn is_duplicate_relay(&self, tx_request: &TransactionRequest) -> bool {
+	async fn is_duplicate_relay(
+		&self,
+		tx_request: &TransactionRequest,
+		check_mempool: bool,
+	) -> bool {
+		if !check_mempool {
+			return false
+		}
+
 		let data = tx_request.data.as_ref().unwrap();
 		let to = tx_request.to.as_ref().unwrap().as_address().unwrap();
 

@@ -251,6 +251,7 @@ impl<T: JsonRpcClient> RoundupRelayHandler<T> {
 							roundup_submit.round,
 							target_chain.event_sender.id,
 						)),
+						true,
 					))
 					.unwrap();
 			}

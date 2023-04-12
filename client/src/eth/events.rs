@@ -157,6 +157,8 @@ pub struct EventMessage {
 	pub tx_request: TransactionRequest,
 	/// Additional data of the transaction request.
 	pub metadata: EventMetadata,
+	/// Check mempool to prevent duplicate relay
+	pub check_mempool: bool,
 }
 
 impl EventMessage {
@@ -165,8 +167,9 @@ impl EventMessage {
 		retries_remaining: u8,
 		tx_request: TransactionRequest,
 		metadata: EventMetadata,
+		check_mempool: bool,
 	) -> Self {
-		Self { retries_remaining, tx_request, metadata }
+		Self { retries_remaining, tx_request, metadata, check_mempool }
 	}
 }
 
