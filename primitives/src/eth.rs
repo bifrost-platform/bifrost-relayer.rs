@@ -37,7 +37,7 @@ impl RoundUpEventStatus {
 	}
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 /// The socket event status.
 pub enum SocketEventStatus {
 	// None = 0

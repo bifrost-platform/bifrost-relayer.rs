@@ -5,14 +5,14 @@ use cccp_primitives::{
 		BridgeRelayBuilder, PollSubmit, Signatures, SocketEvents, SocketExternal, SocketMessage,
 	},
 	eth::{BridgeDirection, Contract, RecoveredSignature, SocketEventStatus},
-	socket_external::SerializedPoll,
+	socket_external::{RequestID, SerializedPoll},
 	sub_display_format,
 };
 use ethers::{
 	abi::{RawLog, Token},
 	prelude::decode_logs,
 	providers::{JsonRpcClient, Provider},
-	types::{Bytes, Signature, TransactionReceipt, TransactionRequest, H160, H256, U256},
+	types::{Bytes, Signature, TransactionReceipt, TransactionRequest, Uint8, H160, H256, U256},
 };
 use tokio::sync::broadcast::Receiver;
 use tokio_stream::StreamExt;
@@ -386,8 +386,11 @@ impl<T: JsonRpcClient> BridgeRelayHandler<T> {
 		is_inbound: bool,
 	) {
 		let status = SocketEventStatus::from_u8(msg.status);
-		if Self::is_sequence_ended(status) {
+
+		if Self::is_sequence_ended(status) && self.is_already_done(msg.req_id.clone(), status).await
+		{
 			// do nothing if protocol sequence ended
+			println!("already done?");
 			return
 		}
 
@@ -504,6 +507,13 @@ impl<T: JsonRpcClient> BridgeRelayHandler<T> {
 				},
 			}
 		}
+	}
+
+	async fn is_already_done(&self, rid: RequestID, status: SocketEventStatus) -> bool {
+		let request = self.target_socket.get_request(rid).call().await.unwrap();
+		let event_status = request.field[0].clone();
+
+		status == SocketEventStatus::from_u8(event_status.into())
 	}
 }
 

@@ -16,7 +16,7 @@ use std::{str::FromStr, sync::Arc};
 use tokio::{sync::Mutex, time::sleep};
 
 const SUB_LOG_TARGET: &str = "roundup-emitter";
-const BOOTSTRAP_ROUND_OFFSET: u64 = 6;
+const BOOTSTRAP_ROUND_OFFSET: u64 = 0;
 
 pub struct RoundupEmitter<T> {
 	/// Current round number
@@ -176,7 +176,7 @@ impl<T: JsonRpcClient> RoundupEmitter<T> {
 		let origin_round = round;
 
 		while !self.is_previous_selected_relayer(round).await {
-			if origin_round.saturating_sub(round) > BOOTSTRAP_ROUND_OFFSET.into() {
+			if origin_round.saturating_sub(round) >= BOOTSTRAP_ROUND_OFFSET.into() {
 				break
 			}
 
