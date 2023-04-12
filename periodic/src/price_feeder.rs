@@ -195,7 +195,6 @@ mod tests {
 				},
 			),
 			is_native,
-			None,
 		));
 
 		let mut oracle_price_feeder = OraclePriceFeeder::new(
