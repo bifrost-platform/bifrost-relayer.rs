@@ -364,6 +364,7 @@ impl<T: JsonRpcClient> BridgeRelayHandler<T> {
 					DEFAULT_RETRIES,
 					tx_request,
 					EventMetadata::BridgeRelay(metadata.clone()),
+					true,
 				))
 				.unwrap();
 			log::info!(
