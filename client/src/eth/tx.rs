@@ -6,7 +6,7 @@ use ethers::{
 	},
 	providers::{JsonRpcClient, Middleware, Provider},
 	signers::{LocalWallet, Signer},
-	types::{Bytes, U256},
+	types::{TransactionRequest, U256},
 };
 use std::sync::Arc;
 use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
@@ -95,7 +95,7 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> {
 		let estimated_gas = U256::from(300_000);
 		msg.tx_request = msg.tx_request.gas(estimated_gas);
 
-		if !(self.is_duplicate_relay(msg.tx_request.clone().data.unwrap()).await) {
+		if !(self.is_duplicate_relay(&msg.tx_request).await) {
 			match self.middleware.send_transaction(msg.tx_request.clone(), None).await {
 				Ok(pending_tx) => match pending_tx.await {
 					Ok(receipt) =>
@@ -173,11 +173,14 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> {
 
 	/// Function that query mempool for check if the relay event that this relayer is about to send
 	/// has already been processed by another relayer.
-	async fn is_duplicate_relay(&self, data: Bytes) -> bool {
+	async fn is_duplicate_relay(&self, tx_request: &TransactionRequest) -> bool {
+		let data = tx_request.data.as_ref().unwrap();
+		let to = tx_request.to.as_ref().unwrap().as_address().unwrap();
+
 		let txpool_pending_contents = self.client.provider.txpool_content().await.unwrap().pending;
 		for (_address, tx_map) in txpool_pending_contents.iter() {
 			for (_nonce, transaction) in tx_map.iter() {
-				if transaction.input == data {
+				if transaction.to.unwrap_or_default() == *to && transaction.input == *data {
 					return true
 				}
 			}
