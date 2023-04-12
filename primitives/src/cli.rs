@@ -58,6 +58,8 @@ pub struct RelayerConfig {
 	pub private_key: String,
 	/// Periodic worker configs
 	pub periodic_configs: Option<PeriodicWorkerConfig>,
+	/// Bootstrapping configs
+	pub bootstrap_configs: BootstrapConfig,
 	/// Sentry config
 	pub sentry_config: Option<SentryConfig>,
 }
@@ -188,6 +190,16 @@ pub struct PeriodicWorkerConfig {
 	pub roundup_emitter: RoundupEmitterConfig,
 	/// Heartbeat sender
 	pub heartbeat: HeartbeatSenderConfig,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct BootstrapConfig {
+	/// Bootstrapping flag
+	pub no_bootstrap: bool,
+	/// Round for bootstrap
+	pub offset: u32,
+	/// Block time of native chain
+	pub native_block_time: u32,
 }
 
 #[derive(Debug, Clone, Deserialize)]

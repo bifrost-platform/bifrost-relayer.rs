@@ -5,7 +5,7 @@ use cccp_client::eth::{
 use cccp_periodic::OraclePriceFeeder;
 use cccp_primitives::{
 	cli::{Configuration, HandlerConfig, HandlerType},
-	eth::{BridgeDirection, Contract, EthClientConfiguration},
+	eth::{BootstrapState, BridgeDirection, Contract, EthClientConfiguration},
 	periodic::PeriodicWorker,
 	sub_display_format,
 };
@@ -14,11 +14,11 @@ use cccp_periodic::{heartbeat_sender::HeartbeatSender, roundup_emitter::RoundupE
 use cccp_primitives::socket_bifrost::SocketBifrost;
 use ethers::{
 	providers::{Http, Provider},
-	types::{H160, U64},
+	types::H160,
 };
 use sc_service::{Error as ServiceError, TaskManager};
 use std::{str::FromStr, sync::Arc};
-use tokio::sync::Mutex;
+use tokio::sync::{Barrier, Mutex};
 
 use crate::cli::{LOG_TARGET, SUB_LOG_TARGET};
 
@@ -60,7 +60,13 @@ pub fn relay(config: Configuration) -> Result<TaskManager, ServiceError> {
 }
 
 pub fn new_relay_base(config: Configuration) -> Result<RelayBase, ServiceError> {
-	let bootstrap_offset = Arc::new(Mutex::new(U64::default()));
+	let bootstrap_state = if config.relayer_config.bootstrap_configs.no_bootstrap {
+		BootstrapState::NormalStart
+	} else {
+		BootstrapState::BeforeCompletion
+	};
+
+	let is_bootstrapping_completed = Arc::new(Mutex::new(bootstrap_state));
 
 	// initialize `EthClient`, `TransactionManager`, `BlockManager`
 	let (clients, tx_managers, block_managers, event_channels) = {
@@ -107,8 +113,12 @@ pub fn new_relay_base(config: Configuration) -> Result<RelayBase, ServiceError> 
 					is_native,
 				)));
 			}
-			let block_manager =
-				BlockManager::new(client.clone(), target_contracts, bootstrap_offset.clone());
+			let block_manager = BlockManager::new(
+				client.clone(),
+				target_contracts,
+				config.relayer_config.bootstrap_configs.clone(),
+				is_bootstrapping_completed.clone(),
+			);
 
 			clients.push(client);
 			block_managers.push(block_manager);
@@ -188,6 +198,9 @@ pub fn new_relay_base(config: Configuration) -> Result<RelayBase, ServiceError> 
 			);
 		});
 
+	// Wait until each chain of vault/socket contract and bootstrapping is completed
+	let bootstrap_barrier = Arc::new(Barrier::new(12));
+
 	// Initialize handlers & spawn tasks
 	let socket_contracts = build_socket_contracts(&config.relayer_config.handler_configs);
 	config.relayer_config.handler_configs.iter().for_each(|handler_config| {
@@ -230,6 +243,11 @@ pub fn new_relay_base(config: Configuration) -> Result<RelayBase, ServiceError> 
 						target_socket.address,
 						socket_contracts.clone(),
 					);
+
+					// let mut bootstrap_rx = bootstrap_tx.subscribe();
+					let barrier = bootstrap_barrier.clone();
+					let is_bootstrapped = is_bootstrapping_completed.clone();
+
 					task_manager.spawn_essential_handle().spawn(
 						Box::leak(
 							format!(
@@ -240,7 +258,15 @@ pub fn new_relay_base(config: Configuration) -> Result<RelayBase, ServiceError> 
 							.into_boxed_str(),
 						),
 						Some("handlers"),
-						async move { bridge_relay_handler.run().await },
+						async move {
+							barrier.wait().await;
+							// After All of barrier complete the waiting
+							let mut guard = is_bootstrapped.lock().await;
+							*guard = BootstrapState::AfterCompletion;
+							drop(guard);
+
+							bridge_relay_handler.run().await
+						},
 					);
 				}),
 			HandlerType::Roundup => {
@@ -290,7 +316,10 @@ pub fn new_relay_base(config: Configuration) -> Result<RelayBase, ServiceError> 
 					external_clients,
 					socket_bifrost,
 					handler_config.roundup_utils.clone().unwrap(),
+					bootstrap_barrier.clone(),
+					is_bootstrapping_completed.clone(),
 				);
+
 				task_manager.spawn_essential_handle().spawn(
 					"Roundup-handler",
 					Some("handlers"),
@@ -305,16 +334,12 @@ pub fn new_relay_base(config: Configuration) -> Result<RelayBase, ServiceError> 
 		event_channels.iter().find(|sender| sender.is_native).unwrap().clone(),
 		clients.iter().find(|client| client.is_native).unwrap().clone(),
 		config.relayer_config.periodic_configs.unwrap().roundup_emitter,
-		bootstrap_offset,
 	);
 
 	task_manager.spawn_essential_handle().spawn(
 		"Roundup-Emitter",
 		Some("roundup-emitter"),
-		async move {
-			roundup_emitter.set_bootstrap_height().await;
-			roundup_emitter.run().await
-		},
+		async move { roundup_emitter.run().await },
 	);
 
 	// spawn block managers' tasks

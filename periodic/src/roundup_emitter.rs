@@ -10,13 +10,12 @@ use cron::Schedule;
 use ethers::{
 	abi::{encode, Token},
 	providers::{JsonRpcClient, Provider},
-	types::{Address, TransactionRequest, H160, U256, U64},
+	types::{Address, TransactionRequest, H160, U256},
 };
 use std::{str::FromStr, sync::Arc};
-use tokio::{sync::Mutex, time::sleep};
+use tokio::time::sleep;
 
 const SUB_LOG_TARGET: &str = "roundup-emitter";
-const BOOTSTRAP_ROUND_OFFSET: u64 = 0;
 
 pub struct RoundupEmitter<T> {
 	/// Current round number
@@ -33,8 +32,6 @@ pub struct RoundupEmitter<T> {
 	pub socket_contract: SocketBifrost<Provider<T>>,
 	/// RelayerManager contract(bifrost) instance
 	pub relayer_contract: RelayerManagerBifrost<Provider<T>>,
-	/// block height offset required for bootstrapping
-	pub bootstrap_offset: Arc<Mutex<U64>>,
 }
 
 #[async_trait::async_trait]
@@ -82,7 +79,6 @@ impl<T: JsonRpcClient> RoundupEmitter<T> {
 		event_sender: Arc<EventSender>,
 		client: Arc<EthClient<T>>,
 		config: RoundupEmitterConfig,
-		bootstrap_offset: Arc<Mutex<U64>>,
 	) -> Self {
 		let provider = client.get_provider();
 
@@ -103,7 +99,6 @@ impl<T: JsonRpcClient> RoundupEmitter<T> {
 				H160::from_str(&config.relayer_manager_address).unwrap(),
 				provider,
 			),
-			bootstrap_offset,
 		}
 	}
 
@@ -167,45 +162,5 @@ impl<T: JsonRpcClient> RoundupEmitter<T> {
 
 	async fn get_latest_round(&self) -> U256 {
 		self.authority_contract.latest_round().call().await.unwrap()
-	}
-
-	pub async fn set_bootstrap_height(&self) {
-		let mut locked_bootstrap_offset = self.bootstrap_offset.lock().await;
-
-		let (mut round, _height, round_length) = self.get_round_info().await;
-		let origin_round = round;
-
-		while !self.is_previous_selected_relayer(round).await {
-			if origin_round.saturating_sub(round) >= BOOTSTRAP_ROUND_OFFSET.into() {
-				break
-			}
-
-			round = round.saturating_sub(U256::from(1));
-		}
-
-		let offset_height = origin_round.saturating_sub(round) * round_length;
-
-		log::info!(
-				target: "bootstrap",
-				"-[{}] 👤 Bootstrap block offset: {}",
-				sub_display_format(SUB_LOG_TARGET),
-				offset_height);
-
-		*locked_bootstrap_offset = offset_height.as_u64().into();
-	}
-
-	async fn get_round_info(&self) -> (U256, U256, U256) {
-		let (round, _, _, _, _, height, round_length, _) =
-			self.authority_contract.round_info().call().await.unwrap();
-
-		(round, height, round_length)
-	}
-
-	async fn is_previous_selected_relayer(&self, round: U256) -> bool {
-		self.relayer_contract
-			.is_previous_selected_relayer(round, self.client.address(), true)
-			.call()
-			.await
-			.unwrap()
 	}
 }

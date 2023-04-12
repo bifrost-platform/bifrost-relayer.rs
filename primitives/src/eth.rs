@@ -118,6 +118,13 @@ impl EthClientConfiguration {
 	}
 }
 
+#[derive(Debug, PartialEq)]
+pub enum BootstrapState {
+	BeforeCompletion,
+	AfterCompletion,
+	NormalStart,
+}
+
 #[derive(Clone, Debug)]
 /// The information of a recovered signature.
 pub struct RecoveredSignature {

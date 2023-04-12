@@ -5,7 +5,7 @@ use async_trait::async_trait;
 use cccp_primitives::{
 	authority_external::AuthorityExternal,
 	cli::RoundupHandlerUtilityConfig,
-	eth::{RecoveredSignature, RoundUpEventStatus},
+	eth::{BootstrapState, RecoveredSignature, RoundUpEventStatus},
 	socket_bifrost::{SerializedRoundUp, SocketBifrost, SocketBifrostEvents},
 	socket_external::{RoundUpSubmit, Signatures, SocketExternal},
 	sub_display_format, RoundupHandlerUtilType,
@@ -18,7 +18,7 @@ use ethers::{
 	types::{Address, Bytes, Log, Signature, TransactionRequest, H160, U256},
 };
 use std::{str::FromStr, sync::Arc};
-use tokio::sync::broadcast::Receiver;
+use tokio::sync::{broadcast::Receiver, Barrier, Mutex};
 use tokio_stream::StreamExt;
 
 const SUB_LOG_TARGET: &str = "roundup-handler";
@@ -46,6 +46,10 @@ pub struct RoundupRelayHandler<T> {
 	pub roundup_utils: Vec<RoundupUtility<T>>,
 	/// Signature of RoundUp Event.
 	pub roundup_signature: H256,
+	/// Barrier for bootstrapping
+	pub bootstrap_barrier: Arc<Barrier>,
+	/// Completion of bootstrapping
+	pub is_bootstrapping_completed: Arc<Mutex<BootstrapState>>,
 }
 
 #[async_trait]
@@ -141,6 +145,8 @@ impl<T: JsonRpcClient> RoundupRelayHandler<T> {
 		external_clients: Vec<Arc<EthClient<T>>>,
 		socket_bifrost: SocketBifrost<Provider<T>>,
 		roundup_util_configs: Vec<RoundupHandlerUtilityConfig>,
+		bootstrap_barrier: Arc<Barrier>,
+		is_bootstrapping_completed: Arc<Mutex<BootstrapState>>,
 	) -> Self {
 		let roundup_signature = socket_bifrost.abi().event("RoundUp").unwrap().signature();
 		let roundup_utils = event_senders
@@ -193,7 +199,15 @@ impl<T: JsonRpcClient> RoundupRelayHandler<T> {
 			})
 			.collect();
 
-		Self { block_receiver, client, socket_bifrost, roundup_utils, roundup_signature }
+		Self {
+			block_receiver,
+			client,
+			socket_bifrost,
+			roundup_utils,
+			roundup_signature,
+			bootstrap_barrier,
+			is_bootstrapping_completed,
+		}
 	}
 
 	/// Decode & Serialize log to `SerializedRoundUp` struct.
@@ -282,6 +296,7 @@ impl<T: JsonRpcClient> RoundupRelayHandler<T> {
 		let mut stream = tokio_stream::iter(&self.roundup_utils);
 		while let Some(target_chain) = stream.next().await {
 			// Check roundup submitted to target chain before.
+
 			if roundup_submit.round >
 				target_chain.authority_external.latest_round().call().await.unwrap()
 			{
@@ -290,32 +305,27 @@ impl<T: JsonRpcClient> RoundupRelayHandler<T> {
 					roundup_submit.clone(),
 				);
 
-				let metadata =
-					VSPPhase2Metadata::new(roundup_submit.round, target_chain.event_sender.id);
-				match target_chain.event_sender.sender.send(EventMessage::new(
-					transaction_request,
-					EventMetadata::VSPPhase2(metadata.clone()),
-					true,
-				)) {
-					Ok(()) => log::info!(
-						target: &self.client.get_chain_name(),
-						"-[{}] 🔖 Request roundup transaction to chain({:?}): {}",
-						sub_display_format(SUB_LOG_TARGET),
-						target_chain.id,
-						metadata,
-					),
-					Err(error) => {
-						log::error!(
-							target: &self.client.get_chain_name(),
-							"-[{}] ❗️ Failed to request roundup transaction to chain({:?}): {}, Error: {}",
-							sub_display_format(SUB_LOG_TARGET),
-							target_chain.id,
-							metadata,
-							error.to_string()
-						);
-						sentry::capture_error(&error);
-					},
+				target_chain
+					.event_sender
+					.sender
+					.send(EventMessage::new(
+						transaction_request,
+						EventMetadata::VSPPhase2(VSPPhase2Metadata::new(
+							roundup_submit.round,
+							target_chain.event_sender.id,
+						)),
+						true,
+					))
+					.unwrap();
+			} else if roundup_submit.round ==
+				target_chain.relayer_external.latest_round().call().await.unwrap()
+			{
+				if *self.is_bootstrapping_completed.lock().await != BootstrapState::BeforeCompletion
+				{
+					continue
 				}
+
+				self.bootstrap_barrier.wait().await;
 			}
 		}
 	}

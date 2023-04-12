@@ -1,4 +1,4 @@
-use cccp_primitives::sub_display_format;
+use cccp_primitives::{cli::BootstrapConfig, eth::BootstrapState, sub_display_format};
 use ethers::{
 	providers::{JsonRpcClient, Middleware},
 	types::{Block, TransactionReceipt, H160, H256, U64},
@@ -56,8 +56,10 @@ pub struct BlockManager<T> {
 	pub target_contracts: Vec<H160>,
 	/// The pending block waiting for some confirmations.
 	pub pending_block: U64,
-	/// Bootstrap round
-	pub bootstrap_offset: Arc<Mutex<U64>>,
+	/// Bootstrap config
+	pub bootstrap_configs: BootstrapConfig,
+	/// State of bootstrapping
+	pub is_bootstrapping_completed: Arc<Mutex<BootstrapState>>,
 }
 
 impl<T: JsonRpcClient> BlockManager<T> {
@@ -65,10 +67,18 @@ impl<T: JsonRpcClient> BlockManager<T> {
 	pub fn new(
 		client: Arc<EthClient<T>>,
 		target_contracts: Vec<H160>,
-		bootstrap_offset: Arc<Mutex<U64>>,
+		bootstrap_configs: BootstrapConfig,
+		is_bootstrapping_completed: Arc<Mutex<BootstrapState>>,
 	) -> Self {
 		let (sender, _receiver) = broadcast::channel(512); // TODO: size?
-		Self { client, sender, target_contracts, pending_block: U64::default(), bootstrap_offset }
+		Self {
+			client,
+			sender,
+			target_contracts,
+			pending_block: U64::default(),
+			bootstrap_configs,
+			is_bootstrapping_completed,
+		}
 	}
 
 	/// Initialize block manager.
@@ -80,17 +90,21 @@ impl<T: JsonRpcClient> BlockManager<T> {
 			self.target_contracts
 		);
 
-		let bootstrap_offset_height = self
-			.get_bootstrap_offset_height_based_on_block_time(*self.bootstrap_offset.lock().await)
-			.await;
-
 		// initialize pending block to the bootstrapping block
-		self.pending_block = self
-			.client
-			.get_latest_block_number()
-			.await
-			.unwrap()
-			.saturating_sub(bootstrap_offset_height);
+		// if self.bootstrap_configs.no_bootstrap {
+		// 	self.pending_block = self.client.get_latest_block_number().await.unwrap();
+		// } else {
+		// 	let bootstrap_offset_height = self
+		// 		.get_bootstrap_offset_height_based_on_block_time(self.bootstrap_configs.offset)
+		// 		.await;
+
+		// 	self.pending_block = self
+		// 		.client
+		// 		.get_latest_block_number()
+		// 		.await
+		// 		.unwrap()
+		// 		.saturating_sub(bootstrap_offset_height);
+		// }
 
 		log::info!(
 			target: &self.client.get_chain_name(),
@@ -117,6 +131,24 @@ impl<T: JsonRpcClient> BlockManager<T> {
 		self.initialize().await;
 
 		loop {
+			if self.bootstrap_configs.no_bootstrap ||
+				*self.is_bootstrapping_completed.lock().await == BootstrapState::NormalStart
+			{
+				self.pending_block = self.client.get_latest_block_number().await.unwrap();
+			} else {
+				// Before or After completion of Bootstrapping
+				let bootstrap_offset_height = self
+					.get_bootstrap_offset_height_based_on_block_time(self.bootstrap_configs.offset)
+					.await;
+
+				self.pending_block = self
+					.client
+					.get_latest_block_number()
+					.await
+					.unwrap()
+					.saturating_sub(bootstrap_offset_height);
+			}
+
 			let latest_block = self.client.get_latest_block_number().await.unwrap();
 			if self.is_block_confirmed(latest_block) {
 				self.process_pending_block().await;
@@ -173,9 +205,9 @@ impl<T: JsonRpcClient> BlockManager<T> {
 	}
 
 	/// Get factor between the block time of native-chain and block time of this chain
-	async fn get_bootstrap_offset_height_based_on_block_time(&self, offset: U64) -> U64 {
-		let block_offset = 100;
-		let native_block_time = 3;
+	async fn get_bootstrap_offset_height_based_on_block_time(&self, offset: u32) -> U64 {
+		let block_offset = 100u32;
+		let native_block_time = 3u32;
 
 		let block_number = self.client.provider.get_block_number().await.unwrap();
 
@@ -195,9 +227,10 @@ impl<T: JsonRpcClient> BlockManager<T> {
 			.unwrap();
 
 		offset
-			.checked_div(diff.as_u64().into())
+			.checked_div(diff.as_u32())
 			.unwrap()
-			.checked_mul(native_block_time.into())
+			.checked_mul(native_block_time)
 			.unwrap()
+			.into()
 	}
 }
