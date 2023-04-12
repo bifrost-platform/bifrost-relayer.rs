@@ -128,6 +128,7 @@ impl<T: JsonRpcClient> OraclePriceFeeder<T> {
 			DEFAULT_RETRIES,
 			tx_request,
 			EventMetadata::PriceFeed(metadata.clone()),
+			false,
 		)) {
 			Ok(()) => log::info!(
 				target: &self.client.get_chain_name(),

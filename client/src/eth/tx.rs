@@ -6,7 +6,7 @@ use ethers::{
 	},
 	providers::{JsonRpcClient, Middleware, Provider},
 	signers::{LocalWallet, Signer},
-	types::U256,
+	types::{TransactionRequest, U256},
 };
 use std::sync::Arc;
 use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
@@ -95,39 +95,60 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> {
 		let estimated_gas = U256::from(300_000);
 		msg.tx_request = msg.tx_request.gas(estimated_gas);
 
-		match self.middleware.send_transaction(msg.tx_request.clone(), None).await {
-			Ok(pending_tx) => match pending_tx.await {
-				Ok(receipt) =>
-					if let Some(receipt) = receipt {
-						log::info!(
-							target: &self.client.get_chain_name(),
-							"-[{}] 🎁 The requested transaction has been successfully mined in block: {}, {:?}-{:?}-{:?}",
-							sub_display_format(SUB_LOG_TARGET),
-							msg.metadata.to_string(),
-							receipt.block_number.unwrap(),
-							receipt.status.unwrap(),
-							receipt.transaction_hash
-						);
-					} else {
+		if !(self.is_duplicate_relay(&msg.tx_request, msg.check_mempool).await) {
+			match self.middleware.send_transaction(msg.tx_request.clone(), None).await {
+				Ok(pending_tx) => match pending_tx.await {
+					Ok(receipt) =>
+						if let Some(receipt) = receipt {
+							log::info!(
+								target: &self.client.get_chain_name(),
+								"-[{}] 🎁 The requested transaction has been successfully mined in block: {}, {:?}-{:?}-{:?}",
+								sub_display_format(SUB_LOG_TARGET),
+								msg.metadata.to_string(),
+								receipt.block_number.unwrap(),
+								receipt.status.unwrap(),
+								receipt.transaction_hash
+							);
+						} else {
+							log::error!(
+								target: &self.client.get_chain_name(),
+								"-[{}] ♻️ The requested transaction has been dropped from the mempool: {}, Retries left: {:?}",
+								sub_display_format(SUB_LOG_TARGET),
+								msg.metadata,
+								msg.retries_remaining - 1,
+							);
+							self.sender
+								.send(EventMessage::new(
+									msg.retries_remaining - 1,
+									msg.tx_request,
+									msg.metadata,
+									msg.check_mempool,
+								))
+								.unwrap();
+						},
+					Err(error) => {
 						log::error!(
 							target: &self.client.get_chain_name(),
-							"-[{}] ♻️ The requested transaction has been dropped from the mempool: {}, Retries left: {:?}",
+							"-[{}] ♻️ Unknown error while waiting for transaction receipt: {}, Retries left: {:?}, Error: {}",
 							sub_display_format(SUB_LOG_TARGET),
 							msg.metadata,
 							msg.retries_remaining - 1,
+							error.to_string()
 						);
 						self.sender
 							.send(EventMessage::new(
 								msg.retries_remaining - 1,
 								msg.tx_request,
 								msg.metadata,
+								msg.check_mempool,
 							))
 							.unwrap();
 					},
+				},
 				Err(error) => {
 					log::error!(
 						target: &self.client.get_chain_name(),
-						"-[{}] ♻️ Unknown error while waiting for transaction receipt: {}, Retries left: {:?}, Error: {}",
+						"-[{}] ♻️ Unknown error while sending transaction: {}, Retries left: {:?}, Error: {}",
 						sub_display_format(SUB_LOG_TARGET),
 						msg.metadata,
 						msg.retries_remaining - 1,
@@ -138,28 +159,44 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> {
 							msg.retries_remaining - 1,
 							msg.tx_request,
 							msg.metadata,
+							msg.check_mempool,
 						))
 						.unwrap();
 				},
-			},
-			Err(error) => {
-				log::error!(
-					target: &self.client.get_chain_name(),
-					"-[{}] ♻️ Unknown error while sending transaction: {}, Retries left: {:?}, Error: {}",
-					sub_display_format(SUB_LOG_TARGET),
-					msg.metadata,
-					msg.retries_remaining - 1,
-					error.to_string()
-				);
-				self.sender
-					.send(EventMessage::new(
-						msg.retries_remaining - 1,
-						msg.tx_request,
-						msg.metadata,
-					))
-					.unwrap();
-			},
+			}
+		} else {
+			log::info!(
+				target: &self.client.get_chain_name(),
+				"-[{}] 🐌 The requested relay has been already processed by another relayer: {}",
+				sub_display_format(SUB_LOG_TARGET),
+				msg.metadata.to_string(),
+			);
 		}
+	}
+
+	/// Function that query mempool for check if the relay event that this relayer is about to send
+	/// has already been processed by another relayer.
+	async fn is_duplicate_relay(
+		&self,
+		tx_request: &TransactionRequest,
+		check_mempool: bool,
+	) -> bool {
+		if !check_mempool {
+			return false
+		}
+
+		let data = tx_request.data.as_ref().unwrap();
+		let to = tx_request.to.as_ref().unwrap().as_address().unwrap();
+
+		let txpool_pending_contents = self.client.provider.txpool_content().await.unwrap().pending;
+		for (_address, tx_map) in txpool_pending_contents.iter() {
+			for (_nonce, transaction) in tx_map.iter() {
+				if transaction.to.unwrap_or_default() == *to && transaction.input == *data {
+					return true
+				}
+			}
+		}
+		false
 	}
 }
 
