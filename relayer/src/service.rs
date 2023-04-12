@@ -56,7 +56,7 @@ fn build_socket_contracts(handler_configs: &Vec<HandlerConfig>) -> Vec<Contract>
 }
 
 /// Builds a sentry client only when the sentry config exists.
-fn build_sentry_client(sentry_config: Option<SentryConfig>) -> Option<ClientInitGuard> {
+fn build_sentry_client(sentry_config: Option<SentryConfig>) -> Option<Arc<ClientInitGuard>> {
 	if let Some(sentry_config) = sentry_config {
 		// TODO: set to `production`
 		let sentry_client = sentry::init((
@@ -68,7 +68,7 @@ fn build_sentry_client(sentry_config: Option<SentryConfig>) -> Option<ClientInit
 				..Default::default()
 			},
 		));
-		return Some(sentry_client)
+		return Some(Arc::new(sentry_client))
 	}
 	None
 }
@@ -78,7 +78,7 @@ pub fn relay(config: Configuration) -> Result<TaskManager, ServiceError> {
 }
 
 pub fn new_relay_base(config: Configuration) -> Result<RelayBase, ServiceError> {
-	let sentry_client = Arc::new(build_sentry_client(config.relayer_config.sentry_config));
+	let sentry_client = build_sentry_client(config.relayer_config.sentry_config);
 
 	// initialize `EthClient`, `TransactionManager`, `BlockManager`
 	let (clients, tx_managers, block_managers, event_channels) = {

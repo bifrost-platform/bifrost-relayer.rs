@@ -37,7 +37,7 @@ pub struct EthClient<T> {
 	/// The flag whether the chain is BIFROST(native) or an external chain.
 	pub is_native: bool,
 	/// The sentry client.
-	pub sentry_client: Arc<Option<ClientInitGuard>>,
+	pub sentry_client: Option<Arc<ClientInitGuard>>,
 }
 
 impl<T: JsonRpcClient> EthClient<T> {
@@ -47,7 +47,7 @@ impl<T: JsonRpcClient> EthClient<T> {
 		provider: Arc<Provider<T>>,
 		config: EthClientConfiguration,
 		is_native: bool,
-		sentry_client: Arc<Option<ClientInitGuard>>,
+		sentry_client: Option<Arc<ClientInitGuard>>,
 	) -> Self {
 		Self { wallet, provider, config, is_native, sentry_client }
 	}
