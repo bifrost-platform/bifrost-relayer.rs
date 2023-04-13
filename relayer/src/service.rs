@@ -323,6 +323,6 @@ pub fn new_relay_base(config: Configuration) -> Result<RelayBase, ServiceError> 
 }
 
 pub struct RelayBase {
-	/// The task manager of the node.
+	/// The task manager of the relayer.
 	pub task_manager: TaskManager,
 }

@@ -36,11 +36,11 @@ fn main() {
 		.filter(None, log::LevelFilter::Info)
 		.init();
 
-	let cli = Cli::from_args();
-	cli.print_relayer_infos();
-
 	let tokio_runtime = build_runtime().unwrap();
 	let configuration = create_configuration(tokio_runtime.handle().clone()).unwrap();
+
+	let cli = Cli::from_args();
+	cli.print_relayer_infos();
 
 	let runner = Runner::new(configuration, tokio_runtime).unwrap();
 	runner

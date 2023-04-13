@@ -11,6 +11,7 @@ repository = { workspace = true }
 [dependencies]
 # General
 log = { workspace = true }
+sentry = { workspace = true }
 ethers = { workspace = true }
 serde_yaml = { workspace = true }
 tokio-stream = { workspace = true }

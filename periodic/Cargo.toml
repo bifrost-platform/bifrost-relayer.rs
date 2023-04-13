@@ -11,6 +11,7 @@ repository = { workspace = true }
 [dependencies]
 # General
 log = { workspace = true }
+sentry = { workspace = true }
 async-trait = { workspace = true }
 
 chrono = { workspace = true }

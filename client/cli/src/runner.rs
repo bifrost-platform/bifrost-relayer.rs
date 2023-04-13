@@ -1,7 +1,10 @@
-use cccp_primitives::cli::{Configuration, Result as CliResult};
-use futures::{future, future::FutureExt, pin_mut, select, Future};
+use cccp_primitives::cli::{Configuration, Result as CliResult, SentryConfig};
+
 use sc_service::{Error as ServiceError, TaskManager};
 use sc_utils::metrics::{TOKIO_THREADS_ALIVE, TOKIO_THREADS_TOTAL};
+
+use futures::{future, future::FutureExt, pin_mut, select, Future};
+use sentry::ClientInitGuard;
 use std::time::Duration;
 
 #[cfg(target_family = "unix")]
@@ -44,15 +47,38 @@ pub fn build_runtime() -> Result<tokio::runtime::Runtime, std::io::Error> {
 		.build()
 }
 
+/// Builds a sentry client only when the sentry config exists.
+fn build_sentry_client(sentry_config: Option<SentryConfig>) -> Option<ClientInitGuard> {
+	if let Some(sentry_config) = sentry_config {
+		// TODO: set to `production`
+		let sentry_client = sentry::init((
+			sentry_config.dsn.unwrap(),
+			sentry::ClientOptions {
+				release: sentry::release_name!(),
+				debug: true,
+				environment: Some("development".into()),
+				..Default::default()
+			},
+		));
+		return Some(sentry_client)
+	}
+	None
+}
+
 /// A CCCP-Relayer CLI runtime that can be used to run a relayer
 pub struct Runner {
 	config: Configuration,
 	tokio_runtime: tokio::runtime::Runtime,
+	pub sentry_client: Option<ClientInitGuard>,
 }
 
 impl Runner {
 	pub fn new(config: Configuration, tokio_runtime: tokio::runtime::Runtime) -> CliResult<Runner> {
-		Ok(Runner { config, tokio_runtime })
+		Ok(Runner {
+			config: config.clone(),
+			tokio_runtime,
+			sentry_client: build_sentry_client(config.relayer_config.sentry_config),
+		})
 	}
 
 	pub fn run_relayer_until_exit<F, E>(
