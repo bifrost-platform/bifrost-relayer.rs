@@ -224,15 +224,15 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> {
 		tx_request: &TransactionRequest,
 		check_mempool: bool,
 	) -> bool {
-		if !check_mempool {
+		if (!check_mempool) || self.client.is_native {
 			return false
 		}
 
 		let data = tx_request.data.as_ref().unwrap();
 		let to = tx_request.to.as_ref().unwrap().as_address().unwrap();
 
-		let txpool_pending_contents = self.client.provider.txpool_content().await.unwrap().pending;
-		for (_address, tx_map) in txpool_pending_contents.iter() {
+		let mempool_pending_contents = self.client.provider.txpool_content().await.unwrap().pending;
+		for (_address, tx_map) in mempool_pending_contents.iter() {
 			for (_nonce, transaction) in tx_map.iter() {
 				if transaction.to.unwrap_or_default() == *to && transaction.input == *data {
 					return true
