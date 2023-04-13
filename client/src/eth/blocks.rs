@@ -90,14 +90,15 @@ impl<T: JsonRpcClient> BlockManager<T> {
 			self.target_contracts
 		);
 
-		self.set_pending_block().await;
+		if self.bootstrap_configs.no_bootstrap {
+			self.pending_block = self.client.get_latest_block_number().await.unwrap();
+		}
 
 		log::info!(
 			target: &self.client.get_chain_name(),
-			"-[{}] 📃 latest: #{:?}, bootstrap: #{:?}",
+			"-[{}] 📃 latest: #{:?}",
 			sub_display_format(SUB_LOG_TARGET),
 			self.client.get_latest_block_number().await.unwrap(),
-			self.pending_block,
 		);
 
 		if let Some(block) = self.client.get_block(self.pending_block.into()).await.unwrap() {
@@ -117,9 +118,7 @@ impl<T: JsonRpcClient> BlockManager<T> {
 		self.initialize().await;
 
 		loop {
-			if *self.is_bootstrapping_completed.lock().await != BootstrapState::NormalStart {
-				self.set_pending_block().await;
-			}
+			self.set_pending_block().await;
 
 			let latest_block = self.client.get_latest_block_number().await.unwrap();
 			if self.is_block_confirmed(latest_block) {
@@ -180,6 +179,7 @@ impl<T: JsonRpcClient> BlockManager<T> {
 	async fn get_bootstrap_offset_height_based_on_block_time(&self, offset: u32) -> U64 {
 		let block_offset = 100u32;
 		let native_block_time = 3u32;
+		let native_round = 7200u32;
 
 		let block_number = self.client.provider.get_block_number().await.unwrap();
 
@@ -199,6 +199,8 @@ impl<T: JsonRpcClient> BlockManager<T> {
 			.unwrap();
 
 		offset
+			.checked_mul(native_round)
+			.unwrap()
 			.checked_div(diff.as_u32())
 			.unwrap()
 			.checked_mul(native_block_time)
@@ -208,9 +210,7 @@ impl<T: JsonRpcClient> BlockManager<T> {
 
 	async fn set_pending_block(&mut self) {
 		// initialize pending block to the bootstrapping block
-		if *self.is_bootstrapping_completed.lock().await == BootstrapState::NormalStart {
-			self.pending_block = self.client.get_latest_block_number().await.unwrap();
-		} else {
+		if *self.is_bootstrapping_completed.lock().await != BootstrapState::NormalStart {
 			// Before or After completion of Bootstrapping
 			let bootstrap_offset_height = self
 				.get_bootstrap_offset_height_based_on_block_time(self.bootstrap_configs.offset)
