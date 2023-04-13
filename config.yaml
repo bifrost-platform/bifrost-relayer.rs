@@ -65,13 +65,13 @@ handler_configs:
       - contract_type: Socket
         contract: "0xA25357F3C313Bd13885678f935178211f0dF6722"
         chain_id: 80001
-      - contract_type: RelayManager
+      - contract_type: Authority
         contract: "0xF51f7e267D2D966f8d3Ff2fea42B410bB14800e1"
         chain_id: 5
-      - contract_type: RelayManager
+      - contract_type: Authority
         contract: "0xCf9f6428A309b6652a1dfaA4d8aB8B61C9c7E8CF"
         chain_id: 97
-      - contract_type: RelayManager
+      - contract_type: Authority
         contract: "0x2FD5232fDFa6e1c127e7821CC48108Ca79281a38"
         chain_id: 80001
 
