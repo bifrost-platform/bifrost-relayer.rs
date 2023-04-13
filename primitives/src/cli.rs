@@ -255,3 +255,9 @@ pub struct PeriodicWorkerConfig {
 	/// Oracle price feeder
 	pub oracle_price_feeder: Option<Vec<PriceFeederConfig>>,
 }
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct SentryConfig {
+	/// The DSN that tells Sentry where to send the events to.
+	pub dsn: Option<String>,
+}
