@@ -88,7 +88,6 @@ impl<T: JsonRpcClient> Handler for RoundupRelayHandler<T> {
 			if receipt.status.unwrap().is_zero() {
 				return;
 			}
-			match self.decode_log(log.clone()).await {
 				Ok(serialized_log) => {
 					if !is_bootstrap {
 						log::info!(
@@ -110,21 +109,6 @@ impl<T: JsonRpcClient> Handler for RoundupRelayHandler<T> {
 									.build_roundup_submit(
 										serialized_log.roundup.round,
 										serialized_log.roundup.new_relayers,
-									)
-									.await,
-								is_bootstrap,
-							)
-							.await;
-						},
-						RoundUpEventStatus::NextAuthorityRelayed => return,
-					}
-				},
-				Err(e) => {
-					let log_msg = format!(
-						"-[{}] Error on decoding RoundUp event ({:?}):{}",
-						sub_display_format(SUB_LOG_TARGET),
-						log.transaction_hash,
-						e.to_string(),
 					);
 					log::error!(target: &self.client.get_chain_name(), "{log_msg}");
 					sentry::capture_message(
