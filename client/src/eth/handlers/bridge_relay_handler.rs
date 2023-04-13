@@ -1,11 +1,11 @@
-use std::{str::FromStr, sync::Arc};
+use std::sync::Arc;
 
 // TODO: Move event sig into handler structure (Initialize from config.yaml)
 use cccp_primitives::{
 	contracts::socket_external::{
 		BridgeRelayBuilder, PollSubmit, Signatures, SocketEvents, SocketExternal, SocketMessage,
 	},
-	eth::{BridgeDirection, Contract, SocketEventStatus, SOCKET_EVENT_SIG},
+	eth::{BridgeDirection, Contract, SocketEventStatus},
 	socket_external::SerializedPoll,
 	sub_display_format,
 };
@@ -40,6 +40,8 @@ pub struct BridgeRelayHandler<T> {
 	pub target_socket: SocketExternal<Provider<T>>,
 	/// The socket contracts supporting CCCP.
 	pub socket_contracts: Vec<Contract>,
+	/// Signature of the `Socket` Event.
+	pub socket_signature: H256,
 }
 
 impl<T: JsonRpcClient> BridgeRelayHandler<T> {
@@ -52,13 +54,16 @@ impl<T: JsonRpcClient> BridgeRelayHandler<T> {
 		target_socket: H160,
 		socket_contracts: Vec<Contract>,
 	) -> Self {
+		let target_socket = SocketExternal::new(target_socket, client.provider.clone());
+		let socket_signature = target_socket.abi().event("Socket").unwrap().signature();
 		Self {
 			event_senders,
 			block_receiver,
 			client: client.clone(),
 			target_contract,
-			target_socket: SocketExternal::new(target_socket, client.provider.clone()),
+			target_socket,
 			socket_contracts,
+			socket_signature,
 		}
 	}
 }
@@ -154,7 +159,7 @@ impl<T: JsonRpcClient> Handler for BridgeRelayHandler<T> {
 	}
 
 	fn is_target_event(&self, topic: H256) -> bool {
-		topic == H256::from_str(SOCKET_EVENT_SIG).unwrap()
+		topic == self.socket_signature
 	}
 }
 
@@ -472,7 +477,7 @@ mod tests {
 		providers::{Http, Middleware, Provider},
 		types::H160,
 	};
-	use std::sync::Arc;
+	use std::{str::FromStr, sync::Arc};
 
 	#[tokio::test]
 	async fn function_decode() {

@@ -20,10 +20,6 @@ impl Contract {
 	}
 }
 
-/// The socket event signature.
-pub const SOCKET_EVENT_SIG: &str =
-	"0x918454f530580823dd0d8cf59cacb45a6eb7cc62f222d7129efba5821e77f191";
-
 #[derive(Clone, Copy, Debug)]
 /// The socket event status.
 pub enum SocketEventStatus {
