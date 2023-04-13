@@ -50,17 +50,20 @@ pub fn build_runtime() -> Result<tokio::runtime::Runtime, std::io::Error> {
 /// Builds a sentry client only when the sentry config exists.
 fn build_sentry_client(sentry_config: Option<SentryConfig>) -> Option<ClientInitGuard> {
 	if let Some(sentry_config) = sentry_config {
-		// TODO: set to `production`
-		let sentry_client = sentry::init((
-			sentry_config.dsn.unwrap(),
-			sentry::ClientOptions {
-				release: sentry::release_name!(),
-				debug: true,
-				environment: Some("development".into()),
-				..Default::default()
-			},
-		));
-		return Some(sentry_client)
+		let dsn = sentry_config.dsn.unwrap();
+		if !dsn.is_empty() {
+			// TODO: set to `production`
+			let sentry_client = sentry::init((
+				dsn,
+				sentry::ClientOptions {
+					release: sentry::release_name!(),
+					debug: true,
+					environment: Some("development".into()),
+					..Default::default()
+				},
+			));
+			return Some(sentry_client)
+		}
 	}
 	None
 }
