@@ -119,7 +119,7 @@ pub struct WatchTarget {
 #[derive(Debug, Clone, Deserialize)]
 pub enum RoundupHandlerUtilType {
 	Socket,
-	RelayManager,
+	Authority,
 }
 
 #[derive(Debug, Clone, Deserialize)]
