@@ -1,7 +1,7 @@
 use ethers::prelude::abigen;
 
 abigen!(
-	RelayerManagerExternal,
-	"../abi/abi.relayer.external.json",
+	AuthorityExternal,
+	"../abi/abi.authority.external.json",
 	event_derives(serde::Deserialize, serde::Serialize)
 );

@@ -4,8 +4,8 @@ use crate::eth::{
 };
 use async_trait::async_trait;
 use cccp_primitives::{
+	authority_external::AuthorityExternal,
 	cli::RoundupHandlerUtilityConfig,
-	relayer_external::RelayerManagerExternal,
 	socket_bifrost::{SerializedRoundUp, SocketBifrost, SocketBifrostEvents},
 	socket_external::{RoundUpSubmit, Signatures, SocketExternal},
 	sub_display_format, RoundupHandlerUtilType,
@@ -29,7 +29,7 @@ pub struct RoundupUtility<T> {
 	/// Socket contract on external chain.
 	pub socket_external: SocketExternal<Provider<T>>,
 	/// Relayer contracts on external chain.
-	pub relayer_external: RelayerManagerExternal<Provider<T>>,
+	pub authority_external: AuthorityExternal<Provider<T>>,
 	/// External chain id.
 	pub id: u32,
 }
@@ -145,9 +145,9 @@ impl<T: JsonRpcClient> RoundupRelayHandler<T> {
 		let roundup_utils = event_senders
 			.iter()
 			.map(|sender| {
-				let (socket_external, relayer_external) = roundup_util_configs.iter().fold(
+				let (socket_external, authority_external) = roundup_util_configs.iter().fold(
 					(None, None),
-					|(socket_ext, relay_ext), config| {
+					|(socket_ext, authority_ext), config| {
 						if config.chain_id == sender.id {
 							match config.contract_type {
 								RoundupHandlerUtilType::Socket => (
@@ -159,11 +159,11 @@ impl<T: JsonRpcClient> RoundupRelayHandler<T> {
 											.unwrap()
 											.get_provider(),
 									)),
-									relay_ext,
+									authority_ext,
 								),
-								RoundupHandlerUtilType::RelayManager => (
+								RoundupHandlerUtilType::Authority => (
 									socket_ext,
-									Some(RelayerManagerExternal::new(
+									Some(AuthorityExternal::new(
 										H160::from_str(&config.contract).unwrap(),
 										external_clients
 											.iter()
@@ -174,19 +174,19 @@ impl<T: JsonRpcClient> RoundupRelayHandler<T> {
 								),
 							}
 						} else {
-							(socket_ext, relay_ext)
+							(socket_ext, authority_ext)
 						}
 					},
 				);
 
 				let socket_external = socket_external.expect("socket_external must be initialized");
-				let relayer_external =
-					relayer_external.expect("relayer_external must be initialized");
+				let authority_external =
+					authority_external.expect("authority_external must be initialized");
 
 				RoundupUtility {
 					event_sender: sender.clone(),
 					socket_external,
-					relayer_external,
+					authority_external,
 					id: sender.id,
 				}
 			})
@@ -234,7 +234,7 @@ impl<T: JsonRpcClient> RoundupRelayHandler<T> {
 		while let Some(target_chain) = stream.next().await {
 			// Check roundup submitted to target chain before.
 			if roundup_submit.round >
-				target_chain.relayer_external.latest_round().call().await.unwrap()
+				target_chain.authority_external.latest_round().call().await.unwrap()
 			{
 				let transaction_request = self.build_transaction_request(
 					target_chain.socket_external.clone(),
