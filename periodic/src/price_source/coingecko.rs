@@ -103,16 +103,12 @@ impl CoingeckoPriceFetcher {
 					Err(e) => {
 						log::error!(
 							target: LOG_TARGET,
-							"-[{}] ❗️ Error decoding support coin list: {}",
+							"-[{}] ❗️ Error decoding support coin list: {}, Retry in {:?} secs...",
 							sub_display_format(SUB_LOG_TARGET),
-							e
-						);
-						log::error!(
-							target: LOG_TARGET,
-							"-[{}] ❗️ Retry in {:?} secs...",
-							sub_display_format(SUB_LOG_TARGET),
+							e.to_string(),
 							retry_interval
 						);
+						sentry::capture_error(&e);
 						sleep(retry_interval).await;
 						retry_interval *= 2;
 					},
@@ -120,16 +116,12 @@ impl CoingeckoPriceFetcher {
 				Err(e) => {
 					log::error!(
 						target: LOG_TARGET,
-						"-[{}] ❗️ Error fetching support coin list: {}",
+						"-[{}] ❗️ Error fetching support coin list: {}, Retry in {:?} secs...",
 						sub_display_format(SUB_LOG_TARGET),
-						e
-					);
-					log::error!(
-						target: LOG_TARGET,
-						"-[{}] ❗️ Retry in {:?} secs...",
-						sub_display_format(SUB_LOG_TARGET),
+						e.to_string(),
 						retry_interval
 					);
+					sentry::capture_error(&e);
 					sleep(retry_interval).await;
 					retry_interval *= 2;
 				},
@@ -147,16 +139,12 @@ impl CoingeckoPriceFetcher {
 						Err(e) => {
 							log::error!(
 								target: LOG_TARGET,
-								"-[{}] ❗️ Error decoding coingecko response. Maybe rete limit exceeds?: {}",
+								"-[{}] ❗️ Error decoding coingecko response. Maybe rate limit exceeds?: {}, Retry in {:?} secs...",
 								sub_display_format(SUB_LOG_TARGET),
-								e
-							);
-							log::error!(
-								target: LOG_TARGET,
-								"-[{}] ❗️ Retry in {:?} secs...",
-								sub_display_format(SUB_LOG_TARGET),
+								e.to_string(),
 								retry_interval
 							);
+							sentry::capture_error(&e);
 							sleep(retry_interval).await;
 							retry_interval *= 2;
 						},
@@ -164,16 +152,12 @@ impl CoingeckoPriceFetcher {
 				Err(e) => {
 					log::error!(
 						target: LOG_TARGET,
-						"-[{}] ❗️ Error fetching from coingecko: {}",
+						"-[{}] ❗️ Error fetching from coingecko: {}, Retry in {:?} secs...",
 						sub_display_format(SUB_LOG_TARGET),
-						e
+						e.to_string(),
+						retry_interval,
 					);
-					log::error!(
-						target: LOG_TARGET,
-						"-[{}] ❗️ Retry in {:?} secs...",
-						sub_display_format(SUB_LOG_TARGET),
-						retry_interval
-					);
+					sentry::capture_error(&e);
 					sleep(retry_interval).await;
 					retry_interval *= 2;
 				},

@@ -58,6 +58,8 @@ pub struct RelayerConfig {
 	pub private_key: String,
 	/// Periodic worker configs
 	pub periodic_configs: Option<PeriodicWorkerConfig>,
+	/// Sentry config
+	pub sentry_config: Option<SentryConfig>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -186,4 +188,10 @@ pub struct PeriodicWorkerConfig {
 	pub roundup_emitter: RoundupEmitterConfig,
 	/// Heartbeat sender
 	pub heartbeat: HeartbeatSenderConfig,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct SentryConfig {
+	/// The DSN that tells Sentry where to send the events to.
+	pub dsn: Option<String>,
 }
