@@ -3,6 +3,7 @@ use crate::eth::{
 };
 use async_trait::async_trait;
 use cccp_primitives::{
+	authority_bifrost::AuthorityBifrost,
 	authority_external::AuthorityExternal,
 	cli::RoundupHandlerUtilityConfig,
 	eth::{BootstrapState, RecoveredSignature, RoundUpEventStatus},
@@ -43,18 +44,23 @@ pub struct RoundupRelayHandler<T> {
 	/// The `Socket` contract instance on bifrost network.
 	pub socket_bifrost: SocketBifrost<Provider<T>>,
 	/// Utils for relay transaction to external
-	pub roundup_utils: Vec<RoundupUtility<T>>,
+	pub roundup_utils: Arc<Vec<RoundupUtility<T>>>,
 	/// Signature of RoundUp Event.
 	pub roundup_signature: H256,
 	/// Barrier for bootstrapping
 	pub bootstrap_barrier: Arc<Barrier>,
 	/// Completion of bootstrapping
 	pub is_bootstrapping_completed: Arc<Mutex<BootstrapState>>,
+	/// Authority contracts on native chain
+	pub authority_bifrost: AuthorityBifrost<Provider<T>>,
 }
 
 #[async_trait]
 impl<T: JsonRpcClient> Handler for RoundupRelayHandler<T> {
 	async fn run(&mut self) {
+		// Checking if the current round is the latest round
+		self.bootstrap().await;
+
 		loop {
 			let block_msg = self.block_receiver.recv().await.unwrap();
 
@@ -147,57 +153,70 @@ impl<T: JsonRpcClient> RoundupRelayHandler<T> {
 		roundup_util_configs: Vec<RoundupHandlerUtilityConfig>,
 		bootstrap_barrier: Arc<Barrier>,
 		is_bootstrapping_completed: Arc<Mutex<BootstrapState>>,
+		authority_address: String,
 	) -> Self {
 		let roundup_signature = socket_bifrost.abi().event("RoundUp").unwrap().signature();
-		let roundup_utils = event_senders
-			.iter()
-			.map(|sender| {
-				let (socket_external, authority_external) = roundup_util_configs.iter().fold(
-					(None, None),
-					|(socket_ext, authority_ext), config| {
-						if config.chain_id == sender.id {
-							match config.contract_type {
-								RoundupHandlerUtilType::Socket => (
-									Some(SocketExternal::new(
-										H160::from_str(&config.contract).unwrap(),
-										external_clients
-											.iter()
-											.find(|client| client.get_chain_id() == config.chain_id)
-											.unwrap()
-											.get_provider(),
-									)),
-									authority_ext,
-								),
-								RoundupHandlerUtilType::Authority => (
-									socket_ext,
-									Some(AuthorityExternal::new(
-										H160::from_str(&config.contract).unwrap(),
-										external_clients
-											.iter()
-											.find(|client| client.get_chain_id() == config.chain_id)
-											.unwrap()
-											.get_provider(),
-									)),
-								),
+		let roundup_utils = Arc::new(
+			event_senders
+				.iter()
+				.map(|sender| {
+					let (socket_external, authority_external) = roundup_util_configs.iter().fold(
+						(None, None),
+						|(socket_ext, authority_ext), config| {
+							if config.chain_id == sender.id {
+								match config.contract_type {
+									RoundupHandlerUtilType::Socket => (
+										Some(SocketExternal::new(
+											H160::from_str(&config.contract).unwrap(),
+											external_clients
+												.iter()
+												.find(|client| {
+													client.get_chain_id() == config.chain_id
+												})
+												.unwrap()
+												.get_provider(),
+										)),
+										authority_ext,
+									),
+									RoundupHandlerUtilType::Authority => (
+										socket_ext,
+										Some(AuthorityExternal::new(
+											H160::from_str(&config.contract).unwrap(),
+											external_clients
+												.iter()
+												.find(|client| {
+													client.get_chain_id() == config.chain_id
+												})
+												.unwrap()
+												.get_provider(),
+										)),
+									),
+								}
+							} else {
+								(socket_ext, authority_ext)
 							}
-						} else {
-							(socket_ext, authority_ext)
-						}
-					},
-				);
+						},
+					);
 
-				let socket_external = socket_external.expect("socket_external must be initialized");
-				let authority_external =
-					authority_external.expect("authority_external must be initialized");
+					let socket_external =
+						socket_external.expect("socket_external must be initialized");
+					let authority_external =
+						authority_external.expect("authority_external must be initialized");
 
-				RoundupUtility {
-					event_sender: sender.clone(),
-					socket_external,
-					authority_external,
-					id: sender.id,
-				}
-			})
-			.collect();
+					RoundupUtility {
+						event_sender: sender.clone(),
+						socket_external,
+						authority_external,
+						id: sender.id,
+					}
+				})
+				.collect(),
+		);
+
+		let authority_bifrost = AuthorityBifrost::new(
+			H160::from_str(&authority_address).unwrap(),
+			client.get_provider(),
+		);
 
 		Self {
 			block_receiver,
@@ -207,6 +226,7 @@ impl<T: JsonRpcClient> RoundupRelayHandler<T> {
 			roundup_signature,
 			bootstrap_barrier,
 			is_bootstrapping_completed,
+			authority_bifrost,
 		}
 	}
 
@@ -293,7 +313,8 @@ impl<T: JsonRpcClient> RoundupRelayHandler<T> {
 
 	/// Check roundup submitted before. If not, call `round_control_relay`.
 	async fn broadcast_roundup(&self, roundup_submit: RoundUpSubmit) {
-		let mut stream = tokio_stream::iter(&self.roundup_utils);
+		let roundup_utils = self.roundup_utils.clone();
+		let mut stream = tokio_stream::iter(roundup_utils.iter());
 		while let Some(target_chain) = stream.next().await {
 			// Check roundup submitted to target chain before.
 
@@ -318,7 +339,7 @@ impl<T: JsonRpcClient> RoundupRelayHandler<T> {
 					))
 					.unwrap();
 			} else if roundup_submit.round ==
-				target_chain.relayer_external.latest_round().call().await.unwrap()
+				target_chain.authority_external.latest_round().call().await.unwrap()
 			{
 				if *self.is_bootstrapping_completed.lock().await != BootstrapState::BeforeCompletion
 				{
@@ -327,6 +348,25 @@ impl<T: JsonRpcClient> RoundupRelayHandler<T> {
 
 				self.bootstrap_barrier.wait().await;
 			}
+		}
+	}
+
+	async fn bootstrap(&self) {
+		let barrier_clone = self.bootstrap_barrier.clone();
+
+		let roundup_utils = &self.roundup_utils.clone();
+
+		for target_chain in roundup_utils.iter() {
+			let barrier_clone_inner = barrier_clone.clone();
+			let current_round = self.authority_bifrost.latest_round().call().await.unwrap();
+			let target_chain_round =
+				target_chain.authority_external.latest_round().call().await.unwrap();
+
+			tokio::spawn(async move {
+				if current_round == target_chain_round {
+					barrier_clone_inner.wait().await;
+				}
+			});
 		}
 	}
 }

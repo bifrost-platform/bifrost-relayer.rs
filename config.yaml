@@ -100,3 +100,4 @@ sentry_config:
 bootstrap_configs:
   no_bootstrap: false
   offset: 6
+  native_block_time: 3

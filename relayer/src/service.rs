@@ -67,6 +67,14 @@ pub fn new_relay_base(config: Configuration) -> Result<RelayBase, ServiceError> 
 	};
 
 	let is_bootstrapping_completed = Arc::new(Mutex::new(bootstrap_state));
+	let authority_address = &config
+		.relayer_config
+		.periodic_configs
+		.as_ref()
+		.unwrap()
+		.roundup_emitter
+		.authority_address
+		.clone();
 
 	// initialize `EthClient`, `TransactionManager`, `BlockManager`
 	let (clients, tx_managers, block_managers, event_channels) = {
@@ -199,9 +207,10 @@ pub fn new_relay_base(config: Configuration) -> Result<RelayBase, ServiceError> 
 		});
 
 	// Wait until each chain of vault/socket contract and bootstrapping is completed
-	let bootstrap_barrier = Arc::new(Barrier::new(12));
+	let bootstrap_barrier = Arc::new(Barrier::new(11));
 
 	// Initialize handlers & spawn tasks
+
 	let socket_contracts = build_socket_contracts(&config.relayer_config.handler_configs);
 	config.relayer_config.handler_configs.iter().for_each(|handler_config| {
 		match handler_config.handler_type {
@@ -247,6 +256,7 @@ pub fn new_relay_base(config: Configuration) -> Result<RelayBase, ServiceError> 
 					// let mut bootstrap_rx = bootstrap_tx.subscribe();
 					let barrier = bootstrap_barrier.clone();
 					let is_bootstrapped = is_bootstrapping_completed.clone();
+					let handler_type = handler_config.handler_type.to_string();
 
 					task_manager.spawn_essential_handle().spawn(
 						Box::leak(
@@ -260,10 +270,18 @@ pub fn new_relay_base(config: Configuration) -> Result<RelayBase, ServiceError> 
 						Some("handlers"),
 						async move {
 							barrier.wait().await;
+
 							// After All of barrier complete the waiting
 							let mut guard = is_bootstrapped.lock().await;
 							*guard = BootstrapState::AfterCompletion;
 							drop(guard);
+
+							log::info!(
+								target: LOG_TARGET,
+								"-[{}] Bootstrapping has finished in {}",
+								sub_display_format(SUB_LOG_TARGET),
+								handler_type,
+							);
 
 							bridge_relay_handler.run().await
 						},
@@ -318,6 +336,7 @@ pub fn new_relay_base(config: Configuration) -> Result<RelayBase, ServiceError> 
 					handler_config.roundup_utils.clone().unwrap(),
 					bootstrap_barrier.clone(),
 					is_bootstrapping_completed.clone(),
+					authority_address.clone(),
 				);
 
 				task_manager.spawn_essential_handle().spawn(

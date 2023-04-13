@@ -90,21 +90,7 @@ impl<T: JsonRpcClient> BlockManager<T> {
 			self.target_contracts
 		);
 
-		// initialize pending block to the bootstrapping block
-		// if self.bootstrap_configs.no_bootstrap {
-		// 	self.pending_block = self.client.get_latest_block_number().await.unwrap();
-		// } else {
-		// 	let bootstrap_offset_height = self
-		// 		.get_bootstrap_offset_height_based_on_block_time(self.bootstrap_configs.offset)
-		// 		.await;
-
-		// 	self.pending_block = self
-		// 		.client
-		// 		.get_latest_block_number()
-		// 		.await
-		// 		.unwrap()
-		// 		.saturating_sub(bootstrap_offset_height);
-		// }
+		self.set_pending_block().await;
 
 		log::info!(
 			target: &self.client.get_chain_name(),
@@ -131,22 +117,8 @@ impl<T: JsonRpcClient> BlockManager<T> {
 		self.initialize().await;
 
 		loop {
-			if self.bootstrap_configs.no_bootstrap ||
-				*self.is_bootstrapping_completed.lock().await == BootstrapState::NormalStart
-			{
-				self.pending_block = self.client.get_latest_block_number().await.unwrap();
-			} else {
-				// Before or After completion of Bootstrapping
-				let bootstrap_offset_height = self
-					.get_bootstrap_offset_height_based_on_block_time(self.bootstrap_configs.offset)
-					.await;
-
-				self.pending_block = self
-					.client
-					.get_latest_block_number()
-					.await
-					.unwrap()
-					.saturating_sub(bootstrap_offset_height);
+			if *self.is_bootstrapping_completed.lock().await != BootstrapState::NormalStart {
+				self.set_pending_block().await;
 			}
 
 			let latest_block = self.client.get_latest_block_number().await.unwrap();
@@ -232,5 +204,28 @@ impl<T: JsonRpcClient> BlockManager<T> {
 			.checked_mul(native_block_time)
 			.unwrap()
 			.into()
+	}
+
+	async fn set_pending_block(&mut self) {
+		// initialize pending block to the bootstrapping block
+		if *self.is_bootstrapping_completed.lock().await == BootstrapState::NormalStart {
+			self.pending_block = self.client.get_latest_block_number().await.unwrap();
+		} else {
+			// Before or After completion of Bootstrapping
+			let bootstrap_offset_height = self
+				.get_bootstrap_offset_height_based_on_block_time(self.bootstrap_configs.offset)
+				.await;
+
+			self.pending_block = self
+				.client
+				.get_latest_block_number()
+				.await
+				.unwrap()
+				.saturating_sub(bootstrap_offset_height);
+
+			if *self.is_bootstrapping_completed.lock().await == BootstrapState::AfterCompletion {
+				*self.is_bootstrapping_completed.lock().await = BootstrapState::NormalStart;
+			}
+		}
 	}
 }
