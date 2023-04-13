@@ -4,8 +4,6 @@ pub use events::*;
 mod handlers;
 pub use handlers::*;
 
-pub use cccp_primitives::contracts::*;
-
 mod tx;
 pub use tx::*;
 
@@ -17,10 +15,11 @@ pub use wallet::*;
 
 use ethers::{
 	providers::{JsonRpcClient, Middleware, Provider},
-	types::{Block, BlockId, TransactionReceipt, H160, H256, U64},
+	types::{Block, BlockId, Transaction, TransactionReceipt, H160, H256, U64},
 };
 use std::sync::Arc;
 
+pub use cccp_primitives::contracts::*;
 use cccp_primitives::eth::{EthClientConfiguration, EthResult};
 
 pub type TxResult<T = ()> = Result<T, Box<dyn std::error::Error + Send + Sync>>;
@@ -76,6 +75,11 @@ impl<T: JsonRpcClient> EthClient<T> {
 	/// Retrieves the block information of the given block hash.
 	pub async fn get_block(&self, id: BlockId) -> EthResult<Option<Block<H256>>> {
 		self.provider.get_block(id).await
+	}
+
+	/// Retrieves the transaction of the given transaction hash.
+	pub async fn get_transaction(&self, hash: H256) -> EthResult<Option<Transaction>> {
+		self.provider.get_transaction(hash).await
 	}
 
 	/// Retrieves the transaction receipt of the given transaction hash.

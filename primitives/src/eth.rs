@@ -29,8 +29,8 @@ pub const SOCKET_EVENT_SIG: &str =
 pub enum SocketEventStatus {
 	// None = 0
 	Requested = 1,
-	// Failed = 2
-	Executed = 3,
+	Failed,
+	Executed,
 	Reverted,
 	Accepted,
 	Rejected,
@@ -42,6 +42,7 @@ impl SocketEventStatus {
 	pub fn from_u8(status: u8) -> Self {
 		match status {
 			1 => SocketEventStatus::Requested,
+			2 => SocketEventStatus::Failed,
 			3 => SocketEventStatus::Executed,
 			4 => SocketEventStatus::Reverted,
 			5 => SocketEventStatus::Accepted,
@@ -57,6 +58,7 @@ impl From<SocketEventStatus> for u8 {
 	fn from(status: SocketEventStatus) -> Self {
 		match status {
 			SocketEventStatus::Requested => 1,
+			SocketEventStatus::Failed => 2,
 			SocketEventStatus::Executed => 3,
 			SocketEventStatus::Reverted => 4,
 			SocketEventStatus::Accepted => 5,
