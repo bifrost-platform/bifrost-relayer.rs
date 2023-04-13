@@ -204,3 +204,9 @@ pub struct PrometheusConfig {
 	/// Prometheus exporter TCP Port.
 	pub port: Option<u16>,
 }
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct SentryConfig {
+	/// The DSN that tells Sentry where to send the events to.
+	pub dsn: Option<String>,
+}

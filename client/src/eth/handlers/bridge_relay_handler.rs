@@ -124,10 +124,10 @@ impl<T: JsonRpcClient> Handler for BridgeRelayHandler<T> {
 							},
 						},
 						Err(error) => panic!(
-							"{}]-[{}] Unknown error while decoding socket event: {:?}",
+							"[{}]-[{}] Unknown error while decoding socket event: {}",
 							self.client.get_chain_name(),
-							sub_display_format(SUB_LOG_TARGET),
-							error
+							SUB_LOG_TARGET,
+							error.to_string()
 						),
 					}
 				}
@@ -195,9 +195,9 @@ impl<T: JsonRpcClient> BridgeRelayBuilder for BridgeRelayHandler<T> {
 				SocketEventStatus::Accepted | SocketEventStatus::Rejected =>
 					self.get_signatures(msg).await,
 				_ => panic!(
-					"{}]-[{}] Unknown socket event status received: {:?}",
+					"[{}]-[{}] Unknown socket event status received: {:?}",
 					&self.client.get_chain_name(),
-					sub_display_format(SUB_LOG_TARGET),
+					SUB_LOG_TARGET,
 					status
 				),
 			}
@@ -212,9 +212,9 @@ impl<T: JsonRpcClient> BridgeRelayBuilder for BridgeRelayHandler<T> {
 					self.get_signatures(msg).await,
 				SocketEventStatus::Executed | SocketEventStatus::Reverted => Signatures::default(),
 				_ => panic!(
-					"{}]-[{}] Unknown socket event status received: {:?}",
+					"[{}]-[{}] Unknown socket event status received: {:?}",
 					&self.client.get_chain_name(),
-					sub_display_format(SUB_LOG_TARGET),
+					SUB_LOG_TARGET,
 					status
 				),
 			}
@@ -305,9 +305,9 @@ impl<T: JsonRpcClient> BridgeRelayHandler<T> {
 			SocketEventStatus::Reverted => dst_chain_id,
 			SocketEventStatus::Accepted | SocketEventStatus::Rejected => src_chain_id,
 			_ => panic!(
-				"{}]-[{}] Unknown socket event status received: {:?}",
+				"[{}]-[{}] Unknown socket event status received: {:?}",
 				&self.client.get_chain_name(),
-				sub_display_format(SUB_LOG_TARGET),
+				SUB_LOG_TARGET,
 				status
 			),
 		}
@@ -326,9 +326,9 @@ impl<T: JsonRpcClient> BridgeRelayHandler<T> {
 			SocketEventStatus::Reverted => src_chain_id,
 			SocketEventStatus::Accepted | SocketEventStatus::Rejected => dst_chain_id,
 			_ => panic!(
-				"{}]-[{}] Unknown socket event status received: {:?}",
+				"[{}]-[{}] Unknown socket event status received: {:?}",
 				&self.client.get_chain_name(),
-				sub_display_format(SUB_LOG_TARGET),
+				SUB_LOG_TARGET,
 				status
 			),
 		}
@@ -358,30 +358,31 @@ impl<T: JsonRpcClient> BridgeRelayHandler<T> {
 		if let Some(event_sender) =
 			self.event_senders.iter().find(|event_sender| event_sender.id == chain_id)
 		{
-			event_sender
-				.sender
-				.send(EventMessage::new(
-					DEFAULT_RETRIES,
-					tx_request,
-					EventMetadata::BridgeRelay(metadata.clone()),
-					true,
-				))
-				.unwrap();
-			log::info!(
-				target: &self.client.get_chain_name(),
-				"-[{}] 🔖 Request relay transaction to chain({:?}): {}",
-				sub_display_format(SUB_LOG_TARGET),
-				chain_id,
-				metadata
-			);
-		} else {
-			log::warn!(
-				target: &self.client.get_chain_name(),
-				"-[{}] Relaying to target chain({:?}) is disabled: {}",
-				sub_display_format(SUB_LOG_TARGET),
-				chain_id,
-				metadata
-			)
+			match event_sender.sender.send(EventMessage::new(
+				DEFAULT_RETRIES,
+				tx_request,
+				EventMetadata::BridgeRelay(metadata.clone()),
+				true,
+			)) {
+				Ok(()) => log::info!(
+					target: &self.client.get_chain_name(),
+					"-[{}] 🔖 Request relay transaction to chain({:?}): {}",
+					sub_display_format(SUB_LOG_TARGET),
+					chain_id,
+					metadata
+				),
+				Err(error) => {
+					log::error!(
+						target: &self.client.get_chain_name(),
+						"-[{}] ❗️ Failed to send relay transaction to chain({:?}): {}, Error: {}",
+						sub_display_format(SUB_LOG_TARGET),
+						chain_id,
+						metadata,
+						error.to_string()
+					);
+					sentry::capture_error(&error);
+				},
+			}
 		}
 	}
 }
