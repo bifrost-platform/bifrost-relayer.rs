@@ -198,7 +198,7 @@ impl<T: JsonRpcClient> RoundupRelayHandler<T> {
 
 	/// Decode & Serialize log to `SerializedRoundUp` struct.
 	async fn decode_log(&self, log: Log) -> Result<SerializedRoundUp, ethers::abi::Error> {
-		return match SocketBifrostEvents::decode_log(&log.clone().into()) {
+		match SocketBifrostEvents::decode_log(&log.into()) {
 			Ok(roundup) => Ok(SerializedRoundUp::from_tokens(roundup.into_tokens()).unwrap()),
 			Err(error) => Err(error),
 		}

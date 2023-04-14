@@ -300,7 +300,7 @@ pub fn new_relay_base(config: Configuration) -> Result<RelayBase, ServiceError> 
 	let mut roundup_emitter = RoundupEmitter::new(
 		event_channels.iter().find(|sender| sender.is_native).unwrap().clone(),
 		clients.iter().find(|client| client.is_native).unwrap().clone(),
-		config.relayer_config.periodic_configs.unwrap().roundup_emitter.clone(),
+		config.relayer_config.periodic_configs.unwrap().roundup_emitter,
 	);
 	task_manager.spawn_essential_handle().spawn(
 		"Roundup-Emitter",

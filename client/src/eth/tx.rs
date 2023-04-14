@@ -83,7 +83,7 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> {
 				target: &self.client.get_chain_name(),
 				"-[{}] ⚠️  Warning! Error encountered during contract execution [execution reverted]: {}, {:?}-{:?}-{:?}",
 				sub_display_format(SUB_LOG_TARGET),
-				metadata.to_string(),
+				metadata,
 				receipt.block_number.unwrap(),
 				status,
 				receipt.transaction_hash
@@ -93,7 +93,7 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> {
 					"[{}]-[{}] ⚠️  Warning! Error encountered during contract execution [execution reverted]: {}, {:?}-{:?}-{:?}",
 					&self.client.get_chain_name(),
 					SUB_LOG_TARGET,
-					metadata.to_string(),
+					metadata,
 					receipt.block_number.unwrap(),
 					status,
 					receipt.transaction_hash
