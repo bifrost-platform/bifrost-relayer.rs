@@ -333,8 +333,17 @@ impl<T: JsonRpcClient> BridgeRelayHandler<T> {
 
 							self.send_socket_message(poll.msg, metadata, is_inbound).await;
 						},
-						Err(_) => {
+						Err(error) => {
 							// ignore for now if function input data decode fails
+							log::warn!(
+								target: &self.client.get_chain_name(),
+								"-[{}] ⚠️  Tried to re-process the reverted relay transaction but failed to decode function input: {}, Reverted at: {:?}-{:?}",
+								sub_display_format(SUB_LOG_TARGET),
+								error.to_string(),
+								receipt.block_number.unwrap(),
+								receipt.transaction_hash,
+							);
+							sentry::capture_error(&error);
 						},
 					}
 				}
