@@ -60,7 +60,7 @@ pub fn relay(config: Configuration) -> Result<TaskManager, ServiceError> {
 }
 
 pub fn new_relay_base(config: Configuration) -> Result<RelayBase, ServiceError> {
-	let bootstrap_state = if config.relayer_config.bootstrap_configs.no_bootstrap {
+	let bootstrap_state = if config.relayer_config.bootstrap_config.is_enabled {
 		BootstrapState::NormalStart
 	} else {
 		BootstrapState::BeforeCompletion
@@ -124,7 +124,7 @@ pub fn new_relay_base(config: Configuration) -> Result<RelayBase, ServiceError> 
 			let block_manager = BlockManager::new(
 				client.clone(),
 				target_contracts,
-				config.relayer_config.bootstrap_configs.clone(),
+				config.relayer_config.bootstrap_config.clone(),
 				is_bootstrapping_completed.clone(),
 			);
 

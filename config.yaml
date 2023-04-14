@@ -97,7 +97,7 @@ periodic_configs:
 sentry_config:
   dsn: ""
 
-bootstrap_configs:
-  no_bootstrap: false
-  offset: 6
+bootstrap_config:
+  is_enabled: false
+  round_offset: 6
   native_block_time: 3

@@ -59,7 +59,7 @@ pub struct RelayerConfig {
 	/// Periodic worker configs
 	pub periodic_configs: Option<PeriodicWorkerConfig>,
 	/// Bootstrapping configs
-	pub bootstrap_configs: BootstrapConfig,
+	pub bootstrap_config: BootstrapConfig,
 	/// Sentry config
 	pub sentry_config: Option<SentryConfig>,
 }
@@ -195,9 +195,9 @@ pub struct PeriodicWorkerConfig {
 #[derive(Debug, Clone, Deserialize)]
 pub struct BootstrapConfig {
 	/// Bootstrapping flag
-	pub no_bootstrap: bool,
+	pub is_enabled: bool,
 	/// Round for bootstrap
-	pub offset: u32,
+	pub round_offset: u32,
 	/// Block time of native chain
 	pub native_block_time: u32,
 }

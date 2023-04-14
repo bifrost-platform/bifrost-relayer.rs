@@ -57,7 +57,7 @@ pub struct BlockManager<T> {
 	/// The pending block waiting for some confirmations.
 	pub pending_block: U64,
 	/// Bootstrap config
-	pub bootstrap_configs: BootstrapConfig,
+	pub bootstrap_config: BootstrapConfig,
 	/// State of bootstrapping
 	pub is_bootstrapping_completed: Arc<Mutex<BootstrapState>>,
 }
@@ -67,7 +67,7 @@ impl<T: JsonRpcClient> BlockManager<T> {
 	pub fn new(
 		client: Arc<EthClient<T>>,
 		target_contracts: Vec<H160>,
-		bootstrap_configs: BootstrapConfig,
+		bootstrap_config: BootstrapConfig,
 		is_bootstrapping_completed: Arc<Mutex<BootstrapState>>,
 	) -> Self {
 		let (sender, _receiver) = broadcast::channel(512); // TODO: size?
@@ -76,7 +76,7 @@ impl<T: JsonRpcClient> BlockManager<T> {
 			sender,
 			target_contracts,
 			pending_block: U64::default(),
-			bootstrap_configs,
+			bootstrap_config,
 			is_bootstrapping_completed,
 		}
 	}
@@ -90,7 +90,7 @@ impl<T: JsonRpcClient> BlockManager<T> {
 			self.target_contracts
 		);
 
-		if self.bootstrap_configs.no_bootstrap {
+		if self.bootstrap_config.is_enabled {
 			self.pending_block = self.client.get_latest_block_number().await.unwrap();
 		}
 
@@ -176,7 +176,7 @@ impl<T: JsonRpcClient> BlockManager<T> {
 	}
 
 	/// Get factor between the block time of native-chain and block time of this chain
-	async fn get_bootstrap_offset_height_based_on_block_time(&self, offset: u32) -> U64 {
+	async fn get_bootstrap_offset_height_based_on_block_time(&self, round_offset: u32) -> U64 {
 		let block_offset = 100u32;
 		let native_block_time = 3u32;
 		let native_round = 7200u32;
@@ -198,7 +198,7 @@ impl<T: JsonRpcClient> BlockManager<T> {
 			.checked_div(block_offset.into())
 			.unwrap();
 
-		offset
+		round_offset
 			.checked_mul(native_round)
 			.unwrap()
 			.checked_div(diff.as_u32())
@@ -213,7 +213,7 @@ impl<T: JsonRpcClient> BlockManager<T> {
 		if *self.is_bootstrapping_completed.lock().await != BootstrapState::NormalStart {
 			// Before or After completion of Bootstrapping
 			let bootstrap_offset_height = self
-				.get_bootstrap_offset_height_based_on_block_time(self.bootstrap_configs.offset)
+				.get_bootstrap_offset_height_based_on_block_time(self.bootstrap_config.round_offset)
 				.await;
 
 			self.pending_block = self
