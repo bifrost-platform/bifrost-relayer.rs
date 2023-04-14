@@ -195,7 +195,7 @@ impl<T: JsonRpcClient> BridgeRelayBuilder for BridgeRelayHandler<T> {
 		if is_inbound {
 			// build signatures for inbound requests
 			match status {
-				SocketEventStatus::Requested => Signatures::default(),
+				SocketEventStatus::Requested | SocketEventStatus::Failed => Signatures::default(),
 				SocketEventStatus::Executed => {
 					msg.status = SocketEventStatus::Accepted.into();
 					Signatures::from(self.sign_socket_message(msg).await)
@@ -324,7 +324,7 @@ impl<T: JsonRpcClient> BridgeRelayHandler<T> {
 
 							log::info!(
 								target: &self.client.get_chain_name(),
-								"-[{}] ♻️ Re-Processed reverted relay transaction: {}, Reverted at: {:?}-{:?}",
+								"-[{}] ♻️  Re-Processed reverted relay transaction: {}, Reverted at: {:?}-{:?}",
 								sub_display_format(SUB_LOG_TARGET),
 								metadata,
 								receipt.block_number.unwrap(),
@@ -379,6 +379,7 @@ impl<T: JsonRpcClient> BridgeRelayHandler<T> {
 	) -> u32 {
 		match status {
 			SocketEventStatus::Requested |
+			SocketEventStatus::Failed |
 			SocketEventStatus::Executed |
 			SocketEventStatus::Reverted => dst_chain_id,
 			SocketEventStatus::Accepted | SocketEventStatus::Rejected => src_chain_id,
