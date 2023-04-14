@@ -390,7 +390,6 @@ impl<T: JsonRpcClient> BridgeRelayHandler<T> {
 		if Self::is_sequence_ended(status) && self.is_already_done(msg.req_id.clone(), status).await
 		{
 			// do nothing if protocol sequence ended
-			println!("already done?");
 			return
 		}
 
@@ -513,7 +512,7 @@ impl<T: JsonRpcClient> BridgeRelayHandler<T> {
 		let request = self.target_socket.get_request(rid).call().await.unwrap();
 		let event_status = request.field[0].clone();
 
-		status == SocketEventStatus::from_u8(event_status.into())
+		status < SocketEventStatus::from_u8(event_status.into())
 	}
 }
 
