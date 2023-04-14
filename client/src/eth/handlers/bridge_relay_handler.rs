@@ -105,6 +105,7 @@ impl<T: JsonRpcClient> Handler for BridgeRelayHandler<T> {
 					match decode_logs::<SocketEvents>(&[raw_log]) {
 						Ok(decoded) => match &decoded[0] {
 							SocketEvents::Socket(socket) => {
+								let status = SocketEventStatus::from_u8(socket.msg.status);
 								let src_chain_id = u32::from_be_bytes(socket.msg.req_id.chain);
 								let dst_chain_id = u32::from_be_bytes(socket.msg.ins_code.chain);
 								let is_inbound = self.is_inbound_sequence(dst_chain_id);
@@ -115,7 +116,7 @@ impl<T: JsonRpcClient> Handler for BridgeRelayHandler<T> {
 									} else {
 										"Outbound".to_string()
 									},
-									SocketEventStatus::from_u8(socket.msg.status),
+									status,
 									socket.msg.req_id.sequence,
 									src_chain_id,
 									dst_chain_id,
@@ -292,15 +293,17 @@ impl<T: JsonRpcClient> BridgeRelayHandler<T> {
 						.decode_with_selector::<SerializedPoll, Bytes>(poll_selector, tx.input)
 					{
 						Ok(mut poll) => {
-							let status = SocketEventStatus::from_u8(poll.msg.status);
+							let prev_status = SocketEventStatus::from_u8(poll.msg.status);
 							let src_chain_id = u32::from_be_bytes(poll.msg.req_id.chain);
 							let dst_chain_id = u32::from_be_bytes(poll.msg.ins_code.chain);
 							let is_inbound = self.is_inbound_sequence(dst_chain_id);
 
-							if is_inbound && matches!(status, SocketEventStatus::Requested) {
+							if is_inbound && matches!(prev_status, SocketEventStatus::Requested) {
 								// if inbound-Requested
 								poll.msg.status = SocketEventStatus::Failed.into();
-							} else if !is_inbound && matches!(status, SocketEventStatus::Accepted) {
+							} else if !is_inbound &&
+								matches!(prev_status, SocketEventStatus::Accepted)
+							{
 								// if outbound-Accepted
 								poll.msg.status = SocketEventStatus::Rejected.into();
 							} else {
@@ -321,7 +324,7 @@ impl<T: JsonRpcClient> BridgeRelayHandler<T> {
 
 							log::info!(
 								target: &self.client.get_chain_name(),
-								"-[{}] ♻️ Processed reverted relay transaction: {}, {:?}-{:?}",
+								"-[{}] ♻️ Re-Processed reverted relay transaction: {}, Reverted at: {:?}-{:?}",
 								sub_display_format(SUB_LOG_TARGET),
 								metadata,
 								receipt.block_number.unwrap(),
