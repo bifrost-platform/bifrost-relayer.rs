@@ -3,9 +3,7 @@ use chrono::{Datelike, Local};
 use clap::{CommandFactory, FromArgMatches, Parser};
 
 #[derive(Debug, Parser)]
-pub struct Cli {
-	// TODO: add params
-}
+pub struct Cli {}
 
 impl Cli {
 	/// Helper function used to parse the command line arguments. This is the equivalent of
