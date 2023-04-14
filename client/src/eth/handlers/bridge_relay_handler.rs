@@ -519,67 +519,31 @@ impl<T: JsonRpcClient> BridgeRelayHandler<T> {
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use cccp_primitives::socket_external::SerializedPoll;
 	use ethers::{
-		providers::{Http, Middleware, Provider},
+		providers::{Http, Provider},
 		types::H160,
 	};
 	use std::{str::FromStr, sync::Arc};
 
 	#[tokio::test]
-	async fn function_decode() {
+	async fn test_is_already_done() {
 		let provider = Arc::new(Provider::<Http>::try_from("").unwrap());
 
 		let target_socket = SocketExternal::new(
 			H160::from_str("0x0218371b18340aBD460961bdF3Bd5F01858dAB53").unwrap(),
 			provider.clone(),
 		);
-		let poll_selector = target_socket.abi().function("poll").unwrap().short_signature();
 
-		let tx = provider
-			.get_transaction(
-				H256::from_str(
-					"0xbef5fc7d225eb4835f030fc5ccb8b9fe12c33943b89a5588aa6b618d796c8b80",
-				)
-				.unwrap(),
-			)
-			.await
-			.unwrap();
+		let data = r#"{
+				"chain": [0,0,191,192],
+				"round_id": 3588,
+				"sequence": 359
+			}"#;
 
-		if let Some(tx) = tx {
-			match target_socket
-				.decode_with_selector::<SerializedPoll, Bytes>(poll_selector, tx.input)
-			{
-				Ok(mut poll) => {
-					let status = SocketEventStatus::from_u8(poll.msg.status);
-					let src_chain_id = u32::from_be_bytes(poll.msg.req_id.chain);
-					let dst_chain_id = u32::from_be_bytes(poll.msg.ins_code.chain);
-					let is_inbound = true;
+		let request_id: RequestID = serde_json::from_str(&data).unwrap();
+		println!("request_id : {:?}", request_id);
 
-					if is_inbound && matches!(status, SocketEventStatus::Requested) {
-						// if inbound-Requested
-						poll.msg.status = SocketEventStatus::Failed.into();
-					} else if !is_inbound && matches!(status, SocketEventStatus::Accepted) {
-						// if outbound-Accepted
-						poll.msg.status = SocketEventStatus::Rejected.into();
-					} else {
-						println!("failed");
-						return
-					}
-
-					let metadata = BridgeRelayMetadata::new(
-						if is_inbound { "Inbound".to_string() } else { "Outbound".to_string() },
-						SocketEventStatus::from_u8(poll.msg.status),
-						poll.msg.req_id.sequence,
-						src_chain_id,
-						dst_chain_id,
-					);
-					println!("{}", metadata);
-				},
-				Err(error) => {
-					println!("error -> {:?}", error);
-				},
-			}
-		}
+		let request = target_socket.get_request(request_id).call().await.unwrap();
+		println!("request : {:?}", request);
 	}
 }
