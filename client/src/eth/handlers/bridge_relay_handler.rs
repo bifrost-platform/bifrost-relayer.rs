@@ -1,6 +1,5 @@
 use std::sync::Arc;
 
-// TODO: Move event sig into handler structure (Initialize from config.yaml)
 use cccp_primitives::{
 	contracts::socket_external::{
 		BridgeRelayBuilder, PollSubmit, Signatures, SocketEvents, SocketExternal, SocketMessage,

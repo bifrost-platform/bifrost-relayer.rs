@@ -22,8 +22,6 @@ use std::sync::Arc;
 pub use cccp_primitives::contracts::*;
 use cccp_primitives::eth::{EthClientConfiguration, EthResult};
 
-pub type TxResult<T = ()> = Result<T, Box<dyn std::error::Error + Send + Sync>>;
-
 /// The core client for EVM-based chain interactions.
 pub struct EthClient<T> {
 	/// The wallet manager for the connected relayer.
