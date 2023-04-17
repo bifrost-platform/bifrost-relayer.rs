@@ -58,13 +58,12 @@ pub struct BlockManager<T> {
 impl<T: JsonRpcClient> BlockManager<T> {
 	/// Instantiates a new `BlockManager` instance.
 	pub fn new(client: Arc<EthClient<T>>, target_contracts: Vec<H160>) -> Self {
-		let (sender, _receiver) = broadcast::channel(512); // TODO: size?
+		let (sender, _receiver) = broadcast::channel(512);
 		Self { client, sender, target_contracts, pending_block: U64::default() }
 	}
 
 	/// Initialize block manager.
 	async fn initialize(&mut self) {
-		// TODO: follow-up to the highest block
 		log::info!(
 			target: &self.client.get_chain_name(),
 			"-[{}] 📃 Target contracts: {:?}",
