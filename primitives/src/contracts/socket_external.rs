@@ -1,7 +1,7 @@
 use ethers::{
 	abi::RawLog,
 	prelude::abigen,
-	types::{Bytes, Signature, TransactionRequest},
+	types::{Bytes, Signature, TransactionRequest, U256},
 };
 
 abigen!(
@@ -9,6 +9,26 @@ abigen!(
 	"../abi/abi.socket.external.json",
 	event_derives(serde::Deserialize, serde::Serialize)
 );
+
+#[derive(
+	Clone,
+	ethers::contract::EthCall,
+	ethers::contract::EthDisplay,
+	Default,
+	Debug,
+	PartialEq,
+	Eq,
+	Hash,
+)]
+#[ethcall(
+	name = "poll",
+	abi = "poll(((bytes4,uint64,uint128),uint8,(bytes4,bytes16),(bytes32,bytes32,address,address,uint256,bytes)),(bytes32[],bytes32[],bytes),uint256)"
+)]
+pub struct SerializedPoll {
+	pub msg: SocketMessage,
+	pub sigs: Signatures,
+	pub option: U256,
+}
 
 #[derive(
 	Clone,

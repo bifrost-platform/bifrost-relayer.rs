@@ -94,7 +94,7 @@ impl<T: JsonRpcClient> RoundupEmitter<T> {
 			),
 			relayer_contract: RelayerManagerBifrost::new(
 				H160::from_str(&config.relayer_manager_address).unwrap(),
-				provider.clone(),
+				provider,
 			),
 		}
 	}

@@ -6,7 +6,7 @@ use ethers::{
 	},
 	providers::{JsonRpcClient, Middleware, Provider},
 	signers::{LocalWallet, Signer},
-	types::{TransactionReceipt, TransactionRequest, U256},
+	types::{transaction::eip2718::TypedTransaction, TransactionReceipt, TransactionRequest},
 };
 use std::{error::Error, sync::Arc};
 use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
@@ -83,7 +83,7 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> {
 				target: &self.client.get_chain_name(),
 				"-[{}] ⚠️  Warning! Error encountered during contract execution [execution reverted]: {}, {:?}-{:?}-{:?}",
 				sub_display_format(SUB_LOG_TARGET),
-				metadata.to_string(),
+				metadata,
 				receipt.block_number.unwrap(),
 				status,
 				receipt.transaction_hash
@@ -93,7 +93,7 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> {
 					"[{}]-[{}] ⚠️  Warning! Error encountered during contract execution [execution reverted]: {}, {:?}-{:?}-{:?}",
 					&self.client.get_chain_name(),
 					SUB_LOG_TARGET,
-					metadata.to_string(),
+					metadata,
 					receipt.block_number.unwrap(),
 					status,
 					receipt.transaction_hash
@@ -158,6 +158,40 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> {
 			.unwrap();
 	}
 
+	/// Handles the failed gas estimation.
+	fn handle_failed_gas_estimation<E>(&self, msg: EventMessage, error: &E)
+	where
+		E: Error + ?Sized,
+	{
+		log::error!(
+			target: &self.client.get_chain_name(),
+			"-[{}] ♻️ Gas estimation failed: {}, Retries left: {:?}, Error: {}",
+			sub_display_format(SUB_LOG_TARGET),
+			msg.metadata,
+			msg.retries_remaining - 1,
+			error.to_string()
+		);
+		sentry::capture_message(
+			format!(
+				"[{}]-[{}] ♻️ Gas estimation failed: {}, Retries left: {:?}",
+				&self.client.get_chain_name(),
+				SUB_LOG_TARGET,
+				msg.metadata,
+				msg.retries_remaining - 1,
+			)
+			.as_str(),
+			sentry::Level::Error,
+		);
+		self.sender
+			.send(EventMessage::new(
+				msg.retries_remaining - 1,
+				msg.tx_request,
+				msg.metadata,
+				msg.check_mempool,
+			))
+			.unwrap();
+	}
+
 	/// Sends the consumed transaction request to the connected chain. The transaction request will
 	/// be re-published to the event channel if the transaction fails to be mined in a block.
 	async fn send_transaction(&self, mut msg: EventMessage) {
@@ -179,22 +213,21 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> {
 				sentry::Level::Error,
 			);
 			return
-			// TODO: retry 전부 소모시 정책 결정 필요
-			// return? panic? etc?
 		}
 
 		// set the gas price to be used
 		let gas_price = self.middleware.get_gas_price().await.unwrap();
 		msg.tx_request = msg.tx_request.gas_price(gas_price);
 
-		// let estimated_gas = self
-		// 	.middleware
-		// 	.estimate_gas(&TypedTransaction::Eip1559(msg.tx_request.clone()), None)
-		// 	.await
-		// 	.unwrap();
-		// TODO: remove constant gas
 		// estimate the gas amount to be used
-		let estimated_gas = U256::from(300_000);
+		let estimated_gas = match self
+			.middleware
+			.estimate_gas(&TypedTransaction::Legacy(msg.tx_request.clone()), None)
+			.await
+		{
+			Ok(estimated_gas) => estimated_gas,
+			Err(error) => return self.handle_failed_gas_estimation(msg, &error),
+		};
 		msg.tx_request = msg.tx_request.gas(estimated_gas);
 
 		if !(self.is_duplicate_relay(&msg.tx_request, msg.check_mempool).await) {
