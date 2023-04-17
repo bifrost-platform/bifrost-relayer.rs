@@ -241,6 +241,11 @@ impl<T: JsonRpcClient> EthClient<T> {
 		self.rpc_call("eth_getTransactionByHash", vec![hash]).await
 	}
 
+	/// Retrieves the transaction of the given transaction hash.
+	pub async fn get_transaction(&self, hash: H256) -> EthResult<Option<Transaction>> {
+		self.provider.get_transaction(hash).await
+	}
+
 	/// Retrieves the transaction receipt of the given transaction hash.
 	pub async fn get_transaction_receipt(&self, hash: H256) -> Option<TransactionReceipt> {
 		self.rpc_call("eth_getTransactionReceipt", vec![hash]).await
