@@ -5,7 +5,7 @@ use ethers::{
 };
 use std::{fs, path::PathBuf};
 
-use super::TxResult;
+type WalletResult<T = ()> = Result<T, Box<dyn std::error::Error + Send + Sync>>;
 
 #[derive(Debug)]
 pub struct WalletManager {
@@ -13,7 +13,7 @@ pub struct WalletManager {
 }
 
 impl WalletManager {
-	pub fn new(output_path: PathBuf, chain_id: u32) -> TxResult<Self> {
+	pub fn new(output_path: PathBuf, chain_id: u32) -> WalletResult<Self> {
 		let mut rng = rand::thread_rng();
 
 		fs::create_dir_all(&output_path)?;
@@ -28,13 +28,13 @@ impl WalletManager {
 	pub fn from_phrase_or_file<P: Into<PathOrString>>(
 		input_path: P,
 		chain_id: u32,
-	) -> TxResult<Self> {
+	) -> WalletResult<Self> {
 		let wallet = MnemonicBuilder::<English>::default().phrase(input_path).build()?;
 
 		Ok(Self { signer: wallet.with_chain_id(chain_id) })
 	}
 
-	pub fn from_private_key(input_path: &str, chain_id: u32) -> TxResult<Self> {
+	pub fn from_private_key(input_path: &str, chain_id: u32) -> WalletResult<Self> {
 		let wallet = input_path.parse::<LocalWallet>()?;
 
 		Ok(Self { signer: wallet.with_chain_id(chain_id) })

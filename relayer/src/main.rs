@@ -26,7 +26,7 @@ fn main() {
 
 			writeln!(
 				buf,
-				"{} {:05} {:015}]{:019}",
+				"{} {:05} {:015}]{}",
 				Local::now().format("%Y-%m-%dT%H:%M:%S"),
 				level_style.value(record.level()),
 				record.target(),

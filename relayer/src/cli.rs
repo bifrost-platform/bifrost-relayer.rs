@@ -3,9 +3,7 @@ use chrono::{Datelike, Local};
 use clap::{CommandFactory, FromArgMatches, Parser};
 
 #[derive(Debug, Parser)]
-pub struct Cli {
-	// TODO: add params
-}
+pub struct Cli {}
 
 impl Cli {
 	/// Helper function used to parse the command line arguments. This is the equivalent of
@@ -21,7 +19,7 @@ impl Cli {
 	where
 		Self: Parser + Sized,
 	{
-		Self::from_iter(&mut std::env::args_os())
+		Self::from_iter(std::env::args_os())
 	}
 
 	/// Helper function used to parse the command line arguments. This is the equivalent of
