@@ -63,8 +63,12 @@ pub fn new_relay_base(config: Configuration) -> Result<RelayBase, ServiceError> 
 	let bootstrap_state = if config.relayer_config.bootstrap_config.is_enabled {
 		BootstrapState::NormalStart
 	} else {
-		BootstrapState::BeforeCompletion
+		BootstrapState::BootstrapRoundUp
 	};
+
+	// Wait until each chain of vault/socket contract and bootstrapping is completed
+	let bootstrap_barrier =
+		Arc::new(Barrier::new(config.relayer_config.evm_providers.len() * 3 - 1));
 
 	let is_bootstrapping_completed = Arc::new(Mutex::new(bootstrap_state));
 	let authority_address = &config
@@ -126,6 +130,7 @@ pub fn new_relay_base(config: Configuration) -> Result<RelayBase, ServiceError> 
 				target_contracts,
 				config.relayer_config.bootstrap_config.clone(),
 				is_bootstrapping_completed.clone(),
+				authority_address.clone(),
 			);
 
 			clients.push(client);
@@ -206,9 +211,6 @@ pub fn new_relay_base(config: Configuration) -> Result<RelayBase, ServiceError> 
 			);
 		});
 
-	// Wait until each chain of vault/socket contract and bootstrapping is completed
-	let bootstrap_barrier = Arc::new(Barrier::new(11));
-
 	// Initialize handlers & spawn tasks
 
 	let socket_contracts = build_socket_contracts(&config.relayer_config.handler_configs);
@@ -273,8 +275,8 @@ pub fn new_relay_base(config: Configuration) -> Result<RelayBase, ServiceError> 
 
 							// After All of barrier complete the waiting
 							let mut guard = is_bootstrapped.lock().await;
-							if *guard == BootstrapState::BeforeCompletion {
-								*guard = BootstrapState::AfterCompletion;
+							if *guard == BootstrapState::BootstrapRoundUp {
+								*guard = BootstrapState::BootstrapSocket;
 							}
 							drop(guard);
 

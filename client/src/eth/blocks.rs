@@ -1,9 +1,12 @@
-use cccp_primitives::{cli::BootstrapConfig, eth::BootstrapState, sub_display_format};
+use cccp_primitives::{
+	authority_bifrost::AuthorityBifrost, cli::BootstrapConfig, eth::BootstrapState,
+	sub_display_format,
+};
 use ethers::{
-	providers::{JsonRpcClient, Middleware},
+	providers::{JsonRpcClient, Middleware, Provider},
 	types::{Block, TransactionReceipt, H160, H256, U64},
 };
-use std::sync::Arc;
+use std::{str::FromStr, sync::Arc};
 use tokio::{
 	sync::{
 		broadcast::{self, Receiver, Sender},
@@ -60,6 +63,8 @@ pub struct BlockManager<T> {
 	pub bootstrap_config: BootstrapConfig,
 	/// State of bootstrapping
 	pub is_bootstrapping_completed: Arc<Mutex<BootstrapState>>,
+	/// The target Authority contract instance.
+	pub authority: AuthorityBifrost<Provider<T>>,
 }
 
 impl<T: JsonRpcClient> BlockManager<T> {
@@ -69,8 +74,13 @@ impl<T: JsonRpcClient> BlockManager<T> {
 		target_contracts: Vec<H160>,
 		bootstrap_config: BootstrapConfig,
 		is_bootstrapping_completed: Arc<Mutex<BootstrapState>>,
+		authority_address: String,
 	) -> Self {
 		let (sender, _receiver) = broadcast::channel(512); // TODO: size?
+		let authority = AuthorityBifrost::new(
+			H160::from_str(&authority_address).expect("Failed to parse the authority address"),
+			client.get_provider(),
+		);
 		Self {
 			client,
 			sender,
@@ -78,6 +88,7 @@ impl<T: JsonRpcClient> BlockManager<T> {
 			pending_block: U64::default(),
 			bootstrap_config,
 			is_bootstrapping_completed,
+			authority,
 		}
 	}
 
@@ -179,7 +190,8 @@ impl<T: JsonRpcClient> BlockManager<T> {
 	async fn get_bootstrap_offset_height_based_on_block_time(&self, round_offset: u32) -> U64 {
 		let block_offset = 100u32;
 		let native_block_time = 3u32;
-		let native_round = 7200u32;
+		println!("authority : {:?}", self.authority);
+		let round_info = self.authority.round_info().call().await.unwrap();
 
 		let block_number = self.client.provider.get_block_number().await.unwrap();
 
@@ -199,11 +211,11 @@ impl<T: JsonRpcClient> BlockManager<T> {
 			.unwrap();
 
 		round_offset
-			.checked_mul(native_round)
-			.unwrap()
-			.checked_div(diff.as_u32())
+			.checked_mul(round_info.round_length.as_u32())
 			.unwrap()
 			.checked_mul(native_block_time)
+			.unwrap()
+			.checked_div(diff.as_u32())
 			.unwrap()
 			.into()
 	}
@@ -216,6 +228,8 @@ impl<T: JsonRpcClient> BlockManager<T> {
 				.get_bootstrap_offset_height_based_on_block_time(self.bootstrap_config.round_offset)
 				.await;
 
+			println!("bootstrap offset {}", bootstrap_offset_height);
+
 			self.pending_block = self
 				.client
 				.get_latest_block_number()
@@ -223,7 +237,7 @@ impl<T: JsonRpcClient> BlockManager<T> {
 				.unwrap()
 				.saturating_sub(bootstrap_offset_height);
 
-			if *self.is_bootstrapping_completed.lock().await == BootstrapState::AfterCompletion {
+			if *self.is_bootstrapping_completed.lock().await == BootstrapState::BootstrapSocket {
 				*self.is_bootstrapping_completed.lock().await = BootstrapState::NormalStart;
 			}
 		}

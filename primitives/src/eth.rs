@@ -120,8 +120,8 @@ impl EthClientConfiguration {
 
 #[derive(Debug, PartialEq)]
 pub enum BootstrapState {
-	BeforeCompletion,
-	AfterCompletion,
+	BootstrapRoundUp,
+	BootstrapSocket,
 	NormalStart,
 }
 

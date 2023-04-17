@@ -317,7 +317,6 @@ impl<T: JsonRpcClient> RoundupRelayHandler<T> {
 		let mut stream = tokio_stream::iter(roundup_utils.iter());
 		while let Some(target_chain) = stream.next().await {
 			// Check roundup submitted to target chain before.
-
 			if roundup_submit.round >
 				target_chain.authority_external.latest_round().call().await.unwrap()
 			{
@@ -341,11 +340,11 @@ impl<T: JsonRpcClient> RoundupRelayHandler<T> {
 			} else if roundup_submit.round ==
 				target_chain.authority_external.latest_round().call().await.unwrap()
 			{
-				if *self.is_bootstrapping_completed.lock().await != BootstrapState::BeforeCompletion
+				if *self.is_bootstrapping_completed.lock().await != BootstrapState::BootstrapRoundUp
 				{
 					continue
 				}
-
+				// If it is BootstrapRoundUp and already the latest round
 				self.bootstrap_barrier.wait().await;
 			}
 		}
@@ -353,7 +352,6 @@ impl<T: JsonRpcClient> RoundupRelayHandler<T> {
 
 	async fn bootstrap(&self) {
 		let barrier_clone = self.bootstrap_barrier.clone();
-
 		let roundup_utils = &self.roundup_utils.clone();
 
 		for target_chain in roundup_utils.iter() {
