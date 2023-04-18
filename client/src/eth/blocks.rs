@@ -67,6 +67,8 @@ pub struct BlockManager<T> {
 	pub is_bootstrapping_completed: Arc<Mutex<BootstrapState>>,
 	/// The target Authority contract instance.
 	pub authority: AuthorityBifrost<Provider<T>>,
+	/// Bootstrapping required flag (self)
+	bootstrap_required: bool,
 }
 
 impl<T: JsonRpcClient> BlockManager<T> {
@@ -86,6 +88,8 @@ impl<T: JsonRpcClient> BlockManager<T> {
 			native_client.get_provider(),
 		);
 
+		let bootstrap_required = bootstrap_config.is_enabled;
+
 		Self {
 			client,
 			sender,
@@ -94,6 +98,7 @@ impl<T: JsonRpcClient> BlockManager<T> {
 			bootstrap_config,
 			is_bootstrapping_completed,
 			authority,
+			bootstrap_required,
 		}
 	}
 
@@ -106,25 +111,18 @@ impl<T: JsonRpcClient> BlockManager<T> {
 			self.target_contracts
 		);
 
-		if self.bootstrap_config.is_enabled {
+		if !self.bootstrap_config.is_enabled {
 			self.pending_block = self.client.get_latest_block_number().await.unwrap();
-		}
 
-		log::info!(
-			target: &self.client.get_chain_name(),
-			"-[{}] 📃 latest: #{:?}",
-			sub_display_format(SUB_LOG_TARGET),
-			self.client.get_latest_block_number().await.unwrap(),
-		);
-
-		if let Some(block) = self.client.get_block(self.pending_block.into()).await.unwrap() {
-			log::info!(
-				target: &self.client.get_chain_name(),
-				"-[{}] 💤 Idle, waiting for initial block confirmation, best: #{:?} ({})",
-				sub_display_format(SUB_LOG_TARGET),
-				block.number.unwrap(),
-				block.hash.unwrap(),
-			);
+			if let Some(block) = self.client.get_block(self.pending_block.into()).await.unwrap() {
+				log::info!(
+					target: &self.client.get_chain_name(),
+					"-[{}] 💤 Idle, best: #{:?} ({})",
+					sub_display_format(SUB_LOG_TARGET),
+					block.number.unwrap(),
+					block.hash.unwrap(),
+				);
+			}
 		}
 	}
 
@@ -134,13 +132,16 @@ impl<T: JsonRpcClient> BlockManager<T> {
 		self.initialize().await;
 
 		loop {
-			self.set_pending_block().await;
+			if self.bootstrap_required {
+				self.set_pending_block().await;
+			}
 
 			let latest_block = self.client.get_latest_block_number().await.unwrap();
 			if self.is_block_confirmed(latest_block) {
 				self.process_pending_block().await;
 				self.increment_pending_block();
 			}
+
 			sleep(Duration::from_millis(self.client.config.call_interval)).await;
 		}
 	}
@@ -161,12 +162,13 @@ impl<T: JsonRpcClient> BlockManager<T> {
 			if !target_receipts.is_empty() {
 				self.sender.send(BlockMessage::new(block.clone(), target_receipts)).unwrap();
 			}
+
 			log::info!(
 				target: &self.client.get_chain_name(),
-				"-[{}] ✨ Imported #{:?} ({})",
+				"-[{}] ✨ Imported #{:?}, latest: #{:?}",
 				sub_display_format(SUB_LOG_TARGET),
 				block.number.unwrap(),
-				block.hash.unwrap()
+				self.client.get_latest_block_number().await.unwrap(),
 			);
 		}
 	}
@@ -243,6 +245,8 @@ impl<T: JsonRpcClient> BlockManager<T> {
 			if *self.is_bootstrapping_completed.lock().await == BootstrapState::BootstrapSocket {
 				*self.is_bootstrapping_completed.lock().await = BootstrapState::NormalStart;
 			}
+		} else {
+			self.bootstrap_required = false;
 		}
 	}
 }

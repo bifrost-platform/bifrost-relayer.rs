@@ -61,9 +61,9 @@ pub fn relay(config: Configuration) -> Result<TaskManager, ServiceError> {
 
 pub fn new_relay_base(config: Configuration) -> Result<RelayBase, ServiceError> {
 	let bootstrap_state = if config.relayer_config.bootstrap_config.is_enabled {
-		BootstrapState::NormalStart
-	} else {
 		BootstrapState::BootstrapRoundUp
+	} else {
+		BootstrapState::NormalStart
 	};
 
 	// Wait until each chain of vault/socket contract and bootstrapping is completed
@@ -287,7 +287,6 @@ pub fn new_relay_base(config: Configuration) -> Result<RelayBase, ServiceError> 
 					// let mut bootstrap_rx = bootstrap_tx.subscribe();
 					let barrier = bootstrap_barrier.clone();
 					let is_bootstrapped = is_bootstrapping_completed.clone();
-					let handler_type = handler_config.handler_type.to_string();
 
 					task_manager.spawn_essential_handle().spawn(
 						Box::leak(
@@ -306,15 +305,14 @@ pub fn new_relay_base(config: Configuration) -> Result<RelayBase, ServiceError> 
 							let mut guard = is_bootstrapped.lock().await;
 							if *guard == BootstrapState::BootstrapRoundUp {
 								*guard = BootstrapState::BootstrapSocket;
+
+								log::info!(
+									target: LOG_TARGET,
+									"-[{}] Roundup -> Socket Bootstrapping",
+									sub_display_format(SUB_LOG_TARGET),
+								);
 							}
 							drop(guard);
-
-							log::info!(
-								target: LOG_TARGET,
-								"-[{}] Bootstrapping has finished in {}",
-								sub_display_format(SUB_LOG_TARGET),
-								handler_type,
-							);
 
 							bridge_relay_handler.run().await
 						},
