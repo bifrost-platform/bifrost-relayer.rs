@@ -1,5 +1,7 @@
 use cccp_primitives::{
-	authority_bifrost::AuthorityBifrost, cli::BootstrapConfig, eth::BootstrapState,
+	authority_bifrost::{AuthorityBifrost, RoundMetaData},
+	cli::BootstrapConfig,
+	eth::BootstrapState,
 	sub_display_format,
 };
 use ethers::{
@@ -75,12 +77,15 @@ impl<T: JsonRpcClient> BlockManager<T> {
 		bootstrap_config: BootstrapConfig,
 		is_bootstrapping_completed: Arc<Mutex<BootstrapState>>,
 		authority_address: String,
+		native_client: Arc<EthClient<T>>,
 	) -> Self {
 		let (sender, _receiver) = broadcast::channel(512); // TODO: size?
+
 		let authority = AuthorityBifrost::new(
 			H160::from_str(&authority_address).expect("Failed to parse the authority address"),
-			client.get_provider(),
+			native_client.get_provider(),
 		);
+
 		Self {
 			client,
 			sender,
@@ -187,11 +192,11 @@ impl<T: JsonRpcClient> BlockManager<T> {
 	}
 
 	/// Get factor between the block time of native-chain and block time of this chain
+	/// Approximately bfc-testnet: 3s, matic-mumbai: 2s, bsc-testnet: 3s, eth-goerli: 15s
 	async fn get_bootstrap_offset_height_based_on_block_time(&self, round_offset: u32) -> U64 {
 		let block_offset = 100u32;
 		let native_block_time = 3u32;
-		println!("authority : {:?}", self.authority);
-		let round_info = self.authority.round_info().call().await.unwrap();
+		let round_info: RoundMetaData = self.authority.round_info().call().await.unwrap();
 
 		let block_number = self.client.provider.get_block_number().await.unwrap();
 
@@ -227,8 +232,6 @@ impl<T: JsonRpcClient> BlockManager<T> {
 			let bootstrap_offset_height = self
 				.get_bootstrap_offset_height_based_on_block_time(self.bootstrap_config.round_offset)
 				.await;
-
-			println!("bootstrap offset {}", bootstrap_offset_height);
 
 			self.pending_block = self
 				.client

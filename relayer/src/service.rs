@@ -80,6 +80,34 @@ pub fn new_relay_base(config: Configuration) -> Result<RelayBase, ServiceError> 
 		.authority_address
 		.clone();
 
+	let native_client = {
+		let evm_provider = config
+			.relayer_config
+			.evm_providers
+			.iter()
+			.find(|evm_provider| evm_provider.is_native.unwrap())
+			.unwrap();
+
+		let wallet = WalletManager::from_private_key(
+			config.relayer_config.private_key.as_str(),
+			evm_provider.id,
+		)
+		.expect("Failed to initialize wallet manager");
+
+		Arc::new(EthClient::new(
+			wallet,
+			Arc::new(Provider::<Http>::try_from(evm_provider.provider.clone()).unwrap()),
+			EthClientConfiguration::new(
+				evm_provider.name.clone(),
+				evm_provider.id,
+				evm_provider.call_interval,
+				evm_provider.block_confirmations,
+				BridgeDirection::Inbound,
+			),
+			true,
+		))
+	};
+
 	// initialize `EthClient`, `TransactionManager`, `BlockManager`
 	let (clients, tx_managers, block_managers, event_channels) = {
 		let mut clients = vec![];
@@ -131,6 +159,7 @@ pub fn new_relay_base(config: Configuration) -> Result<RelayBase, ServiceError> 
 				config.relayer_config.bootstrap_config.clone(),
 				is_bootstrapping_completed.clone(),
 				authority_address.clone(),
+				native_client.clone(),
 			);
 
 			clients.push(client);
