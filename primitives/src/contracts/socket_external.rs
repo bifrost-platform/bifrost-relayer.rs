@@ -98,7 +98,7 @@ impl From<Signature> for Signatures {
 	fn from(signature: Signature) -> Self {
 		let r: [u8; 32] = signature.r.into();
 		let s: [u8; 32] = signature.s.into();
-		let v: Bytes = Bytes::from(signature.v.to_be_bytes());
-		Signatures { r: vec![r], s: vec![s], v }
+		let v: [u8; 1] = [signature.v as u8];
+		Signatures { r: vec![r], s: vec![s], v: Bytes::from(v) }
 	}
 }
