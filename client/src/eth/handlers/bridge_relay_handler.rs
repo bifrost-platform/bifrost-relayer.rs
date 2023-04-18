@@ -1,20 +1,25 @@
 use std::{str::FromStr, sync::Arc};
 
 use cccp_primitives::{
+	authority_bifrost::{AuthorityBifrost, RoundMetaData},
+	cli::BootstrapConfig,
 	contracts::socket_external::{
 		BridgeRelayBuilder, PollSubmit, Signatures, SocketEvents, SocketExternal, SocketMessage,
 	},
-	eth::{BridgeDirection, Contract, RecoveredSignature, SocketEventStatus},
+	eth::{BootstrapState, BridgeDirection, Contract, RecoveredSignature, SocketEventStatus},
 	socket_external::{RequestID, SerializedPoll},
 	sub_display_format,
 };
 use ethers::{
 	abi::{RawLog, Token},
 	prelude::decode_logs,
-	providers::{JsonRpcClient, Provider},
-	types::{Bytes, Signature, TransactionReceipt, TransactionRequest, H160, H256, U256, U64},
+	providers::{JsonRpcClient, Middleware, Provider},
+	types::{
+		Bytes, Filter, Log, Signature, TransactionReceipt, TransactionRequest, H160, H256, U256,
+		U64,
+	},
 };
-use tokio::sync::broadcast::Receiver;
+use tokio::sync::{broadcast::Receiver, Mutex};
 use tokio_stream::StreamExt;
 
 use crate::eth::{
@@ -39,6 +44,14 @@ pub struct BridgeRelayHandler<T> {
 	pub socket_contracts: Vec<Contract>,
 	/// Signature of the `Socket` Event.
 	pub socket_signature: H256,
+	/// Completion of bootstrapping
+	pub is_bootstrapping_completed: Arc<Mutex<BootstrapState>>,
+	/// Completion of bootstrapping count
+	pub bootstrapping_count: Arc<Mutex<u8>>,
+	/// Bootstrap config
+	pub bootstrap_config: BootstrapConfig,
+	/// Authority contracts on native chain
+	pub authority_bifrost: AuthorityBifrost<Provider<T>>,
 }
 
 impl<T: JsonRpcClient> BridgeRelayHandler<T> {
@@ -50,9 +63,19 @@ impl<T: JsonRpcClient> BridgeRelayHandler<T> {
 		target_contract: H160,
 		target_socket: H160,
 		socket_contracts: Vec<Contract>,
+		is_bootstrapping_completed: Arc<Mutex<BootstrapState>>,
+		bootstrapping_count: Arc<Mutex<u8>>,
+		bootstrap_config: BootstrapConfig,
+		authority_address: String,
+		native_client: Arc<EthClient<T>>,
 	) -> Self {
 		let target_socket = SocketExternal::new(target_socket, client.provider.clone());
 		let socket_signature = target_socket.abi().event("Socket").unwrap().signature();
+		let authority_bifrost = AuthorityBifrost::new(
+			H160::from_str(&authority_address).unwrap(),
+			native_client.get_provider(),
+		);
+
 		Self {
 			event_senders,
 			block_receiver,
@@ -61,6 +84,10 @@ impl<T: JsonRpcClient> BridgeRelayHandler<T> {
 			target_socket,
 			socket_contracts,
 			socket_signature,
+			is_bootstrapping_completed,
+			bootstrapping_count,
+			bootstrap_config,
+			authority_bifrost,
 		}
 	}
 }
@@ -68,6 +95,8 @@ impl<T: JsonRpcClient> BridgeRelayHandler<T> {
 #[async_trait::async_trait]
 impl<T: JsonRpcClient> Handler for BridgeRelayHandler<T> {
 	async fn run(&mut self) {
+		self.bootstrap().await;
+
 		loop {
 			let block_msg = self.block_receiver.recv().await.unwrap();
 
@@ -119,6 +148,13 @@ impl<T: JsonRpcClient> Handler for BridgeRelayHandler<T> {
 									src_chain_id,
 									dst_chain_id,
 								);
+
+								if Self::is_sequence_ended(status) ||
+									self.is_already_done(socket.msg.req_id.clone(), status).await
+								{
+									// do nothing if protocol sequence ended
+									return
+								}
 
 								log::info!(
 									target: &self.client.get_chain_name(),
@@ -387,12 +423,6 @@ impl<T: JsonRpcClient> BridgeRelayHandler<T> {
 	) {
 		let status = SocketEventStatus::from_u8(msg.status);
 
-		if Self::is_sequence_ended(status) && self.is_already_done(msg.req_id.clone(), status).await
-		{
-			// do nothing if protocol sequence ended
-			return
-		}
-
 		let relay_tx_chain_id = if is_inbound {
 			self.get_inbound_relay_tx_chain_id(status, metadata.src_chain_id, metadata.dst_chain_id)
 		} else {
@@ -513,6 +543,108 @@ impl<T: JsonRpcClient> BridgeRelayHandler<T> {
 		let event_status = request.field[0].clone();
 
 		status < SocketEventStatus::from_u8(event_status.into())
+	}
+
+	async fn bootstrap(&self) {
+		let mut bootstrap_guard = self.is_bootstrapping_completed.lock().await;
+		if *bootstrap_guard == BootstrapState::BootstrapSocket {
+			let logs = self.bootstrap_socket().await;
+
+			let mut stream = tokio_stream::iter(logs);
+			while let Some(log) = stream.next().await {
+				let receipt = self
+					.client
+					.provider
+					.get_transaction_receipt(log.transaction_hash.unwrap())
+					.await
+					.unwrap()
+					.unwrap();
+
+				self.process_confirmed_transaction(receipt).await;
+			}
+
+			let mut bootstrap_count = self.bootstrapping_count.lock().await;
+			*bootstrap_count += 1;
+
+			// If All thread complete the task, starts the blockManager
+			if *bootstrap_count == (self.socket_contracts.len() * 2) as u8 {
+				*bootstrap_guard = BootstrapState::NormalStart;
+
+				log::info!(
+					target: &self.client.get_chain_name(),
+					"-[{}] Socket Bootstrapping -> BlockManager Running",
+					sub_display_format(SUB_LOG_TARGET),
+				);
+			}
+		}
+	}
+
+	async fn bootstrap_socket(&self) -> Vec<Log> {
+		let round_info: RoundMetaData = self.authority_bifrost.round_info().call().await.unwrap();
+
+		let bootstrap_offset_height = self
+			.get_bootstrap_offset_height_based_on_block_time(self.bootstrap_config.round_offset)
+			.await;
+
+		let latest_block_number = self.client.get_latest_block_number().await.unwrap();
+		let mut from_block = latest_block_number.saturating_sub(bootstrap_offset_height);
+		let to_block = latest_block_number;
+
+		let mut logs = vec![];
+
+		// Split from_block into smaller chunks
+		let block_chunk_size = round_info.round_length.as_u32();
+		while from_block <= to_block {
+			let chunk_to_block = std::cmp::min(from_block + block_chunk_size - 1, to_block);
+			println!("chunk_to_block {}", chunk_to_block);
+
+			let filter = Filter::new()
+				.address(self.target_contract)
+				// .topic0(self.socket_signature)
+				.from_block(from_block)
+				.to_block(chunk_to_block);
+
+			let chunk_logs = self.client.provider.get_logs(&filter).await.unwrap();
+			logs.extend(chunk_logs);
+
+			from_block = chunk_to_block + 1;
+		}
+
+		logs
+	}
+
+	/// Get factor between the block time of native-chain and block time of this chain
+	/// Approximately bfc-testnet: 3s, matic-mumbai: 2s, bsc-testnet: 3s, eth-goerli: 12s
+	pub async fn get_bootstrap_offset_height_based_on_block_time(&self, round_offset: u32) -> U64 {
+		let block_offset = 100u32;
+		let native_block_time = 3u32;
+		let round_info: RoundMetaData = self.authority_bifrost.round_info().call().await.unwrap();
+
+		let block_number = self.client.provider.get_block_number().await.unwrap();
+
+		let current_block = self.client.get_block((block_number).into()).await.unwrap().unwrap();
+		let prev_block = self
+			.client
+			.get_block((block_number - block_offset).into())
+			.await
+			.unwrap()
+			.unwrap();
+
+		let diff = current_block
+			.timestamp
+			.checked_sub(prev_block.timestamp)
+			.unwrap()
+			.checked_div(block_offset.into())
+			.unwrap();
+
+		round_offset
+			.checked_mul(round_info.round_length.as_u32())
+			.unwrap()
+			.checked_mul(native_block_time)
+			.unwrap()
+			.checked_div(diff.as_u32())
+			.unwrap()
+			.into()
 	}
 }
 

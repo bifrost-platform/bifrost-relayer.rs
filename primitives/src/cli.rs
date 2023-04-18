@@ -92,7 +92,7 @@ pub struct EVMProvider {
 	pub is_relay_target: bool,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, PartialEq)]
 pub enum HandlerType {
 	/// Socket handler
 	Socket,

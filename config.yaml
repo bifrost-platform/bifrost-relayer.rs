@@ -98,6 +98,6 @@ sentry_config:
   dsn: ""
 
 bootstrap_config:
-  is_enabled: false
+  is_enabled: true
   round_offset: 6
   native_block_time: 3

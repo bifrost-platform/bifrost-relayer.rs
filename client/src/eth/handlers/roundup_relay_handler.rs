@@ -3,9 +3,9 @@ use crate::eth::{
 };
 use async_trait::async_trait;
 use cccp_primitives::{
-	authority_bifrost::AuthorityBifrost,
+	authority_bifrost::{AuthorityBifrost, RoundMetaData},
 	authority_external::AuthorityExternal,
-	cli::RoundupHandlerUtilityConfig,
+	cli::{BootstrapConfig, RoundupHandlerUtilityConfig},
 	eth::{BootstrapState, RecoveredSignature, RoundUpEventStatus},
 	socket_bifrost::{SerializedRoundUp, SocketBifrost, SocketBifrostEvents},
 	socket_external::{RoundUpSubmit, Signatures, SocketExternal},
@@ -15,8 +15,8 @@ use ethers::{
 	abi::{encode, Detokenize, Token, Tokenize},
 	contract::EthLogDecode,
 	prelude::{TransactionReceipt, H256},
-	providers::{JsonRpcClient, Provider},
-	types::{Address, Bytes, Log, Signature, TransactionRequest, H160, U256},
+	providers::{JsonRpcClient, Middleware, Provider},
+	types::{Address, Bytes, Filter, Log, Signature, TransactionRequest, H160, U256, U64},
 };
 use std::{str::FromStr, sync::Arc};
 use tokio::sync::{broadcast::Receiver, Barrier, Mutex};
@@ -48,9 +48,15 @@ pub struct RoundupRelayHandler<T> {
 	/// Signature of RoundUp Event.
 	pub roundup_signature: H256,
 	/// Barrier for bootstrapping
-	pub bootstrap_barrier: Arc<Barrier>,
+	pub socket_barrier: Arc<Barrier>,
+	/// Barrier for bootstrapping
+	pub roundup_barrier: Arc<Barrier>,
 	/// Completion of bootstrapping
 	pub is_bootstrapping_completed: Arc<Mutex<BootstrapState>>,
+	/// Completion of bootstrapping count
+	pub bootstrapping_count: Arc<Mutex<u8>>,
+	/// Bootstrap config
+	pub bootstrap_config: BootstrapConfig,
 	/// Authority contracts on native chain
 	pub authority_bifrost: AuthorityBifrost<Provider<T>>,
 }
@@ -58,8 +64,9 @@ pub struct RoundupRelayHandler<T> {
 #[async_trait]
 impl<T: JsonRpcClient> Handler for RoundupRelayHandler<T> {
 	async fn run(&mut self) {
-		// Checking if the current round is the latest round
-		self.bootstrap().await;
+		if *self.is_bootstrapping_completed.lock().await == BootstrapState::BootstrapRoundUp {
+			self.bootstrap().await;
+		}
 
 		loop {
 			let block_msg = self.block_receiver.recv().await.unwrap();
@@ -151,8 +158,9 @@ impl<T: JsonRpcClient> RoundupRelayHandler<T> {
 		external_clients: Vec<Arc<EthClient<T>>>,
 		socket_bifrost: SocketBifrost<Provider<T>>,
 		roundup_util_configs: Vec<RoundupHandlerUtilityConfig>,
-		bootstrap_barrier: Arc<Barrier>,
+		socket_barrier: Arc<Barrier>,
 		is_bootstrapping_completed: Arc<Mutex<BootstrapState>>,
+		bootstrap_config: BootstrapConfig,
 		authority_address: String,
 	) -> Self {
 		let roundup_signature = socket_bifrost.abi().event("RoundUp").unwrap().signature();
@@ -218,14 +226,20 @@ impl<T: JsonRpcClient> RoundupRelayHandler<T> {
 			client.get_provider(),
 		);
 
+		let roundup_barrier = Arc::new(Barrier::new(4));
+		let bootstrapping_count = Arc::new(Mutex::new(u8::default()));
+
 		Self {
 			block_receiver,
 			client,
 			socket_bifrost,
 			roundup_utils,
 			roundup_signature,
-			bootstrap_barrier,
+			socket_barrier,
+			roundup_barrier,
 			is_bootstrapping_completed,
+			bootstrapping_count,
+			bootstrap_config,
 			authority_bifrost,
 		}
 	}
@@ -337,21 +351,23 @@ impl<T: JsonRpcClient> RoundupRelayHandler<T> {
 						true,
 					))
 					.unwrap();
-			} else if roundup_submit.round ==
-				target_chain.authority_external.latest_round().call().await.unwrap()
-			{
-				if *self.is_bootstrapping_completed.lock().await != BootstrapState::BootstrapRoundUp
-				{
-					continue
-				}
-				// If it is BootstrapRoundUp and already the latest round
-				self.bootstrap_barrier.wait().await;
 			}
+			// else if roundup_submit.round ==
+			// 	target_chain.authority_external.latest_round().call().await.unwrap()
+			// {
+			// 	if *self.is_bootstrapping_completed.lock().await != BootstrapState::BootstrapRoundUp
+			// 	{
+			// 		continue
+			// 	}
+
+			// 	// If it is BootstrapRoundUp and already the latest round
+			// 	self.roundup_barrier.wait().await;
+			// }
 		}
 	}
 
-	async fn bootstrap(&self) {
-		let barrier_clone = self.bootstrap_barrier.clone();
+	async fn wait_if_latest_round(&self) {
+		let barrier_clone = self.roundup_barrier.clone();
 		let roundup_utils = &self.roundup_utils.clone();
 
 		for target_chain in roundup_utils.iter() {
@@ -360,19 +376,137 @@ impl<T: JsonRpcClient> RoundupRelayHandler<T> {
 			let target_chain_round =
 				target_chain.authority_external.latest_round().call().await.unwrap();
 			let chain_name = target_chain.id;
+			let bootstrap_guard = self.bootstrapping_count.clone();
 
 			tokio::spawn(async move {
 				if current_round == target_chain_round {
-					barrier_clone_inner.wait().await;
-
 					log::info!(
 						target: "bootstrapping",
 						"-[{}] Chain {} is already in the latest round",
 						sub_display_format(SUB_LOG_TARGET),
 						chain_name,
 					);
+
+					*bootstrap_guard.lock().await += 1;
 				}
+
+				barrier_clone_inner.wait().await;
 			});
 		}
+	}
+
+	async fn bootstrap(&self) {
+		let mut bootstrap_guard = self.is_bootstrapping_completed.lock().await;
+		// Checking if the current round is the latest round
+		self.wait_if_latest_round().await;
+
+		// Wait to lock after checking if it is latest round
+		self.roundup_barrier.clone().wait().await;
+
+		if *self.bootstrapping_count.lock().await == self.roundup_utils.len() as u8 {
+			log::info!(
+				target: &self.client.get_chain_name(),
+				"-[{}] Roundup -> Socket Bootstrapping",
+				sub_display_format(SUB_LOG_TARGET),
+			);
+
+			*bootstrap_guard = BootstrapState::BootstrapSocket;
+		}
+
+		if *bootstrap_guard == BootstrapState::BootstrapRoundUp {
+			drop(bootstrap_guard);
+			let logs = self.bootstrap_roundup().await;
+
+			let mut stream = tokio_stream::iter(logs);
+			while let Some(log) = stream.next().await {
+				let receipt = self
+					.client
+					.provider
+					.get_transaction_receipt(log.transaction_hash.unwrap())
+					.await
+					.unwrap()
+					.unwrap();
+
+				self.process_confirmed_transaction(receipt).await;
+			}
+		}
+
+		// Poll socket barrier to call wait()
+		let socket_barrier_clone = self.socket_barrier.clone();
+
+		tokio::spawn(async move {
+			socket_barrier_clone.clone().wait().await;
+		});
+	}
+
+	async fn bootstrap_roundup(&self) -> Vec<Log> {
+		let round_info: RoundMetaData = self.authority_bifrost.round_info().call().await.unwrap();
+
+		let roundup_signature = self.socket_bifrost.abi().event("RoundUp").unwrap().signature();
+
+		let bootstrap_offset_height = self
+			.get_bootstrap_offset_height_based_on_block_time(self.bootstrap_config.round_offset)
+			.await;
+
+		let latest_block_number = self.client.get_latest_block_number().await.unwrap();
+		let mut from_block = latest_block_number.saturating_sub(bootstrap_offset_height);
+		let to_block = latest_block_number;
+
+		let mut logs = vec![];
+
+		// Split from_block into smaller chunks
+		let block_chunk_size = round_info.round_length.as_u32();
+		while from_block <= to_block {
+			let chunk_to_block = std::cmp::min(from_block + block_chunk_size - 1, to_block);
+			println!("chunk_to_block {}", chunk_to_block);
+
+			let filter = Filter::new()
+				.address(self.socket_bifrost.address())
+				.event("RoundUp(uint8,(uint256,address[],(bytes32[],bytes32[],bytes)))")
+				.topic0(roundup_signature)
+				.from_block(from_block)
+				.to_block(chunk_to_block);
+
+			let chunk_logs = self.client.provider.get_logs(&filter).await.unwrap();
+			logs.extend(chunk_logs);
+
+			from_block = chunk_to_block + 1;
+		}
+
+		logs
+	}
+
+	/// Get factor between the block time of native-chain and block time of this chain
+	/// Approximately bfc-testnet: 3s, matic-mumbai: 2s, bsc-testnet: 3s, eth-goerli: 12s
+	pub async fn get_bootstrap_offset_height_based_on_block_time(&self, round_offset: u32) -> U64 {
+		let block_offset = 100u32;
+		let native_block_time = 3u32;
+		let round_info: RoundMetaData = self.authority_bifrost.round_info().call().await.unwrap();
+
+		let block_number = self.client.provider.get_block_number().await.unwrap();
+
+		let current_block = self.client.get_block((block_number).into()).await.unwrap().unwrap();
+		let prev_block = self
+			.client
+			.get_block((block_number - block_offset).into())
+			.await
+			.unwrap()
+			.unwrap();
+
+		let diff = current_block
+			.timestamp
+			.checked_sub(prev_block.timestamp)
+			.unwrap()
+			.checked_div(block_offset.into())
+			.unwrap();
+
+		round_offset
+			.checked_mul(round_info.round_length.as_u32())
+			.unwrap()
+			.checked_mul(native_block_time)
+			.unwrap()
+			.checked_div(diff.as_u32())
+			.unwrap()
+			.into()
 	}
 }

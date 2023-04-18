@@ -1,11 +1,9 @@
 use cccp_primitives::{
-	authority_bifrost::{AuthorityBifrost, RoundMetaData},
-	cli::BootstrapConfig,
-	eth::BootstrapState,
+	authority_bifrost::AuthorityBifrost, cli::BootstrapConfig, eth::BootstrapState,
 	sub_display_format,
 };
 use ethers::{
-	providers::{JsonRpcClient, Middleware, Provider},
+	providers::{JsonRpcClient, Provider},
 	types::{Block, TransactionReceipt, H160, H256, U64},
 };
 use std::{str::FromStr, sync::Arc};
@@ -67,8 +65,6 @@ pub struct BlockManager<T> {
 	pub is_bootstrapping_completed: Arc<Mutex<BootstrapState>>,
 	/// The target Authority contract instance.
 	pub authority: AuthorityBifrost<Provider<T>>,
-	/// Bootstrapping required flag (self)
-	bootstrap_required: bool,
 }
 
 impl<T: JsonRpcClient> BlockManager<T> {
@@ -88,8 +84,6 @@ impl<T: JsonRpcClient> BlockManager<T> {
 			native_client.get_provider(),
 		);
 
-		let bootstrap_required = bootstrap_config.is_enabled;
-
 		Self {
 			client,
 			sender,
@@ -98,7 +92,6 @@ impl<T: JsonRpcClient> BlockManager<T> {
 			bootstrap_config,
 			is_bootstrapping_completed,
 			authority,
-			bootstrap_required,
 		}
 	}
 
@@ -111,18 +104,16 @@ impl<T: JsonRpcClient> BlockManager<T> {
 			self.target_contracts
 		);
 
-		if !self.bootstrap_config.is_enabled {
-			self.pending_block = self.client.get_latest_block_number().await.unwrap();
-
-			if let Some(block) = self.client.get_block(self.pending_block.into()).await.unwrap() {
-				log::info!(
-					target: &self.client.get_chain_name(),
-					"-[{}] 💤 Idle, best: #{:?} ({})",
-					sub_display_format(SUB_LOG_TARGET),
-					block.number.unwrap(),
-					block.hash.unwrap(),
-				);
-			}
+		// initialize pending block to the latest block
+		self.pending_block = self.client.get_latest_block_number().await.unwrap();
+		if let Some(block) = self.client.get_block(self.pending_block.into()).await.unwrap() {
+			log::info!(
+				target: &self.client.get_chain_name(),
+				"-[{}] 💤 Idle, best: #{:?} ({})",
+				sub_display_format(SUB_LOG_TARGET),
+				block.number.unwrap(),
+				block.hash.unwrap(),
+			);
 		}
 	}
 
@@ -132,14 +123,12 @@ impl<T: JsonRpcClient> BlockManager<T> {
 		self.initialize().await;
 
 		loop {
-			if self.bootstrap_required {
-				self.set_pending_block().await;
-			}
-
-			let latest_block = self.client.get_latest_block_number().await.unwrap();
-			if self.is_block_confirmed(latest_block) {
-				self.process_pending_block().await;
-				self.increment_pending_block();
+			if *self.is_bootstrapping_completed.lock().await == BootstrapState::NormalStart {
+				let latest_block = self.client.get_latest_block_number().await.unwrap();
+				if self.is_block_confirmed(latest_block) {
+					self.process_pending_block().await;
+					self.increment_pending_block();
+				}
 			}
 
 			sleep(Duration::from_millis(self.client.config.call_interval)).await;
@@ -191,62 +180,5 @@ impl<T: JsonRpcClient> BlockManager<T> {
 	/// Verifies if the stored pending block waited for confirmations.
 	fn is_block_confirmed(&self, latest_block: U64) -> bool {
 		latest_block.saturating_sub(self.pending_block) > self.client.config.block_confirmations
-	}
-
-	/// Get factor between the block time of native-chain and block time of this chain
-	/// Approximately bfc-testnet: 3s, matic-mumbai: 2s, bsc-testnet: 3s, eth-goerli: 15s
-	async fn get_bootstrap_offset_height_based_on_block_time(&self, round_offset: u32) -> U64 {
-		let block_offset = 100u32;
-		let native_block_time = 3u32;
-		let round_info: RoundMetaData = self.authority.round_info().call().await.unwrap();
-
-		let block_number = self.client.provider.get_block_number().await.unwrap();
-
-		let current_block = self.client.get_block((block_number).into()).await.unwrap().unwrap();
-		let prev_block = self
-			.client
-			.get_block((block_number - block_offset).into())
-			.await
-			.unwrap()
-			.unwrap();
-
-		let diff = current_block
-			.timestamp
-			.checked_sub(prev_block.timestamp)
-			.unwrap()
-			.checked_div(block_offset.into())
-			.unwrap();
-
-		round_offset
-			.checked_mul(round_info.round_length.as_u32())
-			.unwrap()
-			.checked_mul(native_block_time)
-			.unwrap()
-			.checked_div(diff.as_u32())
-			.unwrap()
-			.into()
-	}
-
-	async fn set_pending_block(&mut self) {
-		// initialize pending block to the bootstrapping block
-		if *self.is_bootstrapping_completed.lock().await != BootstrapState::NormalStart {
-			// Before or After completion of Bootstrapping
-			let bootstrap_offset_height = self
-				.get_bootstrap_offset_height_based_on_block_time(self.bootstrap_config.round_offset)
-				.await;
-
-			self.pending_block = self
-				.client
-				.get_latest_block_number()
-				.await
-				.unwrap()
-				.saturating_sub(bootstrap_offset_height);
-
-			if *self.is_bootstrapping_completed.lock().await == BootstrapState::BootstrapSocket {
-				*self.is_bootstrapping_completed.lock().await = BootstrapState::NormalStart;
-			}
-		} else {
-			self.bootstrap_required = false;
-		}
 	}
 }
