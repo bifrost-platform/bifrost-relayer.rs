@@ -9,7 +9,7 @@ use cccp_primitives::{
 	sub_display_format,
 };
 use ethers::{
-	abi::{AbiDecode, AbiEncode, RawLog, Token},
+	abi::{RawLog, Token},
 	prelude::decode_logs,
 	providers::{JsonRpcClient, Provider},
 	types::{Bytes, Signature, TransactionReceipt, TransactionRequest, H160, H256, U256},
@@ -232,9 +232,7 @@ impl<T: JsonRpcClient> BridgeRelayBuilder for BridgeRelayHandler<T> {
 		}
 	}
 
-	fn encode_socket_message(&self, raw_msg: SocketMessage) -> Vec<u8> {
-		let msg = SocketMessage::decode(raw_msg.clone().encode()).unwrap();
-
+	fn encode_socket_message(&self, msg: SocketMessage) -> Vec<u8> {
 		let req_id_token = Token::Tuple(vec![
 			Token::FixedBytes(msg.req_id.chain.into()),
 			Token::Uint(msg.req_id.round_id.into()),
