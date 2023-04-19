@@ -202,7 +202,7 @@ impl<T: JsonRpcClient> EthClient<T> {
 	}
 
 	/// Returns the relayer address.
-	pub fn address(&self) -> H160 {
+	pub fn address(&self) -> Address {
 		self.wallet.address()
 	}
 
