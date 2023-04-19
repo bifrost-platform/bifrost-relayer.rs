@@ -1,8 +1,11 @@
 use ethers::{
 	prelude::{k256::ecdsa::SigningKey, rand},
 	signers::{coins_bip39::English, LocalWallet, MnemonicBuilder, Signer},
-	types::{PathOrString, H160},
+	types::{Address, PathOrString, Signature, U256},
+	utils::hex::FromHex,
 };
+use k256::ecdsa::SigningKey as K256SigningKey;
+use sha3::{digest::FixedOutput, Digest, Keccak256};
 use std::{fs, path::PathBuf};
 
 type WalletResult<T = ()> = Result<T, Box<dyn std::error::Error + Send + Sync>>;
@@ -10,6 +13,7 @@ type WalletResult<T = ()> = Result<T, Box<dyn std::error::Error + Send + Sync>>;
 #[derive(Debug)]
 pub struct WalletManager {
 	pub signer: ethers::signers::Wallet<SigningKey>,
+	secret_key: Option<K256SigningKey>,
 }
 
 impl WalletManager {
@@ -22,7 +26,7 @@ impl WalletManager {
 			.write_to(output_path)
 			.build_random(&mut rng)?;
 
-		Ok(Self { signer: wallet.with_chain_id(chain_id) })
+		Ok(Self { signer: wallet.with_chain_id(chain_id), secret_key: None })
 	}
 
 	pub fn from_phrase_or_file<P: Into<PathOrString>>(
@@ -31,16 +35,38 @@ impl WalletManager {
 	) -> WalletResult<Self> {
 		let wallet = MnemonicBuilder::<English>::default().phrase(input_path).build()?;
 
-		Ok(Self { signer: wallet.with_chain_id(chain_id) })
+		Ok(Self { signer: wallet.with_chain_id(chain_id), secret_key: None })
 	}
 
 	pub fn from_private_key(input_path: &str, chain_id: u32) -> WalletResult<Self> {
 		let wallet = input_path.parse::<LocalWallet>()?;
 
-		Ok(Self { signer: wallet.with_chain_id(chain_id) })
+		let pk_bytes =
+			<[u8; 32]>::from_hex(input_path.to_string().trim_start_matches("0x")).unwrap();
+		let signing_key = K256SigningKey::from_bytes(&pk_bytes.into()).unwrap();
+
+		Ok(Self { signer: wallet.with_chain_id(chain_id), secret_key: Some(signing_key) })
 	}
 
-	pub fn address(&self) -> H160 {
+	pub fn sign_message(&self, msg: &[u8]) -> Signature {
+		println!("only abi encoded msg -> {:?}", msg);
+
+		let digest = Keccak256::new_with_prefix(msg);
+		let (sig, recovery_id) =
+			self.secret_key.clone().unwrap().sign_digest_recoverable(digest).unwrap();
+
+		println!("finalized digest -> {:?}", Keccak256::new_with_prefix(msg).finalize_fixed());
+
+		let (r, s) = sig.split_bytes();
+
+		Signature {
+			r: U256::from_big_endian(r.as_slice()),
+			s: U256::from_big_endian(s.as_slice()),
+			v: (recovery_id.to_byte() + 27).into(),
+		}
+	}
+
+	pub fn address(&self) -> Address {
 		self.signer.address()
 	}
 }

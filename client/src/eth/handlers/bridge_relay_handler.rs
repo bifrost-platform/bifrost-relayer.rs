@@ -217,7 +217,9 @@ impl<T: JsonRpcClient> BridgeRelayBuilder for BridgeRelayHandler<T> {
 			match status {
 				SocketEventStatus::Requested => {
 					msg.status = SocketEventStatus::Accepted.into();
-					Signatures::from(self.sign_socket_message(msg).await)
+					let sigs = Signatures::from(self.sign_socket_message(msg).await);
+					println!("sigs -> {:?}", sigs);
+					sigs
 				},
 				SocketEventStatus::Accepted | SocketEventStatus::Rejected =>
 					self.get_signatures(msg).await,
@@ -232,13 +234,17 @@ impl<T: JsonRpcClient> BridgeRelayBuilder for BridgeRelayHandler<T> {
 		}
 	}
 
-	fn encode_socket_message(&self, msg: SocketMessage) -> Bytes {
-		msg.encode().into()
+	fn encode_socket_message(&self, msg: SocketMessage) -> Vec<u8> {
+		msg.encode()
 	}
 
 	async fn sign_socket_message(&self, msg: SocketMessage) -> Signature {
 		let encoded_msg = self.encode_socket_message(msg.clone());
-		self.client.wallet.sign_message(&encoded_msg).await
+		let sig = self.client.wallet.sign_message(&encoded_msg);
+
+		println!("Signature -> {:?}", sig);
+
+		sig
 	}
 
 	async fn get_signatures(&self, msg: SocketMessage) -> Signatures {

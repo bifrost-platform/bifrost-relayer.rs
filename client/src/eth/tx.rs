@@ -214,6 +214,7 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> {
 			);
 			return
 		}
+		println!("tx_request data -> {:?}", msg.tx_request.clone().data.unwrap());
 
 		// set transaction `from` field
 		msg.tx_request = msg.tx_request.from(self.client.address());
