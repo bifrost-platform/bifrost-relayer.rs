@@ -580,8 +580,6 @@ impl<T: JsonRpcClient> BridgeRelayHandler<T> {
 	}
 
 	async fn bootstrap_socket(&self) -> Vec<Log> {
-		let round_info: RoundMetaData = self.authority_bifrost.round_info().call().await.unwrap();
-
 		let bootstrap_offset_height = self
 			.get_bootstrap_offset_height_based_on_block_time(self.bootstrap_config.round_offset)
 			.await;
@@ -593,14 +591,13 @@ impl<T: JsonRpcClient> BridgeRelayHandler<T> {
 		let mut logs = vec![];
 
 		// Split from_block into smaller chunks
-		let block_chunk_size = round_info.round_length.as_u32();
+		let block_chunk_size = 2000;
 		while from_block <= to_block {
 			let chunk_to_block = std::cmp::min(from_block + block_chunk_size - 1, to_block);
-			println!("chunk_to_block {}", chunk_to_block);
 
 			let filter = Filter::new()
 				.address(self.target_contract)
-				// .topic0(self.socket_signature)
+				// .topic0(self.socket_signature) // socket signature? vault signature?
 				.from_block(from_block)
 				.to_block(chunk_to_block);
 

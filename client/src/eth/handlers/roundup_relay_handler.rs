@@ -352,17 +352,6 @@ impl<T: JsonRpcClient> RoundupRelayHandler<T> {
 					))
 					.unwrap();
 			}
-			// else if roundup_submit.round ==
-			// 	target_chain.authority_external.latest_round().call().await.unwrap()
-			// {
-			// 	if *self.is_bootstrapping_completed.lock().await != BootstrapState::BootstrapRoundUp
-			// 	{
-			// 		continue
-			// 	}
-
-			// 	// If it is BootstrapRoundUp and already the latest round
-			// 	self.roundup_barrier.wait().await;
-			// }
 		}
 	}
 
@@ -440,8 +429,6 @@ impl<T: JsonRpcClient> RoundupRelayHandler<T> {
 	}
 
 	async fn bootstrap_roundup(&self) -> Vec<Log> {
-		let round_info: RoundMetaData = self.authority_bifrost.round_info().call().await.unwrap();
-
 		let roundup_signature = self.socket_bifrost.abi().event("RoundUp").unwrap().signature();
 
 		let bootstrap_offset_height = self
@@ -455,10 +442,9 @@ impl<T: JsonRpcClient> RoundupRelayHandler<T> {
 		let mut logs = vec![];
 
 		// Split from_block into smaller chunks
-		let block_chunk_size = round_info.round_length.as_u32();
+		let block_chunk_size = 2000;
 		while from_block <= to_block {
 			let chunk_to_block = std::cmp::min(from_block + block_chunk_size - 1, to_block);
-			println!("chunk_to_block {}", chunk_to_block);
 
 			let filter = Filter::new()
 				.address(self.socket_bifrost.address())

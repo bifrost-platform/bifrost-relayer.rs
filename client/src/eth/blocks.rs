@@ -1,12 +1,9 @@
-use cccp_primitives::{
-	authority_bifrost::AuthorityBifrost, cli::BootstrapConfig, eth::BootstrapState,
-	sub_display_format,
-};
+use cccp_primitives::{eth::BootstrapState, sub_display_format};
 use ethers::{
-	providers::{JsonRpcClient, Provider},
+	providers::JsonRpcClient,
 	types::{Block, TransactionReceipt, H160, H256, U64},
 };
-use std::{str::FromStr, sync::Arc};
+use std::sync::Arc;
 use tokio::{
 	sync::{
 		broadcast::{self, Receiver, Sender},
@@ -59,12 +56,8 @@ pub struct BlockManager<T> {
 	pub target_contracts: Vec<H160>,
 	/// The pending block waiting for some confirmations.
 	pub pending_block: U64,
-	/// Bootstrap config
-	pub bootstrap_config: BootstrapConfig,
 	/// State of bootstrapping
 	pub is_bootstrapping_completed: Arc<Mutex<BootstrapState>>,
-	/// The target Authority contract instance.
-	pub authority: AuthorityBifrost<Provider<T>>,
 }
 
 impl<T: JsonRpcClient> BlockManager<T> {
@@ -72,26 +65,16 @@ impl<T: JsonRpcClient> BlockManager<T> {
 	pub fn new(
 		client: Arc<EthClient<T>>,
 		target_contracts: Vec<H160>,
-		bootstrap_config: BootstrapConfig,
 		is_bootstrapping_completed: Arc<Mutex<BootstrapState>>,
-		authority_address: String,
-		native_client: Arc<EthClient<T>>,
 	) -> Self {
 		let (sender, _receiver) = broadcast::channel(512); // TODO: size?
-
-		let authority = AuthorityBifrost::new(
-			H160::from_str(&authority_address).expect("Failed to parse the authority address"),
-			native_client.get_provider(),
-		);
 
 		Self {
 			client,
 			sender,
 			target_contracts,
 			pending_block: U64::default(),
-			bootstrap_config,
 			is_bootstrapping_completed,
-			authority,
 		}
 	}
 

@@ -67,13 +67,10 @@ pub fn new_relay_base(config: Configuration) -> Result<RelayBase, ServiceError> 
 	};
 
 	// Wait until each chain of vault/socket contract and bootstrapping is completed
-	// let socket_barrier = Arc::new(Barrier::new(config.relayer_config.evm_providers.len() * 3 -
-	// 1));
 	let socket_barrier = Arc::new(Barrier::new(config.relayer_config.evm_providers.len() * 2 + 1));
-
 	let socket_bootstrapping_count = Arc::new(Mutex::new(u8::default()));
-
 	let is_bootstrapping_completed = Arc::new(Mutex::new(bootstrap_state));
+
 	let authority_address = &config
 		.relayer_config
 		.periodic_configs
@@ -82,51 +79,6 @@ pub fn new_relay_base(config: Configuration) -> Result<RelayBase, ServiceError> 
 		.roundup_emitter
 		.authority_address
 		.clone();
-
-	let (native_client, socket_bifrost) = {
-		let evm_provider = config
-			.relayer_config
-			.evm_providers
-			.iter()
-			.find(|evm_provider| evm_provider.is_native.unwrap())
-			.unwrap();
-
-		let wallet = WalletManager::from_private_key(
-			config.relayer_config.private_key.as_str(),
-			evm_provider.id,
-		)
-		.expect("Failed to initialize wallet manager");
-
-		let client = Arc::new(EthClient::new(
-			wallet,
-			Arc::new(Provider::<Http>::try_from(evm_provider.provider.clone()).unwrap()),
-			EthClientConfiguration::new(
-				evm_provider.name.clone(),
-				evm_provider.id,
-				evm_provider.call_interval,
-				evm_provider.block_confirmations,
-				BridgeDirection::Inbound,
-			),
-			true,
-		));
-
-		let native_socket_address = &config
-			.relayer_config
-			.handler_configs
-			.iter()
-			.find(|handler_config| handler_config.handler_type == HandlerType::Roundup)
-			.unwrap()
-			.watch_list[0]
-			.contract;
-
-		// Initialize SocketBifrost instance
-		let socket_bifrost = SocketBifrost::new(
-			H160::from_str(&native_socket_address).unwrap(),
-			client.get_provider(),
-		);
-
-		(client, socket_bifrost)
-	};
 
 	// initialize `EthClient`, `TransactionManager`, `BlockManager`
 	let (clients, tx_managers, block_managers, event_channels) = {
@@ -176,11 +128,7 @@ pub fn new_relay_base(config: Configuration) -> Result<RelayBase, ServiceError> 
 			let block_manager = BlockManager::new(
 				client.clone(),
 				target_contracts,
-				config.relayer_config.bootstrap_config.clone(),
 				is_bootstrapping_completed.clone(),
-				authority_address.clone(),
-				native_client.clone(),
-				// socket_bifrost.clone(),
 			);
 
 			clients.push(client);
@@ -310,10 +258,9 @@ pub fn new_relay_base(config: Configuration) -> Result<RelayBase, ServiceError> 
 						socket_bootstrapping_count.clone(),
 						config.relayer_config.bootstrap_config.clone(),
 						authority_address.clone(),
-						native_client.clone(),
+						native_client,
 					);
 
-					// let mut bootstrap_rx = bootstrap_tx.subscribe();
 					let socket_barrier_clone = socket_barrier.clone();
 					let is_bootstrapped = is_bootstrapping_completed.clone();
 
