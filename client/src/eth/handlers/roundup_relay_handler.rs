@@ -226,7 +226,7 @@ impl<T: JsonRpcClient> RoundupRelayHandler<T> {
 			client.get_provider(),
 		);
 
-		let roundup_barrier = Arc::new(Barrier::new(4));
+		let roundup_barrier = Arc::new(Barrier::new(external_clients.len() + 1));
 		let bootstrapping_count = Arc::new(Mutex::new(u8::default()));
 
 		Self {
