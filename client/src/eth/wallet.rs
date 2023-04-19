@@ -5,7 +5,7 @@ use ethers::{
 	utils::hex::FromHex,
 };
 use k256::ecdsa::SigningKey as K256SigningKey;
-use sha3::{digest::FixedOutput, Digest, Keccak256};
+use sha3::{Digest, Keccak256};
 use std::{fs, path::PathBuf};
 
 type WalletResult<T = ()> = Result<T, Box<dyn std::error::Error + Send + Sync>>;
@@ -49,13 +49,9 @@ impl WalletManager {
 	}
 
 	pub fn sign_message(&self, msg: &[u8]) -> Signature {
-		println!("only abi encoded msg -> {:?}", msg);
-
 		let digest = Keccak256::new_with_prefix(msg);
 		let (sig, recovery_id) =
 			self.secret_key.clone().unwrap().sign_digest_recoverable(digest).unwrap();
-
-		println!("finalized digest -> {:?}", Keccak256::new_with_prefix(msg).finalize_fixed());
 
 		let (r, s) = sig.split_bytes();
 

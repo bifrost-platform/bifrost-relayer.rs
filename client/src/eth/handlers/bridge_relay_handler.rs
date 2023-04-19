@@ -9,7 +9,7 @@ use cccp_primitives::{
 	sub_display_format,
 };
 use ethers::{
-	abi::{AbiEncode, RawLog},
+	abi::{AbiDecode, AbiEncode, RawLog, Token},
 	prelude::decode_logs,
 	providers::{JsonRpcClient, Provider},
 	types::{Bytes, Signature, TransactionReceipt, TransactionRequest, H160, H256, U256},
@@ -217,9 +217,7 @@ impl<T: JsonRpcClient> BridgeRelayBuilder for BridgeRelayHandler<T> {
 			match status {
 				SocketEventStatus::Requested => {
 					msg.status = SocketEventStatus::Accepted.into();
-					let sigs = Signatures::from(self.sign_socket_message(msg).await);
-					println!("sigs -> {:?}", sigs);
-					sigs
+					Signatures::from(self.sign_socket_message(msg).await)
 				},
 				SocketEventStatus::Accepted | SocketEventStatus::Rejected =>
 					self.get_signatures(msg).await,
@@ -234,17 +232,36 @@ impl<T: JsonRpcClient> BridgeRelayBuilder for BridgeRelayHandler<T> {
 		}
 	}
 
-	fn encode_socket_message(&self, msg: SocketMessage) -> Vec<u8> {
-		msg.encode()
+	fn encode_socket_message(&self, raw_msg: SocketMessage) -> Vec<u8> {
+		let msg = SocketMessage::decode(raw_msg.clone().encode()).unwrap();
+
+		let req_id_token = Token::Tuple(vec![
+			Token::FixedBytes(msg.req_id.chain.into()),
+			Token::Uint(msg.req_id.round_id.into()),
+			Token::Uint(msg.req_id.sequence.into()),
+		]);
+		let status_token = Token::Uint(msg.status.into());
+		let ins_code_token = Token::Tuple(vec![
+			Token::FixedBytes(msg.ins_code.chain.into()),
+			Token::FixedBytes(msg.ins_code.method.into()),
+		]);
+		let params_token = Token::Tuple(vec![
+			Token::FixedBytes(msg.params.token_idx0.into()),
+			Token::FixedBytes(msg.params.token_idx1.into()),
+			Token::Address(msg.params.refund),
+			Token::Address(msg.params.to),
+			Token::Uint(msg.params.amount),
+			Token::Bytes(msg.params.variants.to_vec()),
+		]);
+		let msg_token =
+			Token::Tuple(vec![req_id_token, status_token, ins_code_token, params_token]);
+
+		ethers::abi::encode(&[msg_token])
 	}
 
 	async fn sign_socket_message(&self, msg: SocketMessage) -> Signature {
 		let encoded_msg = self.encode_socket_message(msg.clone());
-		let sig = self.client.wallet.sign_message(&encoded_msg);
-
-		println!("Signature -> {:?}", sig);
-
-		sig
+		self.client.wallet.sign_message(&encoded_msg)
 	}
 
 	async fn get_signatures(&self, msg: SocketMessage) -> Signatures {
