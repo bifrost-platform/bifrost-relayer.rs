@@ -824,10 +824,12 @@ dependencies = [
  "async-trait",
  "cccp-primitives",
  "ethers",
+ "k256",
  "log",
  "sentry",
  "serde",
  "serde_yaml",
+ "sha3",
  "tokio",
  "tokio-stream",
 ]

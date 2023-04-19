@@ -15,7 +15,7 @@ pub use wallet::*;
 
 use ethers::{
 	providers::{JsonRpcClient, Middleware, Provider},
-	types::{Block, BlockId, Transaction, TransactionReceipt, H160, H256, U64},
+	types::{Address, Block, BlockId, Transaction, TransactionReceipt, H256, U64},
 };
 use std::sync::Arc;
 
@@ -46,7 +46,7 @@ impl<T: JsonRpcClient> EthClient<T> {
 	}
 
 	/// Returns the relayer address.
-	pub fn address(&self) -> H160 {
+	pub fn address(&self) -> Address {
 		self.wallet.address()
 	}
 
