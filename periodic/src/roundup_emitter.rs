@@ -12,7 +12,6 @@ use cron::Schedule;
 use ethers::{
 	abi::{encode, Token},
 	providers::{JsonRpcClient, Provider},
-	signers::Signer,
 	types::{Address, Bytes, TransactionRequest, H160, U256},
 };
 use std::{str::FromStr, sync::Arc};
@@ -119,7 +118,7 @@ impl<T: JsonRpcClient> RoundupEmitter<T> {
 			Token::Array(new_relayers.clone().into_iter().map(Token::Address).collect()),
 		])])
 		.into();
-		let signed_sigs = self.client.wallet.signer.sign_message(data_to_sig).await.unwrap();
+		let signed_sigs = self.client.wallet.sign_message(&data_to_sig);
 
 		let sigs = Signatures {
 			r: vec![signed_sigs.r.into()],

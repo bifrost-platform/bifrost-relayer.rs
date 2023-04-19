@@ -18,6 +18,8 @@ tokio-stream = { workspace = true }
 async-trait = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 tokio = { workspace = true, features = ["signal", "rt-multi-thread", "parking_lot"] }
+k256 = { workspace = true }
+sha3 = { workspace = true }
 
 # CCCP
 cccp-primitives = { path = "../primitives" }

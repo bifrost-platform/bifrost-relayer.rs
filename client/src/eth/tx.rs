@@ -108,14 +108,14 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> {
 	fn handle_failed_tx_receipt(&self, msg: EventMessage) {
 		log::error!(
 			target: &self.client.get_chain_name(),
-			"-[{}] ♻️ The requested transaction has been dropped from the mempool: {}, Retries left: {:?}",
+			"-[{}] ♻️  The requested transaction has been dropped from the mempool: {}, Retries left: {:?}",
 			sub_display_format(SUB_LOG_TARGET),
 			msg.metadata,
 			msg.retries_remaining - 1,
 		);
 		sentry::capture_message(
 			format!(
-				"[{}]-[{}] ♻️ The requested transaction has been dropped from the mempool: {}, Retries left: {:?}",
+				"[{}]-[{}] ♻️  The requested transaction has been dropped from the mempool: {}, Retries left: {:?}",
 				&self.client.get_chain_name(),
 				SUB_LOG_TARGET,
 				msg.metadata,
@@ -141,7 +141,7 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> {
 	{
 		log::error!(
 			target: &self.client.get_chain_name(),
-			"-[{}] ♻️ Unknown error while requesting a transaction request: {}, Retries left: {:?}, Error: {}",
+			"-[{}] ♻️  Unknown error while requesting a transaction request: {}, Retries left: {:?}, Error: {}",
 			sub_display_format(SUB_LOG_TARGET),
 			msg.metadata,
 			msg.retries_remaining - 1,
@@ -165,7 +165,7 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> {
 	{
 		log::error!(
 			target: &self.client.get_chain_name(),
-			"-[{}] ♻️ Gas estimation failed: {}, Retries left: {:?}, Error: {}",
+			"-[{}] ♻️  Gas estimation failed: {}, Retries left: {:?}, Error: {}",
 			sub_display_format(SUB_LOG_TARGET),
 			msg.metadata,
 			msg.retries_remaining - 1,
@@ -173,7 +173,7 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> {
 		);
 		sentry::capture_message(
 			format!(
-				"[{}]-[{}] ♻️ Gas estimation failed: {}, Retries left: {:?}",
+				"[{}]-[{}] ♻️  Gas estimation failed: {}, Retries left: {:?}",
 				&self.client.get_chain_name(),
 				SUB_LOG_TARGET,
 				msg.metadata,
@@ -214,6 +214,9 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> {
 			);
 			return
 		}
+
+		// set transaction `from` field
+		msg.tx_request = msg.tx_request.from(self.client.address());
 
 		// set the gas price to be used
 		let gas_price = self.middleware.get_gas_price().await.unwrap();
