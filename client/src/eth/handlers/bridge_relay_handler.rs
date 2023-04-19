@@ -9,10 +9,9 @@ use cccp_primitives::{
 	sub_display_format,
 };
 use ethers::{
-	abi::{encode, RawLog, Token},
+	abi::{RawLog, Token},
 	prelude::decode_logs,
 	providers::{JsonRpcClient, Provider},
-	signers::Signer,
 	types::{Bytes, Signature, TransactionReceipt, TransactionRequest, H160, H256, U256},
 };
 use tokio::sync::broadcast::Receiver;
@@ -233,7 +232,7 @@ impl<T: JsonRpcClient> BridgeRelayBuilder for BridgeRelayHandler<T> {
 		}
 	}
 
-	fn encode_socket_message(&self, msg: SocketMessage) -> Bytes {
+	fn encode_socket_message(&self, msg: SocketMessage) -> Vec<u8> {
 		let req_id_token = Token::Tuple(vec![
 			Token::FixedBytes(msg.req_id.chain.into()),
 			Token::Uint(msg.req_id.round_id.into()),
@@ -254,16 +253,13 @@ impl<T: JsonRpcClient> BridgeRelayBuilder for BridgeRelayHandler<T> {
 		]);
 		let msg_token =
 			Token::Tuple(vec![req_id_token, status_token, ins_code_token, params_token]);
-		encode(&[msg_token]).into()
+
+		ethers::abi::encode(&[msg_token])
 	}
 
 	async fn sign_socket_message(&self, msg: SocketMessage) -> Signature {
-		self.client
-			.wallet
-			.signer
-			.sign_message(self.encode_socket_message(msg))
-			.await
-			.unwrap()
+		let encoded_msg = self.encode_socket_message(msg.clone());
+		self.client.wallet.sign_message(&encoded_msg)
 	}
 
 	async fn get_signatures(&self, msg: SocketMessage) -> Signatures {

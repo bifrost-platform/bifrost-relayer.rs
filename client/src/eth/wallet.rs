@@ -94,7 +94,21 @@ impl WalletManager {
 		self.signer.address()
 	}
 
-	pub fn address(&self) -> H160 {
+	pub fn sign_message(&self, msg: &[u8]) -> Signature {
+		let digest = Keccak256::new_with_prefix(msg);
+		let (sig, recovery_id) =
+			self.secret_key.clone().unwrap().sign_digest_recoverable(digest).unwrap();
+
+		let (r, s) = sig.split_bytes();
+
+		Signature {
+			r: U256::from_big_endian(r.as_slice()),
+			s: U256::from_big_endian(s.as_slice()),
+			v: (recovery_id.to_byte() + 27).into(),
+		}
+	}
+
+	pub fn address(&self) -> Address {
 		self.signer.address()
 	}
 }
