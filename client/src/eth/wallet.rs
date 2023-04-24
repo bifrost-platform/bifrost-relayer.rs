@@ -4,7 +4,7 @@ use ethers::{
 	types::{Address, PathOrString, Signature, U256},
 	utils::hex::FromHex,
 };
-use k256::ecdsa::SigningKey as K256SigningKey;
+use k256::ecdsa::{SigningKey as K256SigningKey, VerifyingKey};
 use sha3::{Digest, Keccak256};
 use std::{fs, path::PathBuf};
 
@@ -64,7 +64,18 @@ impl WalletManager {
 
 	/// Recovers the given signature and returns the signer address.
 	pub fn recover_message(&self, sig: Signature, msg: &[u8]) -> Address {
-		sig.recover(msg).unwrap().into()
+		let r: [u8; 32] = sig.r.into();
+		let s: [u8; 32] = sig.s.into();
+		let v = sig.recovery_id().unwrap();
+
+		let rs = k256::ecdsa::Signature::from_slice([r, s].concat().as_slice()).unwrap();
+
+		let verifying_key =
+			VerifyingKey::recover_from_digest(Keccak256::new_with_prefix(msg), &rs, v)
+				.unwrap()
+				.to_encoded_point(false);
+
+		Address::from_slice(verifying_key.as_bytes())
 	}
 
 	pub fn address(&self) -> Address {
