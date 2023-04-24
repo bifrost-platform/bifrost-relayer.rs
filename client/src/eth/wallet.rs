@@ -62,6 +62,11 @@ impl WalletManager {
 		}
 	}
 
+	/// Recovers the given signature and returns the signer address.
+	pub fn recover_message(&self, sig: Signature, msg: &[u8]) -> Address {
+		sig.recover(msg).unwrap().into()
+	}
+
 	pub fn address(&self) -> Address {
 		self.signer.address()
 	}

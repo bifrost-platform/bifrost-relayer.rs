@@ -12,7 +12,7 @@ use ethers::{
 	abi::{RawLog, Token},
 	prelude::decode_logs,
 	providers::{JsonRpcClient, Provider},
-	types::{Bytes, Signature, TransactionReceipt, TransactionRequest, H160, H256, U256},
+	types::{Bytes, Signature, TransactionReceipt, TransactionRequest, H160, H256, U256, U64},
 };
 use tokio::sync::broadcast::Receiver;
 use tokio_stream::StreamExt;
@@ -204,7 +204,7 @@ impl<T: JsonRpcClient> BridgeRelayBuilder for BridgeRelayHandler<T> {
 					Signatures::from(self.sign_socket_message(msg).await)
 				},
 				SocketEventStatus::Accepted | SocketEventStatus::Rejected =>
-					self.get_signatures(msg).await,
+					self.get_sorted_signatures(msg).await,
 				_ => panic!(
 					"[{}]-[{}] Unknown socket event status received: {:?}",
 					&self.client.get_chain_name(),
@@ -220,7 +220,7 @@ impl<T: JsonRpcClient> BridgeRelayBuilder for BridgeRelayHandler<T> {
 					Signatures::from(self.sign_socket_message(msg).await)
 				},
 				SocketEventStatus::Accepted | SocketEventStatus::Rejected =>
-					self.get_signatures(msg).await,
+					self.get_sorted_signatures(msg).await,
 				SocketEventStatus::Executed | SocketEventStatus::Reverted => Signatures::default(),
 				_ => panic!(
 					"[{}]-[{}] Unknown socket event status received: {:?}",
@@ -262,12 +262,43 @@ impl<T: JsonRpcClient> BridgeRelayBuilder for BridgeRelayHandler<T> {
 		self.client.wallet.sign_message(&encoded_msg)
 	}
 
-	async fn get_signatures(&self, msg: SocketMessage) -> Signatures {
-		self.target_socket
-			.get_signatures(msg.req_id, msg.status)
+	async fn get_sorted_signatures(&self, msg: SocketMessage) -> Signatures {
+		let sigs = self
+			.target_socket
+			.get_signatures(msg.clone().req_id, msg.clone().status)
 			.call()
 			.await
-			.unwrap_or_default()
+			.unwrap_or_default();
+
+		sigs
+
+		// println!("unsorted_sigs -> {:?}", sigs);
+
+		// let mut sorted_sigs = Signatures::default();
+		// let mut sorted_relayers = vec![];
+		// let encoded_msg = self.encode_socket_message(msg);
+		// for idx in 0..sigs.r.len() {
+		// 	let sig = Signature {
+		// 		r: sigs.r[idx].into(),
+		// 		s: sigs.s[idx].into(),
+		// 		v: U64::from_big_endian(&sigs.v).as_u64(),
+		// 	};
+		// 	sorted_relayers.push((idx, self.client.wallet.recover_message(sig, &encoded_msg)));
+		// }
+		// sorted_relayers.sort_by_key(|k| k.1);
+		// sorted_relayers.reverse();
+
+		// println!("sorted_relayers -> {:?}", sorted_relayers);
+
+		// sorted_relayers.into_iter().for_each(|relayer| {
+		// 	sorted_sigs.r.push(sigs.r[relayer.0]);
+		// 	sorted_sigs.s.push(sigs.s[relayer.0]);
+		// });
+		// sorted_sigs.v = sigs.v;
+
+		// println!("sorted_sigs -> {:?}", sorted_sigs);
+
+		// sorted_sigs
 	}
 }
 
