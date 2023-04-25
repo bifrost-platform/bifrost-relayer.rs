@@ -278,10 +278,7 @@ impl<T: JsonRpcClient> BridgeRelayBuilder for BridgeRelayHandler<T> {
 			let sig = Signature {
 				r: raw_sigs.r[idx].into(),
 				s: raw_sigs.s[idx].into(),
-				v: U64::from_big_endian(
-					&Bytes::from_str(&raw_concated_v[idx * 2..idx * 2 + 2]).unwrap(),
-				)
-				.as_u64(),
+				v: u64::from_str_radix(&raw_concated_v[idx * 2..idx * 2 + 2], 16).unwrap(),
 			};
 			recovered_sigs.push(RecoveredSignature::new(
 				idx,
