@@ -2,9 +2,13 @@ use ethers::{
 	prelude::{k256::ecdsa::SigningKey, rand},
 	signers::{coins_bip39::English, LocalWallet, MnemonicBuilder, Signer},
 	types::{Address, PathOrString, Signature, U256},
-	utils::hex::FromHex,
+	utils::{hex::FromHex, keccak256},
 };
-use k256::ecdsa::{SigningKey as K256SigningKey, VerifyingKey};
+use k256::{
+	ecdsa::{SigningKey as K256SigningKey, VerifyingKey},
+	elliptic_curve::sec1::ToEncodedPoint,
+	PublicKey as K256PublicKey,
+};
 use sha3::{Digest, Keccak256};
 use std::{fs, path::PathBuf};
 
@@ -70,12 +74,14 @@ impl WalletManager {
 
 		let rs = k256::ecdsa::Signature::from_slice([r, s].concat().as_slice()).unwrap();
 
-		let verifying_key =
-			VerifyingKey::recover_from_digest(Keccak256::new_with_prefix(msg), &rs, v)
-				.unwrap()
-				.to_encoded_point(false);
+		let verify_key =
+			VerifyingKey::recover_from_digest(Keccak256::new_with_prefix(msg), &rs, v).unwrap();
 
-		Address::from_slice(verifying_key.as_bytes())
+		let public_key = K256PublicKey::from(&verify_key);
+		let public_key = public_key.to_encoded_point(false);
+		let public_key = public_key.as_bytes();
+		let hash = keccak256(&public_key[1..]);
+		Address::from_slice(&hash[12..])
 	}
 
 	pub fn address(&self) -> Address {

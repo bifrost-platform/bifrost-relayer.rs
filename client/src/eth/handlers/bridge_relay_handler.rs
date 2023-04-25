@@ -1,10 +1,10 @@
-use std::sync::Arc;
+use std::{str::FromStr, sync::Arc};
 
 use cccp_primitives::{
 	contracts::socket_external::{
 		BridgeRelayBuilder, PollSubmit, Signatures, SocketEvents, SocketExternal, SocketMessage,
 	},
-	eth::{BridgeDirection, Contract, SocketEventStatus},
+	eth::{BridgeDirection, Contract, RecoveredSignature, SocketEventStatus},
 	socket_external::SerializedPoll,
 	sub_display_format,
 };
@@ -263,42 +263,46 @@ impl<T: JsonRpcClient> BridgeRelayBuilder for BridgeRelayHandler<T> {
 	}
 
 	async fn get_sorted_signatures(&self, msg: SocketMessage) -> Signatures {
-		let sigs = self
+		let raw_sigs = self
 			.target_socket
 			.get_signatures(msg.clone().req_id, msg.clone().status)
 			.call()
 			.await
 			.unwrap_or_default();
 
-		sigs
+		let raw_concated_v = &raw_sigs.v.to_string()[2..];
 
-		// println!("unsorted_sigs -> {:?}", sigs);
+		let mut recovered_sigs = vec![];
+		let encoded_msg = self.encode_socket_message(msg);
+		for idx in 0..raw_sigs.r.len() {
+			let sig = Signature {
+				r: raw_sigs.r[idx].into(),
+				s: raw_sigs.s[idx].into(),
+				v: U64::from_big_endian(
+					&Bytes::from_str(&raw_concated_v[idx * 2..idx * 2 + 2]).unwrap(),
+				)
+				.as_u64(),
+			};
+			recovered_sigs.push(RecoveredSignature::new(
+				idx,
+				sig,
+				self.client.wallet.recover_message(sig, &encoded_msg),
+			));
+		}
+		recovered_sigs.sort_by_key(|k| k.signer);
 
-		// let mut sorted_sigs = Signatures::default();
-		// let mut sorted_relayers = vec![];
-		// let encoded_msg = self.encode_socket_message(msg);
-		// for idx in 0..sigs.r.len() {
-		// 	let sig = Signature {
-		// 		r: sigs.r[idx].into(),
-		// 		s: sigs.s[idx].into(),
-		// 		v: U64::from_big_endian(&sigs.v).as_u64(),
-		// 	};
-		// 	sorted_relayers.push((idx, self.client.wallet.recover_message(sig, &encoded_msg)));
-		// }
-		// sorted_relayers.sort_by_key(|k| k.1);
-		// sorted_relayers.reverse();
+		let mut sorted_sigs = Signatures::default();
+		let mut sorted_concated_v = String::from("0x");
+		recovered_sigs.into_iter().for_each(|sig| {
+			let idx = sig.idx;
+			sorted_sigs.r.push(raw_sigs.r[idx]);
+			sorted_sigs.s.push(raw_sigs.s[idx]);
+			let v = Bytes::from([sig.signature.v as u8]);
+			sorted_concated_v.push_str(&v.to_string()[2..]);
+		});
+		sorted_sigs.v = Bytes::from_str(&sorted_concated_v).unwrap();
 
-		// println!("sorted_relayers -> {:?}", sorted_relayers);
-
-		// sorted_relayers.into_iter().for_each(|relayer| {
-		// 	sorted_sigs.r.push(sigs.r[relayer.0]);
-		// 	sorted_sigs.s.push(sigs.s[relayer.0]);
-		// });
-		// sorted_sigs.v = sigs.v;
-
-		// println!("sorted_sigs -> {:?}", sorted_sigs);
-
-		// sorted_sigs
+		sorted_sigs
 	}
 }
 

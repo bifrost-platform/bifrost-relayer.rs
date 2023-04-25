@@ -250,8 +250,6 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> {
 					self.handle_failed_tx_request(msg, &error);
 				},
 			};
-		} else {
-			println!("duplicate transaction exists");
 		}
 	}
 
