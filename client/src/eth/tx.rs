@@ -65,10 +65,7 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> {
 
 	/// Initialize transaction manager.
 	async fn initialize(&mut self) {
-		let is_txpool_enabled = match self.client.get_txpool_content().await {
-			Ok(_) => true,
-			Err(_) => false,
-		};
+		let is_txpool_enabled = self.client.get_txpool_content().await.is_ok();
 		self.set_txpool_activation(is_txpool_enabled);
 	}
 

@@ -258,7 +258,7 @@ impl<T: JsonRpcClient> BridgeRelayBuilder for BridgeRelayHandler<T> {
 	}
 
 	async fn sign_socket_message(&self, msg: SocketMessage) -> Signature {
-		let encoded_msg = self.encode_socket_message(msg.clone());
+		let encoded_msg = self.encode_socket_message(msg);
 		self.client.wallet.sign_message(&encoded_msg)
 	}
 
