@@ -108,6 +108,23 @@ impl WalletManager {
 		}
 	}
 
+	/// Recovers the given signature and returns the signer address.
+	pub fn recover_message(&self, sig: Signature, msg: &[u8]) -> Address {
+		let r: [u8; 32] = sig.r.into();
+		let s: [u8; 32] = sig.s.into();
+		let v = sig.recovery_id().unwrap();
+
+		let rs = k256::ecdsa::Signature::from_slice([r, s].concat().as_slice()).unwrap();
+
+		let verify_key =
+			VerifyingKey::recover_from_digest(Keccak256::new_with_prefix(msg), &rs, v).unwrap();
+
+		let public_key = K256PublicKey::from(&verify_key).to_encoded_point(false);
+		let hash = keccak256(&public_key.as_bytes()[1..]);
+
+		Address::from_slice(&hash[12..])
+	}
+
 	pub fn address(&self) -> Address {
 		self.signer.address()
 	}

@@ -218,10 +218,6 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> {
 		// set transaction `from` field
 		msg.tx_request = msg.tx_request.from(self.client.address());
 
-		// set the gas price to be used
-		let gas_price = self.middleware.get_gas_price().await.unwrap();
-		msg.tx_request = msg.tx_request.gas_price(gas_price);
-
 		// estimate the gas amount to be used
 		let estimated_gas = match self
 			.middleware
@@ -232,6 +228,10 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> {
 			Err(error) => return self.handle_failed_gas_estimation(msg, &error),
 		};
 		msg.tx_request = msg.tx_request.gas(estimated_gas);
+
+		// set the gas price to be used
+		let gas_price = self.middleware.get_gas_price().await.unwrap();
+		msg.tx_request = msg.tx_request.gas_price(gas_price);
 
 		if !(self.is_duplicate_relay(&msg.tx_request, msg.check_mempool).await) {
 			match self.middleware.send_transaction(msg.tx_request.clone(), None).await {

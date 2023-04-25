@@ -91,7 +91,7 @@ pub trait BridgeRelayBuilder {
 	async fn sign_socket_message(&self, msg: SocketMessage) -> Signature;
 
 	/// Get the signatures of the given message.
-	async fn get_signatures(&self, msg: SocketMessage) -> Signatures;
+	async fn get_sorted_signatures(&self, msg: SocketMessage) -> Signatures;
 }
 
 impl From<Signature> for Signatures {
