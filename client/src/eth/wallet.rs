@@ -77,10 +77,9 @@ impl WalletManager {
 		let verify_key =
 			VerifyingKey::recover_from_digest(Keccak256::new_with_prefix(msg), &rs, v).unwrap();
 
-		let public_key = K256PublicKey::from(&verify_key);
-		let public_key = public_key.to_encoded_point(false);
-		let public_key = public_key.as_bytes();
-		let hash = keccak256(&public_key[1..]);
+		let public_key = K256PublicKey::from(&verify_key).to_encoded_point(false);
+		let hash = keccak256(&public_key.as_bytes()[1..]);
+
 		Address::from_slice(&hash[12..])
 	}
 
