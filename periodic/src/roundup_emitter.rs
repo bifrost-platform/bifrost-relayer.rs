@@ -12,7 +12,7 @@ use cron::Schedule;
 use ethers::{
 	abi::{encode, Token},
 	providers::{JsonRpcClient, Provider},
-	types::{Address, Bytes, TransactionRequest, H160, U256},
+	types::{Address, TransactionRequest, H160, U256},
 };
 use std::{str::FromStr, sync::Arc};
 use tokio::time::sleep;
@@ -125,11 +125,7 @@ impl<T: JsonRpcClient> RoundupEmitter<T> {
 		])]);
 		let signature = self.client.wallet.sign_message(&encoded_msg);
 
-		let sigs = Signatures {
-			r: vec![signature.r.into()],
-			s: vec![signature.s.into()],
-			v: Bytes::from(signature.v.to_be_bytes()),
-		};
+		let sigs = Signatures::from(signature);
 		let round_up_submit = RoundUpSubmit { round, new_relayers, sigs };
 
 		TransactionRequest::default()
