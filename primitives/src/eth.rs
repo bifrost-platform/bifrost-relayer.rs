@@ -374,3 +374,20 @@ impl EthClientConfiguration {
 		Self { name, id, call_interval, block_confirmations, if_destination_chain }
 	}
 }
+
+#[derive(Clone, Debug)]
+/// The information of a recovered signature.
+pub struct RecoveredSignature {
+	/// The original index that represents the order from the result of `get_signatures()`.
+	pub idx: usize,
+	/// The signature of the message.
+	pub signature: Signature,
+	/// The account who signed the message.
+	pub signer: Address,
+}
+
+impl RecoveredSignature {
+	pub fn new(idx: usize, signature: Signature, signer: Address) -> Self {
+		Self { idx, signature, signer }
+	}
+}
