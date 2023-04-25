@@ -113,17 +113,22 @@ impl<T: JsonRpcClient> RoundupEmitter<T> {
 		round: U256,
 		new_relayers: Vec<Address>,
 	) -> TransactionRequest {
-		let data_to_sig: Bytes = encode(&[Token::Tuple(vec![
+		let encoded_msg = encode(&[Token::Tuple(vec![
 			Token::Uint(round),
-			Token::Array(new_relayers.clone().into_iter().map(Token::Address).collect()),
-		])])
-		.into();
-		let signed_sigs = self.client.wallet.sign_message(&data_to_sig);
+			Token::Array(
+				new_relayers
+					.clone()
+					.into_iter()
+					.map(|address| Token::Address(address))
+					.collect(),
+			),
+		])]);
+		let signature = self.client.wallet.sign_message(&encoded_msg);
 
 		let sigs = Signatures {
-			r: vec![signed_sigs.r.into()],
-			s: vec![signed_sigs.s.into()],
-			v: Bytes::from(signed_sigs.v.to_be_bytes()),
+			r: vec![signature.r.into()],
+			s: vec![signature.s.into()],
+			v: Bytes::from(signature.v.to_be_bytes()),
 		};
 		let round_up_submit = RoundUpSubmit { round, new_relayers, sigs };
 
