@@ -34,6 +34,8 @@ pub struct TransactionManager<T> {
 	pub sender: UnboundedSender<EventMessage>,
 	/// The receiver connected to the event channel.
 	pub receiver: UnboundedReceiver<EventMessage>,
+	/// The flag whether the client has enabled txpool namespace.
+	pub is_txpool_enabled: bool,
 }
 
 impl<T: 'static + JsonRpcClient> TransactionManager<T> {
@@ -55,11 +57,25 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> {
 		// for them to hit the mempool.
 		let middleware = NonceManagerMiddleware::new(signer, client.wallet.signer.address());
 
-		(Self { client, sender: sender.clone(), middleware, receiver }, sender)
+		(
+			Self { client, sender: sender.clone(), middleware, receiver, is_txpool_enabled: false },
+			sender,
+		)
+	}
+
+	/// Initialize transaction manager.
+	async fn initialize(&mut self) {
+		let is_txpool_enabled = match self.client.get_txpool_content().await {
+			Ok(_) => true,
+			Err(_) => false,
+		};
+		self.set_txpool_activation(is_txpool_enabled);
 	}
 
 	/// Starts the transaction manager. Listens to every new consumed event message.
 	pub async fn run(&mut self) {
+		self.initialize().await;
+
 		while let Some(msg) = self.receiver.recv().await {
 			log::info!(
 				target: &self.client.get_chain_name(),
@@ -68,7 +84,7 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> {
 				msg.metadata,
 			);
 
-			self.send_transaction(msg).await;
+			self.try_send_transaction(msg).await;
 		}
 	}
 
@@ -83,6 +99,11 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> {
 				msg.check_mempool,
 			))
 			.unwrap();
+	}
+
+	/// Set the activation of txpool namespace related actions.
+	fn set_txpool_activation(&mut self, is_txpool_enabled: bool) {
+		self.is_txpool_enabled = is_txpool_enabled;
 	}
 
 	/// Handles the successfully mined transaction.
@@ -190,9 +211,28 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> {
 		self.retry_transaction(msg).await;
 	}
 
+	/// Handles relay transaction duplication.
+	fn handle_relay_duplication(&self, msg: EventMessage) {
+		log::error!(
+			target: &self.client.get_chain_name(),
+			"-[{}] ♻️  Duplicate transaction found in txpool: {}, Retries left: {:?}",
+			sub_display_format(SUB_LOG_TARGET),
+			msg.metadata,
+			msg.retries_remaining - 1,
+		);
+		self.sender
+			.send(EventMessage {
+				retries_remaining: msg.retries_remaining - 1,
+				tx_request: msg.tx_request,
+				metadata: msg.metadata,
+				check_mempool: msg.check_mempool,
+			})
+			.unwrap();
+	}
+
 	/// Sends the consumed transaction request to the connected chain. The transaction request will
 	/// be re-published to the event channel if the transaction fails to be mined in a block.
-	async fn send_transaction(&self, mut msg: EventMessage) {
+	async fn try_send_transaction(&self, mut msg: EventMessage) {
 		if msg.retries_remaining == 0 {
 			log::error!(
 				target: &self.client.get_chain_name(),
@@ -231,7 +271,9 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> {
 		let gas_price = self.middleware.get_gas_price().await.unwrap();
 		msg.tx_request = msg.tx_request.gas_price(gas_price);
 
+		// check the txpool for transaction duplication prevention
 		if !(self.is_duplicate_relay(&msg.tx_request, msg.check_mempool).await) {
+			// no duplication found
 			match self.middleware.send_transaction(msg.tx_request.clone(), None).await {
 				Ok(pending_tx) => match pending_tx.await {
 					Ok(receipt) =>
@@ -248,6 +290,9 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> {
 					self.handle_failed_tx_request(msg, &error).await;
 				},
 			};
+		} else {
+			// duplication found
+			self.handle_relay_duplication(msg);
 		}
 	}
 
@@ -258,14 +303,18 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> {
 		tx_request: &TransactionRequest,
 		check_mempool: bool,
 	) -> bool {
-		if (!check_mempool) || self.client.is_native {
+		// does not check the txpool if the following condition satisfies
+		// 1. the txpool namespace is disabled for the client
+		// 2. the txpool check flag is false
+		// 3. the client is BIFROST (native)
+		if !self.is_txpool_enabled || !check_mempool || self.client.is_native {
 			return false
 		}
 
 		let data = tx_request.data.as_ref().unwrap();
 		let to = tx_request.to.as_ref().unwrap().as_address().unwrap();
 
-		let mempool_pending_contents = self.client.provider.txpool_content().await.unwrap().pending;
+		let mempool_pending_contents = self.client.get_txpool_content().await.unwrap().pending;
 		for (_address, tx_map) in mempool_pending_contents.iter() {
 			for (_nonce, transaction) in tx_map.iter() {
 				if transaction.to.unwrap_or_default() == *to && transaction.input == *data {
