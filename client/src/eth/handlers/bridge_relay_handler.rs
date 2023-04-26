@@ -12,7 +12,7 @@ use ethers::{
 	abi::{RawLog, Token},
 	prelude::decode_logs,
 	providers::{JsonRpcClient, Provider},
-	types::{Bytes, Signature, TransactionReceipt, TransactionRequest, H160, H256, U256, U64},
+	types::{Bytes, Signature, TransactionReceipt, TransactionRequest, H160, H256, U256},
 };
 use tokio::sync::broadcast::Receiver;
 use tokio_stream::StreamExt;
