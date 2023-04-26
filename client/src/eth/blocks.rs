@@ -1,7 +1,7 @@
 use cccp_primitives::{eth::BootstrapState, sub_display_format};
 use ethers::{
-	providers::JsonRpcClient,
-	types::{Block, TransactionReceipt, H160, H256, U64},
+	providers::{JsonRpcClient, Middleware},
+	types::{Block, SyncingStatus, TransactionReceipt, H160, H256, U64},
 };
 use std::sync::Arc;
 use tokio::{
@@ -163,5 +163,33 @@ impl<T: JsonRpcClient> BlockManager<T> {
 	/// Verifies if the stored pending block waited for confirmations.
 	fn is_block_confirmed(&self, latest_block: U64) -> bool {
 		latest_block.saturating_sub(self.pending_block) > self.client.config.block_confirmations
+	}
+
+	pub async fn is_syncing(&self) {
+		let provider = self.client.get_provider();
+
+		loop {
+			if let SyncingStatus::IsSyncing(status) = provider.syncing().await.unwrap() {
+				log::info!(
+					target: &self.client.get_chain_name(),
+					"-[{}] ✨ Syncing #{:?}, Highest: #{:?}",
+					sub_display_format(SUB_LOG_TARGET),
+					status.current_block,
+					status.highest_block,
+				);
+			} else {
+				*self.is_bootstrapping_completed.lock().await = BootstrapState::BootstrapRoundUp;
+
+				log::info!(
+					target: &self.client.get_chain_name(),
+					"-[{}] ✨ Block Syncing completed",
+					sub_display_format(SUB_LOG_TARGET),
+				);
+
+				return
+			}
+
+			sleep(Duration::from_millis(self.client.config.call_interval)).await;
+		}
 	}
 }

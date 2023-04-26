@@ -61,7 +61,7 @@ pub fn relay(config: Configuration) -> Result<TaskManager, ServiceError> {
 
 pub fn new_relay_base(config: Configuration) -> Result<RelayBase, ServiceError> {
 	let bootstrap_state = if config.relayer_config.bootstrap_config.is_enabled {
-		BootstrapState::BootstrapRoundUp
+		BootstrapState::NodeSyncing
 	} else {
 		BootstrapState::NormalStart
 	};
@@ -244,9 +244,6 @@ pub fn new_relay_base(config: Configuration) -> Result<RelayBase, ServiceError> 
 						.find(|socket| socket.chain_id == client.get_chain_id())
 						.unwrap();
 
-					let native_client =
-						clients.iter().find(|client| client.is_native).unwrap().clone();
-
 					let mut bridge_relay_handler = BridgeRelayHandler::new(
 						event_channels.clone(),
 						block_receiver,
@@ -258,7 +255,7 @@ pub fn new_relay_base(config: Configuration) -> Result<RelayBase, ServiceError> 
 						socket_bootstrapping_count.clone(),
 						config.relayer_config.bootstrap_config.clone(),
 						authority_address.clone(),
-						native_client,
+						clients.clone(),
 					);
 
 					let socket_barrier_clone = socket_barrier.clone();
@@ -376,7 +373,10 @@ pub fn new_relay_base(config: Configuration) -> Result<RelayBase, ServiceError> 
 				format!("{}-block-manager", block_manager.client.get_chain_name()).into_boxed_str(),
 			),
 			Some("block-managers"),
-			async move { block_manager.run().await },
+			async move {
+				block_manager.is_syncing().await;
+				block_manager.run().await
+			},
 		)
 	});
 

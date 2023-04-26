@@ -18,8 +18,11 @@ use ethers::{
 	providers::{JsonRpcClient, Middleware, Provider},
 	types::{Address, Bytes, Filter, Log, Signature, TransactionRequest, H160, U256, U64},
 };
-use std::{str::FromStr, sync::Arc};
-use tokio::sync::{broadcast::Receiver, Barrier, Mutex};
+use std::{str::FromStr, sync::Arc, time::Duration};
+use tokio::{
+	sync::{broadcast::Receiver, Barrier, Mutex},
+	time::sleep,
+};
 use tokio_stream::StreamExt;
 
 const SUB_LOG_TARGET: &str = "roundup-handler";
@@ -64,25 +67,27 @@ pub struct RoundupRelayHandler<T> {
 #[async_trait]
 impl<T: JsonRpcClient> Handler for RoundupRelayHandler<T> {
 	async fn run(&mut self) {
-		if *self.is_bootstrapping_completed.lock().await == BootstrapState::BootstrapRoundUp {
-			self.bootstrap().await;
-		}
-
 		loop {
-			let block_msg = self.block_receiver.recv().await.unwrap();
+			if *self.is_bootstrapping_completed.lock().await == BootstrapState::BootstrapRoundUp {
+				self.bootstrap().await;
 
-			log::info!(
-				target: &self.client.get_chain_name(),
-				"-[{}] 📦 Imported #{:?} ({}) with target transactions({:?})",
-				sub_display_format(SUB_LOG_TARGET),
-				block_msg.raw_block.number.unwrap(),
-				block_msg.raw_block.hash.unwrap(),
-				block_msg.target_receipts.len(),
-			);
+				sleep(Duration::from_millis(self.client.config.call_interval)).await;
+			} else if *self.is_bootstrapping_completed.lock().await == BootstrapState::NormalStart {
+				let block_msg = self.block_receiver.recv().await.unwrap();
 
-			let mut stream = tokio_stream::iter(block_msg.target_receipts);
-			while let Some(receipt) = stream.next().await {
-				self.process_confirmed_transaction(receipt).await;
+				log::info!(
+					target: &self.client.get_chain_name(),
+					"-[{}] 📦 Imported #{:?} ({}) with target transactions({:?})",
+					sub_display_format(SUB_LOG_TARGET),
+					block_msg.raw_block.number.unwrap(),
+					block_msg.raw_block.hash.unwrap(),
+					block_msg.target_receipts.len(),
+				);
+
+				let mut stream = tokio_stream::iter(block_msg.target_receipts);
+				while let Some(receipt) = stream.next().await {
+					self.process_confirmed_transaction(receipt).await;
+				}
 			}
 		}
 	}
