@@ -9,7 +9,10 @@ use ethers::{
 	types::{transaction::eip2718::TypedTransaction, TransactionReceipt, TransactionRequest},
 };
 use std::{error::Error, sync::Arc};
-use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
+use tokio::{
+	sync::mpsc::{self, UnboundedReceiver, UnboundedSender},
+	time::{sleep, Duration},
+};
 
 use super::{EthClient, EventMessage, EventMetadata};
 
@@ -17,6 +20,9 @@ type TransactionMiddleware<T> =
 	NonceManagerMiddleware<SignerMiddleware<GasEscalatorMiddleware<Arc<Provider<T>>>, LocalWallet>>;
 
 const SUB_LOG_TARGET: &str = "transaction-manager";
+
+/// The default retry interval in milliseconds.
+const DEFAULT_RETRY_INTERVAL_MS: u64 = 2000;
 
 /// The essential task that sends asynchronous transactions.
 pub struct TransactionManager<T> {
@@ -66,6 +72,19 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> {
 		}
 	}
 
+	/// Sends the transaction request to the event channel to retry transaction execution.
+	async fn retry_transaction(&self, msg: EventMessage) {
+		sleep(Duration::from_millis(DEFAULT_RETRY_INTERVAL_MS)).await;
+		self.sender
+			.send(EventMessage::new(
+				msg.retries_remaining - 1,
+				msg.tx_request,
+				msg.metadata,
+				msg.check_mempool,
+			))
+			.unwrap();
+	}
+
 	/// Handles the successfully mined transaction.
 	fn handle_success_tx_receipt(&self, receipt: TransactionReceipt, metadata: EventMetadata) {
 		let status = receipt.status.unwrap();
@@ -105,7 +124,7 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> {
 	}
 
 	/// Handles the dropped transaction.
-	fn handle_failed_tx_receipt(&self, msg: EventMessage) {
+	async fn handle_failed_tx_receipt(&self, msg: EventMessage) {
 		log::error!(
 			target: &self.client.get_chain_name(),
 			"-[{}] ♻️  The requested transaction has been dropped from the mempool: {}, Retries left: {:?}",
@@ -124,18 +143,11 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> {
 			.as_str(),
 			sentry::Level::Error,
 		);
-		self.sender
-			.send(EventMessage::new(
-				msg.retries_remaining - 1,
-				msg.tx_request,
-				msg.metadata,
-				msg.check_mempool,
-			))
-			.unwrap();
+		self.retry_transaction(msg).await;
 	}
 
 	/// Handles the failed transaction request.
-	fn handle_failed_tx_request<E>(&self, msg: EventMessage, error: &E)
+	async fn handle_failed_tx_request<E>(&self, msg: EventMessage, error: &E)
 	where
 		E: Error + ?Sized,
 	{
@@ -148,18 +160,11 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> {
 			error.to_string()
 		);
 		sentry::capture_error(&error);
-		self.sender
-			.send(EventMessage::new(
-				msg.retries_remaining - 1,
-				msg.tx_request,
-				msg.metadata,
-				msg.check_mempool,
-			))
-			.unwrap();
+		self.retry_transaction(msg).await;
 	}
 
 	/// Handles the failed gas estimation.
-	fn handle_failed_gas_estimation<E>(&self, msg: EventMessage, error: &E)
+	async fn handle_failed_gas_estimation<E>(&self, msg: EventMessage, error: &E)
 	where
 		E: Error + ?Sized,
 	{
@@ -182,14 +187,7 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> {
 			.as_str(),
 			sentry::Level::Error,
 		);
-		self.sender
-			.send(EventMessage::new(
-				msg.retries_remaining - 1,
-				msg.tx_request,
-				msg.metadata,
-				msg.check_mempool,
-			))
-			.unwrap();
+		self.retry_transaction(msg).await;
 	}
 
 	/// Sends the consumed transaction request to the connected chain. The transaction request will
@@ -225,7 +223,7 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> {
 			.await
 		{
 			Ok(estimated_gas) => estimated_gas,
-			Err(error) => return self.handle_failed_gas_estimation(msg, &error),
+			Err(error) => return self.handle_failed_gas_estimation(msg, &error).await,
 		};
 		msg.tx_request = msg.tx_request.gas(estimated_gas);
 
@@ -240,14 +238,14 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> {
 						if let Some(receipt) = receipt {
 							self.handle_success_tx_receipt(receipt, msg.metadata);
 						} else {
-							self.handle_failed_tx_receipt(msg);
+							self.handle_failed_tx_receipt(msg).await;
 						},
 					Err(error) => {
-						self.handle_failed_tx_request(msg, &error);
+						self.handle_failed_tx_request(msg, &error).await;
 					},
 				},
 				Err(error) => {
-					self.handle_failed_tx_request(msg, &error);
+					self.handle_failed_tx_request(msg, &error).await;
 				},
 			};
 		}

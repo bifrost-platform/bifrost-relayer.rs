@@ -76,7 +76,7 @@ impl<T: JsonRpcClient> BlockManager<T> {
 		if let Some(block) = self.client.get_block(self.pending_block.into()).await.unwrap() {
 			log::info!(
 				target: &self.client.get_chain_name(),
-				"-[{}] 💤 Idle, best: #{:?} ({})",
+				"-[{}] 💤 Idle, waiting for initial block confirmation, best: #{:?} ({})",
 				sub_display_format(SUB_LOG_TARGET),
 				block.number.unwrap(),
 				block.hash.unwrap(),
