@@ -26,6 +26,7 @@ use tokio::{
 use tokio_stream::StreamExt;
 
 const SUB_LOG_TARGET: &str = "roundup-handler";
+const NATIVE_BLOCK_TIME: u32 = 3u32;
 
 pub struct RoundupUtility<T> {
 	/// The event senders that sends messages to the event channel.
@@ -55,7 +56,7 @@ pub struct RoundupRelayHandler<T> {
 	/// Barrier for bootstrapping
 	pub roundup_barrier: Arc<Barrier>,
 	/// Completion of bootstrapping
-	pub is_bootstrapping_completed: Arc<Mutex<BootstrapState>>,
+	pub bootstrap_state: Arc<Mutex<BootstrapState>>,
 	/// Completion of bootstrapping count
 	pub bootstrapping_count: Arc<Mutex<u8>>,
 	/// Bootstrap config
@@ -68,11 +69,11 @@ pub struct RoundupRelayHandler<T> {
 impl<T: JsonRpcClient> Handler for RoundupRelayHandler<T> {
 	async fn run(&mut self) {
 		loop {
-			if *self.is_bootstrapping_completed.lock().await == BootstrapState::BootstrapRoundUp {
+			if *self.bootstrap_state.lock().await == BootstrapState::BootstrapRoundUp {
 				self.bootstrap().await;
 
 				sleep(Duration::from_millis(self.client.config.call_interval)).await;
-			} else if *self.is_bootstrapping_completed.lock().await == BootstrapState::NormalStart {
+			} else if *self.bootstrap_state.lock().await == BootstrapState::NormalStart {
 				let block_msg = self.block_receiver.recv().await.unwrap();
 
 				log::info!(
@@ -164,7 +165,7 @@ impl<T: JsonRpcClient> RoundupRelayHandler<T> {
 		socket_bifrost: SocketBifrost<Provider<T>>,
 		roundup_util_configs: Vec<RoundupHandlerUtilityConfig>,
 		socket_barrier: Arc<Barrier>,
-		is_bootstrapping_completed: Arc<Mutex<BootstrapState>>,
+		bootstrap_state: Arc<Mutex<BootstrapState>>,
 		bootstrap_config: BootstrapConfig,
 		authority_address: String,
 	) -> Self {
@@ -242,7 +243,7 @@ impl<T: JsonRpcClient> RoundupRelayHandler<T> {
 			roundup_signature,
 			socket_barrier,
 			roundup_barrier,
-			is_bootstrapping_completed,
+			bootstrap_state,
 			bootstrapping_count,
 			bootstrap_config,
 			authority_bifrost,
@@ -390,7 +391,7 @@ impl<T: JsonRpcClient> RoundupRelayHandler<T> {
 	}
 
 	async fn bootstrap(&self) {
-		let mut bootstrap_guard = self.is_bootstrapping_completed.lock().await;
+		let mut bootstrap_guard = self.bootstrap_state.lock().await;
 		// Checking if the current round is the latest round
 		self.wait_if_latest_round().await;
 
@@ -471,7 +472,6 @@ impl<T: JsonRpcClient> RoundupRelayHandler<T> {
 	/// Approximately bfc-testnet: 3s, matic-mumbai: 2s, bsc-testnet: 3s, eth-goerli: 12s
 	pub async fn get_bootstrap_offset_height_based_on_block_time(&self, round_offset: u32) -> U64 {
 		let block_offset = 100u32;
-		let native_block_time = 3u32;
 		let round_info: RoundMetaData = self.authority_bifrost.round_info().call().await.unwrap();
 
 		let block_number = self.client.provider.get_block_number().await.unwrap();
@@ -494,7 +494,7 @@ impl<T: JsonRpcClient> RoundupRelayHandler<T> {
 		round_offset
 			.checked_mul(round_info.round_length.as_u32())
 			.unwrap()
-			.checked_mul(native_block_time)
+			.checked_mul(NATIVE_BLOCK_TIME)
 			.unwrap()
 			.checked_div(diff.as_u32())
 			.unwrap()

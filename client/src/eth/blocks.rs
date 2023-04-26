@@ -57,7 +57,7 @@ pub struct BlockManager<T> {
 	/// The pending block waiting for some confirmations.
 	pub pending_block: U64,
 	/// State of bootstrapping
-	pub is_bootstrapping_completed: Arc<Mutex<BootstrapState>>,
+	pub bootstrap_state: Arc<Mutex<BootstrapState>>,
 }
 
 impl<T: JsonRpcClient> BlockManager<T> {
@@ -65,17 +65,11 @@ impl<T: JsonRpcClient> BlockManager<T> {
 	pub fn new(
 		client: Arc<EthClient<T>>,
 		target_contracts: Vec<H160>,
-		is_bootstrapping_completed: Arc<Mutex<BootstrapState>>,
+		bootstrap_state: Arc<Mutex<BootstrapState>>,
 	) -> Self {
 		let (sender, _receiver) = broadcast::channel(512); // TODO: size?
 
-		Self {
-			client,
-			sender,
-			target_contracts,
-			pending_block: U64::default(),
-			is_bootstrapping_completed,
-		}
+		Self { client, sender, target_contracts, pending_block: U64::default(), bootstrap_state }
 	}
 
 	/// Initialize block manager.
@@ -106,7 +100,7 @@ impl<T: JsonRpcClient> BlockManager<T> {
 		self.initialize().await;
 
 		loop {
-			if *self.is_bootstrapping_completed.lock().await == BootstrapState::NormalStart {
+			if *self.bootstrap_state.lock().await == BootstrapState::NormalStart {
 				let latest_block = self.client.get_latest_block_number().await.unwrap();
 				if self.is_block_confirmed(latest_block) {
 					self.process_pending_block().await;
@@ -137,10 +131,10 @@ impl<T: JsonRpcClient> BlockManager<T> {
 
 			log::info!(
 				target: &self.client.get_chain_name(),
-				"-[{}] ✨ Imported #{:?}, latest: #{:?}",
+				"-[{}] ✨ Imported #{:?} ({})",
 				sub_display_format(SUB_LOG_TARGET),
 				block.number.unwrap(),
-				self.client.get_latest_block_number().await.unwrap(),
+				block.hash.unwrap(),
 			);
 		}
 	}
@@ -178,7 +172,7 @@ impl<T: JsonRpcClient> BlockManager<T> {
 					status.highest_block,
 				);
 			} else {
-				*self.is_bootstrapping_completed.lock().await = BootstrapState::BootstrapRoundUp;
+				*self.bootstrap_state.lock().await = BootstrapState::BootstrapRoundUp;
 
 				log::info!(
 					target: &self.client.get_chain_name(),

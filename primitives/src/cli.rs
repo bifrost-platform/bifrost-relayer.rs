@@ -198,8 +198,6 @@ pub struct BootstrapConfig {
 	pub is_enabled: bool,
 	/// Round for bootstrap
 	pub round_offset: u32,
-	/// Block time of native chain
-	pub native_block_time: u32,
 }
 
 #[derive(Debug, Clone, Deserialize)]

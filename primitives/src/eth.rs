@@ -119,10 +119,15 @@ impl EthClientConfiguration {
 }
 
 #[derive(Debug, PartialEq)]
+/// The state for bootstrapping
 pub enum BootstrapState {
+	/// phase 0. check if the node is in syncing
 	NodeSyncing,
+	/// phase 1. bootstrap for RoundUp event
 	BootstrapRoundUp,
+	/// phase 2. bootstrap for Socket event
 	BootstrapSocket,
+	/// phase 3. process for latest block as normal
 	NormalStart,
 }
 

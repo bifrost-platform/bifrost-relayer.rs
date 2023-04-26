@@ -69,7 +69,7 @@ pub fn new_relay_base(config: Configuration) -> Result<RelayBase, ServiceError> 
 	// Wait until each chain of vault/socket contract and bootstrapping is completed
 	let socket_barrier = Arc::new(Barrier::new(config.relayer_config.evm_providers.len() * 2 + 1));
 	let socket_bootstrapping_count = Arc::new(Mutex::new(u8::default()));
-	let is_bootstrapping_completed = Arc::new(Mutex::new(bootstrap_state));
+	let bootstrap_state = Arc::new(Mutex::new(bootstrap_state));
 
 	let authority_address = &config
 		.relayer_config
@@ -125,11 +125,8 @@ pub fn new_relay_base(config: Configuration) -> Result<RelayBase, ServiceError> 
 					is_native,
 				)));
 			}
-			let block_manager = BlockManager::new(
-				client.clone(),
-				target_contracts,
-				is_bootstrapping_completed.clone(),
-			);
+			let block_manager =
+				BlockManager::new(client.clone(), target_contracts, bootstrap_state.clone());
 
 			clients.push(client);
 			block_managers.push(block_manager);
@@ -251,7 +248,7 @@ pub fn new_relay_base(config: Configuration) -> Result<RelayBase, ServiceError> 
 						H160::from_str(&target.contract).unwrap(),
 						target_socket.address,
 						socket_contracts.clone(),
-						is_bootstrapping_completed.clone(),
+						bootstrap_state.clone(),
 						socket_bootstrapping_count.clone(),
 						config.relayer_config.bootstrap_config.clone(),
 						authority_address.clone(),
@@ -259,7 +256,7 @@ pub fn new_relay_base(config: Configuration) -> Result<RelayBase, ServiceError> 
 					);
 
 					let socket_barrier_clone = socket_barrier.clone();
-					let is_bootstrapped = is_bootstrapping_completed.clone();
+					let is_bootstrapped = bootstrap_state.clone();
 
 					task_manager.spawn_essential_handle().spawn(
 						Box::leak(
@@ -339,7 +336,7 @@ pub fn new_relay_base(config: Configuration) -> Result<RelayBase, ServiceError> 
 					socket_bifrost,
 					handler_config.roundup_utils.clone().unwrap(),
 					socket_barrier.clone(),
-					is_bootstrapping_completed.clone(),
+					bootstrap_state.clone(),
 					config.relayer_config.bootstrap_config.clone(),
 					authority_address.clone(),
 				);

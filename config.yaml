@@ -34,13 +34,13 @@ handler_configs:
   - handler_type: Socket
     watch_list:
       - chain_id: 49088
-        contract: &socket_bfc "0x0218371b18340aBD460961bdF3Bd5F01858dAB53"
+        contract: "0x0218371b18340aBD460961bdF3Bd5F01858dAB53"
       - chain_id: 5
-        contract: &socket_eth "0xeF5260Db045200142a6B5DDB297e860099ffd51d"
+        contract: "0xeF5260Db045200142a6B5DDB297e860099ffd51d"
       - chain_id: 97
-        contract: &socket_bsc "0x8039c3AD8ED55509fD3f6Daa78867923fDe6E61c"
+        contract: "0x8039c3AD8ED55509fD3f6Daa78867923fDe6E61c"
       - chain_id: 80001
-        contract: &socket_matic "0xA25357F3C313Bd13885678f935178211f0dF6722"
+        contract: "0xA25357F3C313Bd13885678f935178211f0dF6722"
   - handler_type: Vault
     watch_list:
       - chain_id: 49088
@@ -54,16 +54,16 @@ handler_configs:
   - handler_type: Roundup
     watch_list:
       - chain_id: 49088
-        contract: *socket_bfc
+        contract: "0x0218371b18340aBD460961bdF3Bd5F01858dAB53"
     roundup_utils:
       - contract_type: Socket
-        contract: *socket_eth
+        contract: "0xeF5260Db045200142a6B5DDB297e860099ffd51d"
         chain_id: 5
       - contract_type: Socket
-        contract: *socket_bsc
+        contract: "0x8039c3AD8ED55509fD3f6Daa78867923fDe6E61c"
         chain_id: 97
       - contract_type: Socket
-        contract: *socket_matic
+        contract: "0xA25357F3C313Bd13885678f935178211f0dF6722"
         chain_id: 80001
       - contract_type: Authority
         contract: "0xF51f7e267D2D966f8d3Ff2fea42B410bB14800e1"
@@ -75,7 +75,7 @@ handler_configs:
         contract: "0x2FD5232fDFa6e1c127e7821CC48108Ca79281a38"
         chain_id: 80001
 
-private_key: "0x5fb92d6e98884f76de468fa3f6278f8807c48bebc13595d45af5bdc4da702133"
+private_key: ""
 
 periodic_configs:
   oracle_price_feeder:
@@ -87,7 +87,7 @@ periodic_configs:
   roundup_emitter:
     schedule: "*/15 * * * * * *" # Every 15th seconds.
     authority_address: "0x0000000000000000000000000000000000000400"
-    socket_address: *socket_bfc
+    socket_address: "0x0218371b18340aBD460961bdF3Bd5F01858dAB53"
     relayer_manager_address: "0x0000000000000000000000000000000000002000"
   heartbeat:
     schedule: "0 * * * * * *" # Every minute.
@@ -100,4 +100,3 @@ sentry_config:
 bootstrap_config:
   is_enabled: true
   round_offset: 6
-  native_block_time: 3

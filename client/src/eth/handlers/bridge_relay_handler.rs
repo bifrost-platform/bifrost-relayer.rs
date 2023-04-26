@@ -30,6 +30,7 @@ use crate::eth::{
 };
 
 const SUB_LOG_TARGET: &str = "bridge-handler";
+const NATIVE_BLOCK_TIME: u32 = 3u32;
 
 /// The essential task that handles `bridge relay` related events.
 pub struct BridgeRelayHandler<T> {
@@ -48,7 +49,7 @@ pub struct BridgeRelayHandler<T> {
 	/// Signature of the `Socket` Event.
 	pub socket_signature: H256,
 	/// Completion of bootstrapping
-	pub is_bootstrapping_completed: Arc<Mutex<BootstrapState>>,
+	pub bootstrap_state: Arc<Mutex<BootstrapState>>,
 	/// Completion of bootstrapping count
 	pub bootstrapping_count: Arc<Mutex<u8>>,
 	/// Bootstrap config
@@ -68,7 +69,7 @@ impl<T: JsonRpcClient> BridgeRelayHandler<T> {
 		target_contract: H160,
 		target_socket: H160,
 		socket_contracts: Vec<Contract>,
-		is_bootstrapping_completed: Arc<Mutex<BootstrapState>>,
+		bootstrap_state: Arc<Mutex<BootstrapState>>,
 		bootstrapping_count: Arc<Mutex<u8>>,
 		bootstrap_config: BootstrapConfig,
 		authority_address: String,
@@ -91,7 +92,7 @@ impl<T: JsonRpcClient> BridgeRelayHandler<T> {
 			target_socket,
 			socket_contracts,
 			socket_signature,
-			is_bootstrapping_completed,
+			bootstrap_state,
 			bootstrapping_count,
 			bootstrap_config,
 			authority_bifrost,
@@ -104,11 +105,11 @@ impl<T: JsonRpcClient> BridgeRelayHandler<T> {
 impl<T: JsonRpcClient> Handler for BridgeRelayHandler<T> {
 	async fn run(&mut self) {
 		loop {
-			if *self.is_bootstrapping_completed.lock().await == BootstrapState::BootstrapSocket {
+			if *self.bootstrap_state.lock().await == BootstrapState::BootstrapSocket {
 				self.bootstrap().await;
 
 				sleep(Duration::from_millis(self.client.config.call_interval)).await;
-			} else if *self.is_bootstrapping_completed.lock().await == BootstrapState::NormalStart {
+			} else if *self.bootstrap_state.lock().await == BootstrapState::NormalStart {
 				let block_msg = self.block_receiver.recv().await.unwrap();
 
 				log::info!(
@@ -162,12 +163,8 @@ impl<T: JsonRpcClient> Handler for BridgeRelayHandler<T> {
 								);
 
 								if Self::is_sequence_ended(status) ||
-									self.is_already_done(
-										socket.msg.req_id.clone(),
-										status,
-										src_chain_id,
-									)
-									.await
+									self.is_already_done(socket.msg.req_id.clone(), src_chain_id)
+										.await
 								{
 									// do nothing if protocol sequence ended
 									return
@@ -555,22 +552,23 @@ impl<T: JsonRpcClient> BridgeRelayHandler<T> {
 		}
 	}
 
-	async fn is_already_done(
-		&self,
-		rid: RequestID,
-		status: SocketEventStatus,
-		src_chain_id: u32,
-	) -> bool {
+	/// Compare the reqeust status recorded in source chain with event status to determine if the
+	/// event has already been exeuted
+	async fn is_already_done(&self, rid: RequestID, src_chain_id: u32) -> bool {
 		let socket_contract = self.get_source_socket(src_chain_id);
 		let request = socket_contract.get_request(rid.clone()).call().await.unwrap();
 
 		let event_status = request.field[0].clone();
 
-		status < SocketEventStatus::from_u8(event_status.into())
+		matches!(
+			SocketEventStatus::from_u8(event_status.into()),
+			SocketEventStatus::Committed | SocketEventStatus::Rollbacked
+		)
 	}
 
+	/// Get a receipt from each log and add it to the processing routine
 	async fn bootstrap(&self) {
-		let mut bootstrap_guard = self.is_bootstrapping_completed.lock().await;
+		let mut bootstrap_guard = self.bootstrap_state.lock().await;
 		let logs = self.bootstrap_socket().await;
 
 		let mut stream = tokio_stream::iter(logs);
@@ -601,6 +599,7 @@ impl<T: JsonRpcClient> BridgeRelayHandler<T> {
 		}
 	}
 
+	/// Calculate the logs to look up when bootstrapping
 	async fn bootstrap_socket(&self) -> Vec<Log> {
 		let bootstrap_offset_height = self
 			.get_bootstrap_offset_height_based_on_block_time(self.bootstrap_config.round_offset)
@@ -619,7 +618,7 @@ impl<T: JsonRpcClient> BridgeRelayHandler<T> {
 
 			let filter = Filter::new()
 				.address(self.target_contract)
-				// .topic0(self.socket_signature) // socket signature? vault signature?
+				.topic0(self.socket_signature)
 				.from_block(from_block)
 				.to_block(chunk_to_block);
 
@@ -636,7 +635,6 @@ impl<T: JsonRpcClient> BridgeRelayHandler<T> {
 	/// Approximately bfc-testnet: 3s, matic-mumbai: 2s, bsc-testnet: 3s, eth-goerli: 12s
 	pub async fn get_bootstrap_offset_height_based_on_block_time(&self, round_offset: u32) -> U64 {
 		let block_offset = 100u32;
-		let native_block_time = 3u32;
 		let round_info: RoundMetaData = self.authority_bifrost.round_info().call().await.unwrap();
 
 		let block_number = self.client.provider.get_block_number().await.unwrap();
@@ -659,7 +657,7 @@ impl<T: JsonRpcClient> BridgeRelayHandler<T> {
 		round_offset
 			.checked_mul(round_info.round_length.as_u32())
 			.unwrap()
-			.checked_mul(native_block_time)
+			.checked_mul(NATIVE_BLOCK_TIME)
 			.unwrap()
 			.checked_div(diff.as_u32())
 			.unwrap()
