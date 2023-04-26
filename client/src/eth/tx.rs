@@ -208,25 +208,6 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> {
 		self.retry_transaction(msg).await;
 	}
 
-	/// Handles relay transaction duplication.
-	fn handle_relay_duplication(&self, msg: EventMessage) {
-		log::error!(
-			target: &self.client.get_chain_name(),
-			"-[{}] ♻️  Duplicate transaction found in txpool: {}, Retries left: {:?}",
-			sub_display_format(SUB_LOG_TARGET),
-			msg.metadata,
-			msg.retries_remaining - 1,
-		);
-		self.sender
-			.send(EventMessage {
-				retries_remaining: msg.retries_remaining - 1,
-				tx_request: msg.tx_request,
-				metadata: msg.metadata,
-				check_mempool: msg.check_mempool,
-			})
-			.unwrap();
-	}
-
 	/// Sends the consumed transaction request to the connected chain. The transaction request will
 	/// be re-published to the event channel if the transaction fails to be mined in a block.
 	async fn try_send_transaction(&self, mut msg: EventMessage) {
@@ -287,9 +268,6 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> {
 					self.handle_failed_tx_request(msg, &error).await;
 				},
 			};
-		} else {
-			// duplication found
-			self.handle_relay_duplication(msg);
 		}
 	}
 
