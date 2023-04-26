@@ -1,4 +1,7 @@
-use ethers::prelude::{abigen, H256};
+use ethers::{
+	prelude::{abigen, H256},
+	types::{Bytes, Signature},
+};
 use std::{collections::HashMap, str::FromStr};
 
 abigen!(
@@ -79,6 +82,15 @@ pub fn get_asset_oids() -> HashMap<String, H256> {
 				.unwrap(),
 		),
 	])
+}
+
+impl From<Signature> for Signatures {
+	fn from(signature: Signature) -> Self {
+		let r: [u8; 32] = signature.r.into();
+		let s: [u8; 32] = signature.s.into();
+		let v: [u8; 1] = [signature.v as u8];
+		Signatures { r: vec![r], s: vec![s], v: Bytes::from(v) }
+	}
 }
 
 #[cfg(test)]

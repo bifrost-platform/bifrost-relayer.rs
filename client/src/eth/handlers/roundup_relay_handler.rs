@@ -6,16 +6,17 @@ use async_trait::async_trait;
 use cccp_primitives::{
 	authority_external::AuthorityExternal,
 	cli::RoundupHandlerUtilityConfig,
+	eth::RecoveredSignature,
 	socket_bifrost::{SerializedRoundUp, SocketBifrost, SocketBifrostEvents},
 	socket_external::{RoundUpSubmit, Signatures, SocketExternal},
 	sub_display_format, RoundupHandlerUtilType,
 };
 use ethers::{
-	abi::{Detokenize, Tokenize},
+	abi::{encode, Detokenize, Token, Tokenize},
 	contract::EthLogDecode,
 	prelude::{TransactionReceipt, H256},
 	providers::{JsonRpcClient, Provider},
-	types::{Address, Log, TransactionRequest, H160, U256},
+	types::{Address, Bytes, Log, Signature, TransactionRequest, H160, U256},
 };
 use std::{str::FromStr, sync::Arc};
 use tokio::sync::broadcast::Receiver;
@@ -204,6 +205,60 @@ impl<T: JsonRpcClient> RoundupRelayHandler<T> {
 		}
 	}
 
+	async fn get_sorted_signatures(&self, round: U256, new_relayers: Vec<Address>) -> Signatures {
+		let encoded_msg = encode(&[Token::Tuple(vec![
+			Token::Uint(round),
+			Token::Array(
+				new_relayers
+					.clone()
+					.into_iter()
+					.map(|address| Token::Address(address))
+					.collect(),
+			),
+		])]);
+
+		// looks unnecessary, but bifrost_socket::Signatures != external_socket::Signatures
+		let unordered_sigs = Signatures::from_tokens(
+			self.socket_bifrost
+				.get_round_signatures(round)
+				.call()
+				.await
+				.unwrap()
+				.into_tokens(),
+		)
+		.unwrap_or_default();
+		let unordered_concated_v = &unordered_sigs.v.to_string()[2..];
+
+		// TODO: Maybe BTreeMap(key: signer, value: signature) could replace Vec<RecoveredSignature>
+		let mut recovered_sigs = vec![];
+		for idx in 0..unordered_sigs.r.len() {
+			let sig = Signature {
+				r: unordered_sigs.r[idx].into(),
+				s: unordered_sigs.s[idx].into(),
+				v: u64::from_str_radix(&unordered_concated_v[idx * 2..idx * 2 + 2], 16).unwrap(),
+			};
+			recovered_sigs.push(RecoveredSignature::new(
+				idx,
+				sig,
+				self.client.wallet.recover_message(sig, &encoded_msg),
+			));
+		}
+		recovered_sigs.sort_by_key(|k| k.signer);
+
+		let mut sorted_sigs = Signatures::default();
+		let mut sorted_concated_v = String::from("0x");
+		recovered_sigs.into_iter().for_each(|sig| {
+			let idx = sig.idx;
+			sorted_sigs.r.push(unordered_sigs.r[idx]);
+			sorted_sigs.s.push(unordered_sigs.s[idx]);
+			let v = Bytes::from([sig.signature.v as u8]);
+			sorted_concated_v.push_str(&v.to_string()[2..]);
+		});
+		sorted_sigs.v = Bytes::from_str(&sorted_concated_v).unwrap();
+
+		sorted_sigs
+	}
+
 	/// Build `round_control_relay` method call param.
 	async fn build_roundup_submit(
 		&self,
@@ -212,8 +267,7 @@ impl<T: JsonRpcClient> RoundupRelayHandler<T> {
 	) -> RoundUpSubmit {
 		new_relayers.sort();
 
-		let bifrost_sigs = self.socket_bifrost.get_round_signatures(round).call().await.unwrap();
-		let sigs = Signatures::from_tokens(bifrost_sigs.into_tokens()).unwrap();
+		let sigs = self.get_sorted_signatures(round, new_relayers.clone()).await;
 
 		RoundUpSubmit { round, new_relayers, sigs }
 	}
