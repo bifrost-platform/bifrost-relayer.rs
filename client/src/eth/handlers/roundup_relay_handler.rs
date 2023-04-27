@@ -212,8 +212,6 @@ impl<T: JsonRpcClient> RoundupRelayHandler<T> {
 			Token::Array(new_relayers.iter().map(|address| Token::Address(*address)).collect()),
 		]);
 
-		println!("phase2 encoded msg -> {:?}", encoded_msg);
-
 		// looks unnecessary, but bifrost_socket::Signatures != external_socket::Signatures
 		let unordered_sigs = Signatures::from_tokens(
 			self.socket_bifrost
@@ -224,14 +222,6 @@ impl<T: JsonRpcClient> RoundupRelayHandler<T> {
 				.into_tokens(),
 		)
 		.unwrap_or_default();
-
-		// let bifrost_unordered_sigs =
-		// 	self.socket_bifrost.get_round_signatures(round).call().await.unwrap();
-		// let unordered_sigs = Signatures {
-		// 	r: bifrost_unordered_sigs.r.clone(),
-		// 	s: bifrost_unordered_sigs.s.clone(),
-		// 	v: bifrost_unordered_sigs.v.clone(),
-		// };
 
 		let unordered_concated_v = &unordered_sigs.v.to_string()[2..];
 
@@ -272,7 +262,6 @@ impl<T: JsonRpcClient> RoundupRelayHandler<T> {
 		mut new_relayers: Vec<Address>,
 	) -> RoundUpSubmit {
 		new_relayers.sort();
-
 		let sigs = self.get_sorted_signatures(round, new_relayers.clone()).await;
 
 		RoundUpSubmit { round, new_relayers, sigs }
