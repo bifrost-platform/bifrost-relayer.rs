@@ -120,35 +120,16 @@ impl<T: JsonRpcClient> RoundupEmitter<T> {
 		let mut addresses =
 			self.relayer_contract.selected_relayers(true).call().await.unwrap_or_default();
 		addresses.sort();
-
 		addresses
 	}
 
 	/// Build `VSP phase 1` transaction.
 	fn build_transaction(&self, round: U256, new_relayers: Vec<Address>) -> TransactionRequest {
-		let encoded_msg = encode(&[Token::Tuple(vec![
+		let encoded_msg = encode(&[
 			Token::Uint(round),
-			Token::Array(
-				new_relayers
-					.clone()
-					.into_iter()
-					.map(|address| {
-						Token::Address(
-							Address::from_str(&address.to_string().to_ascii_lowercase()).unwrap(),
-						)
-					})
-					.collect(),
-			),
-		])]);
-		println!("phase1 encoded msg -> {:?}", encoded_msg);
-		let signature = self.client.wallet.sign_message(&encoded_msg);
-
-		let recovered = self.client.wallet.recover_message(signature, &encoded_msg);
-		println!("phase1 recovered msg -> {:?}", recovered);
-
-		let sigs = Signatures::from(signature);
-		println!("phase 1 sigs -> {:?}", sigs);
-
+			Token::Array(new_relayers.iter().map(|address| Token::Address(*address)).collect()),
+		]);
+		let sigs = Signatures::from(self.client.wallet.sign_message(&encoded_msg));
 		let round_up_submit = RoundUpSubmit { round, new_relayers, sigs };
 
 		TransactionRequest::default()

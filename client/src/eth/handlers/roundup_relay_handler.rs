@@ -205,38 +205,33 @@ impl<T: JsonRpcClient> RoundupRelayHandler<T> {
 		}
 	}
 
+	/// Get the submitted signatures of the updated round.
 	async fn get_sorted_signatures(&self, round: U256, new_relayers: Vec<Address>) -> Signatures {
-		let encoded_msg = encode(&[Token::Tuple(vec![
+		let encoded_msg = encode(&[
 			Token::Uint(round),
-			Token::Array(
-				new_relayers
-					.clone()
-					.into_iter()
-					.map(|address| Token::Address(address))
-					.collect(),
-			),
-		])]);
+			Token::Array(new_relayers.iter().map(|address| Token::Address(*address)).collect()),
+		]);
 
 		println!("phase2 encoded msg -> {:?}", encoded_msg);
 
 		// looks unnecessary, but bifrost_socket::Signatures != external_socket::Signatures
-		// let unordered_sigs = Signatures::from_tokens(
-		// 	self.socket_bifrost
-		// 		.get_round_signatures(round)
-		// 		.call()
-		// 		.await
-		// 		.unwrap()
-		// 		.into_tokens(),
-		// )
-		// .unwrap_or_default();
+		let unordered_sigs = Signatures::from_tokens(
+			self.socket_bifrost
+				.get_round_signatures(round)
+				.call()
+				.await
+				.unwrap()
+				.into_tokens(),
+		)
+		.unwrap_or_default();
 
-		let bifrost_unordered_sigs =
-			self.socket_bifrost.get_round_signatures(round).call().await.unwrap();
-		let unordered_sigs = Signatures {
-			r: bifrost_unordered_sigs.r.clone(),
-			s: bifrost_unordered_sigs.s.clone(),
-			v: bifrost_unordered_sigs.v.clone(),
-		};
+		// let bifrost_unordered_sigs =
+		// 	self.socket_bifrost.get_round_signatures(round).call().await.unwrap();
+		// let unordered_sigs = Signatures {
+		// 	r: bifrost_unordered_sigs.r.clone(),
+		// 	s: bifrost_unordered_sigs.s.clone(),
+		// 	v: bifrost_unordered_sigs.v.clone(),
+		// };
 
 		let unordered_concated_v = &unordered_sigs.v.to_string()[2..];
 
