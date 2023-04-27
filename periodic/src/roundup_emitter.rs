@@ -51,6 +51,15 @@ impl<T: JsonRpcClient> PeriodicWorker for RoundupEmitter<T> {
 			if self.current_round < latest_round {
 				self.current_round = latest_round;
 
+				if !(self.is_selected_relayer().await) {
+					log::info!(
+						target: &self.client.get_chain_name(),
+						"-[{}] 👤 RoundUp detected. However this relayer was not selected in previous round.",
+						sub_display_format(SUB_LOG_TARGET),
+					);
+					continue
+				}
+
 				let new_relayers = self.fetch_validator_list().await;
 				self.request_send_transaction(
 					self.build_transaction(latest_round, new_relayers.clone()),
@@ -95,6 +104,15 @@ impl<T: JsonRpcClient> RoundupEmitter<T> {
 				provider,
 			),
 		}
+	}
+
+	/// Check relayer has selected in previous round
+	async fn is_selected_relayer(&self) -> bool {
+		self.relayer_contract
+			.is_previous_selected_relayer(self.current_round - 1, self.client.address(), true)
+			.call()
+			.await
+			.unwrap()
 	}
 
 	/// Fetch new validator list
