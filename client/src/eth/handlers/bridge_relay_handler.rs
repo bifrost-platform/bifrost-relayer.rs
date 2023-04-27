@@ -197,11 +197,11 @@ impl<T: JsonRpcClient> BridgeRelayBuilder for BridgeRelayHandler<T> {
 				SocketEventStatus::Requested | SocketEventStatus::Failed => Signatures::default(),
 				SocketEventStatus::Executed => {
 					msg.status = SocketEventStatus::Accepted.into();
-					Signatures::from(self.sign_socket_message(msg).await)
+					Signatures::from(self.sign_socket_message(msg))
 				},
 				SocketEventStatus::Reverted => {
 					msg.status = SocketEventStatus::Rejected.into();
-					Signatures::from(self.sign_socket_message(msg).await)
+					Signatures::from(self.sign_socket_message(msg))
 				},
 				SocketEventStatus::Accepted | SocketEventStatus::Rejected =>
 					self.get_sorted_signatures(msg).await,
@@ -217,7 +217,7 @@ impl<T: JsonRpcClient> BridgeRelayBuilder for BridgeRelayHandler<T> {
 			match status {
 				SocketEventStatus::Requested => {
 					msg.status = SocketEventStatus::Accepted.into();
-					Signatures::from(self.sign_socket_message(msg).await)
+					Signatures::from(self.sign_socket_message(msg))
 				},
 				SocketEventStatus::Accepted | SocketEventStatus::Rejected =>
 					self.get_sorted_signatures(msg).await,
@@ -257,7 +257,7 @@ impl<T: JsonRpcClient> BridgeRelayBuilder for BridgeRelayHandler<T> {
 		ethers::abi::encode(&[msg_token])
 	}
 
-	async fn sign_socket_message(&self, msg: SocketMessage) -> Signature {
+	fn sign_socket_message(&self, msg: SocketMessage) -> Signature {
 		let encoded_msg = self.encode_socket_message(msg);
 		self.client.wallet.sign_message(&encoded_msg)
 	}
