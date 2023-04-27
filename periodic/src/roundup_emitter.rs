@@ -114,7 +114,11 @@ impl<T: JsonRpcClient> RoundupEmitter<T> {
 				new_relayers
 					.clone()
 					.into_iter()
-					.map(|address| Token::Address(address))
+					.map(|address| {
+						Token::Address(
+							Address::from_str(&address.to_string().to_ascii_lowercase()).unwrap(),
+						)
+					})
 					.collect(),
 			),
 		])]);
