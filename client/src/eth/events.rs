@@ -63,23 +63,24 @@ impl Display for PriceFeedMetadata {
 
 #[derive(Clone, Debug)]
 pub struct VSPPhase1Metadata {
+	pub round: U256,
 	pub relayer_addresses: Vec<Address>,
 }
 
 impl VSPPhase1Metadata {
-	pub fn new(relayer_addresses: Vec<Address>) -> Self {
-		Self { relayer_addresses }
+	pub fn new(round: U256, relayer_addresses: Vec<Address>) -> Self {
+		Self { round, relayer_addresses }
 	}
 }
 
 impl Display for VSPPhase1Metadata {
 	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-		let result = self
+		let relayers = self
 			.relayer_addresses
 			.iter()
 			.map(|address| address.to_string())
 			.collect::<Vec<String>>();
-		write!(f, "VSPPhase1({:?})", result,)
+		write!(f, "VSPPhase1({:?}, {:?})", self.round, relayers)
 	}
 }
 

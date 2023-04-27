@@ -51,12 +51,20 @@ impl<T: JsonRpcClient> PeriodicWorker for RoundupEmitter<T> {
 			if self.current_round < latest_round {
 				self.current_round = latest_round;
 
+				if !(self.is_selected_relayer().await) {
+					log::info!(
+						target: &self.client.get_chain_name(),
+						"-[{}] 👤 RoundUp detected. However this relayer was not selected in previous round.",
+						sub_display_format(SUB_LOG_TARGET),
+					);
+					continue
+				}
+
 				let new_relayers = self.fetch_validator_list().await;
 				self.request_send_transaction(
-					self.build_transaction(latest_round, new_relayers.clone()).await,
-					VSPPhase1Metadata::new(new_relayers),
-				)
-				.await;
+					self.build_transaction(latest_round, new_relayers.clone()),
+					VSPPhase1Metadata::new(latest_round, new_relayers),
+				);
 			}
 		}
 	}
@@ -98,34 +106,30 @@ impl<T: JsonRpcClient> RoundupEmitter<T> {
 		}
 	}
 
+	/// Check relayer has selected in previous round
+	async fn is_selected_relayer(&self) -> bool {
+		self.relayer_contract
+			.is_previous_selected_relayer(self.current_round - 1, self.client.address(), true)
+			.call()
+			.await
+			.unwrap()
+	}
+
 	/// Fetch new validator list
 	async fn fetch_validator_list(&self) -> Vec<Address> {
 		let mut addresses =
 			self.relayer_contract.selected_relayers(true).call().await.unwrap_or_default();
 		addresses.sort();
-
 		addresses
 	}
 
 	/// Build `VSP phase 1` transaction.
-	async fn build_transaction(
-		&self,
-		round: U256,
-		new_relayers: Vec<Address>,
-	) -> TransactionRequest {
-		let encoded_msg = encode(&[Token::Tuple(vec![
+	fn build_transaction(&self, round: U256, new_relayers: Vec<Address>) -> TransactionRequest {
+		let encoded_msg = encode(&[
 			Token::Uint(round),
-			Token::Array(
-				new_relayers
-					.clone()
-					.into_iter()
-					.map(|address| Token::Address(address))
-					.collect(),
-			),
-		])]);
-		let signature = self.client.wallet.sign_message(&encoded_msg);
-
-		let sigs = Signatures::from(signature);
+			Token::Array(new_relayers.iter().map(|address| Token::Address(*address)).collect()),
+		]);
+		let sigs = Signatures::from(self.client.wallet.sign_message(&encoded_msg));
 		let round_up_submit = RoundUpSubmit { round, new_relayers, sigs };
 
 		TransactionRequest::default()
@@ -134,7 +138,7 @@ impl<T: JsonRpcClient> RoundupEmitter<T> {
 	}
 
 	/// Request send transaction to the target event channel.
-	async fn request_send_transaction(
+	fn request_send_transaction(
 		&self,
 		tx_request: TransactionRequest,
 		metadata: VSPPhase1Metadata,
@@ -146,13 +150,13 @@ impl<T: JsonRpcClient> RoundupEmitter<T> {
 			false,
 		)) {
 			Ok(()) => log::info!(
-				target: format!("{}::VSP-Phase1", &self.client.get_chain_name()).as_str(),
+				target: &self.client.get_chain_name(),
 				"-[{}] 👤 Request VSP phase1 transaction: {}",
 				sub_display_format(SUB_LOG_TARGET),
 				metadata
 			),
 			Err(error) => log::error!(
-				target: format!("{}::VSP-Phase1", &self.client.get_chain_name()).as_str(),
+				target: &self.client.get_chain_name(),
 				"-[{}] ❗️ Failed to request VSP phase1 transaction: {}, Error: {}",
 				sub_display_format(SUB_LOG_TARGET),
 				metadata,
