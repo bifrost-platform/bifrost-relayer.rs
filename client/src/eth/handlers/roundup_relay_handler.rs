@@ -86,7 +86,7 @@ impl<T: JsonRpcClient> Handler for RoundupRelayHandler<T> {
 
 			match self.decode_log(log).await {
 				Ok(serialized_log) => match RoundUpEventStatus::from_u8(serialized_log.status) {
-					RoundUpEventStatus::NextAuthorityRelayed => {
+					RoundUpEventStatus::NextAuthorityCommitted => {
 						let roundup_submit = self
 							.build_roundup_submit(
 								serialized_log.roundup.round,
@@ -95,7 +95,7 @@ impl<T: JsonRpcClient> Handler for RoundupRelayHandler<T> {
 							.await;
 						self.broadcast_roundup(roundup_submit).await;
 					},
-					RoundUpEventStatus::NextAuthorityCommitted => {
+					RoundUpEventStatus::NextAuthorityRelayed => {
 						log::info!(
 							target: &self.client.get_chain_name(),
 							"-[{}] 👤 RoundUp event emitted. However, the majority has not yet been met. ({:?})",
