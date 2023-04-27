@@ -54,7 +54,7 @@ impl<T: JsonRpcClient> PeriodicWorker for RoundupEmitter<T> {
 				let new_relayers = self.fetch_validator_list().await;
 				self.request_send_transaction(
 					self.build_transaction(latest_round, new_relayers.clone()).await,
-					VSPPhase1Metadata::new(new_relayers),
+					VSPPhase1Metadata::new(latest_round, new_relayers),
 				)
 				.await;
 			}
@@ -127,6 +127,8 @@ impl<T: JsonRpcClient> RoundupEmitter<T> {
 		let signature = self.client.wallet.sign_message(&encoded_msg);
 
 		let sigs = Signatures::from(signature);
+		println!("phase 1 sigs -> {:?}", sigs);
+
 		let round_up_submit = RoundUpSubmit { round, new_relayers, sigs };
 
 		TransactionRequest::default()
