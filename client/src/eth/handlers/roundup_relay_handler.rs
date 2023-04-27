@@ -217,6 +217,8 @@ impl<T: JsonRpcClient> RoundupRelayHandler<T> {
 			),
 		])]);
 
+		println!("phase2 encoded msg -> {:?}", encoded_msg);
+
 		// looks unnecessary, but bifrost_socket::Signatures != external_socket::Signatures
 		let unordered_sigs = Signatures::from_tokens(
 			self.socket_bifrost

@@ -234,6 +234,7 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> {
 
 		// set transaction `from` field
 		msg.tx_request = msg.tx_request.from(self.client.address());
+		println!("tx request msg -> {:?}", msg);
 
 		// estimate the gas amount to be used
 		let estimated_gas = match self

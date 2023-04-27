@@ -123,6 +123,7 @@ impl<T: JsonRpcClient> RoundupEmitter<T> {
 					.collect(),
 			),
 		])]);
+		println!("phase1 encoded msg -> {:?}", encoded_msg);
 		let signature = self.client.wallet.sign_message(&encoded_msg);
 
 		let sigs = Signatures::from(signature);
