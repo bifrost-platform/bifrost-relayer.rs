@@ -201,7 +201,7 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> {
 				SUB_LOG_TARGET,
 				msg.metadata,
 				msg.retries_remaining - 1,
-				error.to_string(),
+				error,
 				msg.clone().tx_request.data.unwrap_or_default(),
 			)
 			.as_str(),
