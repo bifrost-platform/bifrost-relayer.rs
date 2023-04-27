@@ -96,11 +96,8 @@ impl<T: JsonRpcClient> PeriodicWorker for RoundupEmitter<T> {
 impl<T: JsonRpcClient> RoundupEmitter<T> {
 	/// Instantiates a new `RoundupEmitter` instance.
 	pub fn new(
-		tx_request_senders: Vec<Arc<TxRequestSender>>,
 		clients: Vec<Arc<EthClient<T>>>,
 		bootstrap_shared_data: Arc<BootstrapSharedData>,
-	) -> Self {
-		let client = clients
 			.iter()
 			.find(|client| client.metadata.is_native)
 			.expect(INVALID_BIFROST_NATIVENESS)
