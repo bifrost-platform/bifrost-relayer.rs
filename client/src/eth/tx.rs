@@ -143,7 +143,7 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> {
 
 	/// Handles the dropped transaction.
 	async fn handle_failed_tx_receipt(&self, msg: EventMessage) {
-		log::error!(
+		log::warn!(
 			target: &self.client.get_chain_name(),
 			"-[{}] ♻️  The requested transaction has been dropped from the mempool: {}, Retries left: {:?}",
 			sub_display_format(SUB_LOG_TARGET),
@@ -159,7 +159,7 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> {
 				msg.retries_remaining - 1,
 			)
 			.as_str(),
-			sentry::Level::Error,
+			sentry::Level::Warning,
 		);
 		self.retry_transaction(msg).await;
 	}
@@ -186,7 +186,7 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> {
 	where
 		E: Error + ?Sized,
 	{
-		log::error!(
+		log::warn!(
 			target: &self.client.get_chain_name(),
 			"-[{}] ♻️  Gas estimation failed: {}, Retries left: {:?}, Error: {}",
 			sub_display_format(SUB_LOG_TARGET),
@@ -205,7 +205,7 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> {
 				msg.clone().tx_request.data.unwrap_or_default(),
 			)
 			.as_str(),
-			sentry::Level::Error,
+			sentry::Level::Warning,
 		);
 		self.retry_transaction(msg).await;
 	}
@@ -214,7 +214,7 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> {
 	/// be re-published to the event channel if the transaction fails to be mined in a block.
 	async fn try_send_transaction(&self, mut msg: EventMessage) {
 		if msg.retries_remaining == 0 {
-			log::error!(
+			log::warn!(
 				target: &self.client.get_chain_name(),
 				"-[{}] ❗️ Exceeded the retry limit to send a transaction: {}",
 				sub_display_format(SUB_LOG_TARGET),
@@ -229,7 +229,7 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> {
 					msg.tx_request.data.unwrap_or_default(),
 				)
 				.as_str(),
-				sentry::Level::Error,
+				sentry::Level::Warning,
 			);
 			return
 		}
