@@ -6,7 +6,7 @@ use async_trait::async_trait;
 use cccp_primitives::{
 	authority_external::AuthorityExternal,
 	cli::RoundupHandlerUtilityConfig,
-	eth::RecoveredSignature,
+	eth::{RecoveredSignature, RoundUpEventStatus},
 	socket_bifrost::{SerializedRoundUp, SocketBifrost, SocketBifrostEvents},
 	socket_external::{RoundUpSubmit, Signatures, SocketExternal},
 	sub_display_format, RoundupHandlerUtilType,
@@ -85,8 +85,8 @@ impl<T: JsonRpcClient> Handler for RoundupRelayHandler<T> {
 			}
 
 			match self.decode_log(log).await {
-				Ok(serialized_log) => match serialized_log.status {
-					10 => {
+				Ok(serialized_log) => match RoundUpEventStatus::from_u8(serialized_log.status) {
+					RoundUpEventStatus::NextAuthorityRelayed => {
 						let roundup_submit = self
 							.build_roundup_submit(
 								serialized_log.roundup.round,
@@ -95,10 +95,10 @@ impl<T: JsonRpcClient> Handler for RoundupRelayHandler<T> {
 							.await;
 						self.broadcast_roundup(roundup_submit).await;
 					},
-					_ => {
+					RoundUpEventStatus::NextAuthorityCommitted => {
 						log::info!(
 							target: &self.client.get_chain_name(),
-							"-[{}] RoundUp event emitted. However, the majority has not yet been met. ({:?})",
+							"-[{}] 👤 RoundUp event emitted. However, the majority has not yet been met. ({:?})",
 							sub_display_format(SUB_LOG_TARGET),
 							receipt.transaction_hash,
 						);

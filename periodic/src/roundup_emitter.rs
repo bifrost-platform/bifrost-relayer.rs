@@ -146,13 +146,13 @@ impl<T: JsonRpcClient> RoundupEmitter<T> {
 			false,
 		)) {
 			Ok(()) => log::info!(
-				target: format!("{}::VSP-Phase1", &self.client.get_chain_name()).as_str(),
+				target: &self.client.get_chain_name(),
 				"-[{}] 👤 Request VSP phase1 transaction: {}",
 				sub_display_format(SUB_LOG_TARGET),
 				metadata
 			),
 			Err(error) => log::error!(
-				target: format!("{}::VSP-Phase1", &self.client.get_chain_name()).as_str(),
+				target: &self.client.get_chain_name(),
 				"-[{}] ❗️ Failed to request VSP phase1 transaction: {}, Error: {}",
 				sub_display_format(SUB_LOG_TARGET),
 				metadata,

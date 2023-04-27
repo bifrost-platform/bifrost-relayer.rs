@@ -196,11 +196,12 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> {
 		);
 		sentry::capture_message(
 			format!(
-				"[{}]-[{}] ♻️  Gas estimation failed: {}, Retries left: {:?}",
+				"[{}]-[{}] ♻️  Gas estimation failed: {}, Retries left: {:?}, Error: {}",
 				&self.client.get_chain_name(),
 				SUB_LOG_TARGET,
 				msg.metadata,
 				msg.retries_remaining - 1,
+				error.to_string()
 			)
 			.as_str(),
 			sentry::Level::Error,
