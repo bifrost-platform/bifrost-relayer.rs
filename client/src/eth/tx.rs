@@ -175,7 +175,7 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> {
 			sub_display_format(SUB_LOG_TARGET),
 			msg.metadata,
 			msg.retries_remaining - 1,
-			error.to_string()
+			error.to_string(),
 		);
 		sentry::capture_error(&error);
 		self.retry_transaction(msg).await;
@@ -196,12 +196,13 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> {
 		);
 		sentry::capture_message(
 			format!(
-				"[{}]-[{}] ♻️  Gas estimation failed: {}, Retries left: {:?}, Error: {}",
+				"[{}]-[{}] ♻️  Gas estimation failed: {}, Retries left: {:?}, Error: {}\nData: {:?}",
 				&self.client.get_chain_name(),
 				SUB_LOG_TARGET,
 				msg.metadata,
 				msg.retries_remaining - 1,
-				error.to_string()
+				error.to_string(),
+				msg.clone().tx_request.data.unwrap_or_default(),
 			)
 			.as_str(),
 			sentry::Level::Error,
@@ -221,10 +222,11 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> {
 			);
 			sentry::capture_message(
 				format!(
-					"[{}]-[{}] ❗️ Exceeded the retry limit to send a transaction: {}",
+					"[{}]-[{}] ❗️ Exceeded the retry limit to send a transaction: {}\nData: {:?}",
 					&self.client.get_chain_name(),
 					SUB_LOG_TARGET,
-					msg.metadata
+					msg.metadata,
+					msg.tx_request.data.unwrap_or_default(),
 				)
 				.as_str(),
 				sentry::Level::Error,
