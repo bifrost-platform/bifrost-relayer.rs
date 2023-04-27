@@ -53,10 +53,9 @@ impl<T: JsonRpcClient> PeriodicWorker for RoundupEmitter<T> {
 
 				let new_relayers = self.fetch_validator_list().await;
 				self.request_send_transaction(
-					self.build_transaction(latest_round, new_relayers.clone()).await,
+					self.build_transaction(latest_round, new_relayers.clone()),
 					VSPPhase1Metadata::new(latest_round, new_relayers),
-				)
-				.await;
+				);
 			}
 		}
 	}
@@ -108,11 +107,7 @@ impl<T: JsonRpcClient> RoundupEmitter<T> {
 	}
 
 	/// Build `VSP phase 1` transaction.
-	async fn build_transaction(
-		&self,
-		round: U256,
-		new_relayers: Vec<Address>,
-	) -> TransactionRequest {
+	fn build_transaction(&self, round: U256, new_relayers: Vec<Address>) -> TransactionRequest {
 		let encoded_msg = encode(&[Token::Tuple(vec![
 			Token::Uint(round),
 			Token::Array(
@@ -126,6 +121,9 @@ impl<T: JsonRpcClient> RoundupEmitter<T> {
 		println!("phase1 encoded msg -> {:?}", encoded_msg);
 		let signature = self.client.wallet.sign_message(&encoded_msg);
 
+		let recovered = self.client.wallet.recover_message(signature, &encoded_msg);
+		println!("phase1 recovered msg -> {:?}", recovered);
+
 		let sigs = Signatures::from(signature);
 		println!("phase 1 sigs -> {:?}", sigs);
 
@@ -137,7 +135,7 @@ impl<T: JsonRpcClient> RoundupEmitter<T> {
 	}
 
 	/// Request send transaction to the target event channel.
-	async fn request_send_transaction(
+	fn request_send_transaction(
 		&self,
 		tx_request: TransactionRequest,
 		metadata: VSPPhase1Metadata,
