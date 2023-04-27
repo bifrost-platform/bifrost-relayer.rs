@@ -6,7 +6,7 @@ use async_trait::async_trait;
 use cccp_primitives::{
 	authority_external::AuthorityExternal,
 	cli::RoundupHandlerUtilityConfig,
-	eth::RecoveredSignature,
+	eth::{RecoveredSignature, RoundUpEventStatus},
 	socket_bifrost::{SerializedRoundUp, SocketBifrost, SocketBifrostEvents},
 	socket_external::{RoundUpSubmit, Signatures, SocketExternal},
 	sub_display_format, RoundupHandlerUtilType,
@@ -85,8 +85,8 @@ impl<T: JsonRpcClient> Handler for RoundupRelayHandler<T> {
 			}
 
 			match self.decode_log(log).await {
-				Ok(serialized_log) => match serialized_log.status {
-					10 => {
+				Ok(serialized_log) => match RoundUpEventStatus::from_u8(serialized_log.status) {
+					RoundUpEventStatus::NextAuthorityCommitted => {
 						let roundup_submit = self
 							.build_roundup_submit(
 								serialized_log.roundup.round,
@@ -95,10 +95,10 @@ impl<T: JsonRpcClient> Handler for RoundupRelayHandler<T> {
 							.await;
 						self.broadcast_roundup(roundup_submit).await;
 					},
-					_ => {
+					RoundUpEventStatus::NextAuthorityRelayed => {
 						log::info!(
 							target: &self.client.get_chain_name(),
-							"-[{}] RoundUp event emitted. However, the majority has not yet been met. ({:?})",
+							"-[{}] 👤 RoundUp event emitted. However, the majority has not yet been met. ({:?})",
 							sub_display_format(SUB_LOG_TARGET),
 							receipt.transaction_hash,
 						);
@@ -205,17 +205,12 @@ impl<T: JsonRpcClient> RoundupRelayHandler<T> {
 		}
 	}
 
+	/// Get the submitted signatures of the updated round.
 	async fn get_sorted_signatures(&self, round: U256, new_relayers: Vec<Address>) -> Signatures {
-		let encoded_msg = encode(&[Token::Tuple(vec![
+		let encoded_msg = encode(&[
 			Token::Uint(round),
-			Token::Array(
-				new_relayers
-					.clone()
-					.into_iter()
-					.map(|address| Token::Address(address))
-					.collect(),
-			),
-		])]);
+			Token::Array(new_relayers.iter().map(|address| Token::Address(*address)).collect()),
+		]);
 
 		// looks unnecessary, but bifrost_socket::Signatures != external_socket::Signatures
 		let unordered_sigs = Signatures::from_tokens(
@@ -227,6 +222,7 @@ impl<T: JsonRpcClient> RoundupRelayHandler<T> {
 				.into_tokens(),
 		)
 		.unwrap_or_default();
+
 		let unordered_concated_v = &unordered_sigs.v.to_string()[2..];
 
 		// TODO: Maybe BTreeMap(key: signer, value: signature) could replace Vec<RecoveredSignature>
@@ -266,7 +262,6 @@ impl<T: JsonRpcClient> RoundupRelayHandler<T> {
 		mut new_relayers: Vec<Address>,
 	) -> RoundUpSubmit {
 		new_relayers.sort();
-
 		let sigs = self.get_sorted_signatures(round, new_relayers.clone()).await;
 
 		RoundUpSubmit { round, new_relayers, sigs }

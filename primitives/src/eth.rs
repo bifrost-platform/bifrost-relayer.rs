@@ -21,6 +21,23 @@ impl Contract {
 }
 
 #[derive(Clone, Copy, Debug)]
+/// The roundup event status.
+pub enum RoundUpEventStatus {
+	NextAuthorityRelayed = 9,
+	NextAuthorityCommitted,
+}
+
+impl RoundUpEventStatus {
+	pub fn from_u8(status: u8) -> Self {
+		match status {
+			9 => RoundUpEventStatus::NextAuthorityRelayed,
+			10 => RoundUpEventStatus::NextAuthorityCommitted,
+			_ => panic!("Unknown roundup event status received: {:?}", status),
+		}
+	}
+}
+
+#[derive(Clone, Copy, Debug)]
 /// The socket event status.
 pub enum SocketEventStatus {
 	// None = 0
