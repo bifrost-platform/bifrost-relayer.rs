@@ -83,7 +83,7 @@ periodic_configs:
       schedule: "0 */5 * * * * *" # Every 5th minute.
       contract: "0x0218371b18340aBD460961bdF3Bd5F01858dAB53"
       price_sources: [Coingecko]
-      symbols: ["ETH", "BFC", "BNB", "MATIC", "USDC", "BIFI"]
+      symbols: ["ETH", "BFC", "BNB", "MATIC", "USDC", "BIFI", "USDT"]
   roundup_emitter:
     schedule: "*/15 * * * * * *" # Every 15th seconds.
     authority_address: "0x0000000000000000000000000000000000000400"
