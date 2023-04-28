@@ -296,6 +296,12 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> {
 		for (_address, tx_map) in mempool_pending_contents.iter() {
 			for (_nonce, transaction) in tx_map.iter() {
 				if transaction.to.unwrap_or_default() == *to && transaction.input == *data {
+					// Trying gas escalating is not duplicate action
+					if transaction.from == tx_request.from.unwrap() &&
+						transaction.nonce == tx_request.nonce.unwrap()
+					{
+						return false
+					}
 					return true
 				}
 			}
