@@ -1,8 +1,6 @@
 use crate::price_source::PriceFetchers;
 use async_trait::async_trait;
-use cccp_client::eth::{
-	EthClient, EventMessage, EventMetadata, EventSender, PriceFeedMetadata, DEFAULT_RETRIES,
-};
+use cccp_client::eth::{EthClient, EventMessage, EventMetadata, EventSender, PriceFeedMetadata};
 use cccp_primitives::{
 	cli::PriceFeederConfig,
 	contracts::socket_bifrost::{get_asset_oids, SocketBifrost},
@@ -125,7 +123,6 @@ impl<T: JsonRpcClient> OraclePriceFeeder<T> {
 		metadata: PriceFeedMetadata,
 	) {
 		match self.event_sender.sender.send(EventMessage::new(
-			DEFAULT_RETRIES,
 			tx_request,
 			EventMetadata::PriceFeed(metadata.clone()),
 			false,

@@ -7,6 +7,12 @@ use tokio::sync::mpsc::UnboundedSender;
 /// The default retries of a single transaction request.
 pub const DEFAULT_RETRIES: u8 = 3;
 
+/// The default retry interval in milliseconds.
+pub const DEFAULT_RETRY_INTERVAL_MS: u64 = 3000;
+
+/// The coefficient that will be multiplied to the retry interval on every new retry.
+pub const RETRY_COEFFICIENT: u64 = 2;
+
 #[derive(Clone, Debug)]
 pub struct BridgeRelayMetadata {
 	/// The bridge direction.
@@ -154,6 +160,8 @@ impl Display for EventMetadata {
 pub struct EventMessage {
 	/// The remaining retries of the transaction request.
 	pub retries_remaining: u8,
+	/// The retry interval in milliseconds.
+	pub retry_interval: u64,
 	/// The raw transaction request.
 	pub tx_request: TransactionRequest,
 	/// Additional data of the transaction request.
@@ -165,12 +173,27 @@ pub struct EventMessage {
 impl EventMessage {
 	/// Instantiates a new `EventMessage` instance.
 	pub fn new(
-		retries_remaining: u8,
 		tx_request: TransactionRequest,
 		metadata: EventMetadata,
 		check_mempool: bool,
 	) -> Self {
-		Self { retries_remaining, tx_request, metadata, check_mempool }
+		Self {
+			retries_remaining: DEFAULT_RETRIES,
+			retry_interval: DEFAULT_RETRY_INTERVAL_MS,
+			tx_request,
+			metadata,
+			check_mempool,
+		}
+	}
+
+	/// Generate a new `EventMessage` to retry.
+	pub fn retry(&mut self) -> Self {
+		// do not multiply the coefficient on the first retry
+		if self.retries_remaining != DEFAULT_RETRIES {
+			self.retry_interval = self.retry_interval.saturating_mul(RETRY_COEFFICIENT);
+		}
+		self.retries_remaining = self.retries_remaining.saturating_sub(1);
+		self.clone()
 	}
 }
 

@@ -21,9 +21,6 @@ type TransactionMiddleware<T> =
 
 const SUB_LOG_TARGET: &str = "transaction-manager";
 
-/// The default retry interval in milliseconds.
-const DEFAULT_RETRY_INTERVAL_MS: u64 = 2000;
-
 /// The essential task that sends asynchronous transactions.
 pub struct TransactionManager<T> {
 	/// The ethereum client for the connected chain.
@@ -86,16 +83,10 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> {
 	}
 
 	/// Sends the transaction request to the event channel to retry transaction execution.
-	async fn retry_transaction(&self, msg: EventMessage) {
-		sleep(Duration::from_millis(DEFAULT_RETRY_INTERVAL_MS)).await;
-		self.sender
-			.send(EventMessage::new(
-				msg.retries_remaining - 1,
-				msg.tx_request,
-				msg.metadata,
-				msg.check_mempool,
-			))
-			.unwrap();
+	async fn retry_transaction(&self, mut msg: EventMessage) {
+		let retry_msg = msg.retry();
+		sleep(Duration::from_millis(retry_msg.retry_interval)).await;
+		self.sender.send(retry_msg).unwrap();
 	}
 
 	/// Set the activation of txpool namespace related actions.

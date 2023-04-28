@@ -1,6 +1,5 @@
 use crate::eth::{
 	BlockMessage, EthClient, EventMessage, EventMetadata, EventSender, Handler, VSPPhase2Metadata,
-	DEFAULT_RETRIES,
 };
 use async_trait::async_trait;
 use cccp_primitives::{
@@ -57,7 +56,7 @@ impl<T: JsonRpcClient> Handler for RoundupRelayHandler<T> {
 
 			log::info!(
 				target: &self.client.get_chain_name(),
-				"-[{}] ✨ Imported #{:?} ({}) with target transactions({:?})",
+				"-[{}] 📦 Imported #{:?} ({}) with target transactions({:?})",
 				sub_display_format(SUB_LOG_TARGET),
 				block_msg.raw_block.number.unwrap(),
 				block_msg.raw_block.hash.unwrap(),
@@ -294,7 +293,6 @@ impl<T: JsonRpcClient> RoundupRelayHandler<T> {
 				let metadata =
 					VSPPhase2Metadata::new(roundup_submit.round, target_chain.event_sender.id);
 				match target_chain.event_sender.sender.send(EventMessage::new(
-					DEFAULT_RETRIES,
 					transaction_request,
 					EventMetadata::VSPPhase2(metadata.clone()),
 					true,
