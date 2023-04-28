@@ -187,13 +187,12 @@ impl EventMessage {
 	}
 
 	/// Generate a new `EventMessage` to retry.
-	pub fn retry(&mut self) -> Self {
+	pub fn retry(&mut self) {
 		// do not multiply the coefficient on the first retry
 		if self.retries_remaining != DEFAULT_RETRIES {
 			self.retry_interval = self.retry_interval.saturating_mul(RETRY_COEFFICIENT);
 		}
 		self.retries_remaining = self.retries_remaining.saturating_sub(1);
-		self.clone()
 	}
 }
 

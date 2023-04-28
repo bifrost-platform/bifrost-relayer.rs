@@ -84,9 +84,9 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> {
 
 	/// Sends the transaction request to the event channel to retry transaction execution.
 	async fn retry_transaction(&self, mut msg: EventMessage) {
-		let retry_msg = msg.retry();
-		sleep(Duration::from_millis(retry_msg.retry_interval)).await;
-		self.sender.send(retry_msg).unwrap();
+		msg.retry();
+		sleep(Duration::from_millis(msg.retry_interval)).await;
+		self.sender.send(msg).unwrap();
 	}
 
 	/// Set the activation of txpool namespace related actions.
