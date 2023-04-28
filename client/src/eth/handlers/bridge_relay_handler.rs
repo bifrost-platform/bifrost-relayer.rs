@@ -49,7 +49,7 @@ pub struct BridgeRelayHandler<T> {
 	/// Signature of the `Socket` Event.
 	pub socket_signature: H256,
 	/// Completion of bootstrapping
-	pub bootstrap_state: Arc<Mutex<BootstrapState>>,
+	pub bootstrap_state: Arc<Mutex<Vec<BootstrapState>>>,
 	/// Completion of bootstrapping count
 	pub bootstrapping_count: Arc<Mutex<u8>>,
 	/// Bootstrap config
@@ -69,7 +69,7 @@ impl<T: JsonRpcClient> BridgeRelayHandler<T> {
 		target_contract: H160,
 		target_socket: H160,
 		socket_contracts: Vec<Contract>,
-		bootstrap_state: Arc<Mutex<BootstrapState>>,
+		bootstrap_state: Arc<Mutex<Vec<BootstrapState>>>,
 		bootstrapping_count: Arc<Mutex<u8>>,
 		bootstrap_config: BootstrapConfig,
 		authority_address: String,
@@ -105,11 +105,23 @@ impl<T: JsonRpcClient> BridgeRelayHandler<T> {
 impl<T: JsonRpcClient> Handler for BridgeRelayHandler<T> {
 	async fn run(&mut self) {
 		loop {
-			if *self.bootstrap_state.lock().await == BootstrapState::BootstrapSocket {
+			if self
+				.bootstrap_state
+				.lock()
+				.await
+				.iter()
+				.all(|s| *s == BootstrapState::BootstrapSocket)
+			{
 				self.bootstrap().await;
 
 				sleep(Duration::from_millis(self.client.config.call_interval)).await;
-			} else if *self.bootstrap_state.lock().await == BootstrapState::NormalStart {
+			} else if self
+				.bootstrap_state
+				.lock()
+				.await
+				.iter()
+				.all(|s| *s == BootstrapState::NormalStart)
+			{
 				let block_msg = self.block_receiver.recv().await.unwrap();
 
 				log::info!(
@@ -589,7 +601,9 @@ impl<T: JsonRpcClient> BridgeRelayHandler<T> {
 
 		// If All thread complete the task, starts the blockManager
 		if *bootstrap_count == (self.socket_contracts.len() * 2) as u8 {
-			*bootstrap_guard = BootstrapState::NormalStart;
+			for state in bootstrap_guard.iter_mut() {
+				*state = BootstrapState::NormalStart;
+			}
 
 			log::info!(
 				target: &self.client.get_chain_name(),

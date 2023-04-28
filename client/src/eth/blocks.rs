@@ -57,7 +57,7 @@ pub struct BlockManager<T> {
 	/// The pending block waiting for some confirmations.
 	pub pending_block: U64,
 	/// State of bootstrapping
-	pub bootstrap_state: Arc<Mutex<BootstrapState>>,
+	pub bootstrap_state: Arc<Mutex<Vec<BootstrapState>>>,
 }
 
 impl<T: JsonRpcClient> BlockManager<T> {
@@ -65,7 +65,7 @@ impl<T: JsonRpcClient> BlockManager<T> {
 	pub fn new(
 		client: Arc<EthClient<T>>,
 		target_contracts: Vec<H160>,
-		bootstrap_state: Arc<Mutex<BootstrapState>>,
+		bootstrap_state: Arc<Mutex<Vec<BootstrapState>>>,
 	) -> Self {
 		let (sender, _receiver) = broadcast::channel(512); // TODO: size?
 
@@ -100,7 +100,13 @@ impl<T: JsonRpcClient> BlockManager<T> {
 		self.initialize().await;
 
 		loop {
-			if *self.bootstrap_state.lock().await == BootstrapState::NormalStart {
+			if self
+				.bootstrap_state
+				.lock()
+				.await
+				.iter()
+				.all(|s| *s == BootstrapState::NormalStart)
+			{
 				let latest_block = self.client.get_latest_block_number().await.unwrap();
 				if self.is_block_confirmed(latest_block) {
 					self.process_pending_block().await;
@@ -172,15 +178,19 @@ impl<T: JsonRpcClient> BlockManager<T> {
 					status.highest_block,
 				);
 			} else {
-				*self.bootstrap_state.lock().await = BootstrapState::BootstrapRoundUp;
+				for state in self.bootstrap_state.lock().await.iter_mut() {
+					if *state == BootstrapState::NodeSyncing {
+						*state = BootstrapState::BootstrapRoundUp;
 
-				log::info!(
-					target: &self.client.get_chain_name(),
-					"-[{}] ✨ Block Syncing completed",
-					sub_display_format(SUB_LOG_TARGET),
-				);
+						log::info!(
+							target: &self.client.get_chain_name(),
+							"-[{}] ✨ Block Syncing completed",
+							sub_display_format(SUB_LOG_TARGET),
+						);
 
-				return
+						return
+					}
+				}
 			}
 
 			sleep(Duration::from_millis(self.client.config.call_interval)).await;

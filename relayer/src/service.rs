@@ -69,7 +69,8 @@ pub fn new_relay_base(config: Configuration) -> Result<RelayBase, ServiceError> 
 	// Wait until each chain of vault/socket contract and bootstrapping is completed
 	let socket_barrier = Arc::new(Barrier::new(config.relayer_config.evm_providers.len() * 2 + 1));
 	let socket_bootstrapping_count = Arc::new(Mutex::new(u8::default()));
-	let bootstrap_state = Arc::new(Mutex::new(bootstrap_state));
+	let bootstrap_state =
+		Arc::new(Mutex::new(vec![bootstrap_state; config.relayer_config.evm_providers.len()]));
 
 	let authority_address = &config
 		.relayer_config
@@ -273,8 +274,10 @@ pub fn new_relay_base(config: Configuration) -> Result<RelayBase, ServiceError> 
 
 							// After All of barrier complete the waiting
 							let mut guard = is_bootstrapped.lock().await;
-							if *guard == BootstrapState::BootstrapRoundUp {
-								*guard = BootstrapState::BootstrapSocket;
+							if guard.iter().all(|s| *s == BootstrapState::BootstrapRoundUp) {
+								for state in guard.iter_mut() {
+									*state = BootstrapState::BootstrapSocket;
+								}
 
 								log::info!(
 									target: LOG_TARGET,

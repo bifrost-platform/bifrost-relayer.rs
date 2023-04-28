@@ -56,7 +56,7 @@ pub struct RoundupRelayHandler<T> {
 	/// Barrier for bootstrapping
 	pub roundup_barrier: Arc<Barrier>,
 	/// Completion of bootstrapping
-	pub bootstrap_state: Arc<Mutex<BootstrapState>>,
+	pub bootstrap_state: Arc<Mutex<Vec<BootstrapState>>>,
 	/// Completion of bootstrapping count
 	pub bootstrapping_count: Arc<Mutex<u8>>,
 	/// Bootstrap config
@@ -69,11 +69,23 @@ pub struct RoundupRelayHandler<T> {
 impl<T: JsonRpcClient> Handler for RoundupRelayHandler<T> {
 	async fn run(&mut self) {
 		loop {
-			if *self.bootstrap_state.lock().await == BootstrapState::BootstrapRoundUp {
+			if self
+				.bootstrap_state
+				.lock()
+				.await
+				.iter()
+				.all(|s| *s == BootstrapState::BootstrapRoundUp)
+			{
 				self.bootstrap().await;
 
 				sleep(Duration::from_millis(self.client.config.call_interval)).await;
-			} else if *self.bootstrap_state.lock().await == BootstrapState::NormalStart {
+			} else if self
+				.bootstrap_state
+				.lock()
+				.await
+				.iter()
+				.all(|s| *s == BootstrapState::NormalStart)
+			{
 				let block_msg = self.block_receiver.recv().await.unwrap();
 
 				log::info!(
@@ -165,7 +177,7 @@ impl<T: JsonRpcClient> RoundupRelayHandler<T> {
 		socket_bifrost: SocketBifrost<Provider<T>>,
 		roundup_util_configs: Vec<RoundupHandlerUtilityConfig>,
 		socket_barrier: Arc<Barrier>,
-		bootstrap_state: Arc<Mutex<BootstrapState>>,
+		bootstrap_state: Arc<Mutex<Vec<BootstrapState>>>,
 		bootstrap_config: BootstrapConfig,
 		authority_address: String,
 	) -> Self {
@@ -398,6 +410,7 @@ impl<T: JsonRpcClient> RoundupRelayHandler<T> {
 		// Wait to lock after checking if it is latest round
 		self.roundup_barrier.clone().wait().await;
 
+		// if all of chain is the latest round already
 		if *self.bootstrapping_count.lock().await == self.roundup_utils.len() as u8 {
 			log::info!(
 				target: &self.client.get_chain_name(),
@@ -405,12 +418,15 @@ impl<T: JsonRpcClient> RoundupRelayHandler<T> {
 				sub_display_format(SUB_LOG_TARGET),
 			);
 
-			*bootstrap_guard = BootstrapState::BootstrapSocket;
+			// set all of state to BootstrapSocket
+			for state in bootstrap_guard.iter_mut() {
+				*state = BootstrapState::BootstrapSocket;
+			}
 		}
 
-		if *bootstrap_guard == BootstrapState::BootstrapRoundUp {
+		if bootstrap_guard.iter().all(|s| *s == BootstrapState::BootstrapRoundUp) {
 			drop(bootstrap_guard);
-			let logs = self.bootstrap_roundup().await;
+			let logs = self.get_roundup_logs().await;
 
 			let mut stream = tokio_stream::iter(logs);
 			while let Some(log) = stream.next().await {
@@ -434,7 +450,7 @@ impl<T: JsonRpcClient> RoundupRelayHandler<T> {
 		});
 	}
 
-	async fn bootstrap_roundup(&self) -> Vec<Log> {
+	async fn get_roundup_logs(&self) -> Vec<Log> {
 		let roundup_signature = self.socket_bifrost.abi().event("RoundUp").unwrap().signature();
 
 		let bootstrap_offset_height = self
