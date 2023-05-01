@@ -186,8 +186,9 @@ impl EventMessage {
 		}
 	}
 
-	/// Generate a new `EventMessage` to retry.
-	pub fn retry(&mut self) {
+	/// Builds a new `EventMessage` to use on transaction retry. This will reduce the remaining
+	/// retry counter and increase the retry interval.
+	pub fn build_retry_event(&mut self) {
 		// do not multiply the coefficient on the first retry
 		if self.retries_remaining != DEFAULT_RETRIES {
 			self.retry_interval = self.retry_interval.saturating_mul(RETRY_COEFFICIENT);

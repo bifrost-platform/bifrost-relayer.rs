@@ -84,7 +84,7 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> {
 
 	/// Sends the transaction request to the event channel to retry transaction execution.
 	async fn retry_transaction(&self, mut msg: EventMessage) {
-		msg.retry();
+		msg.build_retry_event();
 		sleep(Duration::from_millis(msg.retry_interval)).await;
 		self.sender.send(msg).unwrap();
 	}
