@@ -1,6 +1,4 @@
-use cccp_client::eth::{
-	EthClient, EventMessage, EventMetadata, EventSender, VSPPhase1Metadata, DEFAULT_RETRIES,
-};
+use cccp_client::eth::{EthClient, EventMessage, EventMetadata, EventSender, VSPPhase1Metadata};
 use cccp_primitives::{
 	authority_bifrost::AuthorityBifrost,
 	cli::RoundupEmitterConfig,
@@ -144,7 +142,6 @@ impl<T: JsonRpcClient> RoundupEmitter<T> {
 		metadata: VSPPhase1Metadata,
 	) {
 		match self.event_sender.sender.send(EventMessage::new(
-			DEFAULT_RETRIES,
 			tx_request,
 			EventMetadata::VSPPhase1(metadata.clone()),
 			false,

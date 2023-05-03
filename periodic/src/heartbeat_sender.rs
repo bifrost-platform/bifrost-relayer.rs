@@ -1,6 +1,4 @@
-use cccp_client::eth::{
-	EthClient, EventMessage, EventMetadata, EventSender, HeartbeatMetadata, DEFAULT_RETRIES,
-};
+use cccp_client::eth::{EthClient, EventMessage, EventMetadata, EventSender, HeartbeatMetadata};
 use cccp_primitives::{
 	authority_bifrost::AuthorityBifrost, cli::HeartbeatSenderConfig,
 	relayer_bifrost::RelayerManagerBifrost, sub_display_format, PeriodicWorker,
@@ -105,7 +103,6 @@ impl<T: JsonRpcClient> HeartbeatSender<T> {
 		metadata: HeartbeatMetadata,
 	) {
 		match self.event_sender.sender.send(EventMessage::new(
-			DEFAULT_RETRIES,
 			tx_request,
 			EventMetadata::Heartbeat(metadata.clone()),
 			false,
