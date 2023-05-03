@@ -32,6 +32,9 @@ pub const MAX_FEE_COEFFICIENT: u64 = 2;
 /// The coefficient that will be multipled on the max priority fee.
 pub const MAX_PRIORITY_FEE_COEFFICIENT: u64 = 2;
 
+/// The coefficient that will be multiplied to the estimated gas.
+pub const GAS_COEFFICIENT: f64 = 1.5;
+
 #[derive(Clone, Debug)]
 /// The message format passed through the block channel.
 pub struct EventMessage {
