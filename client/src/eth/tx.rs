@@ -6,7 +6,7 @@ use ethers::{
 	},
 	providers::{JsonRpcClient, Middleware, Provider},
 	signers::{LocalWallet, Signer},
-	types::{transaction::eip2718::TypedTransaction, TransactionReceipt, TransactionRequest},
+	types::{transaction::eip2718::TypedTransaction, TransactionReceipt, TransactionRequest, U256},
 };
 use std::{error::Error, sync::Arc};
 use tokio::{
@@ -14,7 +14,7 @@ use tokio::{
 	time::{sleep, Duration},
 };
 
-use super::{EthClient, EventMessage, EventMetadata};
+use super::{EthClient, EventMessage, EventMetadata, GAS_COEFFICIENT};
 
 type TransactionMiddleware<T> =
 	NonceManagerMiddleware<SignerMiddleware<GasEscalatorMiddleware<Arc<Provider<T>>>, LocalWallet>>;
@@ -223,7 +223,9 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> {
 			Ok(estimated_gas) => estimated_gas,
 			Err(error) => return self.handle_failed_gas_estimation(msg, &error).await,
 		};
-		msg.tx_request = msg.tx_request.gas(estimated_gas);
+		let escalated_gas =
+			U256::from((estimated_gas.as_u64() as f64 * GAS_COEFFICIENT).ceil() as u64);
+		msg.tx_request = msg.tx_request.gas(escalated_gas);
 
 		// set the gas price to be used
 		let gas_price = self.middleware.get_gas_price().await.unwrap();
