@@ -20,7 +20,7 @@ use ethers::{
 	},
 };
 use tokio::{
-	sync::{broadcast::Receiver, Mutex},
+	sync::{broadcast::Receiver, Mutex, RwLock},
 	time::sleep,
 };
 use tokio_stream::StreamExt;
@@ -49,7 +49,7 @@ pub struct BridgeRelayHandler<T> {
 	/// Signature of the `Socket` Event.
 	pub socket_signature: H256,
 	/// Completion of bootstrapping
-	pub bootstrap_state: Arc<Mutex<Vec<BootstrapState>>>,
+	pub bootstrap_states: Arc<RwLock<Vec<BootstrapState>>>,
 	/// Completion of bootstrapping count
 	pub bootstrapping_count: Arc<Mutex<u8>>,
 	/// Bootstrap config
@@ -60,43 +60,53 @@ pub struct BridgeRelayHandler<T> {
 	pub all_clients: Vec<Arc<EthClient<T>>>,
 }
 
+pub struct BridgeRelayArgs<T> {
+	pub event_senders: Vec<Arc<EventSender>>,
+	pub block_receiver: Receiver<BlockMessage>,
+	pub client: Arc<EthClient<T>>,
+	pub target_contract: H160,
+	pub target_socket: H160,
+	pub socket_contracts: Vec<Contract>,
+	pub bootstrap_states: Arc<RwLock<Vec<BootstrapState>>>,
+	pub bootstrapping_count: Arc<Mutex<u8>>,
+	pub bootstrap_config: BootstrapConfig,
+	pub authority_address: String,
+	pub all_clients: Vec<Arc<EthClient<T>>>,
+}
+
 impl<T: JsonRpcClient> BridgeRelayHandler<T> {
 	/// Instantiates a new `BridgeRelayHandler` instance.
-	pub fn new(
-		event_senders: Vec<Arc<EventSender>>,
-		block_receiver: Receiver<BlockMessage>,
-		client: Arc<EthClient<T>>,
-		target_contract: H160,
-		target_socket: H160,
-		socket_contracts: Vec<Contract>,
-		bootstrap_state: Arc<Mutex<Vec<BootstrapState>>>,
-		bootstrapping_count: Arc<Mutex<u8>>,
-		bootstrap_config: BootstrapConfig,
-		authority_address: String,
-		all_clients: Vec<Arc<EthClient<T>>>,
-	) -> Self {
-		let target_socket = SocketExternal::new(target_socket, client.provider.clone());
+	pub fn new(bridge_relay_args: BridgeRelayArgs<T>) -> Self {
+		let target_socket = SocketExternal::new(
+			bridge_relay_args.target_socket,
+			bridge_relay_args.client.provider.clone(),
+		);
 		let socket_signature = target_socket.abi().event("Socket").unwrap().signature();
-		let native_client = all_clients.iter().find(|client| client.is_native).unwrap().clone();
+		let native_client = bridge_relay_args
+			.all_clients
+			.iter()
+			.find(|client| client.is_native)
+			.unwrap()
+			.clone();
 
 		let authority_bifrost = AuthorityBifrost::new(
-			H160::from_str(&authority_address).unwrap(),
+			H160::from_str(&bridge_relay_args.authority_address).unwrap(),
 			native_client.get_provider(),
 		);
 
 		Self {
-			event_senders,
-			block_receiver,
-			client,
-			target_contract,
+			event_senders: bridge_relay_args.event_senders,
+			block_receiver: bridge_relay_args.block_receiver,
+			client: bridge_relay_args.client,
+			target_contract: bridge_relay_args.target_contract,
 			target_socket,
-			socket_contracts,
+			socket_contracts: bridge_relay_args.socket_contracts,
 			socket_signature,
-			bootstrap_state,
-			bootstrapping_count,
-			bootstrap_config,
+			bootstrap_states: bridge_relay_args.bootstrap_states,
+			bootstrapping_count: bridge_relay_args.bootstrapping_count,
+			bootstrap_config: bridge_relay_args.bootstrap_config,
 			authority_bifrost,
-			all_clients,
+			all_clients: bridge_relay_args.all_clients,
 		}
 	}
 }
@@ -106,8 +116,8 @@ impl<T: JsonRpcClient> Handler for BridgeRelayHandler<T> {
 	async fn run(&mut self) {
 		loop {
 			if self
-				.bootstrap_state
-				.lock()
+				.bootstrap_states
+				.read()
 				.await
 				.iter()
 				.all(|s| *s == BootstrapState::BootstrapSocket)
@@ -116,8 +126,8 @@ impl<T: JsonRpcClient> Handler for BridgeRelayHandler<T> {
 
 				sleep(Duration::from_millis(self.client.config.call_interval)).await;
 			} else if self
-				.bootstrap_state
-				.lock()
+				.bootstrap_states
+				.read()
 				.await
 				.iter()
 				.all(|s| *s == BootstrapState::NormalStart)
@@ -580,7 +590,6 @@ impl<T: JsonRpcClient> BridgeRelayHandler<T> {
 
 	/// Get a receipt from each log and add it to the processing routine
 	async fn bootstrap(&self) {
-		let mut bootstrap_guard = self.bootstrap_state.lock().await;
 		let logs = self.bootstrap_socket().await;
 
 		let mut stream = tokio_stream::iter(logs);
@@ -601,6 +610,8 @@ impl<T: JsonRpcClient> BridgeRelayHandler<T> {
 
 		// If All thread complete the task, starts the blockManager
 		if *bootstrap_count == (self.socket_contracts.len() * 2) as u8 {
+			let mut bootstrap_guard = self.bootstrap_states.write().await;
+
 			for state in bootstrap_guard.iter_mut() {
 				*state = BootstrapState::NormalStart;
 			}

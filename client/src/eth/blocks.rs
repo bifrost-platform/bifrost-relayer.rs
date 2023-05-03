@@ -7,7 +7,7 @@ use std::sync::Arc;
 use tokio::{
 	sync::{
 		broadcast::{self, Receiver, Sender},
-		Mutex,
+		RwLock,
 	},
 	time::{sleep, Duration},
 };
@@ -57,7 +57,7 @@ pub struct BlockManager<T> {
 	/// The pending block waiting for some confirmations.
 	pub pending_block: U64,
 	/// State of bootstrapping
-	pub bootstrap_state: Arc<Mutex<Vec<BootstrapState>>>,
+	pub bootstrap_states: Arc<RwLock<Vec<BootstrapState>>>,
 }
 
 impl<T: JsonRpcClient> BlockManager<T> {
@@ -65,11 +65,11 @@ impl<T: JsonRpcClient> BlockManager<T> {
 	pub fn new(
 		client: Arc<EthClient<T>>,
 		target_contracts: Vec<H160>,
-		bootstrap_state: Arc<Mutex<Vec<BootstrapState>>>,
+		bootstrap_states: Arc<RwLock<Vec<BootstrapState>>>,
 	) -> Self {
 		let (sender, _receiver) = broadcast::channel(512); // TODO: size?
 
-		Self { client, sender, target_contracts, pending_block: U64::default(), bootstrap_state }
+		Self { client, sender, target_contracts, pending_block: U64::default(), bootstrap_states }
 	}
 
 	/// Initialize block manager.
@@ -101,8 +101,8 @@ impl<T: JsonRpcClient> BlockManager<T> {
 
 		loop {
 			if self
-				.bootstrap_state
-				.lock()
+				.bootstrap_states
+				.read()
 				.await
 				.iter()
 				.all(|s| *s == BootstrapState::NormalStart)
@@ -178,16 +178,18 @@ impl<T: JsonRpcClient> BlockManager<T> {
 					status.highest_block,
 				);
 			} else {
-				for state in self.bootstrap_state.lock().await.iter_mut() {
+				for state in self.bootstrap_states.write().await.iter_mut() {
+					log::info!(
+						target: &self.client.get_chain_name(),
+						"-[{}] ✨ Block Syncing completed",
+						sub_display_format(SUB_LOG_TARGET),
+					);
+
 					if *state == BootstrapState::NodeSyncing {
 						*state = BootstrapState::BootstrapRoundUp;
 
-						log::info!(
-							target: &self.client.get_chain_name(),
-							"-[{}] ✨ Block Syncing completed",
-							sub_display_format(SUB_LOG_TARGET),
-						);
-
+						return
+					} else if *state == BootstrapState::NormalStart {
 						return
 					}
 				}

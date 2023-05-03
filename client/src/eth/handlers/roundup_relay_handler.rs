@@ -20,7 +20,7 @@ use ethers::{
 };
 use std::{str::FromStr, sync::Arc, time::Duration};
 use tokio::{
-	sync::{broadcast::Receiver, Barrier, Mutex},
+	sync::{broadcast::Receiver, Barrier, Mutex, RwLock},
 	time::sleep,
 };
 use tokio_stream::StreamExt;
@@ -56,7 +56,7 @@ pub struct RoundupRelayHandler<T> {
 	/// Barrier for bootstrapping
 	pub roundup_barrier: Arc<Barrier>,
 	/// Completion of bootstrapping
-	pub bootstrap_state: Arc<Mutex<Vec<BootstrapState>>>,
+	pub bootstrap_states: Arc<RwLock<Vec<BootstrapState>>>,
 	/// Completion of bootstrapping count
 	pub bootstrapping_count: Arc<Mutex<u8>>,
 	/// Bootstrap config
@@ -70,8 +70,8 @@ impl<T: JsonRpcClient> Handler for RoundupRelayHandler<T> {
 	async fn run(&mut self) {
 		loop {
 			if self
-				.bootstrap_state
-				.lock()
+				.bootstrap_states
+				.read()
 				.await
 				.iter()
 				.all(|s| *s == BootstrapState::BootstrapRoundUp)
@@ -80,8 +80,8 @@ impl<T: JsonRpcClient> Handler for RoundupRelayHandler<T> {
 
 				sleep(Duration::from_millis(self.client.config.call_interval)).await;
 			} else if self
-				.bootstrap_state
-				.lock()
+				.bootstrap_states
+				.read()
 				.await
 				.iter()
 				.all(|s| *s == BootstrapState::NormalStart)
@@ -177,7 +177,7 @@ impl<T: JsonRpcClient> RoundupRelayHandler<T> {
 		socket_bifrost: SocketBifrost<Provider<T>>,
 		roundup_util_configs: Vec<RoundupHandlerUtilityConfig>,
 		socket_barrier: Arc<Barrier>,
-		bootstrap_state: Arc<Mutex<Vec<BootstrapState>>>,
+		bootstrap_states: Arc<RwLock<Vec<BootstrapState>>>,
 		bootstrap_config: BootstrapConfig,
 		authority_address: String,
 	) -> Self {
@@ -255,7 +255,7 @@ impl<T: JsonRpcClient> RoundupRelayHandler<T> {
 			roundup_signature,
 			socket_barrier,
 			roundup_barrier,
-			bootstrap_state,
+			bootstrap_states,
 			bootstrapping_count,
 			bootstrap_config,
 			authority_bifrost,
@@ -403,7 +403,7 @@ impl<T: JsonRpcClient> RoundupRelayHandler<T> {
 	}
 
 	async fn bootstrap(&self) {
-		let mut bootstrap_guard = self.bootstrap_state.lock().await;
+		let mut bootstrap_guard = self.bootstrap_states.write().await;
 		// Checking if the current round is the latest round
 		self.wait_if_latest_round().await;
 
