@@ -18,8 +18,7 @@ use tokio::sync::broadcast::Receiver;
 use tokio_stream::StreamExt;
 
 use crate::eth::{
-	BlockMessage, BridgeRelayMetadata, EthClient, EventMessage, EventMetadata, EventSender,
-	Handler, DEFAULT_RETRIES,
+	BlockMessage, BridgeRelayMetadata, EthClient, EventMessage, EventMetadata, EventSender, Handler,
 };
 
 const SUB_LOG_TARGET: &str = "bridge-handler";
@@ -74,7 +73,7 @@ impl<T: JsonRpcClient> Handler for BridgeRelayHandler<T> {
 
 			log::info!(
 				target: &self.client.get_chain_name(),
-				"-[{}] ✨ Imported #{:?} ({}) with target transactions({:?})",
+				"-[{}] 📦 Imported #{:?} ({}) with target transactions({:?})",
 				sub_display_format(SUB_LOG_TARGET),
 				block_msg.raw_block.number.unwrap(),
 				block_msg.raw_block.hash.unwrap(),
@@ -481,7 +480,6 @@ impl<T: JsonRpcClient> BridgeRelayHandler<T> {
 			self.event_senders.iter().find(|event_sender| event_sender.id == chain_id)
 		{
 			match event_sender.sender.send(EventMessage::new(
-				DEFAULT_RETRIES,
 				tx_request,
 				EventMetadata::BridgeRelay(metadata.clone()),
 				true,

@@ -21,9 +21,6 @@ type TransactionMiddleware<T> =
 
 const SUB_LOG_TARGET: &str = "transaction-manager";
 
-/// The default retry interval in milliseconds.
-const DEFAULT_RETRY_INTERVAL_MS: u64 = 2000;
-
 /// The essential task that sends asynchronous transactions.
 pub struct TransactionManager<T> {
 	/// The ethereum client for the connected chain.
@@ -86,16 +83,10 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> {
 	}
 
 	/// Sends the transaction request to the event channel to retry transaction execution.
-	async fn retry_transaction(&self, msg: EventMessage) {
-		sleep(Duration::from_millis(DEFAULT_RETRY_INTERVAL_MS)).await;
-		self.sender
-			.send(EventMessage::new(
-				msg.retries_remaining - 1,
-				msg.tx_request,
-				msg.metadata,
-				msg.check_mempool,
-			))
-			.unwrap();
+	async fn retry_transaction(&self, mut msg: EventMessage) {
+		msg.build_retry_event();
+		sleep(Duration::from_millis(msg.retry_interval)).await;
+		self.sender.send(msg).unwrap();
 	}
 
 	/// Set the activation of txpool namespace related actions.
@@ -118,7 +109,7 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> {
 		if status.is_zero() {
 			log::warn!(
 				target: &self.client.get_chain_name(),
-				"-[{}] ⚠️  Warning! Error encountered during contract execution [execution reverted]: {}, {:?}-{:?}-{:?}",
+				"-[{}] ⚠️  Warning! Error encountered during contract execution [execution reverted]. A prior transaction might have been already submitted: {}, {:?}-{:?}-{:?}",
 				sub_display_format(SUB_LOG_TARGET),
 				metadata,
 				receipt.block_number.unwrap(),
@@ -127,7 +118,7 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> {
 			);
 			sentry::capture_message(
 				format!(
-					"[{}]-[{}] ⚠️  Warning! Error encountered during contract execution [execution reverted]: {}, {:?}-{:?}-{:?}",
+					"[{}]-[{}] ⚠️  Warning! Error encountered during contract execution [execution reverted]. A prior transaction might have been already submitted: {}, {:?}-{:?}-{:?}",
 					&self.client.get_chain_name(),
 					SUB_LOG_TARGET,
 					metadata,
@@ -141,18 +132,18 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> {
 		}
 	}
 
-	/// Handles the dropped transaction.
+	/// Handles the failed transaction receipt generation.
 	async fn handle_failed_tx_receipt(&self, msg: EventMessage) {
 		log::warn!(
 			target: &self.client.get_chain_name(),
-			"-[{}] ♻️  The requested transaction has been dropped from the mempool: {}, Retries left: {:?}",
+			"-[{}] ♻️  The requested transaction failed to generate a receipt: {}, Retries left: {:?}",
 			sub_display_format(SUB_LOG_TARGET),
 			msg.metadata,
 			msg.retries_remaining - 1,
 		);
 		sentry::capture_message(
 			format!(
-				"[{}]-[{}] ♻️  The requested transaction has been dropped from the mempool: {}, Retries left: {:?}",
+				"[{}]-[{}] ♻️  The requested transaction failed to generate a receipt: {}, Retries left: {:?}",
 				&self.client.get_chain_name(),
 				SUB_LOG_TARGET,
 				msg.metadata,
@@ -186,26 +177,13 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> {
 	where
 		E: Error + ?Sized,
 	{
-		log::warn!(
+		log::debug!(
 			target: &self.client.get_chain_name(),
-			"-[{}] ♻️  Gas estimation failed: {}, Retries left: {:?}, Error: {}",
+			"-[{}] ⚠️  Warning! Error encountered during gas estimation: {}, Retries left: {:?}, Error: {}",
 			sub_display_format(SUB_LOG_TARGET),
 			msg.metadata,
 			msg.retries_remaining - 1,
 			error.to_string()
-		);
-		sentry::capture_message(
-			format!(
-				"[{}]-[{}] ♻️  Gas estimation failed: {}, Retries left: {:?}, Error: {}\nData: {:?}",
-				&self.client.get_chain_name(),
-				SUB_LOG_TARGET,
-				msg.metadata,
-				msg.retries_remaining - 1,
-				error,
-				msg.clone().tx_request.data.unwrap_or_default(),
-			)
-			.as_str(),
-			sentry::Level::Warning,
 		);
 		self.retry_transaction(msg).await;
 	}
@@ -216,17 +194,16 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> {
 		if msg.retries_remaining == 0 {
 			log::warn!(
 				target: &self.client.get_chain_name(),
-				"-[{}] ❗️ Exceeded the retry limit to send a transaction: {}",
+				"-[{}] ⚠️  Warning! Exceeded the transaction retry limit. A prior transaction might have been already submitted: {}",
 				sub_display_format(SUB_LOG_TARGET),
 				msg.metadata
 			);
 			sentry::capture_message(
 				format!(
-					"[{}]-[{}] ❗️ Exceeded the retry limit to send a transaction: {}\nData: {:?}",
+					"[{}]-[{}] ⚠️  Warning! Exceeded the transaction retry limit. A prior transaction might have been already submitted: {}",
 					&self.client.get_chain_name(),
 					SUB_LOG_TARGET,
 					msg.metadata,
-					msg.tx_request.data.unwrap_or_default(),
 				)
 				.as_str(),
 				sentry::Level::Warning,
