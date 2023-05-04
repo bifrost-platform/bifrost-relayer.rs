@@ -24,7 +24,7 @@ pub const DEFAULT_RETRY_INTERVAL_MS: u64 = 3000;
 pub const RETRY_COEFFICIENT: u64 = 2;
 
 /// The coefficient that will be multiplied to the estimated gas.
-pub const GAS_COEFFICIENT: f64 = 1.5;
+pub const GAS_COEFFICIENT: f64 = 2.0;
 
 #[derive(Clone, Debug)]
 /// The message format passed through the block channel.
