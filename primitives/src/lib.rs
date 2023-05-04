@@ -1,5 +1,6 @@
 pub mod cli;
 pub mod contracts;
+pub mod errors;
 pub mod eth;
 pub mod periodic;
 

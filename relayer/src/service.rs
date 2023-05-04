@@ -5,6 +5,10 @@ use cccp_client::eth::{
 use cccp_periodic::OraclePriceFeeder;
 use cccp_primitives::{
 	cli::{Configuration, HandlerConfig, HandlerType},
+	errors::{
+		INVALID_BIFROST_NATIVENESS, INVALID_CHAIN_ID, INVALID_CONTRACT_ADDRESS,
+		INVALID_PRIVATE_KEY, INVALID_PROVIDER_URL,
+	},
 	eth::{BootstrapState, BridgeDirection, Contract, EthClientConfiguration},
 	periodic::PeriodicWorker,
 	sub_display_format,
@@ -30,7 +34,7 @@ fn get_target_contracts_by_chain_id(
 	let mut target_contracts = vec![];
 	for handler_config in handler_configs {
 		for target in &handler_config.watch_list {
-			let target_contract = H160::from_str(&target.contract).unwrap();
+			let target_contract = H160::from_str(&target.contract).expect(INVALID_CONTRACT_ADDRESS);
 			if target.chain_id == chain_id && !target_contracts.contains(&target_contract) {
 				target_contracts.push(target_contract);
 			}
@@ -47,7 +51,7 @@ fn build_socket_contracts(handler_configs: &Vec<HandlerConfig>) -> Vec<Contract>
 			for socket in &handler_config.watch_list {
 				contracts.push(Contract::new(
 					socket.chain_id,
-					H160::from_str(&socket.contract).unwrap(),
+					H160::from_str(&socket.contract).expect(INVALID_CONTRACT_ADDRESS),
 				));
 			}
 		}
@@ -101,12 +105,14 @@ pub fn new_relay_base(config: Configuration) -> Result<RelayBase, ServiceError> 
 				config.relayer_config.private_key.as_str(),
 				evm_provider.id,
 			)
-			.expect("Failed to initialize wallet manager");
+			.expect(INVALID_PRIVATE_KEY);
 
 			let is_native = evm_provider.is_native.unwrap_or(false);
 			let client = Arc::new(EthClient::new(
 				wallet,
-				Arc::new(Provider::<Http>::try_from(evm_provider.provider).unwrap()),
+				Arc::new(
+					Provider::<Http>::try_from(evm_provider.provider).expect(INVALID_PROVIDER_URL),
+				),
 				EthClientConfiguration::new(
 					evm_provider.name,
 					evm_provider.id,
@@ -164,7 +170,7 @@ pub fn new_relay_base(config: Configuration) -> Result<RelayBase, ServiceError> 
 	// Spawn transaction managers' tasks
 	tx_managers.into_iter().for_each(|(mut tx_manager, chain_name)| {
 		task_manager.spawn_essential_handle().spawn(
-			Box::leak(format!("{}-tx-manager", chain_name).into_boxed_str()),
+			Box::leak(format!("{}-transaction-manager", chain_name).into_boxed_str()),
 			Some("transaction-managers"),
 			async move { tx_manager.run().await },
 		)
@@ -173,12 +179,16 @@ pub fn new_relay_base(config: Configuration) -> Result<RelayBase, ServiceError> 
 	// initialize heartbeat sender & spawn task
 	let mut heartbeat_sender = HeartbeatSender::new(
 		config.relayer_config.periodic_configs.clone().unwrap().heartbeat,
-		clients.iter().find(|client| client.is_native).unwrap().clone(),
+		clients
+			.iter()
+			.find(|client| client.is_native)
+			.expect(INVALID_BIFROST_NATIVENESS)
+			.clone(),
 		event_channels.clone(),
 	);
 	task_manager
 		.spawn_essential_handle()
-		.spawn("Heartbeat", Some("heartbeat"), async move { heartbeat_sender.run().await });
+		.spawn("heartbeat", Some("heartbeat"), async move { heartbeat_sender.run().await });
 
 	// initialize oracle price feeder & spawn tasks
 	config
@@ -193,19 +203,19 @@ pub fn new_relay_base(config: Configuration) -> Result<RelayBase, ServiceError> 
 			let client = clients
 				.iter()
 				.find(|client| client.get_chain_id() == price_feeder_config.chain_id)
-				.unwrap()
+				.expect(INVALID_CHAIN_ID)
 				.clone();
 			let channel = event_channels
 				.iter()
 				.find(|channel| channel.id == price_feeder_config.chain_id)
-				.expect("Invalid chain_id on oracle_price_feeder config")
+				.expect(INVALID_CHAIN_ID)
 				.clone();
 
 			let mut oracle_price_feeder =
 				OraclePriceFeeder::new(channel, price_feeder_config.clone(), client.clone());
 			task_manager.spawn_essential_handle().spawn(
 				Box::leak(
-					format!("{}-Oracle-price-feeder", client.get_chain_name()).into_boxed_str(),
+					format!("{}-oracle-price-feeder", client.get_chain_name()).into_boxed_str(),
 				),
 				Some("periodic"),
 				async move { oracle_price_feeder.run().await },
@@ -222,12 +232,7 @@ pub fn new_relay_base(config: Configuration) -> Result<RelayBase, ServiceError> 
 					let block_manager = block_managers
 						.iter()
 						.find(|manager| manager.client.get_chain_id() == target.chain_id)
-						.unwrap_or_else(|| {
-							panic!(
-								"Unknown chain id ({:?}) required on initializing socket handler.",
-								target.chain_id
-							)
-						});
+						.expect(INVALID_CHAIN_ID);
 					// initialize a new block receiver
 					let block_receiver = block_manager.sender.subscribe();
 
@@ -235,23 +240,19 @@ pub fn new_relay_base(config: Configuration) -> Result<RelayBase, ServiceError> 
 						.iter()
 						.find(|client| client.get_chain_id() == target.chain_id)
 						.cloned()
-						.unwrap_or_else(|| {
-							panic!(
-								"Unknown chain id ({:?}) required on initializing socket handler.",
-								target.chain_id
-							)
-						});
+						.expect(INVALID_CHAIN_ID);
 
 					let target_socket = socket_contracts
 						.iter()
 						.find(|socket| socket.chain_id == client.get_chain_id())
-						.unwrap();
+						.expect(INVALID_CHAIN_ID);
 
 					let bridge_relay_args = BridgeRelayArgs {
 						event_senders: event_channels.clone(),
 						block_receiver,
 						client: client.clone(),
-						target_contract: H160::from_str(&target.contract).unwrap(),
+						target_contract: H160::from_str(&target.contract)
+							.expect(INVALID_CONTRACT_ADDRESS),
 						target_socket: target_socket.address,
 						socket_contracts: socket_contracts.clone(),
 						bootstrap_states: bootstrap_states.clone(),
@@ -303,23 +304,13 @@ pub fn new_relay_base(config: Configuration) -> Result<RelayBase, ServiceError> 
 					.iter()
 					.find(|client| client.get_chain_id() == handler_config.watch_list[0].chain_id)
 					.cloned()
-					.unwrap_or_else(|| {
-						panic!(
-							"Unknown chain id ({:?}) required on initializing roundup handler.",
-							handler_config.watch_list[0].chain_id
-						)
-					});
+					.expect(INVALID_CHAIN_ID);
 				let block_receiver = block_managers
 					.iter()
 					.find(|manager| {
 						manager.client.get_chain_id() == handler_config.watch_list[0].chain_id
 					})
-					.unwrap_or_else(|| {
-						panic!(
-							"Unknown chain id ({:?}) required on initializing socket handler.",
-							handler_config.watch_list[0].chain_id
-						)
-					})
+					.expect(INVALID_CHAIN_ID)
 					.sender
 					.subscribe();
 
@@ -328,7 +319,8 @@ pub fn new_relay_base(config: Configuration) -> Result<RelayBase, ServiceError> 
 
 				// Initialize SocketBifrost instance
 				let socket_bifrost = SocketBifrost::new(
-					H160::from_str(&handler_config.watch_list[0].contract).unwrap(),
+					H160::from_str(&handler_config.watch_list[0].contract)
+						.expect(INVALID_CONTRACT_ADDRESS),
 					client.get_provider(),
 				);
 
@@ -353,7 +345,7 @@ pub fn new_relay_base(config: Configuration) -> Result<RelayBase, ServiceError> 
 				);
 
 				task_manager.spawn_essential_handle().spawn(
-					"Roundup-handler",
+					"roundup-handler",
 					Some("handlers"),
 					async move { roundup_relay_handler.run().await },
 				);
@@ -363,13 +355,21 @@ pub fn new_relay_base(config: Configuration) -> Result<RelayBase, ServiceError> 
 
 	// initialize roundup feeder & spawn tasks
 	let mut roundup_emitter = RoundupEmitter::new(
-		event_channels.iter().find(|sender| sender.is_native).unwrap().clone(),
-		clients.iter().find(|client| client.is_native).unwrap().clone(),
+		event_channels
+			.iter()
+			.find(|sender| sender.is_native)
+			.expect(INVALID_BIFROST_NATIVENESS)
+			.clone(),
+		clients
+			.iter()
+			.find(|client| client.is_native)
+			.expect(INVALID_BIFROST_NATIVENESS)
+			.clone(),
 		config.relayer_config.periodic_configs.unwrap().roundup_emitter,
 	);
 
 	task_manager.spawn_essential_handle().spawn(
-		"Roundup-Emitter",
+		"roundup-Emitter",
 		Some("roundup-emitter"),
 		async move { roundup_emitter.run().await },
 	);

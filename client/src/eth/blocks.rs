@@ -82,8 +82,8 @@ impl<T: JsonRpcClient> BlockManager<T> {
 		);
 
 		// initialize pending block to the latest block
-		self.pending_block = self.client.get_latest_block_number().await.unwrap();
-		if let Some(block) = self.client.get_block(self.pending_block.into()).await.unwrap() {
+		self.pending_block = self.client.get_latest_block_number().await;
+		if let Some(block) = self.client.get_block(self.pending_block.into()).await {
 			log::info!(
 				target: &self.client.get_chain_name(),
 				"-[{}] 💤 Idle, best: #{:?} ({})",
@@ -120,12 +120,12 @@ impl<T: JsonRpcClient> BlockManager<T> {
 
 	/// Process the pending block and verifies if any action occurred from the target contracts.
 	async fn process_pending_block(&self) {
-		if let Some(block) = self.client.get_block(self.pending_block.into()).await.unwrap() {
+		if let Some(block) = self.client.get_block(self.pending_block.into()).await {
 			let mut target_receipts = vec![];
 			let mut stream = tokio_stream::iter(block.clone().transactions);
 
 			while let Some(tx) = stream.next().await {
-				if let Some(receipt) = self.client.get_transaction_receipt(tx).await.unwrap() {
+				if let Some(receipt) = self.client.get_transaction_receipt(tx).await {
 					if self.is_in_target_contracts(&receipt) {
 						target_receipts.push(receipt);
 					}

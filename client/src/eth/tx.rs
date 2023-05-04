@@ -273,7 +273,7 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> {
 		let data = tx_request.data.as_ref().unwrap();
 		let to = tx_request.to.as_ref().unwrap().as_address().unwrap();
 
-		let mempool_pending_contents = self.client.provider.txpool_content().await.unwrap().pending;
+		let mempool_pending_contents = self.client.get_txpool_content().await.pending;
 		for (_address, tx_map) in mempool_pending_contents.iter() {
 			for (_nonce, transaction) in tx_map.iter() {
 				if transaction.to.unwrap_or_default() == *to && transaction.input == *data {

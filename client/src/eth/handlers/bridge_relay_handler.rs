@@ -381,7 +381,7 @@ impl<T: JsonRpcClient> BridgeRelayHandler<T> {
 	async fn process_reverted_transaction(&self, receipt: TransactionReceipt) {
 		// only handles owned transactions
 		if self.is_owned_relay_transaction(&receipt) {
-			if let Some(tx) = self.client.get_transaction(receipt.transaction_hash).await.unwrap() {
+			if let Some(tx) = self.client.get_transaction(receipt.transaction_hash).await {
 				// the reverted transaction must be execution of `poll()`
 				let selector = &tx.input[0..4];
 				let poll_selector =

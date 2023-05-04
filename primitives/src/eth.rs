@@ -1,9 +1,4 @@
-use ethers::{
-	providers::ProviderError,
-	types::{Address, Signature, H160, U64},
-};
-
-pub type EthResult<T = ()> = Result<T, ProviderError>;
+use ethers::types::{Address, Signature, H160, U64};
 
 #[derive(Clone, Copy, Debug)]
 /// Contract abstraction with an additional chain ID field.
