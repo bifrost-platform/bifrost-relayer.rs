@@ -1,7 +1,7 @@
-use std::fmt::{Display, Formatter};
-
 use cccp_primitives::{eth::SocketEventStatus, PriceResponse};
+
 use ethers::types::{Address, TransactionRequest, U256};
+use std::fmt::{Display, Formatter};
 use tokio::sync::mpsc::UnboundedSender;
 
 /// The default retries of a single json rpc request.
@@ -38,13 +38,19 @@ pub struct BridgeRelayMetadata {
 
 impl BridgeRelayMetadata {
 	pub fn new(
-		direction: String,
+		is_inbound: bool,
 		status: SocketEventStatus,
 		sequence: u128,
 		src_chain_id: u32,
 		dst_chain_id: u32,
 	) -> Self {
-		Self { direction, status, sequence, src_chain_id, dst_chain_id }
+		Self {
+			direction: if is_inbound { "Inbound".to_string() } else { "Outbound".to_string() },
+			status,
+			sequence,
+			src_chain_id,
+			dst_chain_id,
+		}
 	}
 }
 

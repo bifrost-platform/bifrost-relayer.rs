@@ -173,11 +173,7 @@ impl<T: JsonRpcClient> Handler for BridgeRelayHandler<T> {
 								let is_inbound = self.is_inbound_sequence(dst_chain_id);
 
 								let metadata = BridgeRelayMetadata::new(
-									if is_inbound {
-										"Inbound".to_string()
-									} else {
-										"Outbound".to_string()
-									},
+									is_inbound,
 									status,
 									socket.msg.req_id.sequence,
 									src_chain_id,
@@ -410,11 +406,7 @@ impl<T: JsonRpcClient> BridgeRelayHandler<T> {
 							}
 
 							let metadata = BridgeRelayMetadata::new(
-								if is_inbound {
-									"Inbound".to_string()
-								} else {
-									"Outbound".to_string()
-								},
+								is_inbound,
 								SocketEventStatus::from_u8(poll.msg.status),
 								poll.msg.req_id.sequence,
 								src_chain_id,

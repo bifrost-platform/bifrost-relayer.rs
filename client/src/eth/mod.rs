@@ -84,6 +84,7 @@ impl<T: JsonRpcClient> EthClient<T> {
 			match self.provider.request(method, params.clone()).await {
 				Ok(result) => return result,
 				Err(error) => {
+					// retry on error
 					retries_remaining = retries_remaining.saturating_sub(1);
 					error_msg = error.to_string();
 				},

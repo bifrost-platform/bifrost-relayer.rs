@@ -2,7 +2,9 @@ use cccp_client::eth::{
 	BlockManager, BridgeRelayArgs, BridgeRelayHandler, EthClient, EventSender, Handler,
 	RoundupRelayHandler, TransactionManager, WalletManager,
 };
-use cccp_periodic::OraclePriceFeeder;
+use cccp_periodic::{
+	heartbeat_sender::HeartbeatSender, roundup_emitter::RoundupEmitter, OraclePriceFeeder,
+};
 use cccp_primitives::{
 	cli::{Configuration, HandlerConfig, HandlerType},
 	errors::{
@@ -11,11 +13,10 @@ use cccp_primitives::{
 	},
 	eth::{BootstrapState, BridgeDirection, Contract, EthClientConfiguration},
 	periodic::PeriodicWorker,
+	socket_bifrost::SocketBifrost,
 	sub_display_format,
 };
 
-use cccp_periodic::{heartbeat_sender::HeartbeatSender, roundup_emitter::RoundupEmitter};
-use cccp_primitives::socket_bifrost::SocketBifrost;
 use ethers::{
 	providers::{Http, Provider},
 	types::H160,
@@ -369,7 +370,7 @@ pub fn new_relay_base(config: Configuration) -> Result<RelayBase, ServiceError> 
 	);
 
 	task_manager.spawn_essential_handle().spawn(
-		"roundup-Emitter",
+		"roundup-emitter",
 		Some("roundup-emitter"),
 		async move { roundup_emitter.run().await },
 	);

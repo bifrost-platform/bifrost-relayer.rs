@@ -43,6 +43,7 @@ impl WalletManager {
 		Ok(Self { signer: wallet.with_chain_id(chain_id), secret_key: None })
 	}
 
+	/// Initialize `WalletManager` by the given private key.
 	pub fn from_private_key(private_key: &str, chain_id: u32) -> WalletResult<Self> {
 		assert!(private_key.len() == 66, "{}", INVALID_PRIVATE_KEY);
 		assert!(private_key.starts_with("0x"), "{}", INVALID_PRIVATE_KEY);
@@ -56,6 +57,7 @@ impl WalletManager {
 		Ok(Self { signer: wallet.with_chain_id(chain_id), secret_key: Some(signing_key) })
 	}
 
+	/// Signs the given message and returns the generated signature.
 	pub fn sign_message(&self, msg: &[u8]) -> Signature {
 		let digest = Keccak256::new_with_prefix(msg);
 		let (sig, recovery_id) =
@@ -87,6 +89,7 @@ impl WalletManager {
 		Address::from_slice(&hash[12..])
 	}
 
+	/// Returns the relayer address.
 	pub fn address(&self) -> Address {
 		self.signer.address()
 	}
