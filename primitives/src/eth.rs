@@ -1,5 +1,8 @@
 use ethers::types::{Address, Signature, H160, U64};
 
+/// The native chain's average block time is seconds.
+pub const NATIVE_BLOCK_TIME: u32 = 3u32;
+
 #[derive(Clone, Copy, Debug)]
 /// Contract abstraction with an additional chain ID field.
 pub struct Contract {

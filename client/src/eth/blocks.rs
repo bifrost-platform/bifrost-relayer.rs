@@ -1,6 +1,6 @@
 use cccp_primitives::{eth::BootstrapState, sub_display_format};
 use ethers::{
-	providers::{JsonRpcClient, Middleware},
+	providers::JsonRpcClient,
 	types::{Block, SyncingStatus, TransactionReceipt, H160, H256, U64},
 };
 use std::sync::Arc;
@@ -67,7 +67,7 @@ impl<T: JsonRpcClient> BlockManager<T> {
 		target_contracts: Vec<H160>,
 		bootstrap_states: Arc<RwLock<Vec<BootstrapState>>>,
 	) -> Self {
-		let (sender, _receiver) = broadcast::channel(512); // TODO: size?
+		let (sender, _receiver) = broadcast::channel(512);
 
 		Self { client, sender, target_contracts, pending_block: U64::default(), bootstrap_states }
 	}
@@ -107,7 +107,7 @@ impl<T: JsonRpcClient> BlockManager<T> {
 				.iter()
 				.all(|s| *s == BootstrapState::NormalStart)
 			{
-				let latest_block = self.client.get_latest_block_number().await.unwrap();
+				let latest_block = self.client.get_latest_block_number().await;
 				if self.is_block_confirmed(latest_block) {
 					self.process_pending_block().await;
 					self.increment_pending_block();
@@ -166,10 +166,8 @@ impl<T: JsonRpcClient> BlockManager<T> {
 	}
 
 	pub async fn is_syncing(&self) {
-		let provider = self.client.get_provider();
-
 		loop {
-			if let SyncingStatus::IsSyncing(status) = provider.syncing().await.unwrap() {
+			if let SyncingStatus::IsSyncing(status) = self.client.is_syncing().await {
 				log::info!(
 					target: &self.client.get_chain_name(),
 					"-[{}] ✨ Syncing #{:?}, Highest: #{:?}",

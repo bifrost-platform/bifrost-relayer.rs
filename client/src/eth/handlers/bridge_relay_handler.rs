@@ -6,14 +6,18 @@ use cccp_primitives::{
 	contracts::socket_external::{
 		BridgeRelayBuilder, PollSubmit, Signatures, SocketEvents, SocketExternal, SocketMessage,
 	},
-	eth::{BootstrapState, BridgeDirection, Contract, RecoveredSignature, SocketEventStatus},
+	eth::{
+		BootstrapState, BridgeDirection, Contract, RecoveredSignature, SocketEventStatus,
+		NATIVE_BLOCK_TIME,
+	},
 	socket_external::{RequestID, SerializedPoll},
-	sub_display_format,
+	sub_display_format, INVALID_BIFROST_NATIVENESS, INVALID_CHAIN_ID, INVALID_CONTRACT_ABI,
+	INVALID_CONTRACT_ADDRESS,
 };
 use ethers::{
 	abi::{RawLog, Token},
 	prelude::decode_logs,
-	providers::{JsonRpcClient, Middleware, Provider},
+	providers::{JsonRpcClient, Provider},
 	types::{
 		Bytes, Filter, Log, Signature, TransactionReceipt, TransactionRequest, H160, H256, U256,
 		U64,
@@ -30,7 +34,6 @@ use crate::eth::{
 };
 
 const SUB_LOG_TARGET: &str = "bridge-handler";
-const NATIVE_BLOCK_TIME: u32 = 3u32;
 
 /// The essential task that handles `bridge relay` related events.
 pub struct BridgeRelayHandler<T> {
@@ -81,16 +84,17 @@ impl<T: JsonRpcClient> BridgeRelayHandler<T> {
 			bridge_relay_args.target_socket,
 			bridge_relay_args.client.provider.clone(),
 		);
-		let socket_signature = target_socket.abi().event("Socket").unwrap().signature();
+		let socket_signature =
+			target_socket.abi().event("Socket").expect(INVALID_CONTRACT_ABI).signature();
 		let native_client = bridge_relay_args
 			.all_clients
 			.iter()
 			.find(|client| client.is_native)
-			.unwrap()
+			.expect(INVALID_BIFROST_NATIVENESS)
 			.clone();
 
 		let authority_bifrost = AuthorityBifrost::new(
-			H160::from_str(&bridge_relay_args.authority_address).unwrap(),
+			H160::from_str(&bridge_relay_args.authority_address).expect(INVALID_CONTRACT_ADDRESS),
 			native_client.get_provider(),
 		);
 
@@ -380,8 +384,12 @@ impl<T: JsonRpcClient> BridgeRelayHandler<T> {
 			if let Some(tx) = self.client.get_transaction(receipt.transaction_hash).await {
 				// the reverted transaction must be execution of `poll()`
 				let selector = &tx.input[0..4];
-				let poll_selector =
-					self.target_socket.abi().function("poll").unwrap().short_signature();
+				let poll_selector = self
+					.target_socket
+					.abi()
+					.function("poll")
+					.expect(INVALID_CONTRACT_ABI)
+					.short_signature();
 				if selector == poll_selector {
 					match self
 						.target_socket
@@ -586,15 +594,11 @@ impl<T: JsonRpcClient> BridgeRelayHandler<T> {
 
 		let mut stream = tokio_stream::iter(logs);
 		while let Some(log) = stream.next().await {
-			let receipt = self
-				.client
-				.provider
-				.get_transaction_receipt(log.transaction_hash.unwrap())
-				.await
-				.unwrap()
-				.unwrap();
-
-			self.process_confirmed_transaction(receipt).await;
+			if let Some(receipt) =
+				self.client.get_transaction_receipt(log.transaction_hash.unwrap()).await
+			{
+				self.process_confirmed_transaction(receipt).await;
+			}
 		}
 
 		let mut bootstrap_count = self.bootstrapping_count.lock().await;
@@ -622,7 +626,7 @@ impl<T: JsonRpcClient> BridgeRelayHandler<T> {
 			.get_bootstrap_offset_height_based_on_block_time(self.bootstrap_config.round_offset)
 			.await;
 
-		let latest_block_number = self.client.get_latest_block_number().await.unwrap();
+		let latest_block_number = self.client.get_latest_block_number().await;
 		let mut from_block = latest_block_number.saturating_sub(bootstrap_offset_height);
 		let to_block = latest_block_number;
 
@@ -639,7 +643,7 @@ impl<T: JsonRpcClient> BridgeRelayHandler<T> {
 				.from_block(from_block)
 				.to_block(chunk_to_block);
 
-			let chunk_logs = self.client.provider.get_logs(&filter).await.unwrap();
+			let chunk_logs = self.client.get_logs(filter).await;
 			logs.extend(chunk_logs);
 
 			from_block = chunk_to_block + 1;
@@ -654,15 +658,10 @@ impl<T: JsonRpcClient> BridgeRelayHandler<T> {
 		let block_offset = 100u32;
 		let round_info: RoundMetaData = self.authority_bifrost.round_info().call().await.unwrap();
 
-		let block_number = self.client.provider.get_block_number().await.unwrap();
+		let block_number = self.client.get_latest_block_number().await;
 
-		let current_block = self.client.get_block((block_number).into()).await.unwrap().unwrap();
-		let prev_block = self
-			.client
-			.get_block((block_number - block_offset).into())
-			.await
-			.unwrap()
-			.unwrap();
+		let current_block = self.client.get_block((block_number).into()).await.unwrap();
+		let prev_block = self.client.get_block((block_number - block_offset).into()).await.unwrap();
 
 		let diff = current_block
 			.timestamp
@@ -686,14 +685,14 @@ impl<T: JsonRpcClient> BridgeRelayHandler<T> {
 			.socket_contracts
 			.iter()
 			.find(|socket| socket.chain_id == src_chain_id)
-			.unwrap()
+			.expect(INVALID_CHAIN_ID)
 			.address;
 
 		let source_client = self
 			.all_clients
 			.iter()
 			.find(|client| client.get_chain_id() == src_chain_id)
-			.unwrap();
+			.expect(INVALID_CHAIN_ID);
 
 		SocketExternal::new(source_socket, source_client.provider.clone())
 	}

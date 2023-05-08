@@ -1,3 +1,6 @@
+pub const INVALID_CONTRACT_ABI: &str =
+	"Invalid contract ABI provided. Please check your contract's ABI.";
+
 pub const INVALID_CONTRACT_ADDRESS: &str =
 	"Invalid contract address provided. Please check your contract's address.";
 

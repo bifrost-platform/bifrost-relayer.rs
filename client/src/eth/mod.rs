@@ -15,7 +15,10 @@ pub use wallet::*;
 
 use ethers::{
 	providers::{JsonRpcClient, Provider},
-	types::{Address, Block, BlockId, Transaction, TransactionReceipt, TxpoolContent, H256, U64},
+	types::{
+		Address, Block, BlockId, Filter, Log, SyncingStatus, Transaction, TransactionReceipt,
+		TxpoolContent, H256, U64,
+	},
 };
 use serde::{de::DeserializeOwned, Serialize};
 use std::{fmt::Debug, sync::Arc};
@@ -124,5 +127,15 @@ impl<T: JsonRpcClient> EthClient<T> {
 	/// block(s).
 	pub async fn get_txpool_content(&self) -> TxpoolContent {
 		self.rpc_call("txpool_content", ()).await
+	}
+
+	/// Returns an array of all logs matching the given filter.
+	pub async fn get_logs(&self, filter: Filter) -> Vec<Log> {
+		self.rpc_call("eth_getLogs", vec![&filter]).await
+	}
+
+	/// Returns an object with data about the sync status or false.
+	pub async fn is_syncing(&self) -> SyncingStatus {
+		self.rpc_call("eth_syncing", ()).await
 	}
 }
