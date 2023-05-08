@@ -43,7 +43,7 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> {
 
 		// Bumps transactions gas price in the background to avoid getting them stuck in the memory
 		// pool.
-		let geometric_gas_price = GeometricGasPrice::new(1.125, 12u64, None::<u64>);
+		let geometric_gas_price = GeometricGasPrice::new(1.5, 12u64, None::<u64>);
 		let gas_escalator = GasEscalatorMiddleware::new(
 			client.provider.clone(),
 			geometric_gas_price,
