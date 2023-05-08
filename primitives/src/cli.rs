@@ -58,6 +58,8 @@ pub struct RelayerConfig {
 	pub private_key: String,
 	/// Periodic worker configs
 	pub periodic_configs: Option<PeriodicWorkerConfig>,
+	/// Bootstrapping configs
+	pub bootstrap_config: BootstrapConfig,
 	/// Sentry config
 	pub sentry_config: Option<SentryConfig>,
 }
@@ -90,7 +92,7 @@ pub struct EVMProvider {
 	pub is_relay_target: bool,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, PartialEq)]
 pub enum HandlerType {
 	/// Socket handler
 	Socket,
@@ -188,6 +190,14 @@ pub struct PeriodicWorkerConfig {
 	pub roundup_emitter: RoundupEmitterConfig,
 	/// Heartbeat sender
 	pub heartbeat: HeartbeatSenderConfig,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct BootstrapConfig {
+	/// Bootstrapping flag
+	pub is_enabled: bool,
+	/// Round for bootstrap
+	pub round_offset: u32,
 }
 
 #[derive(Debug, Clone, Deserialize)]

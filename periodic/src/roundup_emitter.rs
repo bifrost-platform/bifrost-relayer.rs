@@ -37,14 +37,12 @@ pub struct RoundupEmitter<T> {
 #[async_trait::async_trait]
 impl<T: JsonRpcClient> PeriodicWorker for RoundupEmitter<T> {
 	async fn run(&mut self) {
-		self.current_round =
-			self.authority_contract.latest_round().call().await.unwrap_or_default();
+		self.current_round = self.get_latest_round().await;
 
 		loop {
 			self.wait_until_next_time().await;
 
-			let latest_round =
-				self.authority_contract.latest_round().call().await.unwrap_or_default();
+			let latest_round = self.get_latest_round().await;
 
 			if self.current_round < latest_round {
 				self.current_round = latest_round;
@@ -160,5 +158,9 @@ impl<T: JsonRpcClient> RoundupEmitter<T> {
 				error.to_string()
 			),
 		}
+	}
+
+	async fn get_latest_round(&self) -> U256 {
+		self.authority_contract.latest_round().call().await.unwrap()
 	}
 }

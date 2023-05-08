@@ -42,11 +42,11 @@ impl WalletManager {
 		Ok(Self { signer: wallet.with_chain_id(chain_id), secret_key: None })
 	}
 
-	pub fn from_private_key(input_path: &str, chain_id: u32) -> WalletResult<Self> {
-		let wallet = input_path.parse::<LocalWallet>()?;
+	pub fn from_private_key(private_key: &str, chain_id: u32) -> WalletResult<Self> {
+		let wallet = private_key.parse::<LocalWallet>().expect("private key should exist");
 
 		let pk_bytes =
-			<[u8; 32]>::from_hex(input_path.to_string().trim_start_matches("0x")).unwrap();
+			<[u8; 32]>::from_hex(private_key.to_string().trim_start_matches("0x")).unwrap();
 		let signing_key = K256SigningKey::from_bytes(&pk_bytes.into()).unwrap();
 
 		Ok(Self { signer: wallet.with_chain_id(chain_id), secret_key: Some(signing_key) })

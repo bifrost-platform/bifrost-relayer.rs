@@ -16,10 +16,15 @@ ethers = { workspace = true }
 serde_yaml = { workspace = true }
 tokio-stream = { workspace = true }
 async-trait = { workspace = true }
+async-recursion = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 tokio = { workspace = true, features = ["signal", "rt-multi-thread", "parking_lot"] }
 k256 = { workspace = true, features = ["ecdsa"] }
 sha3 = { workspace = true }
 
+
 # CCCP
 cccp-primitives = { path = "../primitives" }
+
+[dev-dependencies]
+serde_json = { workspace = true }
