@@ -82,6 +82,8 @@ pub fn new_relay_base(config: Configuration) -> Result<RelayBase, ServiceError> 
 		.authority_address
 		.clone();
 
+	let mut number_of_relay_targets: usize = 0;
+
 	// initialize `EthClient`, `TransactionManager`, `BlockManager`
 	let (clients, tx_managers, block_managers, event_channels) = {
 		let mut clients = vec![];
@@ -126,6 +128,8 @@ pub fn new_relay_base(config: Configuration) -> Result<RelayBase, ServiceError> 
 					event_sender,
 					is_native,
 				)));
+
+				number_of_relay_targets = number_of_relay_targets + 1;
 			}
 			let block_manager =
 				BlockManager::new(client.clone(), target_contracts, bootstrap_states.clone());
@@ -345,6 +349,7 @@ pub fn new_relay_base(config: Configuration) -> Result<RelayBase, ServiceError> 
 					bootstrap_states.clone(),
 					config.relayer_config.bootstrap_config.clone(),
 					authority_address.clone(),
+					number_of_relay_targets,
 				);
 
 				task_manager.spawn_essential_handle().spawn(
