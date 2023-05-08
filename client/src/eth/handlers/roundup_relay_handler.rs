@@ -35,6 +35,7 @@ use crate::eth::{
 };
 
 const SUB_LOG_TARGET: &str = "roundup-handler";
+const NATIVE_BLOCK_TIME: u32 = 3u32;
 
 /// The essential task that handles `roundup relay` related events.
 pub struct RoundupRelayHandler<T> {

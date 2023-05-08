@@ -6,6 +6,7 @@ use std::{
 	time::Duration,
 };
 use std::{str::FromStr, sync::Arc};
+use tokio::sync::{Barrier, Mutex, RwLock};
 
 use bitcoincore_rpc::{Auth, Client as BitcoinClient};
 use ethers::providers::{Http, Provider};
