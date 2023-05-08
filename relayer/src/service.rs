@@ -248,6 +248,8 @@ fn construct_managers(
 					sender,
 					is_native,
 				)));
+
+				number_of_relay_targets = number_of_relay_targets + 1;
 			}
 		}
 		let event_manager = EventManager::new(
