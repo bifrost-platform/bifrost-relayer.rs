@@ -386,21 +386,12 @@ impl<T: JsonRpcClient> RoundupRelayHandler<T> {
 			let current_round = self.authority_bifrost.latest_round().call().await.unwrap();
 			let target_chain_round =
 				target_chain.authority_external.latest_round().call().await.unwrap();
-			let chain_name = target_chain.id;
 			let bootstrap_guard = self.bootstrapping_count.clone();
 
 			tokio::spawn(async move {
 				if current_round == target_chain_round {
-					log::info!(
-						target: "bootstrapping",
-						"-[{}] Chain {} is already in the latest round",
-						sub_display_format(SUB_LOG_TARGET),
-						chain_name,
-					);
-
 					*bootstrap_guard.lock().await += 1;
 				}
-
 				barrier_clone_inner.wait().await;
 			});
 		}
@@ -418,7 +409,7 @@ impl<T: JsonRpcClient> RoundupRelayHandler<T> {
 		if *self.bootstrapping_count.lock().await == self.roundup_utils.len() as u8 {
 			log::info!(
 				target: &self.client.get_chain_name(),
-				"-[{}] ⚙️  [Bootstrap mode] Start reprocessing roundup events.",
+				"-[{}] ⚙️  [Bootstrap mode] Bootstrapping RoundUp events.",
 				sub_display_format(SUB_LOG_TARGET),
 			);
 

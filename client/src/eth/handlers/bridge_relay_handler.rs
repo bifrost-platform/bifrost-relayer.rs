@@ -592,7 +592,7 @@ impl<T: JsonRpcClient> BridgeRelayHandler<T> {
 	async fn bootstrap(&self) {
 		log::info!(
 			target: &self.client.get_chain_name(),
-			"-[{}] ⚙️  [Bootstrap mode] Start reprocessing socket events.",
+			"-[{}] ⚙️  [Bootstrap mode] Bootstrapping Socket events.",
 			sub_display_format(SUB_LOG_TARGET),
 		);
 
@@ -619,7 +619,7 @@ impl<T: JsonRpcClient> BridgeRelayHandler<T> {
 			}
 
 			log::info!(
-				target: &self.client.get_chain_name(),
+				target: "cccp-relayer",
 				"-[{}] ⚙️  [Bootstrap mode] Bootstrap process successfully ended.",
 				sub_display_format(SUB_LOG_TARGET),
 			);
