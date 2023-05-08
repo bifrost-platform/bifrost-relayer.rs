@@ -96,3 +96,7 @@ periodic_configs:
 
 sentry_config:
   dsn: ""
+
+bootstrap_config:
+  is_enabled: true
+  round_offset: 6

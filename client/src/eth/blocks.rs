@@ -1,11 +1,14 @@
-use cccp_primitives::sub_display_format;
+use cccp_primitives::{eth::BootstrapState, sub_display_format};
 use ethers::{
-	providers::JsonRpcClient,
-	types::{Block, TransactionReceipt, H160, H256, U64},
+	providers::{JsonRpcClient, Middleware},
+	types::{Block, SyncingStatus, TransactionReceipt, H160, H256, U64},
 };
 use std::sync::Arc;
 use tokio::{
-	sync::broadcast::{self, Receiver, Sender},
+	sync::{
+		broadcast::{self, Receiver, Sender},
+		RwLock,
+	},
 	time::{sleep, Duration},
 };
 use tokio_stream::StreamExt;
@@ -53,13 +56,20 @@ pub struct BlockManager<T> {
 	pub target_contracts: Vec<H160>,
 	/// The pending block waiting for some confirmations.
 	pub pending_block: U64,
+	/// State of bootstrapping
+	pub bootstrap_states: Arc<RwLock<Vec<BootstrapState>>>,
 }
 
 impl<T: JsonRpcClient> BlockManager<T> {
 	/// Instantiates a new `BlockManager` instance.
-	pub fn new(client: Arc<EthClient<T>>, target_contracts: Vec<H160>) -> Self {
-		let (sender, _receiver) = broadcast::channel(512);
-		Self { client, sender, target_contracts, pending_block: U64::default() }
+	pub fn new(
+		client: Arc<EthClient<T>>,
+		target_contracts: Vec<H160>,
+		bootstrap_states: Arc<RwLock<Vec<BootstrapState>>>,
+	) -> Self {
+		let (sender, _receiver) = broadcast::channel(512); // TODO: size?
+
+		Self { client, sender, target_contracts, pending_block: U64::default(), bootstrap_states }
 	}
 
 	/// Initialize block manager.
@@ -76,7 +86,7 @@ impl<T: JsonRpcClient> BlockManager<T> {
 		if let Some(block) = self.client.get_block(self.pending_block.into()).await.unwrap() {
 			log::info!(
 				target: &self.client.get_chain_name(),
-				"-[{}] 💤 Idle, waiting for initial block confirmation, best: #{:?} ({})",
+				"-[{}] 💤 Idle, best: #{:?} ({})",
 				sub_display_format(SUB_LOG_TARGET),
 				block.number.unwrap(),
 				block.hash.unwrap(),
@@ -90,11 +100,20 @@ impl<T: JsonRpcClient> BlockManager<T> {
 		self.initialize().await;
 
 		loop {
-			let latest_block = self.client.get_latest_block_number().await.unwrap();
-			if self.is_block_confirmed(latest_block) {
-				self.process_pending_block().await;
-				self.increment_pending_block();
+			if self
+				.bootstrap_states
+				.read()
+				.await
+				.iter()
+				.all(|s| *s == BootstrapState::NormalStart)
+			{
+				let latest_block = self.client.get_latest_block_number().await.unwrap();
+				if self.is_block_confirmed(latest_block) {
+					self.process_pending_block().await;
+					self.increment_pending_block();
+				}
 			}
+
 			sleep(Duration::from_millis(self.client.config.call_interval)).await;
 		}
 	}
@@ -115,12 +134,13 @@ impl<T: JsonRpcClient> BlockManager<T> {
 			if !target_receipts.is_empty() {
 				self.sender.send(BlockMessage::new(block.clone(), target_receipts)).unwrap();
 			}
+
 			log::info!(
 				target: &self.client.get_chain_name(),
 				"-[{}] ✨ Imported #{:?} ({})",
 				sub_display_format(SUB_LOG_TARGET),
 				block.number.unwrap(),
-				block.hash.unwrap()
+				block.hash.unwrap(),
 			);
 		}
 	}
@@ -143,5 +163,39 @@ impl<T: JsonRpcClient> BlockManager<T> {
 	/// Verifies if the stored pending block waited for confirmations.
 	fn is_block_confirmed(&self, latest_block: U64) -> bool {
 		latest_block.saturating_sub(self.pending_block) > self.client.config.block_confirmations
+	}
+
+	pub async fn is_syncing(&self) {
+		let provider = self.client.get_provider();
+
+		loop {
+			if let SyncingStatus::IsSyncing(status) = provider.syncing().await.unwrap() {
+				log::info!(
+					target: &self.client.get_chain_name(),
+					"-[{}] ✨ Syncing #{:?}, Highest: #{:?}",
+					sub_display_format(SUB_LOG_TARGET),
+					status.current_block,
+					status.highest_block,
+				);
+			} else {
+				for state in self.bootstrap_states.write().await.iter_mut() {
+					if *state == BootstrapState::NodeSyncing {
+						log::info!(
+							target: &self.client.get_chain_name(),
+							"-[{}] ✨ Block Syncing completed",
+							sub_display_format(SUB_LOG_TARGET),
+						);
+
+						*state = BootstrapState::BootstrapRoundUp;
+
+						return
+					} else if *state == BootstrapState::NormalStart {
+						return
+					}
+				}
+			}
+
+			sleep(Duration::from_millis(self.client.config.call_interval)).await;
+		}
 	}
 }

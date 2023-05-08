@@ -206,6 +206,14 @@ pub struct PrometheusConfig {
 }
 
 #[derive(Debug, Clone, Deserialize)]
+pub struct BootstrapConfig {
+	/// Bootstrapping flag
+	pub is_enabled: bool,
+	/// Round for bootstrap
+	pub round_offset: u32,
+}
+
+#[derive(Debug, Clone, Deserialize)]
 pub struct SentryConfig {
 	/// The DSN that tells Sentry where to send the events to.
 	pub dsn: Option<String>,
