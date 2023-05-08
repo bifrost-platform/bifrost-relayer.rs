@@ -287,12 +287,6 @@ pub fn new_relay_base(config: Configuration) -> Result<RelayBase, ServiceError> 
 								for state in guard.iter_mut() {
 									*state = BootstrapState::BootstrapSocket;
 								}
-
-								log::info!(
-									target: LOG_TARGET,
-									"-[{}] Roundup -> Socket Bootstrapping",
-									sub_display_format(SUB_LOG_TARGET),
-								);
 							}
 							drop(guard);
 

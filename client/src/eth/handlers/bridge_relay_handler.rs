@@ -590,6 +590,12 @@ impl<T: JsonRpcClient> BridgeRelayHandler<T> {
 
 	/// Get a receipt from each log and add it to the processing routine
 	async fn bootstrap(&self) {
+		log::info!(
+			target: &self.client.get_chain_name(),
+			"-[{}] ⚙️  [Bootstrap mode] Start reprocessing socket events.",
+			sub_display_format(SUB_LOG_TARGET),
+		);
+
 		let logs = self.bootstrap_socket().await;
 
 		let mut stream = tokio_stream::iter(logs);
@@ -614,7 +620,7 @@ impl<T: JsonRpcClient> BridgeRelayHandler<T> {
 
 			log::info!(
 				target: &self.client.get_chain_name(),
-				"-[{}] Socket Bootstrapping -> BlockManager Running",
+				"-[{}] ⚙️  [Bootstrap mode] Bootstrap process successfully ended.",
 				sub_display_format(SUB_LOG_TARGET),
 			);
 		}

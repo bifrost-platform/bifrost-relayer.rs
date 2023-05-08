@@ -170,7 +170,7 @@ impl<T: JsonRpcClient> BlockManager<T> {
 			if let SyncingStatus::IsSyncing(status) = self.client.is_syncing().await {
 				log::info!(
 					target: &self.client.get_chain_name(),
-					"-[{}] ✨ Syncing #{:?}, Highest: #{:?}",
+					"-[{}] ⚙️  Syncing #{:?}, Highest: #{:?}",
 					sub_display_format(SUB_LOG_TARGET),
 					status.current_block,
 					status.highest_block,
@@ -180,7 +180,7 @@ impl<T: JsonRpcClient> BlockManager<T> {
 					if *state == BootstrapState::NodeSyncing {
 						log::info!(
 							target: &self.client.get_chain_name(),
-							"-[{}] ✨ Block Syncing completed",
+							"-[{}] ⚙️  Block synchronization completed. Bootstrap mode activated.",
 							sub_display_format(SUB_LOG_TARGET),
 						);
 

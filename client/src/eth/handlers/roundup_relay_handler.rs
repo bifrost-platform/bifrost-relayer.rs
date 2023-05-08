@@ -119,25 +119,27 @@ impl<T: JsonRpcClient> Handler for RoundupRelayHandler<T> {
 			}
 
 			match self.decode_log(log).await {
-				Ok(serialized_log) => match RoundUpEventStatus::from_u8(serialized_log.status) {
-					RoundUpEventStatus::NextAuthorityCommitted => {
-						let roundup_submit = self
-							.build_roundup_submit(
-								serialized_log.roundup.round,
-								serialized_log.roundup.new_relayers,
-							)
-							.await;
-						self.broadcast_roundup(roundup_submit).await;
-					},
-					RoundUpEventStatus::NextAuthorityRelayed => {
-						log::info!(
-							target: &self.client.get_chain_name(),
-							"-[{}] 👤 RoundUp event emitted. However, the majority has not yet been met. ({:?})",
-							sub_display_format(SUB_LOG_TARGET),
-							receipt.transaction_hash,
-						);
-						continue
-					},
+				Ok(serialized_log) => {
+					let status = RoundUpEventStatus::from_u8(serialized_log.status);
+					log::info!(
+						target: &self.client.get_chain_name(),
+						"-[{}] 👤 RoundUp event detected. ({:?}-{:?})",
+						sub_display_format(SUB_LOG_TARGET),
+						serialized_log.status,
+						receipt.transaction_hash,
+					);
+					match status {
+						RoundUpEventStatus::NextAuthorityCommitted => {
+							let roundup_submit = self
+								.build_roundup_submit(
+									serialized_log.roundup.round,
+									serialized_log.roundup.new_relayers,
+								)
+								.await;
+							self.broadcast_roundup(roundup_submit).await;
+						},
+						RoundUpEventStatus::NextAuthorityRelayed => continue,
+					}
 				},
 				Err(e) => {
 					log::error!(
@@ -228,15 +230,10 @@ impl<T: JsonRpcClient> RoundupRelayHandler<T> {
 						},
 					);
 
-					let socket_external =
-						socket_external.expect("socket_external must be initialized");
-					let authority_external =
-						authority_external.expect("authority_external must be initialized");
-
 					RoundupUtility {
 						event_sender: sender.clone(),
-						socket_external,
-						authority_external,
+						socket_external: socket_external.unwrap(),
+						authority_external: authority_external.unwrap(),
 						id: sender.id,
 					}
 				})
@@ -418,7 +415,7 @@ impl<T: JsonRpcClient> RoundupRelayHandler<T> {
 		if *self.bootstrapping_count.lock().await == self.roundup_utils.len() as u8 {
 			log::info!(
 				target: &self.client.get_chain_name(),
-				"-[{}] Roundup -> Socket Bootstrapping",
+				"-[{}] ⚙️  [Bootstrap mode] Start reprocessing roundup events.",
 				sub_display_format(SUB_LOG_TARGET),
 			);
 
@@ -451,13 +448,6 @@ impl<T: JsonRpcClient> RoundupRelayHandler<T> {
 	}
 
 	async fn get_roundup_logs(&self) -> Vec<Log> {
-		let roundup_signature = self
-			.socket_bifrost
-			.abi()
-			.event("RoundUp")
-			.expect(INVALID_CONTRACT_ABI)
-			.signature();
-
 		let bootstrap_offset_height = self
 			.get_bootstrap_offset_height_based_on_block_time(self.bootstrap_config.round_offset)
 			.await;
@@ -475,7 +465,7 @@ impl<T: JsonRpcClient> RoundupRelayHandler<T> {
 
 			let filter = Filter::new()
 				.address(self.socket_bifrost.address())
-				.topic0(roundup_signature)
+				.topic0(self.roundup_signature)
 				.from_block(from_block)
 				.to_block(chunk_to_block);
 
