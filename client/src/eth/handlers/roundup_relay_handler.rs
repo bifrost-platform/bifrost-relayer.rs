@@ -372,7 +372,7 @@ impl<T: JsonRpcClient> RoundupRelayHandler<T> {
 						)),
 						true,
 					))
-					.unwrap(); // TODO: this unwrap should be handled
+					.unwrap();
 			}
 		}
 	}
