@@ -245,8 +245,6 @@ impl<T: JsonRpcClient> RoundupRelayHandler<T> {
 			client.get_provider(),
 		);
 
-		println!("num: {}", number_of_relay_targets);
-
 		let roundup_barrier = Arc::new(Barrier::new(number_of_relay_targets));
 		let bootstrapping_count = Arc::new(Mutex::new(u8::default()));
 
