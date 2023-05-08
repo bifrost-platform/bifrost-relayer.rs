@@ -179,13 +179,13 @@ impl<T: JsonRpcClient> BlockManager<T> {
 				);
 			} else {
 				for state in self.bootstrap_states.write().await.iter_mut() {
-					log::info!(
-						target: &self.client.get_chain_name(),
-						"-[{}] ✨ Block Syncing completed",
-						sub_display_format(SUB_LOG_TARGET),
-					);
-
 					if *state == BootstrapState::NodeSyncing {
+						log::info!(
+							target: &self.client.get_chain_name(),
+							"-[{}] ✨ Block Syncing completed",
+							sub_display_format(SUB_LOG_TARGET),
+						);
+
 						*state = BootstrapState::BootstrapRoundUp;
 
 						return
