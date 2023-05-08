@@ -180,6 +180,7 @@ impl<T: JsonRpcClient> RoundupRelayHandler<T> {
 		bootstrap_states: Arc<RwLock<Vec<BootstrapState>>>,
 		bootstrap_config: BootstrapConfig,
 		authority_address: String,
+		number_of_relay_targets: usize,
 	) -> Self {
 		let roundup_signature = socket_bifrost.abi().event("RoundUp").unwrap().signature();
 		let roundup_utils = Arc::new(
@@ -244,7 +245,9 @@ impl<T: JsonRpcClient> RoundupRelayHandler<T> {
 			client.get_provider(),
 		);
 
-		let roundup_barrier = Arc::new(Barrier::new(external_clients.len() + 1));
+		println!("num: {}", number_of_relay_targets);
+
+		let roundup_barrier = Arc::new(Barrier::new(number_of_relay_targets));
 		let bootstrapping_count = Arc::new(Mutex::new(u8::default()));
 
 		Self {
@@ -470,7 +473,6 @@ impl<T: JsonRpcClient> RoundupRelayHandler<T> {
 
 			let filter = Filter::new()
 				.address(self.socket_bifrost.address())
-				.event("RoundUp(uint8,(uint256,address[],(bytes32[],bytes32[],bytes)))")
 				.topic0(roundup_signature)
 				.from_block(from_block)
 				.to_block(chunk_to_block);
