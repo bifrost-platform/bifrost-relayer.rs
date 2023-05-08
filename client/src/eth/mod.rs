@@ -107,17 +107,17 @@ impl<T: JsonRpcClient> EthClient<T> {
 
 	/// Retrieves the block information of the given block hash.
 	pub async fn get_block(&self, id: BlockId) -> Option<Block<H256>> {
-		self.rpc_call("eth_getBlockByNumber", id).await
+		self.rpc_call("eth_getBlockByNumber", (id, false)).await
 	}
 
 	/// Retrieves the transaction of the given transaction hash.
 	pub async fn get_transaction(&self, hash: H256) -> Option<Transaction> {
-		self.rpc_call("eth_getTransactionByHash", hash).await
+		self.rpc_call("eth_getTransactionByHash", vec![hash]).await
 	}
 
 	/// Retrieves the transaction receipt of the given transaction hash.
 	pub async fn get_transaction_receipt(&self, hash: H256) -> Option<TransactionReceipt> {
-		self.rpc_call("eth_getTransactionReceipt", hash).await
+		self.rpc_call("eth_getTransactionReceipt", vec![hash]).await
 	}
 
 	/// Returns the details of all transactions currently pending for inclusion in the next
