@@ -136,7 +136,7 @@ pub fn new_relay_base(config: Configuration) -> Result<RelayBase, ServiceError> 
 					is_native,
 				)));
 
-				number_of_relay_targets = number_of_relay_targets + 1;
+				number_of_relay_targets += 1;
 			}
 			let block_manager =
 				BlockManager::new(client.clone(), target_contracts, bootstrap_states.clone());
