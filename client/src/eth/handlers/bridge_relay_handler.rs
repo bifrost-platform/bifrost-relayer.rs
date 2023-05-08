@@ -8,7 +8,7 @@ use cccp_primitives::{
 	},
 	eth::{
 		BootstrapState, BridgeDirection, Contract, RecoveredSignature, SocketEventStatus,
-		NATIVE_BLOCK_TIME,
+		BOOTSTRAP_BLOCK_CHUNK_SIZE, BOOTSTRAP_BLOCK_OFFSET, NATIVE_BLOCK_TIME,
 	},
 	socket_external::{RequestID, SerializedPoll},
 	sub_display_format, INVALID_BIFROST_NATIVENESS, INVALID_CHAIN_ID, INVALID_CONTRACT_ABI,
@@ -639,9 +639,9 @@ impl<T: JsonRpcClient> BridgeRelayHandler<T> {
 		let mut logs = vec![];
 
 		// Split from_block into smaller chunks
-		let block_chunk_size = 2000;
 		while from_block <= to_block {
-			let chunk_to_block = std::cmp::min(from_block + block_chunk_size - 1, to_block);
+			let chunk_to_block =
+				std::cmp::min(from_block + BOOTSTRAP_BLOCK_CHUNK_SIZE - 1, to_block);
 
 			let filter = Filter::new()
 				.address(self.target_contract)
@@ -661,19 +661,22 @@ impl<T: JsonRpcClient> BridgeRelayHandler<T> {
 	/// Get factor between the block time of native-chain and block time of this chain
 	/// Approximately bfc-testnet: 3s, matic-mumbai: 2s, bsc-testnet: 3s, eth-goerli: 12s
 	pub async fn get_bootstrap_offset_height_based_on_block_time(&self, round_offset: u32) -> U64 {
-		let block_offset = 100u32;
 		let round_info: RoundMetaData = self.authority_bifrost.round_info().call().await.unwrap();
 
 		let block_number = self.client.get_latest_block_number().await;
 
 		let current_block = self.client.get_block((block_number).into()).await.unwrap();
-		let prev_block = self.client.get_block((block_number - block_offset).into()).await.unwrap();
+		let prev_block = self
+			.client
+			.get_block((block_number - BOOTSTRAP_BLOCK_OFFSET).into())
+			.await
+			.unwrap();
 
 		let diff = current_block
 			.timestamp
 			.checked_sub(prev_block.timestamp)
 			.unwrap()
-			.checked_div(block_offset.into())
+			.checked_div(BOOTSTRAP_BLOCK_OFFSET.into())
 			.unwrap();
 
 		round_offset
