@@ -1,11 +1,11 @@
 use cccp_client::eth::{
-	BlockManager, BridgeRelayHandler, EthClient, EventSender, Handler, RoundupRelayHandler,
-	TransactionManager, WalletManager,
+	BlockManager, BridgeRelayArgs, BridgeRelayHandler, EthClient, EventSender, Handler,
+	RoundupRelayHandler, TransactionManager, WalletManager,
 };
 use cccp_periodic::OraclePriceFeeder;
 use cccp_primitives::{
 	cli::{Configuration, HandlerConfig, HandlerType},
-	eth::{BridgeDirection, Contract, EthClientConfiguration},
+	eth::{BootstrapState, BridgeDirection, Contract, EthClientConfiguration},
 	periodic::PeriodicWorker,
 	sub_display_format,
 };
@@ -18,6 +18,7 @@ use ethers::{
 };
 use sc_service::{Error as ServiceError, TaskManager};
 use std::{str::FromStr, sync::Arc};
+use tokio::sync::{Barrier, Mutex, RwLock};
 
 use crate::cli::{LOG_TARGET, SUB_LOG_TARGET};
 
@@ -59,6 +60,28 @@ pub fn relay(config: Configuration) -> Result<TaskManager, ServiceError> {
 }
 
 pub fn new_relay_base(config: Configuration) -> Result<RelayBase, ServiceError> {
+	let (bootstrap_states, socket_barrier_len) =
+		if config.relayer_config.bootstrap_config.is_enabled {
+			(BootstrapState::NodeSyncing, config.relayer_config.evm_providers.len() * 2 + 1)
+		} else {
+			(BootstrapState::NormalStart, 1)
+		};
+
+	// Wait until each chain of vault/socket contract and bootstrapping is completed
+	let socket_barrier = Arc::new(Barrier::new(socket_barrier_len));
+	let socket_bootstrapping_count = Arc::new(Mutex::new(u8::default()));
+	let bootstrap_states =
+		Arc::new(RwLock::new(vec![bootstrap_states; config.relayer_config.evm_providers.len()]));
+
+	let authority_address = &config
+		.relayer_config
+		.periodic_configs
+		.as_ref()
+		.unwrap()
+		.roundup_emitter
+		.authority_address
+		.clone();
+
 	// initialize `EthClient`, `TransactionManager`, `BlockManager`
 	let (clients, tx_managers, block_managers, event_channels) = {
 		let mut clients = vec![];
@@ -104,7 +127,8 @@ pub fn new_relay_base(config: Configuration) -> Result<RelayBase, ServiceError> 
 					is_native,
 				)));
 			}
-			let block_manager = BlockManager::new(client.clone(), target_contracts);
+			let block_manager =
+				BlockManager::new(client.clone(), target_contracts, bootstrap_states.clone());
 
 			clients.push(client);
 			block_managers.push(block_manager);
@@ -185,6 +209,7 @@ pub fn new_relay_base(config: Configuration) -> Result<RelayBase, ServiceError> 
 		});
 
 	// Initialize handlers & spawn tasks
+
 	let socket_contracts = build_socket_contracts(&config.relayer_config.handler_configs);
 	config.relayer_config.handler_configs.iter().for_each(|handler_config| {
 		match handler_config.handler_type {
@@ -218,14 +243,25 @@ pub fn new_relay_base(config: Configuration) -> Result<RelayBase, ServiceError> 
 						.find(|socket| socket.chain_id == client.get_chain_id())
 						.unwrap();
 
-					let mut bridge_relay_handler = BridgeRelayHandler::new(
-						event_channels.clone(),
+					let bridge_relay_args = BridgeRelayArgs {
+						event_senders: event_channels.clone(),
 						block_receiver,
-						client.clone(),
-						H160::from_str(&target.contract).unwrap(),
-						target_socket.address,
-						socket_contracts.clone(),
-					);
+						client: client.clone(),
+						target_contract: H160::from_str(&target.contract).unwrap(),
+						target_socket: target_socket.address,
+						socket_contracts: socket_contracts.clone(),
+						bootstrap_states: bootstrap_states.clone(),
+						bootstrapping_count: socket_bootstrapping_count.clone(),
+						bootstrap_config: config.relayer_config.bootstrap_config.clone(),
+						authority_address: authority_address.clone(),
+						all_clients: clients.clone(),
+					};
+
+					let mut bridge_relay_handler = BridgeRelayHandler::new(bridge_relay_args);
+
+					let socket_barrier_clone = socket_barrier.clone();
+					let is_bootstrapped = bootstrap_states.clone();
+
 					task_manager.spawn_essential_handle().spawn(
 						Box::leak(
 							format!(
@@ -236,7 +272,26 @@ pub fn new_relay_base(config: Configuration) -> Result<RelayBase, ServiceError> 
 							.into_boxed_str(),
 						),
 						Some("handlers"),
-						async move { bridge_relay_handler.run().await },
+						async move {
+							socket_barrier_clone.wait().await;
+
+							// After All of barrier complete the waiting
+							let mut guard = is_bootstrapped.write().await;
+							if guard.iter().all(|s| *s == BootstrapState::BootstrapRoundUp) {
+								for state in guard.iter_mut() {
+									*state = BootstrapState::BootstrapSocket;
+								}
+
+								log::info!(
+									target: LOG_TARGET,
+									"-[{}] Roundup -> Socket Bootstrapping",
+									sub_display_format(SUB_LOG_TARGET),
+								);
+							}
+							drop(guard);
+
+							bridge_relay_handler.run().await
+						},
 					);
 				}),
 			HandlerType::Roundup => {
@@ -286,7 +341,12 @@ pub fn new_relay_base(config: Configuration) -> Result<RelayBase, ServiceError> 
 					external_clients,
 					socket_bifrost,
 					handler_config.roundup_utils.clone().unwrap(),
+					socket_barrier.clone(),
+					bootstrap_states.clone(),
+					config.relayer_config.bootstrap_config.clone(),
+					authority_address.clone(),
 				);
+
 				task_manager.spawn_essential_handle().spawn(
 					"Roundup-handler",
 					Some("handlers"),
@@ -302,6 +362,7 @@ pub fn new_relay_base(config: Configuration) -> Result<RelayBase, ServiceError> 
 		clients.iter().find(|client| client.is_native).unwrap().clone(),
 		config.relayer_config.periodic_configs.unwrap().roundup_emitter,
 	);
+
 	task_manager.spawn_essential_handle().spawn(
 		"Roundup-Emitter",
 		Some("roundup-emitter"),
@@ -315,7 +376,11 @@ pub fn new_relay_base(config: Configuration) -> Result<RelayBase, ServiceError> 
 				format!("{}-block-manager", block_manager.client.get_chain_name()).into_boxed_str(),
 			),
 			Some("block-managers"),
-			async move { block_manager.run().await },
+			async move {
+				block_manager.is_syncing().await;
+
+				block_manager.run().await
+			},
 		)
 	});
 

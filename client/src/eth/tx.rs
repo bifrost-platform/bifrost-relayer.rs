@@ -1,3 +1,4 @@
+use async_recursion::async_recursion;
 use cccp_primitives::sub_display_format;
 use ethers::{
 	prelude::{
@@ -42,7 +43,7 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> {
 
 		// Bumps transactions gas price in the background to avoid getting them stuck in the memory
 		// pool.
-		let geometric_gas_price = GeometricGasPrice::new(1.125, 12u64, None::<u64>);
+		let geometric_gas_price = GeometricGasPrice::new(1.5, 12u64, None::<u64>);
 		let gas_escalator = GasEscalatorMiddleware::new(
 			client.provider.clone(),
 			geometric_gas_price,
@@ -83,10 +84,11 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> {
 	}
 
 	/// Sends the transaction request to the event channel to retry transaction execution.
+	#[async_recursion]
 	async fn retry_transaction(&self, mut msg: EventMessage) {
 		msg.build_retry_event();
 		sleep(Duration::from_millis(msg.retry_interval)).await;
-		self.sender.send(msg).unwrap();
+		self.try_send_transaction(msg).await;
 	}
 
 	/// Set the activation of txpool namespace related actions.
