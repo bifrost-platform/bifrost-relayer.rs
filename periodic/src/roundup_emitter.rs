@@ -2,6 +2,7 @@ use cccp_client::eth::{EthClient, EventMessage, EventMetadata, EventSender, VSPP
 use cccp_primitives::{
 	authority_bifrost::AuthorityBifrost,
 	cli::RoundupEmitterConfig,
+	errors::{INVALID_CONTRACT_ADDRESS, INVALID_PERIODIC_SCHEDULE},
 	relayer_bifrost::RelayerManagerBifrost,
 	socket_bifrost::{RoundUpSubmit, Signatures, SocketBifrost},
 	sub_display_format, PeriodicWorker,
@@ -86,17 +87,17 @@ impl<T: JsonRpcClient> RoundupEmitter<T> {
 			current_round: U256::default(),
 			client,
 			event_sender,
-			schedule: Schedule::from_str(&config.schedule).unwrap(),
+			schedule: Schedule::from_str(&config.schedule).expect(INVALID_PERIODIC_SCHEDULE),
 			authority_contract: AuthorityBifrost::new(
-				H160::from_str(&config.authority_address).unwrap(),
+				H160::from_str(&config.authority_address).expect(INVALID_CONTRACT_ADDRESS),
 				provider.clone(),
 			),
 			socket_contract: SocketBifrost::new(
-				H160::from_str(&config.socket_address).unwrap(),
+				H160::from_str(&config.socket_address).expect(INVALID_CONTRACT_ADDRESS),
 				provider.clone(),
 			),
 			relayer_contract: RelayerManagerBifrost::new(
-				H160::from_str(&config.relayer_manager_address).unwrap(),
+				H160::from_str(&config.relayer_manager_address).expect(INVALID_CONTRACT_ADDRESS),
 				provider,
 			),
 		}

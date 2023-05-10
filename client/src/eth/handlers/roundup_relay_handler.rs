@@ -6,16 +6,20 @@ use cccp_primitives::{
 	authority_bifrost::{AuthorityBifrost, RoundMetaData},
 	authority_external::AuthorityExternal,
 	cli::{BootstrapConfig, RoundupHandlerUtilityConfig},
-	eth::{BootstrapState, RecoveredSignature, RoundUpEventStatus},
+	eth::{
+		BootstrapState, RecoveredSignature, RoundUpEventStatus, BOOTSTRAP_BLOCK_CHUNK_SIZE,
+		BOOTSTRAP_BLOCK_OFFSET, NATIVE_BLOCK_TIME,
+	},
 	socket_bifrost::{SerializedRoundUp, SocketBifrost, SocketBifrostEvents},
 	socket_external::{RoundUpSubmit, Signatures, SocketExternal},
-	sub_display_format, RoundupHandlerUtilType,
+	sub_display_format, RoundupHandlerUtilType, INVALID_CHAIN_ID, INVALID_CONTRACT_ABI,
+	INVALID_CONTRACT_ADDRESS,
 };
 use ethers::{
 	abi::{encode, Detokenize, Token, Tokenize},
 	contract::EthLogDecode,
 	prelude::{TransactionReceipt, H256},
-	providers::{JsonRpcClient, Middleware, Provider},
+	providers::{JsonRpcClient, Provider},
 	types::{Address, Bytes, Filter, Log, Signature, TransactionRequest, H160, U256, U64},
 };
 use std::{str::FromStr, sync::Arc, time::Duration};
@@ -26,7 +30,6 @@ use tokio::{
 use tokio_stream::StreamExt;
 
 const SUB_LOG_TARGET: &str = "roundup-handler";
-const NATIVE_BLOCK_TIME: u32 = 3u32;
 
 pub struct RoundupUtility<T> {
 	/// The event senders that sends messages to the event channel.
@@ -119,25 +122,27 @@ impl<T: JsonRpcClient> Handler for RoundupRelayHandler<T> {
 			}
 
 			match self.decode_log(log).await {
-				Ok(serialized_log) => match RoundUpEventStatus::from_u8(serialized_log.status) {
-					RoundUpEventStatus::NextAuthorityCommitted => {
-						let roundup_submit = self
-							.build_roundup_submit(
-								serialized_log.roundup.round,
-								serialized_log.roundup.new_relayers,
-							)
-							.await;
-						self.broadcast_roundup(roundup_submit).await;
-					},
-					RoundUpEventStatus::NextAuthorityRelayed => {
-						log::info!(
-							target: &self.client.get_chain_name(),
-							"-[{}] 👤 RoundUp event emitted. However, the majority has not yet been met. ({:?})",
-							sub_display_format(SUB_LOG_TARGET),
-							receipt.transaction_hash,
-						);
-						continue
-					},
+				Ok(serialized_log) => {
+					let status = RoundUpEventStatus::from_u8(serialized_log.status);
+					log::info!(
+						target: &self.client.get_chain_name(),
+						"-[{}] 👤 RoundUp event detected. ({:?}-{:?})",
+						sub_display_format(SUB_LOG_TARGET),
+						serialized_log.status,
+						receipt.transaction_hash,
+					);
+					match status {
+						RoundUpEventStatus::NextAuthorityCommitted => {
+							let roundup_submit = self
+								.build_roundup_submit(
+									serialized_log.roundup.round,
+									serialized_log.roundup.new_relayers,
+								)
+								.await;
+							self.broadcast_roundup(roundup_submit).await;
+						},
+						RoundUpEventStatus::NextAuthorityRelayed => continue,
+					}
 				},
 				Err(e) => {
 					log::error!(
@@ -182,7 +187,8 @@ impl<T: JsonRpcClient> RoundupRelayHandler<T> {
 		authority_address: String,
 		number_of_relay_targets: usize,
 	) -> Self {
-		let roundup_signature = socket_bifrost.abi().event("RoundUp").unwrap().signature();
+		let roundup_signature =
+			socket_bifrost.abi().event("RoundUp").expect(INVALID_CONTRACT_ABI).signature();
 		let roundup_utils = Arc::new(
 			event_senders
 				.iter()
@@ -194,13 +200,14 @@ impl<T: JsonRpcClient> RoundupRelayHandler<T> {
 								match config.contract_type {
 									RoundupHandlerUtilType::Socket => (
 										Some(SocketExternal::new(
-											H160::from_str(&config.contract).unwrap(),
+											H160::from_str(&config.contract)
+												.expect(INVALID_CONTRACT_ADDRESS),
 											external_clients
 												.iter()
 												.find(|client| {
 													client.get_chain_id() == config.chain_id
 												})
-												.unwrap()
+												.expect(INVALID_CHAIN_ID)
 												.get_provider(),
 										)),
 										authority_ext,
@@ -208,13 +215,14 @@ impl<T: JsonRpcClient> RoundupRelayHandler<T> {
 									RoundupHandlerUtilType::Authority => (
 										socket_ext,
 										Some(AuthorityExternal::new(
-											H160::from_str(&config.contract).unwrap(),
+											H160::from_str(&config.contract)
+												.expect(INVALID_CONTRACT_ADDRESS),
 											external_clients
 												.iter()
 												.find(|client| {
 													client.get_chain_id() == config.chain_id
 												})
-												.unwrap()
+												.expect(INVALID_CHAIN_ID)
 												.get_provider(),
 										)),
 									),
@@ -225,15 +233,10 @@ impl<T: JsonRpcClient> RoundupRelayHandler<T> {
 						},
 					);
 
-					let socket_external =
-						socket_external.expect("socket_external must be initialized");
-					let authority_external =
-						authority_external.expect("authority_external must be initialized");
-
 					RoundupUtility {
 						event_sender: sender.clone(),
-						socket_external,
-						authority_external,
+						socket_external: socket_external.unwrap(),
+						authority_external: authority_external.unwrap(),
 						id: sender.id,
 					}
 				})
@@ -241,7 +244,7 @@ impl<T: JsonRpcClient> RoundupRelayHandler<T> {
 		);
 
 		let authority_bifrost = AuthorityBifrost::new(
-			H160::from_str(&authority_address).unwrap(),
+			H160::from_str(&authority_address).expect(INVALID_CONTRACT_ADDRESS),
 			client.get_provider(),
 		);
 
@@ -383,21 +386,12 @@ impl<T: JsonRpcClient> RoundupRelayHandler<T> {
 			let current_round = self.authority_bifrost.latest_round().call().await.unwrap();
 			let target_chain_round =
 				target_chain.authority_external.latest_round().call().await.unwrap();
-			let chain_name = target_chain.id;
 			let bootstrap_guard = self.bootstrapping_count.clone();
 
 			tokio::spawn(async move {
 				if current_round == target_chain_round {
-					log::info!(
-						target: "bootstrapping",
-						"-[{}] Chain {} is already in the latest round",
-						sub_display_format(SUB_LOG_TARGET),
-						chain_name,
-					);
-
 					*bootstrap_guard.lock().await += 1;
 				}
-
 				barrier_clone_inner.wait().await;
 			});
 		}
@@ -415,7 +409,7 @@ impl<T: JsonRpcClient> RoundupRelayHandler<T> {
 		if *self.bootstrapping_count.lock().await == self.roundup_utils.len() as u8 {
 			log::info!(
 				target: &self.client.get_chain_name(),
-				"-[{}] Roundup -> Socket Bootstrapping",
+				"-[{}] ⚙️  [Bootstrap mode] Bootstrapping RoundUp events.",
 				sub_display_format(SUB_LOG_TARGET),
 			);
 
@@ -431,15 +425,11 @@ impl<T: JsonRpcClient> RoundupRelayHandler<T> {
 
 			let mut stream = tokio_stream::iter(logs);
 			while let Some(log) = stream.next().await {
-				let receipt = self
-					.client
-					.provider
-					.get_transaction_receipt(log.transaction_hash.unwrap())
-					.await
-					.unwrap()
-					.unwrap();
-
-				self.process_confirmed_transaction(receipt).await;
+				if let Some(receipt) =
+					self.client.get_transaction_receipt(log.transaction_hash.unwrap()).await
+				{
+					self.process_confirmed_transaction(receipt).await;
+				}
 			}
 		}
 
@@ -452,30 +442,28 @@ impl<T: JsonRpcClient> RoundupRelayHandler<T> {
 	}
 
 	async fn get_roundup_logs(&self) -> Vec<Log> {
-		let roundup_signature = self.socket_bifrost.abi().event("RoundUp").unwrap().signature();
-
 		let bootstrap_offset_height = self
 			.get_bootstrap_offset_height_based_on_block_time(self.bootstrap_config.round_offset)
 			.await;
 
-		let latest_block_number = self.client.get_latest_block_number().await.unwrap();
+		let latest_block_number = self.client.get_latest_block_number().await;
 		let mut from_block = latest_block_number.saturating_sub(bootstrap_offset_height);
 		let to_block = latest_block_number;
 
 		let mut logs = vec![];
 
 		// Split from_block into smaller chunks
-		let block_chunk_size = 2000;
 		while from_block <= to_block {
-			let chunk_to_block = std::cmp::min(from_block + block_chunk_size - 1, to_block);
+			let chunk_to_block =
+				std::cmp::min(from_block + BOOTSTRAP_BLOCK_CHUNK_SIZE - 1, to_block);
 
 			let filter = Filter::new()
 				.address(self.socket_bifrost.address())
-				.topic0(roundup_signature)
+				.topic0(self.roundup_signature)
 				.from_block(from_block)
 				.to_block(chunk_to_block);
 
-			let chunk_logs = self.client.provider.get_logs(&filter).await.unwrap();
+			let chunk_logs = self.client.get_logs(filter).await;
 			logs.extend(chunk_logs);
 
 			from_block = chunk_to_block + 1;
@@ -487,24 +475,22 @@ impl<T: JsonRpcClient> RoundupRelayHandler<T> {
 	/// Get factor between the block time of native-chain and block time of this chain
 	/// Approximately bfc-testnet: 3s, matic-mumbai: 2s, bsc-testnet: 3s, eth-goerli: 12s
 	pub async fn get_bootstrap_offset_height_based_on_block_time(&self, round_offset: u32) -> U64 {
-		let block_offset = 100u32;
 		let round_info: RoundMetaData = self.authority_bifrost.round_info().call().await.unwrap();
 
-		let block_number = self.client.provider.get_block_number().await.unwrap();
+		let block_number = self.client.get_latest_block_number().await;
 
-		let current_block = self.client.get_block((block_number).into()).await.unwrap().unwrap();
+		let current_block = self.client.get_block((block_number).into()).await.unwrap();
 		let prev_block = self
 			.client
-			.get_block((block_number - block_offset).into())
+			.get_block((block_number - BOOTSTRAP_BLOCK_OFFSET).into())
 			.await
-			.unwrap()
 			.unwrap();
 
 		let diff = current_block
 			.timestamp
 			.checked_sub(prev_block.timestamp)
 			.unwrap()
-			.checked_div(block_offset.into())
+			.checked_div(BOOTSTRAP_BLOCK_OFFSET.into())
 			.unwrap();
 
 		round_offset

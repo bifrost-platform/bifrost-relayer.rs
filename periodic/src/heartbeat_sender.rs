@@ -1,7 +1,10 @@
 use cccp_client::eth::{EthClient, EventMessage, EventMetadata, EventSender, HeartbeatMetadata};
 use cccp_primitives::{
-	authority_bifrost::AuthorityBifrost, cli::HeartbeatSenderConfig,
-	relayer_bifrost::RelayerManagerBifrost, sub_display_format, PeriodicWorker,
+	authority_bifrost::AuthorityBifrost,
+	cli::HeartbeatSenderConfig,
+	errors::{INVALID_BIFROST_NATIVENESS, INVALID_CONTRACT_ADDRESS, INVALID_PERIODIC_SCHEDULE},
+	relayer_bifrost::RelayerManagerBifrost,
+	sub_display_format, PeriodicWorker,
 };
 use cron::Schedule;
 use ethers::{
@@ -68,22 +71,19 @@ impl<T: JsonRpcClient> HeartbeatSender<T> {
 		event_senders: Vec<Arc<EventSender>>,
 	) -> Self {
 		Self {
-			schedule: Schedule::from_str(&config.schedule)
-				.expect("Failed to parse the heartbeat schedule"),
+			schedule: Schedule::from_str(&config.schedule).expect(INVALID_PERIODIC_SCHEDULE),
 			relayer_manager: RelayerManagerBifrost::new(
-				H160::from_str(&config.relayer_manager_address)
-					.expect("Failed to parse the relayer manager address"),
+				H160::from_str(&config.relayer_manager_address).expect(INVALID_CONTRACT_ADDRESS),
 				client.get_provider(),
 			),
 			authority: AuthorityBifrost::new(
-				H160::from_str(&config.authority_address)
-					.expect("Failed to parse the authority address"),
+				H160::from_str(&config.authority_address).expect(INVALID_CONTRACT_ADDRESS),
 				client.get_provider(),
 			),
 			event_sender: event_senders
 				.iter()
 				.find(|channel| channel.is_native)
-				.expect("Failed to find a event sender for bifrost network")
+				.expect(INVALID_BIFROST_NATIVENESS)
 				.clone(),
 			client,
 		}

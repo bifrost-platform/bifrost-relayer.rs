@@ -1,17 +1,23 @@
-use std::fmt::{Display, Formatter};
-
 use cccp_primitives::{eth::SocketEventStatus, PriceResponse};
+
 use ethers::types::{Address, TransactionRequest, U256};
+use std::fmt::{Display, Formatter};
 use tokio::sync::mpsc::UnboundedSender;
 
-/// The default retries of a single transaction request.
-pub const DEFAULT_RETRIES: u8 = 3;
+/// The default retries of a single json rpc request.
+pub const DEFAULT_CALL_RETRIES: u8 = 3;
 
-/// The default retry interval in milliseconds.
-pub const DEFAULT_RETRY_INTERVAL_MS: u64 = 3000;
+/// The default call retry interval in milliseconds.
+pub const DEFAULT_CALL_RETRY_INTERVAL_MS: u64 = 3000;
+
+/// The default retries of a single transaction request.
+pub const DEFAULT_TX_RETRIES: u8 = 3;
+
+/// The default transaction retry interval in milliseconds.
+pub const DEFAULT_TX_RETRY_INTERVAL_MS: u64 = 3000;
 
 /// The coefficient that will be multiplied to the retry interval on every new retry.
-pub const RETRY_COEFFICIENT: u64 = 2;
+pub const RETRY_TX_COEFFICIENT: u64 = 2;
 
 /// The coefficient that will be multiplied to the estimated gas.
 pub const GAS_COEFFICIENT: f64 = 2.0;
@@ -32,13 +38,19 @@ pub struct BridgeRelayMetadata {
 
 impl BridgeRelayMetadata {
 	pub fn new(
-		direction: String,
+		is_inbound: bool,
 		status: SocketEventStatus,
 		sequence: u128,
 		src_chain_id: u32,
 		dst_chain_id: u32,
 	) -> Self {
-		Self { direction, status, sequence, src_chain_id, dst_chain_id }
+		Self {
+			direction: if is_inbound { "Inbound".to_string() } else { "Outbound".to_string() },
+			status,
+			sequence,
+			src_chain_id,
+			dst_chain_id,
+		}
 	}
 }
 
@@ -181,8 +193,8 @@ impl EventMessage {
 		check_mempool: bool,
 	) -> Self {
 		Self {
-			retries_remaining: DEFAULT_RETRIES,
-			retry_interval: DEFAULT_RETRY_INTERVAL_MS,
+			retries_remaining: DEFAULT_TX_RETRIES,
+			retry_interval: DEFAULT_TX_RETRY_INTERVAL_MS,
 			tx_request,
 			metadata,
 			check_mempool,
@@ -193,8 +205,8 @@ impl EventMessage {
 	/// retry counter and increase the retry interval.
 	pub fn build_retry_event(&mut self) {
 		// do not multiply the coefficient on the first retry
-		if self.retries_remaining != DEFAULT_RETRIES {
-			self.retry_interval = self.retry_interval.saturating_mul(RETRY_COEFFICIENT);
+		if self.retries_remaining != DEFAULT_TX_RETRIES {
+			self.retry_interval = self.retry_interval.saturating_mul(RETRY_TX_COEFFICIENT);
 		}
 		self.retries_remaining = self.retries_remaining.saturating_sub(1);
 	}

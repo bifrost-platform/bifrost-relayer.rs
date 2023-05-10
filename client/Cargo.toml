@@ -22,7 +22,6 @@ tokio = { workspace = true, features = ["signal", "rt-multi-thread", "parking_lo
 k256 = { workspace = true, features = ["ecdsa"] }
 sha3 = { workspace = true }
 
-
 # CCCP
 cccp-primitives = { path = "../primitives" }
 

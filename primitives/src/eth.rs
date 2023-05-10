@@ -1,9 +1,11 @@
-use ethers::{
-	providers::ProviderError,
-	types::{Address, Signature, H160, U64},
-};
+use ethers::types::{Address, Signature, H160, U64};
 
-pub type EthResult<T = ()> = Result<T, ProviderError>;
+/// The native chain's average block time is seconds.
+pub const NATIVE_BLOCK_TIME: u32 = 3u32;
+
+pub const BOOTSTRAP_BLOCK_CHUNK_SIZE: u64 = 2000;
+
+pub const BOOTSTRAP_BLOCK_OFFSET: u32 = 100;
 
 #[derive(Clone, Copy, Debug)]
 /// Contract abstraction with an additional chain ID field.
