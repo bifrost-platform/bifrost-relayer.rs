@@ -125,6 +125,7 @@ impl WalletManager {
 		Address::from_slice(&hash[12..])
 	}
 
+	/// Returns the relayer address.
 	pub fn address(&self) -> Address {
 		self.signer.address()
 	}
