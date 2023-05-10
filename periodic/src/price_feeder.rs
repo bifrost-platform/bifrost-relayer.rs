@@ -4,6 +4,7 @@ use cccp_client::eth::{EthClient, EventMessage, EventMetadata, EventSender, Pric
 use cccp_primitives::{
 	cli::PriceFeederConfig,
 	contracts::socket_bifrost::{get_asset_oids, SocketBifrost},
+	errors::{INVALID_CONTRACT_ADDRESS, INVALID_PERIODIC_SCHEDULE},
 	periodic::{PeriodicWorker, PriceFetcher},
 	sub_display_format,
 };
@@ -75,9 +76,9 @@ impl<T: JsonRpcClient> OraclePriceFeeder<T> {
 		let asset_oid = get_asset_oids();
 
 		Self {
-			schedule: Schedule::from_str(&config.schedule).unwrap(),
+			schedule: Schedule::from_str(&config.schedule).expect(INVALID_PERIODIC_SCHEDULE),
 			contract: SocketBifrost::new(
-				H160::from_str(&config.contract).unwrap(),
+				H160::from_str(&config.contract).expect(INVALID_CONTRACT_ADDRESS),
 				client.get_provider(),
 			),
 			fetchers: vec![],

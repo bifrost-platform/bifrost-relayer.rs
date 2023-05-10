@@ -1,3 +1,4 @@
+use cccp_primitives::errors::INVALID_PRIVATE_KEY;
 use ethers::{
 	prelude::{k256::ecdsa::SigningKey, rand},
 	signers::{coins_bip39::English, LocalWallet, MnemonicBuilder, Signer},
@@ -42,16 +43,21 @@ impl WalletManager {
 		Ok(Self { signer: wallet.with_chain_id(chain_id), secret_key: None })
 	}
 
+	/// Initialize `WalletManager` by the given private key.
 	pub fn from_private_key(private_key: &str, chain_id: u32) -> WalletResult<Self> {
-		let wallet = private_key.parse::<LocalWallet>().expect("private key should exist");
+		assert!(private_key.len() == 66, "{}", INVALID_PRIVATE_KEY);
+		assert!(private_key.starts_with("0x"), "{}", INVALID_PRIVATE_KEY);
 
-		let pk_bytes =
-			<[u8; 32]>::from_hex(private_key.to_string().trim_start_matches("0x")).unwrap();
-		let signing_key = K256SigningKey::from_bytes(&pk_bytes.into()).unwrap();
+		let wallet = private_key.parse::<LocalWallet>().expect(INVALID_PRIVATE_KEY);
+
+		let pk_bytes = <[u8; 32]>::from_hex(private_key.to_string().trim_start_matches("0x"))
+			.expect(INVALID_PRIVATE_KEY);
+		let signing_key = K256SigningKey::from_bytes(&pk_bytes.into()).expect(INVALID_PRIVATE_KEY);
 
 		Ok(Self { signer: wallet.with_chain_id(chain_id), secret_key: Some(signing_key) })
 	}
 
+	/// Signs the given message and returns the generated signature.
 	pub fn sign_message(&self, msg: &[u8]) -> Signature {
 		let digest = Keccak256::new_with_prefix(msg);
 		let (sig, recovery_id) =
@@ -83,6 +89,7 @@ impl WalletManager {
 		Address::from_slice(&hash[12..])
 	}
 
+	/// Returns the relayer address.
 	pub fn address(&self) -> Address {
 		self.signer.address()
 	}
