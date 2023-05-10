@@ -10,7 +10,9 @@ use br_primitives::{
 	eth::{AggregatorContracts, ChainID, ProtocolContracts, ProviderMetadata},
 	utils::sub_display_format,
 };
-use std::sync::Arc;
+use serde::{de::DeserializeOwned, Serialize};
+use std::{fmt::Debug, sync::Arc};
+use tokio::time::{sleep, Duration};
 
 use ethers::{
 	abi::Detokenize,
@@ -71,6 +73,37 @@ pub struct EthClient<T> {
 		self.provider.clone()
 	}
 
+	/// Make an RPC request to the chain provider via the internal connection, and return the
+	/// result. This method wraps the original JSON RPC call and retries whenever the request fails
+	/// until it exceeds the maximum retries.
+	async fn rpc_call<P, R>(&self, method: &str, params: P) -> R
+	where
+		P: Debug + Serialize + Send + Sync + Clone,
+		R: Serialize + DeserializeOwned + Debug + Send,
+	{
+		let mut retries_remaining: u8 = DEFAULT_CALL_RETRIES;
+		let mut error_msg = String::default();
+
+		while retries_remaining > 0 {
+			match self.provider.request(method, params.clone()).await {
+				Ok(result) => return result,
+				Err(error) => {
+					// retry on error
+					retries_remaining = retries_remaining.saturating_sub(1);
+					error_msg = error.to_string();
+				},
+			}
+			sleep(Duration::from_millis(DEFAULT_CALL_RETRY_INTERVAL_MS)).await;
+		}
+		panic!(
+			"[{}]-[{}] An internal error thrown when making a call to the provider. Please check your provider's status [method: {}]: {}",
+			&self.get_chain_name(),
+			SUB_LOG_TARGET,
+			method,
+			error_msg
+		);
+	}
+
 	/// Retrieves the latest mined block number of the connected chain.
 	pub async fn get_latest_block_number(&self) -> U64 {
 		self.rpc_call("eth_blockNumber", ()).await
@@ -92,8 +125,8 @@ pub struct EthClient<T> {
 	}
 
 	/// Retrieves the transaction of the given transaction hash.
-	pub async fn get_transaction(&self, hash: H256) -> EthResult<Option<Transaction>> {
-		self.provider.get_transaction(hash).await
+	pub async fn get_transaction(&self, hash: H256) -> Option<Transaction> {
+		self.rpc_call("eth_getTransactionByHash", vec![hash]).await
 	}
 
 	/// Retrieves the transaction receipt of the given transaction hash.
