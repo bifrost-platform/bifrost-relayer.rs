@@ -61,6 +61,8 @@ pub struct BridgeRelayHandler<T> {
 	pub authority_bifrost: AuthorityBifrost<Provider<T>>,
 	/// All of available clients
 	pub all_clients: Vec<Arc<EthClient<T>>>,
+
+	pub rollback_addresses: Vec<String>,
 }
 
 pub struct BridgeRelayArgs<T> {
@@ -111,6 +113,16 @@ impl<T: JsonRpcClient> BridgeRelayHandler<T> {
 			bootstrap_config: bridge_relay_args.bootstrap_config,
 			authority_bifrost,
 			all_clients: bridge_relay_args.all_clients,
+			rollback_addresses: vec![
+				ethers::utils::to_checksum(
+					&H160::from_str("0xF28829e5b1f8668cd6c5F39EF68026eC26253158").unwrap(),
+					None,
+				),
+				ethers::utils::to_checksum(
+					&H160::from_str("0x5339b0823Cfac4a66de077F9ad42cE2Ca17A0aDF").unwrap(),
+					None,
+				),
+			],
 		}
 	}
 }
@@ -265,7 +277,16 @@ impl<T: JsonRpcClient> BridgeRelayBuilder for BridgeRelayHandler<T> {
 		if is_inbound {
 			// build signatures for inbound requests
 			match status {
-				SocketEventStatus::Requested | SocketEventStatus::Failed => Signatures::default(),
+				SocketEventStatus::Requested => {
+					if self
+						.rollback_addresses
+						.contains(&ethers::utils::to_checksum(&msg.params.to, None))
+					{
+						msg.status = SocketEventStatus::Failed.into();
+					}
+					Signatures::default()
+				},
+				SocketEventStatus::Failed => Signatures::default(),
 				SocketEventStatus::Executed => {
 					msg.status = SocketEventStatus::Accepted.into();
 					Signatures::from(self.sign_socket_message(msg))
@@ -290,8 +311,16 @@ impl<T: JsonRpcClient> BridgeRelayBuilder for BridgeRelayHandler<T> {
 					msg.status = SocketEventStatus::Accepted.into();
 					Signatures::from(self.sign_socket_message(msg))
 				},
-				SocketEventStatus::Accepted | SocketEventStatus::Rejected =>
-					self.get_sorted_signatures(msg).await,
+				SocketEventStatus::Accepted => {
+					if self
+						.rollback_addresses
+						.contains(&ethers::utils::to_checksum(&msg.params.to, None))
+					{
+						msg.status = SocketEventStatus::Rejected.into();
+					}
+					self.get_sorted_signatures(msg).await
+				},
+				SocketEventStatus::Rejected => self.get_sorted_signatures(msg).await,
 				SocketEventStatus::Executed | SocketEventStatus::Reverted => Signatures::default(),
 				_ => panic!(
 					"[{}]-[{}] Unknown socket event status received: {:?}",
