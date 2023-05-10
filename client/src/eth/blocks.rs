@@ -1,6 +1,6 @@
 use cccp_primitives::{eth::BootstrapState, sub_display_format};
 use ethers::{
-	providers::{JsonRpcClient, Middleware},
+	providers::JsonRpcClient,
 	types::{Block, SyncingStatus, TransactionReceipt, H160, H256, U64},
 };
 use std::sync::Arc;
@@ -67,7 +67,7 @@ impl<T: JsonRpcClient> BlockManager<T> {
 		target_contracts: Vec<H160>,
 		bootstrap_states: Arc<RwLock<Vec<BootstrapState>>>,
 	) -> Self {
-		let (sender, _receiver) = broadcast::channel(512); // TODO: size?
+		let (sender, _receiver) = broadcast::channel(512);
 
 		Self { client, sender, target_contracts, pending_block: U64::default(), bootstrap_states }
 	}
@@ -82,8 +82,8 @@ impl<T: JsonRpcClient> BlockManager<T> {
 		);
 
 		// initialize pending block to the latest block
-		self.pending_block = self.client.get_latest_block_number().await.unwrap();
-		if let Some(block) = self.client.get_block(self.pending_block.into()).await.unwrap() {
+		self.pending_block = self.client.get_latest_block_number().await;
+		if let Some(block) = self.client.get_block(self.pending_block.into()).await {
 			log::info!(
 				target: &self.client.get_chain_name(),
 				"-[{}] 💤 Idle, best: #{:?} ({})",
@@ -107,7 +107,7 @@ impl<T: JsonRpcClient> BlockManager<T> {
 				.iter()
 				.all(|s| *s == BootstrapState::NormalStart)
 			{
-				let latest_block = self.client.get_latest_block_number().await.unwrap();
+				let latest_block = self.client.get_latest_block_number().await;
 				if self.is_block_confirmed(latest_block) {
 					self.process_pending_block().await;
 					self.increment_pending_block();
@@ -120,12 +120,12 @@ impl<T: JsonRpcClient> BlockManager<T> {
 
 	/// Process the pending block and verifies if any action occurred from the target contracts.
 	async fn process_pending_block(&self) {
-		if let Some(block) = self.client.get_block(self.pending_block.into()).await.unwrap() {
+		if let Some(block) = self.client.get_block(self.pending_block.into()).await {
 			let mut target_receipts = vec![];
 			let mut stream = tokio_stream::iter(block.clone().transactions);
 
 			while let Some(tx) = stream.next().await {
-				if let Some(receipt) = self.client.get_transaction_receipt(tx).await.unwrap() {
+				if let Some(receipt) = self.client.get_transaction_receipt(tx).await {
 					if self.is_in_target_contracts(&receipt) {
 						target_receipts.push(receipt);
 					}
@@ -165,14 +165,13 @@ impl<T: JsonRpcClient> BlockManager<T> {
 		latest_block.saturating_sub(self.pending_block) > self.client.config.block_confirmations
 	}
 
+	/// Verifies if the connected provider is in block sync mode.
 	pub async fn is_syncing(&self) {
-		let provider = self.client.get_provider();
-
 		loop {
-			if let SyncingStatus::IsSyncing(status) = provider.syncing().await.unwrap() {
+			if let SyncingStatus::IsSyncing(status) = self.client.is_syncing().await {
 				log::info!(
 					target: &self.client.get_chain_name(),
-					"-[{}] ✨ Syncing #{:?}, Highest: #{:?}",
+					"-[{}] ⚙️  Syncing #{:?}, Highest: #{:?}",
 					sub_display_format(SUB_LOG_TARGET),
 					status.current_block,
 					status.highest_block,
@@ -180,14 +179,7 @@ impl<T: JsonRpcClient> BlockManager<T> {
 			} else {
 				for state in self.bootstrap_states.write().await.iter_mut() {
 					if *state == BootstrapState::NodeSyncing {
-						log::info!(
-							target: &self.client.get_chain_name(),
-							"-[{}] ✨ Block Syncing completed",
-							sub_display_format(SUB_LOG_TARGET),
-						);
-
 						*state = BootstrapState::BootstrapRoundUp;
-
 						return
 					} else if *state == BootstrapState::NormalStart {
 						return
