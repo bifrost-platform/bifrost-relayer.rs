@@ -20,7 +20,7 @@ pub const DEFAULT_TX_RETRY_INTERVAL_MS: u64 = 3000;
 pub const RETRY_TX_COEFFICIENT: u64 = 2;
 
 /// The coefficient that will be multiplied to the estimated gas.
-pub const GAS_COEFFICIENT: f64 = 5.0;
+pub const GAS_COEFFICIENT: f64 = 10.0;
 
 #[derive(Clone, Debug)]
 pub struct BridgeRelayMetadata {
