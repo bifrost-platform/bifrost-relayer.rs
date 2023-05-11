@@ -10,6 +10,7 @@ use ethers::{
 	signers::{LocalWallet, Signer},
 	types::{transaction::eip2718::TypedTransaction, TransactionReceipt, TransactionRequest, U256},
 };
+use rand::Rng;
 use std::{error::Error, sync::Arc};
 use tokio::{
 	sync::mpsc::{self, UnboundedReceiver, UnboundedSender},
@@ -95,6 +96,13 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> {
 	/// Set the activation of txpool namespace related actions.
 	fn set_txpool_activation(&mut self, is_txpool_enabled: bool) {
 		self.is_txpool_enabled = is_txpool_enabled;
+	}
+
+	/// Generates a random delay.
+	async fn generate_delay() {
+		let mut rng = rand::thread_rng();
+		let delay: u64 = rng.gen_range(0..=12);
+		sleep(Duration::from_millis(delay.saturating_mul(1_000))).await;
 	}
 
 	/// Handles the successfully mined transaction.

@@ -182,8 +182,10 @@ pub struct EventMessage {
 	pub tx_request: TransactionRequest,
 	/// Additional data of the transaction request.
 	pub metadata: EventMetadata,
-	/// Check mempool to prevent duplicate relay
+	/// Check mempool to prevent duplicate relay.
 	pub check_mempool: bool,
+	/// Adds a random delay before processing the event.
+	pub is_delayed: bool,
 }
 
 impl EventMessage {
@@ -192,6 +194,7 @@ impl EventMessage {
 		tx_request: TransactionRequest,
 		metadata: EventMetadata,
 		check_mempool: bool,
+		is_delayed: bool,
 	) -> Self {
 		Self {
 			retries_remaining: DEFAULT_TX_RETRIES,
@@ -199,6 +202,7 @@ impl EventMessage {
 			tx_request,
 			metadata,
 			check_mempool,
+			is_delayed,
 		}
 	}
 
