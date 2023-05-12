@@ -42,11 +42,16 @@ pub struct TransactionManager<T> {
 	pub receiver: UnboundedReceiver<EventMessage>,
 	/// The flag whether the client has enabled txpool namespace.
 	pub is_txpool_enabled: bool,
+	/// The flag whether debug mode is enabled. If enabled, certain errors will be logged.
+	pub debug_mode: bool,
 }
 
 impl<T: 'static + JsonRpcClient> TransactionManager<T> {
 	/// Instantiates a new `TransactionManager` instance.
-	pub fn new(client: Arc<EthClient<T>>) -> (Self, UnboundedSender<EventMessage>) {
+	pub fn new(
+		client: Arc<EthClient<T>>,
+		debug_mode: bool,
+	) -> (Self, UnboundedSender<EventMessage>) {
 		let (sender, receiver) = mpsc::unbounded_channel::<EventMessage>();
 
 		// Bumps transactions gas price in the background to avoid getting them stuck in the memory
@@ -64,7 +69,14 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> {
 		let middleware = NonceManagerMiddleware::new(signer, client.wallet.signer.address());
 
 		(
-			Self { client, sender: sender.clone(), middleware, receiver, is_txpool_enabled: false },
+			Self {
+				client,
+				sender: sender.clone(),
+				middleware,
+				receiver,
+				is_txpool_enabled: false,
+				debug_mode,
+			},
 			sender,
 		)
 	}
@@ -116,7 +128,7 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> {
 			status,
 			receipt.transaction_hash
 		);
-		if status.is_zero() {
+		if status.is_zero() && self.debug_mode {
 			log::warn!(
 				target: &self.client.get_chain_name(),
 				"-[{}] ⚠️  Warning! Error encountered during contract execution [execution reverted]. A prior transaction might have been already submitted: {}, {:?}-{:?}-{:?}",
@@ -144,7 +156,7 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> {
 
 	/// Handles the failed transaction receipt generation.
 	async fn handle_failed_tx_receipt(&self, msg: EventMessage) {
-		log::warn!(
+		log::error!(
 			target: &self.client.get_chain_name(),
 			"-[{}] ♻️  The requested transaction failed to generate a receipt: {}, Retries left: {:?}",
 			sub_display_format(SUB_LOG_TARGET),
@@ -160,7 +172,7 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> {
 				msg.retries_remaining - 1,
 			)
 			.as_str(),
-			sentry::Level::Warning,
+			sentry::Level::Error,
 		);
 		self.retry_transaction(msg).await;
 	}
@@ -187,14 +199,28 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> {
 	where
 		E: Error + ?Sized,
 	{
-		log::debug!(
-			target: &self.client.get_chain_name(),
-			"-[{}] ⚠️  Warning! Error encountered during gas estimation: {}, Retries left: {:?}, Error: {}",
-			sub_display_format(SUB_LOG_TARGET),
-			msg.metadata,
-			msg.retries_remaining - 1,
-			error.to_string()
-		);
+		if self.debug_mode {
+			log::warn!(
+				target: &self.client.get_chain_name(),
+				"-[{}] ⚠️  Warning! Error encountered during gas estimation: {}, Retries left: {:?}, Error: {}",
+				sub_display_format(SUB_LOG_TARGET),
+				msg.metadata,
+				msg.retries_remaining - 1,
+				error.to_string()
+			);
+			sentry::capture_message(
+				format!(
+					"[{}]-[{}] ⚠️  Warning! Error encountered during gas estimation: {}, Retries left: {:?}, Error: {}",
+					&self.client.get_chain_name(),
+					SUB_LOG_TARGET,
+					msg.metadata,
+					msg.retries_remaining - 1,
+					error.to_string()
+				)
+				.as_str(),
+				sentry::Level::Warning,
+			);
+		}
 		self.retry_transaction(msg).await;
 	}
 
@@ -202,22 +228,6 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> {
 	/// be re-published to the event channel if the transaction fails to be mined in a block.
 	async fn try_send_transaction(&self, mut msg: EventMessage) {
 		if msg.retries_remaining == 0 {
-			log::warn!(
-				target: &self.client.get_chain_name(),
-				"-[{}] ⚠️  Warning! Exceeded the transaction retry limit. A prior transaction might have been already submitted: {}",
-				sub_display_format(SUB_LOG_TARGET),
-				msg.metadata
-			);
-			sentry::capture_message(
-				format!(
-					"[{}]-[{}] ⚠️  Warning! Exceeded the transaction retry limit. A prior transaction might have been already submitted: {}",
-					&self.client.get_chain_name(),
-					SUB_LOG_TARGET,
-					msg.metadata,
-				)
-				.as_str(),
-				sentry::Level::Warning,
-			);
 			return
 		}
 

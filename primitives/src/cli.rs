@@ -38,20 +38,28 @@ pub struct Configuration {
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct RelayerConfig {
+	/// System config
+	pub system: SystemConfig,
 	/// BTC config
 	pub bitcoin: BitcoinConfig,
 	/// EVM configs
 	pub evm_providers: Vec<EVMProvider>,
 	/// Handler configs
 	pub handler_configs: Vec<HandlerConfig>,
-	/// The private key of the relayer
-	pub private_key: String,
 	/// Periodic worker configs
 	pub periodic_configs: Option<PeriodicWorkerConfig>,
 	/// Bootstrapping configs
 	pub bootstrap_config: BootstrapConfig,
 	/// Sentry config
 	pub sentry_config: Option<SentryConfig>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct SystemConfig {
+	/// The private key of the relayer.
+	pub private_key: String,
+	/// Debug mode enabled if set to `true`.
+	pub debug_mode: bool,
 }
 
 #[derive(Debug, Clone, Deserialize)]

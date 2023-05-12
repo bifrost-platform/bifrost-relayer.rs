@@ -1,3 +1,7 @@
+system:
+  private_key: ""
+  debug_mode: false
+
 bitcoin:
   provider: ""
   username: ""
@@ -47,16 +51,16 @@ evm_providers:
 
 handler_configs:
   - handler_type: BridgeRelay
-    watch_list: [ 49088, 5, 97, 80001 ]
+    watch_list: [49088, 5, 97, 80001]
   - handler_type: Roundup
-    watch_list: [ 49088 ]
+    watch_list: [49088]
 
 periodic_configs:
   oracle_price_feeder:
     - chain_id: 49088
       schedule: "0 */5 * * * * *" # Every 5th minute.
-      price_sources: [ Coingecko ]
-      symbols: [ "ETH", "BFC", "BNB", "MATIC", "USDC", "BIFI", "USDT" ]
+      price_sources: [Coingecko]
+      symbols: ["ETH", "BFC", "BNB", "MATIC", "USDC", "BIFI", "USDT"]
   roundup_emitter: "*/15 * * * * * *" # Every 15th seconds.
   heartbeat: "0 * * * * * *" # Every minute.
 
