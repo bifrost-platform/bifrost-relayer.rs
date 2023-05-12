@@ -24,9 +24,9 @@ type TransactionMiddleware<T> =
 
 const SUB_LOG_TARGET: &str = "transaction-manager";
 
-/// Generates a random delay that is ranged as 1 to 12 seconds (in milliseconds).
+/// Generates a random delay that is ranged as 0 to 12 seconds (in milliseconds).
 fn generate_delay() -> u64 {
-	let delay: u64 = rand::thread_rng().gen_range(1..=12);
+	let delay: u64 = rand::thread_rng().gen_range(0..=12);
 	delay.saturating_mul(1_000)
 }
 
@@ -233,8 +233,7 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> {
 
 		// sets a random delay on external chain transactions on first try
 		if msg.is_external && msg.retries_remaining == DEFAULT_TX_RETRIES {
-			let delay = generate_delay();
-			sleep(Duration::from_millis(delay)).await;
+			sleep(Duration::from_millis(generate_delay())).await;
 		}
 
 		// set transaction `from` field
