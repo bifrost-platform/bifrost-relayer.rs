@@ -1,7 +1,7 @@
 use ethers::prelude::abigen;
 
 abigen!(
-	RelayerManagerBifrost,
-	"../abi/abi.relayer.bifrost.json",
+	VaultContract,
+	"../abi/abi.vault.json",
 	event_derives(serde::Deserialize, serde::Serialize)
 );

@@ -1,17 +1,5 @@
 [
   {
-    "inputs": [
-      {
-        "internalType": "bytes20",
-        "name": "_code_hash",
-        "type": "bytes20"
-      }
-    ],
-    "stateMutability": "nonpayable",
-    "type": "constructor",
-    "name": "constructor"
-  },
-  {
     "anonymous": false,
     "inputs": [
       {
@@ -699,6 +687,59 @@
     "type": "function"
   },
   {
+    "inputs": [
+      {
+        "internalType": "Oracle_ID[]",
+        "name": "oids",
+        "type": "bytes32[]"
+      },
+      {
+        "internalType": "bytes32[]",
+        "name": "data",
+        "type": "bytes32[]"
+      }
+    ],
+    "name": "oracle_aggregate_feeding",
+    "outputs": [
+      {
+        "internalType": "bool",
+        "name": "",
+        "type": "bool"
+      }
+    ],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "Oracle_ID[]",
+        "name": "oids",
+        "type": "bytes32[]"
+      },
+      {
+        "internalType": "uint128[]",
+        "name": "rounds",
+        "type": "uint128[]"
+      },
+      {
+        "internalType": "bytes32[]",
+        "name": "data",
+        "type": "bytes32[]"
+      }
+    ],
+    "name": "oracle_consensus_feeding",
+    "outputs": [
+      {
+        "internalType": "bool",
+        "name": "",
+        "type": "bool"
+      }
+    ],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
     "inputs": [],
     "name": "orc_manager",
     "outputs": [
@@ -897,7 +938,7 @@
     "outputs": [
       {
         "internalType": "bool",
-        "name": "",
+        "name": "returnData",
         "type": "bool"
       }
     ],
@@ -1222,7 +1263,7 @@
         "type": "tuple"
       }
     ],
-    "name": "round_control_relay",
+    "name": "round_control_poll",
     "outputs": [
       {
         "internalType": "bool",
@@ -1619,7 +1660,56 @@
     "type": "function"
   },
   {
-    "stateMutability": "payable",
-    "type": "receive"
+    "inputs": [
+      {
+        "components": [
+          {
+            "internalType": "uint256",
+            "name": "round",
+            "type": "uint256"
+          },
+          {
+            "internalType": "address[]",
+            "name": "new_relayers",
+            "type": "address[]"
+          },
+          {
+            "components": [
+              {
+                "internalType": "bytes32[]",
+                "name": "r",
+                "type": "bytes32[]"
+              },
+              {
+                "internalType": "bytes32[]",
+                "name": "s",
+                "type": "bytes32[]"
+              },
+              {
+                "internalType": "bytes",
+                "name": "v",
+                "type": "bytes"
+              }
+            ],
+            "internalType": "struct Socket_Struct.Signatures",
+            "name": "sigs",
+            "type": "tuple"
+          }
+        ],
+        "internalType": "struct Socket_Struct.Round_Up_Submit",
+        "name": "_round_up_submit",
+        "type": "tuple"
+      }
+    ],
+    "name": "round_control_relay",
+    "outputs": [
+      {
+        "internalType": "bool",
+        "name": "",
+        "type": "bool"
+      }
+    ],
+    "stateMutability": "nonpayable",
+    "type": "function"
   }
 ]
