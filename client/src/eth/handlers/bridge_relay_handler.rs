@@ -584,8 +584,8 @@ impl<T: JsonRpcClient> BridgeRelayHandler<T> {
 		}
 	}
 
-	/// Compare the reqeust status recorded in source chain with event status to determine if the
-	/// event has already been exeuted
+	/// Compare the request status recorded in source chain with event status to determine if the
+	/// event has already been executed
 	async fn is_already_done(&self, rid: RequestID, src_chain_id: u32) -> bool {
 		let socket_contract = self.get_source_socket(src_chain_id);
 		let request = socket_contract.get_request(rid.clone()).call().await.unwrap();
