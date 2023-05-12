@@ -261,9 +261,9 @@ impl<T: JsonRpcClient> BridgeRelayBuilder for BridgeRelayHandler<T> {
 	) -> (Signatures, bool) {
 		let status = SocketEventStatus::from_u8(msg.status);
 		let mut is_external = false;
-		if is_inbound {
+		let signatures = if is_inbound {
 			// build signatures for inbound requests
-			let sigs = match status {
+			match status {
 				SocketEventStatus::Requested | SocketEventStatus::Failed => Signatures::default(),
 				SocketEventStatus::Executed => {
 					msg.status = SocketEventStatus::Accepted.into();
@@ -283,11 +283,10 @@ impl<T: JsonRpcClient> BridgeRelayBuilder for BridgeRelayHandler<T> {
 					SUB_LOG_TARGET,
 					status
 				),
-			};
-			(sigs, is_external)
+			}
 		} else {
 			// build signatures for outbound requests
-			let sigs = match status {
+			match status {
 				SocketEventStatus::Requested => {
 					msg.status = SocketEventStatus::Accepted.into();
 					Signatures::from(self.sign_socket_message(msg))
@@ -303,9 +302,9 @@ impl<T: JsonRpcClient> BridgeRelayBuilder for BridgeRelayHandler<T> {
 					SUB_LOG_TARGET,
 					status
 				),
-			};
-			(sigs, is_external)
-		}
+			}
+		};
+		(signatures, is_external)
 	}
 
 	fn encode_socket_message(&self, msg: SocketMessage) -> Vec<u8> {

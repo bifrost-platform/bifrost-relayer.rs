@@ -215,7 +215,7 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> {
 					SUB_LOG_TARGET,
 					msg.metadata,
 					msg.retries_remaining - 1,
-					error.to_string()
+					error
 				)
 				.as_str(),
 				sentry::Level::Warning,
