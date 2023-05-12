@@ -17,12 +17,18 @@ use tokio::{
 	time::{sleep, Duration},
 };
 
-use super::{EthClient, EventMessage, EventMetadata, GAS_COEFFICIENT};
+use super::{EthClient, EventMessage, EventMetadata, DEFAULT_TX_RETRIES, GAS_COEFFICIENT};
 
 type TransactionMiddleware<T> =
 	NonceManagerMiddleware<SignerMiddleware<GasEscalatorMiddleware<Arc<Provider<T>>>, LocalWallet>>;
 
 const SUB_LOG_TARGET: &str = "transaction-manager";
+
+/// Generates a random delay that is ranged as 1 to 12 seconds (in milliseconds).
+fn generate_delay() -> u64 {
+	let delay: u64 = rand::thread_rng().gen_range(1..=12);
+	delay.saturating_mul(1_000)
+}
 
 /// The essential task that sends asynchronous transactions.
 pub struct TransactionManager<T> {
@@ -96,13 +102,6 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> {
 	/// Set the activation of txpool namespace related actions.
 	fn set_txpool_activation(&mut self, is_txpool_enabled: bool) {
 		self.is_txpool_enabled = is_txpool_enabled;
-	}
-
-	/// Generates a random delay.
-	async fn generate_delay() {
-		let mut rng = rand::thread_rng();
-		let delay: u64 = rng.gen_range(0..=12);
-		sleep(Duration::from_millis(delay.saturating_mul(1_000))).await;
 	}
 
 	/// Handles the successfully mined transaction.
@@ -220,6 +219,12 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> {
 				sentry::Level::Warning,
 			);
 			return
+		}
+
+		// sets a random delay on external chain transactions on first try
+		if msg.is_external && msg.retries_remaining == DEFAULT_TX_RETRIES {
+			let delay = generate_delay();
+			sleep(Duration::from_millis(delay)).await;
 		}
 
 		// set transaction `from` field

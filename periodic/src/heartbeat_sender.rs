@@ -99,6 +99,7 @@ impl<T: JsonRpcClient> HeartbeatSender<T> {
 			tx_request,
 			EventMetadata::Heartbeat(metadata.clone()),
 			false,
+			false,
 		)) {
 			Ok(()) => log::info!(
 				target: &self.client.get_chain_name(),

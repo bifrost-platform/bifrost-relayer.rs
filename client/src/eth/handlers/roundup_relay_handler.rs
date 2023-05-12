@@ -292,6 +292,7 @@ impl<T: JsonRpcClient> RoundupRelayHandler<T> {
 							target_client.get_chain_id(),
 						)),
 						true,
+						true,
 					))
 					.unwrap()
 			}

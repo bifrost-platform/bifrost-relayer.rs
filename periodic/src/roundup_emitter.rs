@@ -139,6 +139,7 @@ impl<T: JsonRpcClient> RoundupEmitter<T> {
 			tx_request,
 			EventMetadata::VSPPhase1(metadata.clone()),
 			false,
+			false,
 		)) {
 			Ok(()) => log::info!(
 				target: &self.client.get_chain_name(),
