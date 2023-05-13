@@ -1,3 +1,4 @@
+use crate::cli::EVMProvider;
 use ethers::types::{Address, Signature, H160, U64};
 
 /// The native chain's average block time is seconds.
@@ -106,6 +107,14 @@ pub struct EthClientConfiguration {
 	pub call_interval: u64,
 	/// Bridge direction when bridge event points this chain as destination.
 	pub if_destination_chain: BridgeDirection,
+	/// Socket contract address
+	pub socket_address: String,
+	/// Vault contract address
+	pub vault_address: String,
+	/// Authority contract address
+	pub authority_address: String,
+	/// Relayer manager contract address (Only for Bifrost network)
+	pub relayer_manager_address: Option<String>,
 }
 
 impl EthClientConfiguration {
@@ -115,8 +124,41 @@ impl EthClientConfiguration {
 		call_interval: u64,
 		block_confirmations: U64,
 		if_destination_chain: BridgeDirection,
+		socket_address: String,
+		vault_address: String,
+		authority_address: String,
+		relayer_manager_address: Option<String>,
 	) -> Self {
-		Self { name, id, call_interval, block_confirmations, if_destination_chain }
+		Self {
+			name,
+			id,
+			call_interval,
+			block_confirmations,
+			if_destination_chain,
+			socket_address,
+			vault_address,
+			authority_address,
+			relayer_manager_address,
+		}
+	}
+}
+
+impl From<EVMProvider> for EthClientConfiguration {
+	fn from(evm_provider: EVMProvider) -> EthClientConfiguration {
+		EthClientConfiguration::new(
+			evm_provider.name,
+			evm_provider.id,
+			evm_provider.call_interval,
+			evm_provider.block_confirmations,
+			match evm_provider.is_native.unwrap_or(false) {
+				true => BridgeDirection::Inbound,
+				_ => BridgeDirection::Outbound,
+			},
+			evm_provider.socket_address,
+			evm_provider.vault_address,
+			evm_provider.authority_address,
+			evm_provider.relayer_manager_address,
+		)
 	}
 }
 

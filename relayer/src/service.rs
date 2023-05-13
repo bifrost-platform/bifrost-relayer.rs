@@ -114,17 +114,14 @@ pub fn new_relay_base(config: Configuration) -> Result<RelayBase, ServiceError> 
 				Arc::new(
 					Provider::<Http>::try_from(evm_provider.provider).expect(INVALID_PROVIDER_URL),
 				),
-				EthClientConfiguration::new(
-					evm_provider.name,
-					evm_provider.id,
-					evm_provider.call_interval,
-					evm_provider.block_confirmations,
-					match is_native {
-						true => BridgeDirection::Inbound,
-						_ => BridgeDirection::Outbound,
-					},
-				),
+				evm_provider.name,
+				evm_provider.id,
+				evm_provider.block_confirmations,
+				evm_provider.call_interval,
 				is_native,
+				evm_provider.socket_address,
+				evm_provider.vault_address,
+				evm_provider.authority_address,
 			));
 
 			if evm_provider.is_relay_target {
