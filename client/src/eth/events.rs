@@ -227,4 +227,8 @@ impl EventSender {
 	pub fn new(id: u32, sender: UnboundedSender<EventMessage>, is_native: bool) -> Self {
 		Self { id, sender, is_native }
 	}
+
+	pub fn send(&self, message: EventMessage) {
+		self.sender.send(message).unwrap();
+	}
 }
