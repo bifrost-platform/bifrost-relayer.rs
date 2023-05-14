@@ -2,7 +2,7 @@ use cccp_primitives::{eth::SocketEventStatus, PriceResponse};
 
 use ethers::types::{Address, TransactionRequest, U256};
 use std::fmt::{Display, Formatter};
-use tokio::sync::mpsc::UnboundedSender;
+use tokio::sync::mpsc::{error::SendError, UnboundedSender};
 
 /// The default retries of a single json rpc request.
 pub const DEFAULT_CALL_RETRIES: u8 = 3;
@@ -228,7 +228,7 @@ impl EventSender {
 		Self { id, sender, is_native }
 	}
 
-	pub fn send(&self, message: EventMessage) {
-		self.sender.send(message).unwrap();
+	pub fn send(&self, message: EventMessage) -> Result<(), SendError<EventMessage>> {
+		self.sender.send(message)
 	}
 }

@@ -284,14 +284,16 @@ impl<T: JsonRpcClient> RoundupRelayHandler<T> {
 				let event_sender =
 					self.event_senders.get(&target_client.get_chain_id()).expect(INVALID_CHAIN_ID);
 
-				event_sender.send(EventMessage::new(
-					transaction_request,
-					EventMetadata::VSPPhase2(VSPPhase2Metadata::new(
-						roundup_submit.round,
-						target_client.get_chain_id(),
-					)),
-					true,
-				))
+				event_sender
+					.send(EventMessage::new(
+						transaction_request,
+						EventMetadata::VSPPhase2(VSPPhase2Metadata::new(
+							roundup_submit.round,
+							target_client.get_chain_id(),
+						)),
+						true,
+					))
+					.unwrap()
 			}
 		}
 	}
