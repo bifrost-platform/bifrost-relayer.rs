@@ -45,7 +45,7 @@ impl WalletManager {
 
 	/// Initialize `WalletManager` by the given private key.
 	pub fn from_private_key(private_key: &str, chain_id: u32) -> WalletResult<Self> {
-		assert!(private_key.len() == 66, "{}", INVALID_PRIVATE_KEY);
+		assert_eq!(private_key.len(), 66, "{}", INVALID_PRIVATE_KEY);
 		assert!(private_key.starts_with("0x"), "{}", INVALID_PRIVATE_KEY);
 
 		let wallet = private_key.parse::<LocalWallet>().expect(INVALID_PRIVATE_KEY);
