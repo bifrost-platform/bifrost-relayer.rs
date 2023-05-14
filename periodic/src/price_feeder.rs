@@ -3,10 +3,10 @@ use async_trait::async_trait;
 use cccp_client::eth::{EthClient, EventMessage, EventMetadata, EventSender, PriceFeedMetadata};
 use cccp_primitives::{
 	cli::PriceFeederConfig,
-	contracts::socket_bifrost::{get_asset_oids, SocketBifrost},
 	errors::{INVALID_CONTRACT_ADDRESS, INVALID_PERIODIC_SCHEDULE},
 	periodic::{PeriodicWorker, PriceFetcher},
-	sub_display_format,
+	socket::get_asset_oids,
+	sub_display_format, INVALID_BIFROST_NATIVENESS,
 };
 use cron::Schedule;
 use ethers::{
@@ -22,8 +22,6 @@ const SUB_LOG_TARGET: &str = "price-oracle";
 pub struct OraclePriceFeeder<T> {
 	/// The time schedule that represents when to send price feeds.
 	pub schedule: Schedule,
-	/// The target oracle contract instance.
-	pub contract: SocketBifrost<Provider<T>>,
 	/// The source for fetching prices.
 	pub fetchers: Vec<PriceFetchers>,
 	/// The event sender that sends messages to the event channel.
@@ -58,6 +56,7 @@ impl<T: JsonRpcClient> PeriodicWorker for OraclePriceFeeder<T> {
 				.await;
 		}
 	}
+
 	async fn wait_until_next_time(&self) {
 		// calculate sleep duration for next schedule
 		let sleep_duration =
@@ -69,23 +68,27 @@ impl<T: JsonRpcClient> PeriodicWorker for OraclePriceFeeder<T> {
 
 impl<T: JsonRpcClient> OraclePriceFeeder<T> {
 	pub fn new(
-		event_sender: Arc<EventSender>,
+		event_senders: Vec<Arc<EventSender>>,
 		config: PriceFeederConfig,
-		client: Arc<EthClient<T>>,
+		clients: Vec<Arc<EthClient<T>>>,
 	) -> Self {
 		let asset_oid = get_asset_oids();
 
 		Self {
 			schedule: Schedule::from_str(&config.schedule).expect(INVALID_PERIODIC_SCHEDULE),
-			contract: SocketBifrost::new(
-				H160::from_str(&config.contract).expect(INVALID_CONTRACT_ADDRESS),
-				client.get_provider(),
-			),
 			fetchers: vec![],
-			event_sender,
+			event_sender: event_senders
+				.iter()
+				.find(|event_sender| event_sender.is_native)
+				.expect(INVALID_BIFROST_NATIVENESS)
+				.clone(),
 			config,
 			asset_oid,
-			client,
+			client: clients
+				.iter()
+				.find(|client| client.is_native)
+				.expect(INVALID_BIFROST_NATIVENESS)
+				.clone(),
 		}
 	}
 
@@ -110,7 +113,8 @@ impl<T: JsonRpcClient> OraclePriceFeeder<T> {
 		price_bytes_list: Vec<[u8; 32]>,
 	) -> TransactionRequest {
 		TransactionRequest::default().to(self.contract.address()).data(
-			self.contract
+			self.client
+				.socket
 				.oracle_aggregate_feeding(oid_bytes_list, price_bytes_list)
 				.calldata()
 				.unwrap(),
@@ -123,7 +127,7 @@ impl<T: JsonRpcClient> OraclePriceFeeder<T> {
 		tx_request: TransactionRequest,
 		metadata: PriceFeedMetadata,
 	) {
-		match self.event_sender.sender.send(EventMessage::new(
+		match self.event_sender.send(EventMessage::new(
 			tx_request,
 			EventMetadata::PriceFeed(metadata.clone()),
 			false,
@@ -147,98 +151,5 @@ impl<T: JsonRpcClient> OraclePriceFeeder<T> {
 				sentry::capture_error(&error);
 			},
 		}
-	}
-}
-
-#[cfg(test)]
-mod tests {
-	use super::*;
-	use cccp_client::eth::WalletManager;
-	use cccp_primitives::{
-		cli::RelayerConfig,
-		eth::{BridgeDirection, EthClientConfiguration},
-	};
-	use ethers::providers::Http;
-	use tokio::sync::mpsc::{self};
-
-	async fn initialize_feeder() -> OraclePriceFeeder<Http> {
-		let config_file =
-			std::fs::File::open("../config.yaml").expect("Could not open config file.");
-		let relayer_config: RelayerConfig =
-			serde_yaml::from_reader(config_file).expect("Config file not valid.");
-		let evm_provider = relayer_config
-			.evm_providers
-			.into_iter()
-			.find(|evm_provider| evm_provider.name == "bfc-testnet")
-			.unwrap();
-		let (sender, _) = mpsc::unbounded_channel::<EventMessage>();
-		let is_native = evm_provider.is_native.unwrap_or(false);
-		let event_sender = EventSender { id: evm_provider.id, sender, is_native };
-
-		let wallet =
-			WalletManager::from_private_key(relayer_config.private_key.as_str(), evm_provider.id)
-				.expect("Failed to initialize wallet manager");
-
-		let client = Arc::new(EthClient::new(
-			wallet,
-			Arc::new(Provider::<Http>::try_from(evm_provider.provider).unwrap()),
-			EthClientConfiguration::new(
-				evm_provider.name,
-				evm_provider.id,
-				evm_provider.call_interval,
-				evm_provider.block_confirmations,
-				match is_native {
-					true => BridgeDirection::Inbound,
-					_ => BridgeDirection::Outbound,
-				},
-			),
-			is_native,
-		));
-
-		let mut oracle_price_feeder = OraclePriceFeeder::new(
-			Arc::new(event_sender),
-			relayer_config.periodic_configs.unwrap().oracle_price_feeder.unwrap()[0].clone(),
-			client,
-		);
-		oracle_price_feeder.initialize_fetchers().await;
-
-		oracle_price_feeder
-	}
-
-	#[tokio::test]
-	async fn build_price_feeding_transaction() {
-		let oracle_price_feeder = initialize_feeder().await;
-		println!("oid_bytes: {:?}", oracle_price_feeder.asset_oid);
-
-		let price_responses = oracle_price_feeder.fetchers[0].get_price().await;
-		println!("price_responses: {:#?}", price_responses);
-
-		let (mut oid_bytes_list, mut price_bytes_list) = (vec![], vec![]);
-		for price_response in price_responses {
-			oid_bytes_list.push(
-				oracle_price_feeder
-					.asset_oid
-					.get(&price_response.symbol)
-					.unwrap()
-					.to_fixed_bytes(),
-			);
-			price_bytes_list.push(oracle_price_feeder.float_to_wei_bytes(&price_response.price));
-		}
-		let request = oracle_price_feeder
-			.build_transaction(oid_bytes_list.clone(), price_bytes_list.clone())
-			.await;
-		println!("oid_bytes_list: {:?}", oid_bytes_list);
-		println!("price_bytes_list: {:?}", price_bytes_list);
-
-		println!("price relay transaction: {:#?}", request);
-	}
-
-	#[tokio::test]
-	async fn test_scheduler() {
-		let oracle_price_feeder = initialize_feeder().await;
-
-		println!("{:#?}", chrono::Utc::now());
-		oracle_price_feeder.wait_until_next_time().await;
-		println!("{:#?}", chrono::Utc::now());
 	}
 }

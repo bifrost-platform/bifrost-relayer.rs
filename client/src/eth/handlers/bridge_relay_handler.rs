@@ -542,7 +542,7 @@ impl<T: JsonRpcClient> BridgeRelayHandler<T> {
 		if let Some(event_sender) =
 			self.event_senders.iter().find(|event_sender| event_sender.id == chain_id)
 		{
-			match event_sender.sender.send(EventMessage::new(
+			match event_sender.send(EventMessage::new(
 				tx_request,
 				EventMetadata::BridgeRelay(metadata.clone()),
 				true,
