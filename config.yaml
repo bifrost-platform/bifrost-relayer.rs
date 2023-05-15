@@ -9,7 +9,7 @@ evm_providers:
   - name: "bfc-testnet"
     id: 49088
     provider: ""
-    call_interval: 2000
+    call_interval: 1500
     block_confirmations: 5
     is_native: true
     is_relay_target: true
@@ -20,7 +20,7 @@ evm_providers:
   - name: "eth-goerli"
     id: 5
     provider: ""
-    call_interval: 5000
+    call_interval: 6000
     block_confirmations: 1
     is_relay_target: true
     socket_address: "0xeF5260Db045200142a6B5DDB297e860099ffd51d"
@@ -29,7 +29,7 @@ evm_providers:
   - name: "bsc-testnet"
     id: 97
     provider: ""
-    call_interval: 2000
+    call_interval: 1500
     block_confirmations: 5
     is_relay_target: true
     socket_address: "0x8039c3AD8ED55509fD3f6Daa78867923fDe6E61c"
