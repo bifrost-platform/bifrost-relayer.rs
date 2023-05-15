@@ -35,26 +35,6 @@ pub struct Configuration {
 	pub tokio_handle: tokio::runtime::Handle,
 }
 
-impl Configuration {
-	pub fn get_evm_provider_by_name(&self, name: &str) -> std::result::Result<EVMProvider, String> {
-		self.relayer_config
-			.evm_providers
-			.iter()
-			.find(|evm_config| evm_config.name == name)
-			.cloned()
-			.ok_or_else(|| format!("EVM config with name {} not found", name))
-	}
-
-	pub fn get_evm_provider_by_id(&self, id: u32) -> std::result::Result<EVMProvider, String> {
-		self.relayer_config
-			.evm_providers
-			.iter()
-			.find(|evm_config| evm_config.id == id)
-			.cloned()
-			.ok_or_else(|| format!("EVM config with id {} not found", id))
-	}
-}
-
 #[derive(Debug, Clone, Deserialize)]
 pub struct RelayerConfig {
 	/// BTC config
