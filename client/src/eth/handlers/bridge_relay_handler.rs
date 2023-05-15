@@ -1,26 +1,24 @@
-use std::{str::FromStr, sync::Arc, time::Duration};
+use std::{collections::BTreeMap, str::FromStr, sync::Arc, time::Duration};
 
 use cccp_primitives::{
-	authority_bifrost::{AuthorityBifrost, RoundMetaData},
+	authority::{AuthorityContract, RoundMetaData},
 	cli::BootstrapConfig,
-	contracts::socket_external::{
-		BridgeRelayBuilder, PollSubmit, Signatures, SocketEvents, SocketExternal, SocketMessage,
-	},
 	eth::{
-		BootstrapState, BridgeDirection, Contract, RecoveredSignature, SocketEventStatus,
+		BootstrapState, BridgeDirection, ChainID, RecoveredSignature, SocketEventStatus,
 		BOOTSTRAP_BLOCK_CHUNK_SIZE, BOOTSTRAP_BLOCK_OFFSET, NATIVE_BLOCK_TIME,
 	},
-	socket_external::{RequestID, SerializedPoll},
+	socket::{
+		BridgeRelayBuilder, PollSubmit, RequestID, SerializedPoll, Signatures, SocketEvents,
+		SocketMessage,
+	},
 	sub_display_format, INVALID_BIFROST_NATIVENESS, INVALID_CHAIN_ID, INVALID_CONTRACT_ABI,
-	INVALID_CONTRACT_ADDRESS,
 };
 use ethers::{
 	abi::{RawLog, Token},
 	prelude::decode_logs,
 	providers::{JsonRpcClient, Provider},
 	types::{
-		Bytes, Filter, Log, Signature, TransactionReceipt, TransactionRequest, H160, H256, U256,
-		U64,
+		Bytes, Filter, Log, Signature, TransactionReceipt, TransactionRequest, H256, U256, U64,
 	},
 };
 use tokio::{
@@ -37,80 +35,69 @@ const SUB_LOG_TARGET: &str = "bridge-handler";
 
 /// The essential task that handles `bridge relay` related events.
 pub struct BridgeRelayHandler<T> {
-	/// The event senders that sends messages to the event channel.
-	pub event_senders: Vec<Arc<EventSender>>,
+	/// The event senders that sends messages to the event channel. <chain_id, Arc<EventSender>>
+	pub event_senders: BTreeMap<ChainID, Arc<EventSender>>,
 	/// The block receiver that consumes new blocks from the block channel.
 	pub block_receiver: Receiver<BlockMessage>,
 	/// The `EthClient` to interact with the connected blockchain.
 	pub client: Arc<EthClient<T>>,
-	/// The address of the `Socket` | `Vault` contract.
-	pub target_contract: H160,
-	/// The target `Socket` contract instance.
-	pub target_socket: SocketExternal<Provider<T>>,
-	/// The socket contracts supporting CCCP.
-	pub socket_contracts: Vec<Contract>,
+	/// All of available clients. <chain_id, Arc<EthClient>>
+	pub all_clients: BTreeMap<ChainID, Arc<EthClient<T>>>,
 	/// Signature of the `Socket` Event.
 	pub socket_signature: H256,
+	/// Authority contract
+	pub authority_bifrost: AuthorityContract<Provider<T>>,
 	/// Completion of bootstrapping
 	pub bootstrap_states: Arc<RwLock<Vec<BootstrapState>>>,
 	/// Completion of bootstrapping count
 	pub bootstrapping_count: Arc<Mutex<u8>>,
 	/// Bootstrap config
 	pub bootstrap_config: BootstrapConfig,
-	/// Authority contracts on native chain
-	pub authority_bifrost: AuthorityBifrost<Provider<T>>,
-	/// All of available clients
-	pub all_clients: Vec<Arc<EthClient<T>>>,
-}
-
-pub struct BridgeRelayArgs<T> {
-	pub event_senders: Vec<Arc<EventSender>>,
-	pub block_receiver: Receiver<BlockMessage>,
-	pub client: Arc<EthClient<T>>,
-	pub target_contract: H160,
-	pub target_socket: H160,
-	pub socket_contracts: Vec<Contract>,
-	pub bootstrap_states: Arc<RwLock<Vec<BootstrapState>>>,
-	pub bootstrapping_count: Arc<Mutex<u8>>,
-	pub bootstrap_config: BootstrapConfig,
-	pub authority_address: String,
-	pub all_clients: Vec<Arc<EthClient<T>>>,
 }
 
 impl<T: JsonRpcClient> BridgeRelayHandler<T> {
 	/// Instantiates a new `BridgeRelayHandler` instance.
-	pub fn new(bridge_relay_args: BridgeRelayArgs<T>) -> Self {
-		let target_socket = SocketExternal::new(
-			bridge_relay_args.target_socket,
-			bridge_relay_args.client.provider.clone(),
-		);
-		let socket_signature =
-			target_socket.abi().event("Socket").expect(INVALID_CONTRACT_ABI).signature();
-		let native_client = bridge_relay_args
-			.all_clients
-			.iter()
-			.find(|client| client.is_native)
-			.expect(INVALID_BIFROST_NATIVENESS)
-			.clone();
+	pub fn new(
+		id: ChainID,
+		event_channels: Vec<Arc<EventSender>>,
+		block_receiver: Receiver<BlockMessage>,
+		all_clients_vec: Vec<Arc<EthClient<T>>>,
+		bootstrap_states: Arc<RwLock<Vec<BootstrapState>>>,
+		bootstrapping_count: Arc<Mutex<u8>>,
+		bootstrap_config: BootstrapConfig,
+	) -> Self {
+		let mut all_clients = BTreeMap::new();
+		all_clients_vec.iter().for_each(|client| {
+			all_clients.insert(client.get_chain_id(), client.clone());
+		});
 
-		let authority_bifrost = AuthorityBifrost::new(
-			H160::from_str(&bridge_relay_args.authority_address).expect(INVALID_CONTRACT_ADDRESS),
-			native_client.get_provider(),
-		);
+		let client = all_clients.get(&id).expect(INVALID_CHAIN_ID).clone();
+
+		let mut event_senders = BTreeMap::new();
+		event_channels.iter().for_each(|event_sender| {
+			event_senders.insert(event_sender.id, event_sender.clone());
+		});
 
 		Self {
-			event_senders: bridge_relay_args.event_senders,
-			block_receiver: bridge_relay_args.block_receiver,
-			client: bridge_relay_args.client,
-			target_contract: bridge_relay_args.target_contract,
-			target_socket,
-			socket_contracts: bridge_relay_args.socket_contracts,
-			socket_signature,
-			bootstrap_states: bridge_relay_args.bootstrap_states,
-			bootstrapping_count: bridge_relay_args.bootstrapping_count,
-			bootstrap_config: bridge_relay_args.bootstrap_config,
-			authority_bifrost,
-			all_clients: bridge_relay_args.all_clients,
+			event_senders,
+			block_receiver,
+			socket_signature: client
+				.socket
+				.abi()
+				.event("Socket")
+				.expect(INVALID_CONTRACT_ABI)
+				.signature(),
+			client,
+			all_clients,
+			authority_bifrost: all_clients_vec
+				.iter()
+				.find(|client| client.is_native)
+				.expect(INVALID_BIFROST_NATIVENESS)
+				.authority
+				.clone(),
+			bootstrap_states,
+			bootstrapping_count,
+			bootstrap_config,
 		}
 	}
 }
@@ -128,7 +115,7 @@ impl<T: JsonRpcClient> Handler for BridgeRelayHandler<T> {
 			{
 				self.bootstrap().await;
 
-				sleep(Duration::from_millis(self.client.config.call_interval)).await;
+				sleep(Duration::from_millis(self.client.call_interval)).await;
 			} else if self
 				.bootstrap_states
 				.read()
@@ -167,13 +154,14 @@ impl<T: JsonRpcClient> Handler for BridgeRelayHandler<T> {
 
 			while let Some(log) = stream.next().await {
 				if self.is_target_event(log.topics[0]) {
-					let raw_log: RawLog = log.clone().into();
+					let raw_log = RawLog::from(log);
 					match decode_logs::<SocketEvents>(&[raw_log]) {
 						Ok(decoded) => match &decoded[0] {
 							SocketEvents::Socket(socket) => {
 								let status = SocketEventStatus::from_u8(socket.msg.status);
-								let src_chain_id = u32::from_be_bytes(socket.msg.req_id.chain);
-								let dst_chain_id = u32::from_be_bytes(socket.msg.ins_code.chain);
+								let src_chain_id = ChainID::from_be_bytes(socket.msg.req_id.chain);
+								let dst_chain_id =
+									ChainID::from_be_bytes(socket.msg.ins_code.chain);
 								let is_inbound = self.is_inbound_sequence(dst_chain_id);
 
 								let metadata = BridgeRelayMetadata::new(
@@ -185,8 +173,7 @@ impl<T: JsonRpcClient> Handler for BridgeRelayHandler<T> {
 								);
 
 								if Self::is_sequence_ended(status) ||
-									self.is_already_done(socket.msg.req_id.clone(), src_chain_id)
-										.await
+									self.is_already_done(&socket.msg.req_id, src_chain_id).await
 								{
 									// do nothing if protocol sequence ended
 									return
@@ -214,7 +201,7 @@ impl<T: JsonRpcClient> Handler for BridgeRelayHandler<T> {
 							"[{}]-[{}] Unknown error while decoding socket event: {}",
 							self.client.get_chain_name(),
 							SUB_LOG_TARGET,
-							error
+							error.to_string(),
 						),
 					}
 				}
@@ -224,9 +211,7 @@ impl<T: JsonRpcClient> Handler for BridgeRelayHandler<T> {
 
 	fn is_target_contract(&self, receipt: &TransactionReceipt) -> bool {
 		if let Some(to) = receipt.to {
-			if ethers::utils::to_checksum(&to, None) ==
-				ethers::utils::to_checksum(&self.target_contract, None)
-			{
+			if to == self.client.socket.address() || to == self.client.vault.address() {
 				return true
 			}
 		}
@@ -242,7 +227,7 @@ impl<T: JsonRpcClient> Handler for BridgeRelayHandler<T> {
 impl<T: JsonRpcClient> BridgeRelayBuilder for BridgeRelayHandler<T> {
 	fn build_poll_call_data(&self, msg: SocketMessage, sigs: Signatures) -> Bytes {
 		let poll_submit = PollSubmit { msg, sigs, option: U256::default() };
-		self.target_socket.poll(poll_submit).calldata().unwrap()
+		self.client.socket.poll(poll_submit).calldata().unwrap()
 	}
 
 	async fn build_transaction(
@@ -250,18 +235,20 @@ impl<T: JsonRpcClient> BridgeRelayBuilder for BridgeRelayHandler<T> {
 		submit_msg: SocketMessage,
 		sig_msg: SocketMessage,
 		is_inbound: bool,
-		relay_tx_chain_id: u32,
+		relay_tx_chain_id: ChainID,
 	) -> TransactionRequest {
-		// build transaction request
 		let to_socket = self
-			.socket_contracts
-			.iter()
-			.find(|socket| socket.chain_id == relay_tx_chain_id)
-			.unwrap()
-			.address;
-		let tx_request = TransactionRequest::default();
+			.all_clients
+			.get(&relay_tx_chain_id)
+			.expect(INVALID_CHAIN_ID)
+			.socket
+			.address();
+
+		// the original msg must be used for building calldata
 		let signatures = self.build_signatures(sig_msg, is_inbound).await;
-		tx_request.data(self.build_poll_call_data(submit_msg, signatures)).to(to_socket)
+		TransactionRequest::default()
+			.data(self.build_poll_call_data(submit_msg, signatures))
+			.to(to_socket)
 	}
 
 	async fn build_signatures(&self, mut msg: SocketMessage, is_inbound: bool) -> Signatures {
@@ -326,10 +313,13 @@ impl<T: JsonRpcClient> BridgeRelayBuilder for BridgeRelayHandler<T> {
 			Token::Uint(msg.params.amount),
 			Token::Bytes(msg.params.variants.to_vec()),
 		]);
-		let msg_token =
-			Token::Tuple(vec![req_id_token, status_token, ins_code_token, params_token]);
 
-		ethers::abi::encode(&[msg_token])
+		ethers::abi::encode(&[Token::Tuple(vec![
+			req_id_token,
+			status_token,
+			ins_code_token,
+			params_token,
+		])])
 	}
 
 	fn sign_socket_message(&self, msg: SocketMessage) -> Signature {
@@ -339,7 +329,8 @@ impl<T: JsonRpcClient> BridgeRelayBuilder for BridgeRelayHandler<T> {
 
 	async fn get_sorted_signatures(&self, msg: SocketMessage) -> Signatures {
 		let raw_sigs = self
-			.target_socket
+			.client
+			.socket
 			.get_signatures(msg.clone().req_id, msg.clone().status)
 			.call()
 			.await
@@ -384,25 +375,27 @@ impl<T: JsonRpcClient> BridgeRelayHandler<T> {
 	/// fail-case flow.
 	async fn process_reverted_transaction(&self, receipt: TransactionReceipt) {
 		// only handles owned transactions
-		if self.is_owned_relay_transaction(&receipt) {
+		if receipt.from == self.client.address() {
 			if let Some(tx) = self.client.get_transaction(receipt.transaction_hash).await {
 				// the reverted transaction must be execution of `poll()`
 				let selector = &tx.input[0..4];
 				let poll_selector = self
-					.target_socket
+					.client
+					.socket
 					.abi()
 					.function("poll")
 					.expect(INVALID_CONTRACT_ABI)
 					.short_signature();
 				if selector == poll_selector {
 					match self
-						.target_socket
+						.client
+						.socket
 						.decode_with_selector::<SerializedPoll, Bytes>(poll_selector, tx.input)
 					{
 						Ok(poll) => {
 							let prev_status = SocketEventStatus::from_u8(poll.msg.status);
-							let src_chain_id = u32::from_be_bytes(poll.msg.req_id.chain);
-							let dst_chain_id = u32::from_be_bytes(poll.msg.ins_code.chain);
+							let src_chain_id = ChainID::from_be_bytes(poll.msg.req_id.chain);
+							let dst_chain_id = ChainID::from_be_bytes(poll.msg.ins_code.chain);
 							let is_inbound = self.is_inbound_sequence(dst_chain_id);
 
 							let mut submit_msg = poll.msg.clone();
@@ -488,9 +481,9 @@ impl<T: JsonRpcClient> BridgeRelayHandler<T> {
 	fn get_inbound_relay_tx_chain_id(
 		&self,
 		status: SocketEventStatus,
-		src_chain_id: u32,
-		dst_chain_id: u32,
-	) -> u32 {
+		src_chain_id: ChainID,
+		dst_chain_id: ChainID,
+	) -> ChainID {
 		match status {
 			SocketEventStatus::Requested |
 			SocketEventStatus::Failed |
@@ -510,9 +503,9 @@ impl<T: JsonRpcClient> BridgeRelayHandler<T> {
 	fn get_outbound_relay_tx_chain_id(
 		&self,
 		status: SocketEventStatus,
-		src_chain_id: u32,
-		dst_chain_id: u32,
-	) -> u32 {
+		src_chain_id: ChainID,
+		dst_chain_id: ChainID,
+	) -> ChainID {
 		match status {
 			SocketEventStatus::Requested |
 			SocketEventStatus::Executed |
@@ -534,30 +527,22 @@ impl<T: JsonRpcClient> BridgeRelayHandler<T> {
 	}
 
 	/// Verifies whether the socket event is an inbound sequence.
-	fn is_inbound_sequence(&self, dst_chain_id: u32) -> bool {
+	fn is_inbound_sequence(&self, dst_chain_id: ChainID) -> bool {
 		matches!(
-			(self.client.get_chain_id() == dst_chain_id, self.client.config.if_destination_chain),
+			(self.client.get_chain_id() == dst_chain_id, self.client.if_destination_chain),
 			(true, BridgeDirection::Inbound) | (false, BridgeDirection::Outbound)
 		)
-	}
-
-	/// Verifies whether the current relayer owns the relay transaction.
-	fn is_owned_relay_transaction(&self, receipt: &TransactionReceipt) -> bool {
-		ethers::utils::to_checksum(&receipt.from, None) ==
-			ethers::utils::to_checksum(&self.client.address(), None)
 	}
 
 	/// Request send bridge relay transaction to the target event channel.
 	fn request_send_transaction(
 		&self,
-		chain_id: u32,
+		chain_id: ChainID,
 		tx_request: TransactionRequest,
 		metadata: BridgeRelayMetadata,
 	) {
-		if let Some(event_sender) =
-			self.event_senders.iter().find(|event_sender| event_sender.id == chain_id)
-		{
-			match event_sender.sender.send(EventMessage::new(
+		if let Some(event_sender) = self.event_senders.get(&chain_id) {
+			match event_sender.send(EventMessage::new(
 				tx_request,
 				EventMetadata::BridgeRelay(metadata.clone()),
 				true,
@@ -584,10 +569,10 @@ impl<T: JsonRpcClient> BridgeRelayHandler<T> {
 		}
 	}
 
-	/// Compare the reqeust status recorded in source chain with event status to determine if the
-	/// event has already been exeuted
-	async fn is_already_done(&self, rid: RequestID, src_chain_id: u32) -> bool {
-		let socket_contract = self.get_source_socket(src_chain_id);
+	/// Compare the request status recorded in source chain with event status to determine if the
+	/// event has already been executed
+	async fn is_already_done(&self, rid: &RequestID, src_chain_id: ChainID) -> bool {
+		let socket_contract = &self.all_clients.get(&src_chain_id).expect(INVALID_CHAIN_ID).socket;
 		let request = socket_contract.get_request(rid.clone()).call().await.unwrap();
 
 		let event_status = request.field[0].clone();
@@ -621,7 +606,7 @@ impl<T: JsonRpcClient> BridgeRelayHandler<T> {
 		*bootstrap_count += 1;
 
 		// If All thread complete the task, starts the blockManager
-		if *bootstrap_count == (self.socket_contracts.len() * 2) as u8 {
+		if *bootstrap_count == self.all_clients.len() as u8 {
 			let mut bootstrap_guard = self.bootstrap_states.write().await;
 
 			for state in bootstrap_guard.iter_mut() {
@@ -653,14 +638,21 @@ impl<T: JsonRpcClient> BridgeRelayHandler<T> {
 			let chunk_to_block =
 				std::cmp::min(from_block + BOOTSTRAP_BLOCK_CHUNK_SIZE - 1, to_block);
 
-			let filter = Filter::new()
-				.address(self.target_contract)
+			let socket_filter = Filter::new()
+				.address(self.client.socket.address())
 				.topic0(self.socket_signature)
 				.from_block(from_block)
 				.to_block(chunk_to_block);
+			let socket_logs_chunk = self.client.get_logs(socket_filter).await;
+			logs.extend(socket_logs_chunk);
 
-			let chunk_logs = self.client.get_logs(filter).await;
-			logs.extend(chunk_logs);
+			let vault_filter = Filter::new()
+				.address(self.client.vault.address())
+				.topic0(self.socket_signature)
+				.from_block(from_block)
+				.to_block(chunk_to_block);
+			let vault_logs_chunk = self.client.get_logs(vault_filter).await;
+			logs.extend(vault_logs_chunk);
 
 			from_block = chunk_to_block + 1;
 		}
@@ -698,28 +690,12 @@ impl<T: JsonRpcClient> BridgeRelayHandler<T> {
 			.unwrap()
 			.into()
 	}
-
-	fn get_source_socket(&self, src_chain_id: u32) -> SocketExternal<Provider<T>> {
-		let source_socket = self
-			.socket_contracts
-			.iter()
-			.find(|socket| socket.chain_id == src_chain_id)
-			.expect(INVALID_CHAIN_ID)
-			.address;
-
-		let source_client = self
-			.all_clients
-			.iter()
-			.find(|client| client.get_chain_id() == src_chain_id)
-			.expect(INVALID_CHAIN_ID);
-
-		SocketExternal::new(source_socket, source_client.provider.clone())
-	}
 }
 
 #[cfg(test)]
 mod tests {
 	use super::*;
+	use cccp_primitives::socket::SocketContract;
 	use ethers::{
 		providers::{Http, Provider},
 		types::H160,
@@ -730,7 +706,7 @@ mod tests {
 	async fn test_is_already_done() {
 		let provider = Arc::new(Provider::<Http>::try_from("").unwrap());
 
-		let target_socket = SocketExternal::new(
+		let target_socket = SocketContract::new(
 			H160::from_str("0x0218371b18340aBD460961bdF3Bd5F01858dAB53").unwrap(),
 			provider.clone(),
 		);

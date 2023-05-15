@@ -283,8 +283,8 @@ pub struct EthClient<T> {
 	}
 
 	/// Returns id which chain this client interacts with.
-	pub fn get_chain_id(&self) -> u32 {
-		self.config.id
+	pub fn get_chain_id(&self) -> ChainID {
+		self.id
 	}
 
 	/// Returns `Arc<Provider>`.
