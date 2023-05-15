@@ -1,6 +1,7 @@
 use crate::periodic::PriceSource;
 use ethers::types::U64;
 use serde::Deserialize;
+use crate::eth::ChainID;
 
 pub type Result<T> = std::result::Result<T, Error>;
 
@@ -68,7 +69,7 @@ pub struct EVMProvider {
 	/// Network name
 	pub name: String,
 	/// Chain ID
-	pub id: u32,
+	pub id: ChainID,
 	/// Endpoint provider
 	pub provider: String,
 	/// The time interval(ms) used when to request a new block
@@ -111,13 +112,13 @@ pub struct HandlerConfig {
 	/// Handle type
 	pub handler_type: HandlerType,
 	/// Watch target list
-	pub watch_list: Vec<u32>,
+	pub watch_list: Vec<ChainID>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct PriceFeederConfig {
 	/// Chain id where oracle contract deployed on
-	pub chain_id: u32,
+	pub chain_id: ChainID,
 	/// Periodic schedule in cron expression.
 	pub schedule: String,
 	/// Oracle contract address

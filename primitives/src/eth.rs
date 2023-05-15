@@ -1,5 +1,7 @@
 use ethers::types::{Address, Signature};
 
+pub type ChainID = u32;
+
 /// The native chain's average block time is seconds.
 pub const NATIVE_BLOCK_TIME: u32 = 3u32;
 pub const BOOTSTRAP_BLOCK_CHUNK_SIZE: u64 = 2000;

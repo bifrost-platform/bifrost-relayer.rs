@@ -1,3 +1,4 @@
+use crate::eth::ChainID;
 use ethers::{
 	abi::RawLog,
 	prelude::{abigen, H256},
@@ -163,7 +164,7 @@ pub trait BridgeRelayBuilder {
 		submit_msg: SocketMessage,
 		sig_msg: SocketMessage,
 		is_inbound: bool,
-		relay_tx_chain_id: u32,
+		relay_tx_chain_id: ChainID,
 	) -> TransactionRequest;
 
 	/// Build the signatures required to request `poll()`.

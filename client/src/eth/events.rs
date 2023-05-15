@@ -1,5 +1,6 @@
 use cccp_primitives::{eth::SocketEventStatus, PriceResponse};
 
+use cccp_primitives::eth::ChainID;
 use ethers::types::{Address, TransactionRequest, U256};
 use std::fmt::{Display, Formatter};
 use tokio::sync::mpsc::{error::SendError, UnboundedSender};
@@ -31,9 +32,9 @@ pub struct BridgeRelayMetadata {
 	/// The bridge request sequence ID.
 	pub sequence: u128,
 	/// The source chain ID.
-	pub src_chain_id: u32,
+	pub src_chain_id: ChainID,
 	/// The destination chain ID.
-	pub dst_chain_id: u32,
+	pub dst_chain_id: ChainID,
 }
 
 impl BridgeRelayMetadata {
@@ -41,8 +42,8 @@ impl BridgeRelayMetadata {
 		is_inbound: bool,
 		status: SocketEventStatus,
 		sequence: u128,
-		src_chain_id: u32,
-		dst_chain_id: u32,
+		src_chain_id: ChainID,
+		dst_chain_id: ChainID,
 	) -> Self {
 		Self {
 			direction: if is_inbound { "Inbound".to_string() } else { "Outbound".to_string() },
@@ -108,11 +109,11 @@ impl Display for VSPPhase1Metadata {
 #[derive(Clone, Debug)]
 pub struct VSPPhase2Metadata {
 	pub round: U256,
-	pub dst_chain_id: u32,
+	pub dst_chain_id: ChainID,
 }
 
 impl VSPPhase2Metadata {
-	pub fn new(round: U256, dst_chain_id: u32) -> Self {
+	pub fn new(round: U256, dst_chain_id: ChainID) -> Self {
 		Self { round, dst_chain_id }
 	}
 }
@@ -215,7 +216,7 @@ impl EventMessage {
 /// The message sender connected to the event channel.
 pub struct EventSender {
 	/// The chain ID of the event channel.
-	pub id: u32,
+	pub id: ChainID,
 	/// The message sender.
 	pub sender: UnboundedSender<EventMessage>,
 	/// Is Bifrost network?
@@ -224,7 +225,7 @@ pub struct EventSender {
 
 impl EventSender {
 	/// Instantiates a new `EventSender` instance.
-	pub fn new(id: u32, sender: UnboundedSender<EventMessage>, is_native: bool) -> Self {
+	pub fn new(id: ChainID, sender: UnboundedSender<EventMessage>, is_native: bool) -> Self {
 		Self { id, sender, is_native }
 	}
 

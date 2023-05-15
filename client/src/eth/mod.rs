@@ -26,8 +26,11 @@ use tokio::time::{sleep, Duration};
 
 pub use cccp_primitives::contracts::*;
 use cccp_primitives::{
-	authority::AuthorityContract, eth::BridgeDirection, socket::SocketContract,
-	vault::VaultContract, INVALID_CONTRACT_ADDRESS,
+	authority::AuthorityContract,
+	eth::{BridgeDirection, ChainID},
+	socket::SocketContract,
+	vault::VaultContract,
+	INVALID_CONTRACT_ADDRESS,
 };
 
 const SUB_LOG_TARGET: &str = "eth-client";
@@ -41,7 +44,7 @@ pub struct EthClient<T> {
 	/// The name of chain which this client interact with.
 	name: String,
 	/// Id of chain which this client interact with.
-	id: u32,
+	id: ChainID,
 	/// The number of confirmations required for a block to be processed.
 	pub block_confirmations: U64,
 	/// The `get_block` request interval in milliseconds.
@@ -64,7 +67,7 @@ impl<T: JsonRpcClient> EthClient<T> {
 		wallet: WalletManager,
 		provider: Arc<Provider<T>>,
 		name: String,
-		id: u32,
+		id: ChainID,
 		block_confirmations: U64,
 		call_interval: u64,
 		is_native: bool,
@@ -110,7 +113,7 @@ impl<T: JsonRpcClient> EthClient<T> {
 	}
 
 	/// Returns id which chain this client interacts with.
-	pub fn get_chain_id(&self) -> u32 {
+	pub fn get_chain_id(&self) -> ChainID {
 		self.id
 	}
 

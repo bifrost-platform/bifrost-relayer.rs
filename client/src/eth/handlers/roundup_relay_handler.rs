@@ -6,8 +6,8 @@ use cccp_primitives::{
 	authority::RoundMetaData,
 	cli::BootstrapConfig,
 	eth::{
-		BootstrapState, RecoveredSignature, RoundUpEventStatus, BOOTSTRAP_BLOCK_CHUNK_SIZE,
-		BOOTSTRAP_BLOCK_OFFSET, NATIVE_BLOCK_TIME,
+		BootstrapState, ChainID, RecoveredSignature, RoundUpEventStatus,
+		BOOTSTRAP_BLOCK_CHUNK_SIZE, BOOTSTRAP_BLOCK_OFFSET, NATIVE_BLOCK_TIME,
 	},
 	socket::{RoundUpSubmit, SerializedRoundUp, Signatures, SocketContract, SocketContractEvents},
 	sub_display_format, INVALID_BIFROST_NATIVENESS, INVALID_CHAIN_ID, INVALID_CONTRACT_ABI,
@@ -31,7 +31,7 @@ const SUB_LOG_TARGET: &str = "roundup-handler";
 /// The essential task that handles `roundup relay` related events.
 pub struct RoundupRelayHandler<T> {
 	/// The event senders that sends messages to each event channel.
-	event_senders: BTreeMap<u32, Arc<EventSender>>,
+	event_senders: BTreeMap<ChainID, Arc<EventSender>>,
 	/// The block receiver that consumes new blocks from the block channel.
 	block_receiver: Receiver<BlockMessage>,
 	/// The `EthClient` to interact with the bifrost network.

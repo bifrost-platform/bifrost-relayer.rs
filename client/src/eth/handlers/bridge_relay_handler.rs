@@ -4,7 +4,7 @@ use cccp_primitives::{
 	authority::{AuthorityContract, RoundMetaData},
 	cli::BootstrapConfig,
 	eth::{
-		BootstrapState, BridgeDirection, RecoveredSignature, SocketEventStatus,
+		BootstrapState, BridgeDirection, ChainID, RecoveredSignature, SocketEventStatus,
 		BOOTSTRAP_BLOCK_CHUNK_SIZE, BOOTSTRAP_BLOCK_OFFSET, NATIVE_BLOCK_TIME,
 	},
 	socket::{
@@ -36,13 +36,13 @@ const SUB_LOG_TARGET: &str = "bridge-handler";
 /// The essential task that handles `bridge relay` related events.
 pub struct BridgeRelayHandler<T> {
 	/// The event senders that sends messages to the event channel. <chain_id, Arc<EventSender>>
-	pub event_senders: BTreeMap<u32, Arc<EventSender>>,
+	pub event_senders: BTreeMap<ChainID, Arc<EventSender>>,
 	/// The block receiver that consumes new blocks from the block channel.
 	pub block_receiver: Receiver<BlockMessage>,
 	/// The `EthClient` to interact with the connected blockchain.
 	pub client: Arc<EthClient<T>>,
 	/// All of available clients. <chain_id, Arc<EthClient>>
-	pub all_clients: BTreeMap<u32, Arc<EthClient<T>>>,
+	pub all_clients: BTreeMap<ChainID, Arc<EthClient<T>>>,
 	/// Signature of the `Socket` Event.
 	pub socket_signature: H256,
 	/// Authority contract
@@ -58,7 +58,7 @@ pub struct BridgeRelayHandler<T> {
 impl<T: JsonRpcClient> BridgeRelayHandler<T> {
 	/// Instantiates a new `BridgeRelayHandler` instance.
 	pub fn new(
-		id: u32,
+		id: ChainID,
 		event_channels: Vec<Arc<EventSender>>,
 		block_receiver: Receiver<BlockMessage>,
 		all_clients_vec: Vec<Arc<EthClient<T>>>,
@@ -159,8 +159,9 @@ impl<T: JsonRpcClient> Handler for BridgeRelayHandler<T> {
 						Ok(decoded) => match &decoded[0] {
 							SocketEvents::Socket(socket) => {
 								let status = SocketEventStatus::from_u8(socket.msg.status);
-								let src_chain_id = u32::from_be_bytes(socket.msg.req_id.chain);
-								let dst_chain_id = u32::from_be_bytes(socket.msg.ins_code.chain);
+								let src_chain_id = ChainID::from_be_bytes(socket.msg.req_id.chain);
+								let dst_chain_id =
+									ChainID::from_be_bytes(socket.msg.ins_code.chain);
 								let is_inbound = self.is_inbound_sequence(dst_chain_id);
 
 								let metadata = BridgeRelayMetadata::new(
@@ -234,7 +235,7 @@ impl<T: JsonRpcClient> BridgeRelayBuilder for BridgeRelayHandler<T> {
 		submit_msg: SocketMessage,
 		sig_msg: SocketMessage,
 		is_inbound: bool,
-		relay_tx_chain_id: u32,
+		relay_tx_chain_id: ChainID,
 	) -> TransactionRequest {
 		let to_socket = self.all_clients.get(&relay_tx_chain_id).expect(INVALID_CHAIN_ID).address();
 
@@ -388,8 +389,8 @@ impl<T: JsonRpcClient> BridgeRelayHandler<T> {
 					{
 						Ok(poll) => {
 							let prev_status = SocketEventStatus::from_u8(poll.msg.status);
-							let src_chain_id = u32::from_be_bytes(poll.msg.req_id.chain);
-							let dst_chain_id = u32::from_be_bytes(poll.msg.ins_code.chain);
+							let src_chain_id = ChainID::from_be_bytes(poll.msg.req_id.chain);
+							let dst_chain_id = ChainID::from_be_bytes(poll.msg.ins_code.chain);
 							let is_inbound = self.is_inbound_sequence(dst_chain_id);
 
 							let mut submit_msg = poll.msg.clone();
@@ -475,9 +476,9 @@ impl<T: JsonRpcClient> BridgeRelayHandler<T> {
 	fn get_inbound_relay_tx_chain_id(
 		&self,
 		status: SocketEventStatus,
-		src_chain_id: u32,
-		dst_chain_id: u32,
-	) -> u32 {
+		src_chain_id: ChainID,
+		dst_chain_id: ChainID,
+	) -> ChainID {
 		match status {
 			SocketEventStatus::Requested |
 			SocketEventStatus::Failed |
@@ -497,9 +498,9 @@ impl<T: JsonRpcClient> BridgeRelayHandler<T> {
 	fn get_outbound_relay_tx_chain_id(
 		&self,
 		status: SocketEventStatus,
-		src_chain_id: u32,
-		dst_chain_id: u32,
-	) -> u32 {
+		src_chain_id: ChainID,
+		dst_chain_id: ChainID,
+	) -> ChainID {
 		match status {
 			SocketEventStatus::Requested |
 			SocketEventStatus::Executed |
@@ -521,7 +522,7 @@ impl<T: JsonRpcClient> BridgeRelayHandler<T> {
 	}
 
 	/// Verifies whether the socket event is an inbound sequence.
-	fn is_inbound_sequence(&self, dst_chain_id: u32) -> bool {
+	fn is_inbound_sequence(&self, dst_chain_id: ChainID) -> bool {
 		matches!(
 			(self.client.get_chain_id() == dst_chain_id, self.client.if_destination_chain),
 			(true, BridgeDirection::Inbound) | (false, BridgeDirection::Outbound)
@@ -537,7 +538,7 @@ impl<T: JsonRpcClient> BridgeRelayHandler<T> {
 	/// Request send bridge relay transaction to the target event channel.
 	fn request_send_transaction(
 		&self,
-		chain_id: u32,
+		chain_id: ChainID,
 		tx_request: TransactionRequest,
 		metadata: BridgeRelayMetadata,
 	) {
@@ -571,7 +572,7 @@ impl<T: JsonRpcClient> BridgeRelayHandler<T> {
 
 	/// Compare the request status recorded in source chain with event status to determine if the
 	/// event has already been executed
-	async fn is_already_done(&self, rid: &RequestID, src_chain_id: u32) -> bool {
+	async fn is_already_done(&self, rid: &RequestID, src_chain_id: ChainID) -> bool {
 		let socket_contract = &self.all_clients.get(&src_chain_id).expect(INVALID_CHAIN_ID).socket;
 		let request = socket_contract.get_request(rid.clone()).call().await.unwrap();
 

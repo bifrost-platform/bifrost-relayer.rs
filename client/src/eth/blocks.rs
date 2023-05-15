@@ -12,6 +12,7 @@ use tokio::{
 	time::{sleep, Duration},
 };
 use tokio_stream::StreamExt;
+use cccp_primitives::eth::ChainID;
 
 use super::EthClient;
 
@@ -33,13 +34,13 @@ impl BlockMessage {
 /// The message receiver connected to the block channel.
 pub struct BlockReceiver {
 	/// The chain ID of the block channel.
-	pub id: u32,
+	pub id: ChainID,
 	/// The message receiver.
 	pub receiver: Receiver<BlockMessage>,
 }
 
 impl BlockReceiver {
-	pub fn new(id: u32, receiver: Receiver<BlockMessage>) -> Self {
+	pub fn new(id: ChainID, receiver: Receiver<BlockMessage>) -> Self {
 		Self { id, receiver }
 	}
 }
