@@ -33,7 +33,7 @@ pub const MAX_FEE_COEFFICIENT: u64 = 2;
 pub const MAX_PRIORITY_FEE_COEFFICIENT: u64 = 2;
 
 /// The coefficient that will be multiplied to the estimated gas.
-pub const GAS_COEFFICIENT: f64 = 2.0;
+pub const GAS_COEFFICIENT: f64 = 10.0;
 
 #[derive(Clone, Debug)]
 /// The message format passed through the block channel.

@@ -76,7 +76,8 @@ pub trait BridgeRelayBuilder {
 	/// Builds the `poll()` transaction request.
 	async fn build_transaction(
 		&self,
-		msg: SocketMessage,
+		submit_msg: SocketMessage,
+		sig_msg: SocketMessage,
 		is_inbound: bool,
 		relay_tx_chain_id: u32,
 	) -> TransactionRequest;
