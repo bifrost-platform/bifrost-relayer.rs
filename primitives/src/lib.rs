@@ -4,7 +4,6 @@ pub mod errors;
 pub mod eth;
 pub mod periodic;
 
-pub use cli::{RoundupHandlerUtilType, RoundupHandlerUtilityConfig};
 pub use contracts::*;
 pub use errors::*;
 pub use periodic::*;

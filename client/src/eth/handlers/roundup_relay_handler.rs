@@ -3,26 +3,23 @@ use crate::eth::{
 };
 use async_trait::async_trait;
 use cccp_primitives::{
-	authority_bifrost::{AuthorityBifrost, RoundMetaData},
-	authority_external::AuthorityExternal,
-	cli::{BootstrapConfig, RoundupHandlerUtilityConfig},
+	authority::RoundMetaData,
+	cli::BootstrapConfig,
 	eth::{
-		BootstrapState, RecoveredSignature, RoundUpEventStatus, BOOTSTRAP_BLOCK_CHUNK_SIZE,
-		BOOTSTRAP_BLOCK_OFFSET, NATIVE_BLOCK_TIME,
+		BootstrapState, ChainID, RecoveredSignature, RoundUpEventStatus,
+		BOOTSTRAP_BLOCK_CHUNK_SIZE, BOOTSTRAP_BLOCK_OFFSET, NATIVE_BLOCK_TIME,
 	},
-	socket_bifrost::{SerializedRoundUp, SocketBifrost, SocketBifrostEvents},
-	socket_external::{RoundUpSubmit, Signatures, SocketExternal},
-	sub_display_format, RoundupHandlerUtilType, INVALID_CHAIN_ID, INVALID_CONTRACT_ABI,
-	INVALID_CONTRACT_ADDRESS,
+	socket::{RoundUpSubmit, SerializedRoundUp, Signatures, SocketContract, SocketContractEvents},
+	sub_display_format, INVALID_BIFROST_NATIVENESS, INVALID_CHAIN_ID, INVALID_CONTRACT_ABI,
 };
 use ethers::{
 	abi::{encode, Detokenize, Token, Tokenize},
 	contract::EthLogDecode,
 	prelude::{TransactionReceipt, H256},
 	providers::{JsonRpcClient, Provider},
-	types::{Address, Bytes, Filter, Log, Signature, TransactionRequest, H160, U256, U64},
+	types::{Address, Bytes, Filter, Log, Signature, TransactionRequest, U256, U64},
 };
-use std::{str::FromStr, sync::Arc, time::Duration};
+use std::{collections::BTreeMap, str::FromStr, sync::Arc, time::Duration};
 use tokio::{
 	sync::{broadcast::Receiver, Barrier, Mutex, RwLock},
 	time::sleep,
@@ -31,29 +28,18 @@ use tokio_stream::StreamExt;
 
 const SUB_LOG_TARGET: &str = "roundup-handler";
 
-pub struct RoundupUtility<T> {
-	/// The event senders that sends messages to the event channel.
-	pub event_sender: Arc<EventSender>,
-	/// Socket contract on external chain.
-	pub socket_external: SocketExternal<Provider<T>>,
-	/// Relayer contracts on external chain.
-	pub authority_external: AuthorityExternal<Provider<T>>,
-	/// External chain id.
-	pub id: u32,
-}
-
 /// The essential task that handles `roundup relay` related events.
 pub struct RoundupRelayHandler<T> {
+	/// The event senders that sends messages to each event channel.
+	event_senders: BTreeMap<ChainID, Arc<EventSender>>,
 	/// The block receiver that consumes new blocks from the block channel.
-	pub block_receiver: Receiver<BlockMessage>,
-	/// The `EthClient` to interact with the connected blockchain.
-	pub client: Arc<EthClient<T>>,
-	/// The `Socket` contract instance on bifrost network.
-	pub socket_bifrost: SocketBifrost<Provider<T>>,
-	/// Utils for relay transaction to external
-	pub roundup_utils: Arc<Vec<RoundupUtility<T>>>,
+	block_receiver: Receiver<BlockMessage>,
+	/// The `EthClient` to interact with the bifrost network.
+	client: Arc<EthClient<T>>,
+	/// `EthClient`s to interact with provided networks except bifrost network.
+	external_clients: Vec<Arc<EthClient<T>>>,
 	/// Signature of RoundUp Event.
-	pub roundup_signature: H256,
+	roundup_signature: H256,
 	/// Barrier for bootstrapping
 	pub socket_barrier: Arc<Barrier>,
 	/// Barrier for bootstrapping
@@ -64,8 +50,6 @@ pub struct RoundupRelayHandler<T> {
 	pub bootstrapping_count: Arc<Mutex<u8>>,
 	/// Bootstrap config
 	pub bootstrap_config: BootstrapConfig,
-	/// Authority contracts on native chain
-	pub authority_bifrost: AuthorityBifrost<Provider<T>>,
 }
 
 #[async_trait]
@@ -81,7 +65,7 @@ impl<T: JsonRpcClient> Handler for RoundupRelayHandler<T> {
 			{
 				self.bootstrap().await;
 
-				sleep(Duration::from_millis(self.client.config.call_interval)).await;
+				sleep(Duration::from_millis(self.client.call_interval)).await;
 			} else if self
 				.bootstrap_states
 				.read()
@@ -139,7 +123,7 @@ impl<T: JsonRpcClient> Handler for RoundupRelayHandler<T> {
 									serialized_log.roundup.new_relayers,
 								)
 								.await;
-							self.broadcast_roundup(roundup_submit).await;
+							self.broadcast_roundup(&roundup_submit).await;
 						},
 						RoundUpEventStatus::NextAuthorityRelayed => continue,
 					}
@@ -161,8 +145,7 @@ impl<T: JsonRpcClient> Handler for RoundupRelayHandler<T> {
 
 	fn is_target_contract(&self, receipt: &TransactionReceipt) -> bool {
 		if let Some(to) = receipt.to {
-			return ethers::utils::to_checksum(&to, None) ==
-				ethers::utils::to_checksum(&self.socket_bifrost.address(), None)
+			return to == self.client.socket.address()
 		}
 		false
 	}
@@ -175,126 +158,68 @@ impl<T: JsonRpcClient> Handler for RoundupRelayHandler<T> {
 impl<T: JsonRpcClient> RoundupRelayHandler<T> {
 	/// Instantiates a new `RoundupRelayHandler` instance.
 	pub fn new(
-		event_senders: Vec<Arc<EventSender>>,
+		mut event_senders_vec: Vec<Arc<EventSender>>,
 		block_receiver: Receiver<BlockMessage>,
-		client: Arc<EthClient<T>>,
-		external_clients: Vec<Arc<EthClient<T>>>,
-		socket_bifrost: SocketBifrost<Provider<T>>,
-		roundup_util_configs: Vec<RoundupHandlerUtilityConfig>,
+		clients: Vec<Arc<EthClient<T>>>,
 		socket_barrier: Arc<Barrier>,
 		bootstrap_states: Arc<RwLock<Vec<BootstrapState>>>,
 		bootstrap_config: BootstrapConfig,
-		authority_address: String,
 		number_of_relay_targets: usize,
 	) -> Self {
+		// Only broadcast to external chain
+		event_senders_vec.retain(|channel| !channel.is_native);
+
+		let mut event_senders = BTreeMap::new();
+		event_senders_vec.iter().for_each(|event_sender| {
+			event_senders.insert(event_sender.id, event_sender.clone());
+		});
+
+		let client = clients
+			.iter()
+			.find(|client| client.is_native)
+			.expect(INVALID_BIFROST_NATIVENESS)
+			.clone();
+
+		let external_clients = clients.into_iter().filter(|client| !client.is_native).collect();
+
 		let roundup_signature =
-			socket_bifrost.abi().event("RoundUp").expect(INVALID_CONTRACT_ABI).signature();
-		let roundup_utils = Arc::new(
-			event_senders
-				.iter()
-				.map(|sender| {
-					let (socket_external, authority_external) = roundup_util_configs.iter().fold(
-						(None, None),
-						|(socket_ext, authority_ext), config| {
-							if config.chain_id == sender.id {
-								match config.contract_type {
-									RoundupHandlerUtilType::Socket => (
-										Some(SocketExternal::new(
-											H160::from_str(&config.contract)
-												.expect(INVALID_CONTRACT_ADDRESS),
-											external_clients
-												.iter()
-												.find(|client| {
-													client.get_chain_id() == config.chain_id
-												})
-												.expect(INVALID_CHAIN_ID)
-												.get_provider(),
-										)),
-										authority_ext,
-									),
-									RoundupHandlerUtilType::Authority => (
-										socket_ext,
-										Some(AuthorityExternal::new(
-											H160::from_str(&config.contract)
-												.expect(INVALID_CONTRACT_ADDRESS),
-											external_clients
-												.iter()
-												.find(|client| {
-													client.get_chain_id() == config.chain_id
-												})
-												.expect(INVALID_CHAIN_ID)
-												.get_provider(),
-										)),
-									),
-								}
-							} else {
-								(socket_ext, authority_ext)
-							}
-						},
-					);
-
-					RoundupUtility {
-						event_sender: sender.clone(),
-						socket_external: socket_external.unwrap(),
-						authority_external: authority_external.unwrap(),
-						id: sender.id,
-					}
-				})
-				.collect(),
-		);
-
-		let authority_bifrost = AuthorityBifrost::new(
-			H160::from_str(&authority_address).expect(INVALID_CONTRACT_ADDRESS),
-			client.get_provider(),
-		);
+			client.socket.abi().event("RoundUp").expect(INVALID_CONTRACT_ABI).signature();
 
 		let roundup_barrier = Arc::new(Barrier::new(number_of_relay_targets));
 		let bootstrapping_count = Arc::new(Mutex::new(u8::default()));
 
 		Self {
+			event_senders,
 			block_receiver,
 			client,
-			socket_bifrost,
-			roundup_utils,
+			external_clients,
 			roundup_signature,
 			socket_barrier,
 			roundup_barrier,
 			bootstrap_states,
 			bootstrapping_count,
 			bootstrap_config,
-			authority_bifrost,
 		}
 	}
 
 	/// Decode & Serialize log to `SerializedRoundUp` struct.
 	async fn decode_log(&self, log: Log) -> Result<SerializedRoundUp, ethers::abi::Error> {
-		match SocketBifrostEvents::decode_log(&log.into()) {
+		match SocketContractEvents::decode_log(&log.into()) {
 			Ok(roundup) => Ok(SerializedRoundUp::from_tokens(roundup.into_tokens()).unwrap()),
 			Err(error) => Err(error),
 		}
 	}
 
 	/// Get the submitted signatures of the updated round.
-	async fn get_sorted_signatures(&self, round: U256, new_relayers: Vec<Address>) -> Signatures {
+	async fn get_sorted_signatures(&self, round: U256, new_relayers: &Vec<Address>) -> Signatures {
 		let encoded_msg = encode(&[
 			Token::Uint(round),
 			Token::Array(new_relayers.iter().map(|address| Token::Address(*address)).collect()),
 		]);
 
-		// looks unnecessary, but bifrost_socket::Signatures != external_socket::Signatures
-		let unordered_sigs = Signatures::from_tokens(
-			self.socket_bifrost
-				.get_round_signatures(round)
-				.call()
-				.await
-				.unwrap()
-				.into_tokens(),
-		)
-		.unwrap_or_default();
-
+		let unordered_sigs = self.client.socket.get_round_signatures(round).call().await.unwrap();
 		let unordered_concated_v = &unordered_sigs.v.to_string()[2..];
 
-		// TODO: Maybe BTreeMap(key: signer, value: signature) could replace Vec<RecoveredSignature>
 		let mut recovered_sigs = vec![];
 		for idx in 0..unordered_sigs.r.len() {
 			let sig = Signature {
@@ -331,7 +256,7 @@ impl<T: JsonRpcClient> RoundupRelayHandler<T> {
 		mut new_relayers: Vec<Address>,
 	) -> RoundUpSubmit {
 		new_relayers.sort();
-		let sigs = self.get_sorted_signatures(round, new_relayers.clone()).await;
+		let sigs = self.get_sorted_signatures(round, &new_relayers).await;
 
 		RoundUpSubmit { round, new_relayers, sigs }
 	}
@@ -339,53 +264,48 @@ impl<T: JsonRpcClient> RoundupRelayHandler<T> {
 	/// Build `round_control_relay` method call transaction.
 	fn build_transaction_request(
 		&self,
-		target_contract: SocketExternal<Provider<T>>,
-		roundup_submit: RoundUpSubmit,
+		target_socket: &SocketContract<Provider<T>>,
+		roundup_submit: &RoundUpSubmit,
 	) -> TransactionRequest {
 		TransactionRequest::default()
-			.to(target_contract.address())
-			.data(target_contract.round_control_relay(roundup_submit).calldata().unwrap())
+			.to(target_socket.address())
+			.data(target_socket.round_control_relay(roundup_submit.clone()).calldata().unwrap())
 	}
 
 	/// Check roundup submitted before. If not, call `round_control_relay`.
-	async fn broadcast_roundup(&self, roundup_submit: RoundUpSubmit) {
-		let roundup_utils = self.roundup_utils.clone();
-		let mut stream = tokio_stream::iter(roundup_utils.iter());
-		while let Some(target_chain) = stream.next().await {
+	async fn broadcast_roundup(&self, roundup_submit: &RoundUpSubmit) {
+		let mut stream = tokio_stream::iter(self.external_clients.iter());
+		while let Some(target_client) = stream.next().await {
 			// Check roundup submitted to target chain before.
-			if roundup_submit.round >
-				target_chain.authority_external.latest_round().call().await.unwrap()
-			{
-				let transaction_request = self.build_transaction_request(
-					target_chain.socket_external.clone(),
-					roundup_submit.clone(),
-				);
+			if roundup_submit.round > target_client.authority.latest_round().call().await.unwrap() {
+				let transaction_request =
+					self.build_transaction_request(&target_client.socket, roundup_submit);
 
-				target_chain
-					.event_sender
-					.sender
+				let event_sender =
+					self.event_senders.get(&target_client.get_chain_id()).expect(INVALID_CHAIN_ID);
+
+				event_sender
 					.send(EventMessage::new(
 						transaction_request,
 						EventMetadata::VSPPhase2(VSPPhase2Metadata::new(
 							roundup_submit.round,
-							target_chain.event_sender.id,
+							target_client.get_chain_id(),
 						)),
 						true,
 					))
-					.unwrap();
+					.unwrap()
 			}
 		}
 	}
 
 	async fn wait_if_latest_round(&self) {
 		let barrier_clone = self.roundup_barrier.clone();
-		let roundup_utils = &self.roundup_utils.clone();
+		let external_clients = &self.external_clients;
 
-		for target_chain in roundup_utils.iter() {
+		for target_client in external_clients {
 			let barrier_clone_inner = barrier_clone.clone();
-			let current_round = self.authority_bifrost.latest_round().call().await.unwrap();
-			let target_chain_round =
-				target_chain.authority_external.latest_round().call().await.unwrap();
+			let current_round = self.client.authority.latest_round().call().await.unwrap();
+			let target_chain_round = target_client.authority.latest_round().call().await.unwrap();
 			let bootstrap_guard = self.bootstrapping_count.clone();
 
 			tokio::spawn(async move {
@@ -406,7 +326,7 @@ impl<T: JsonRpcClient> RoundupRelayHandler<T> {
 		self.roundup_barrier.clone().wait().await;
 
 		// if all of chain is the latest round already
-		if *self.bootstrapping_count.lock().await == self.roundup_utils.len() as u8 {
+		if *self.bootstrapping_count.lock().await == self.external_clients.len() as u8 {
 			log::info!(
 				target: &self.client.get_chain_name(),
 				"-[{}] ⚙️  [Bootstrap mode] Bootstrapping RoundUp events.",
@@ -458,7 +378,7 @@ impl<T: JsonRpcClient> RoundupRelayHandler<T> {
 				std::cmp::min(from_block + BOOTSTRAP_BLOCK_CHUNK_SIZE - 1, to_block);
 
 			let filter = Filter::new()
-				.address(self.socket_bifrost.address())
+				.address(self.client.socket.address())
 				.topic0(self.roundup_signature)
 				.from_block(from_block)
 				.to_block(chunk_to_block);
@@ -475,7 +395,7 @@ impl<T: JsonRpcClient> RoundupRelayHandler<T> {
 	/// Get factor between the block time of native-chain and block time of this chain
 	/// Approximately bfc-testnet: 3s, matic-mumbai: 2s, bsc-testnet: 3s, eth-goerli: 12s
 	pub async fn get_bootstrap_offset_height_based_on_block_time(&self, round_offset: u32) -> U64 {
-		let round_info: RoundMetaData = self.authority_bifrost.round_info().call().await.unwrap();
+		let round_info: RoundMetaData = self.client.authority.round_info().call().await.unwrap();
 
 		let block_number = self.client.get_latest_block_number().await;
 
