@@ -145,8 +145,7 @@ impl<T: JsonRpcClient> Handler for RoundupRelayHandler<T> {
 
 	fn is_target_contract(&self, receipt: &TransactionReceipt) -> bool {
 		if let Some(to) = receipt.to {
-			return ethers::utils::to_checksum(&to, None) ==
-				ethers::utils::to_checksum(&self.client.socket.address(), None)
+			return to == self.client.socket.address()
 		}
 		false
 	}

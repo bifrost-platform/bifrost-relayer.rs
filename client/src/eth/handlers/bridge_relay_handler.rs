@@ -370,7 +370,7 @@ impl<T: JsonRpcClient> BridgeRelayHandler<T> {
 	/// fail-case flow.
 	async fn process_reverted_transaction(&self, receipt: TransactionReceipt) {
 		// only handles owned transactions
-		if self.is_owned_relay_transaction(&receipt) {
+		if receipt.from == self.client.address() {
 			if let Some(tx) = self.client.get_transaction(receipt.transaction_hash).await {
 				// the reverted transaction must be execution of `poll()`
 				let selector = &tx.input[0..4];
@@ -527,12 +527,6 @@ impl<T: JsonRpcClient> BridgeRelayHandler<T> {
 			(self.client.get_chain_id() == dst_chain_id, self.client.if_destination_chain),
 			(true, BridgeDirection::Inbound) | (false, BridgeDirection::Outbound)
 		)
-	}
-
-	/// Verifies whether the current relayer owns the relay transaction.
-	fn is_owned_relay_transaction(&self, receipt: &TransactionReceipt) -> bool {
-		ethers::utils::to_checksum(&receipt.from, None) ==
-			ethers::utils::to_checksum(&self.client.address(), None)
 	}
 
 	/// Request send bridge relay transaction to the target event channel.

@@ -1,4 +1,7 @@
-use cccp_primitives::{eth::BootstrapState, sub_display_format};
+use cccp_primitives::{
+	eth::{BootstrapState, ChainID},
+	sub_display_format,
+};
 use ethers::{
 	providers::JsonRpcClient,
 	types::{Block, SyncingStatus, TransactionReceipt, H160, H256, U64},
@@ -12,7 +15,6 @@ use tokio::{
 	time::{sleep, Duration},
 };
 use tokio_stream::StreamExt;
-use cccp_primitives::eth::ChainID;
 
 use super::EthClient;
 
@@ -154,9 +156,7 @@ impl<T: JsonRpcClient> BlockManager<T> {
 	/// Verifies if the transaction was occurred from the target contracts.
 	fn is_in_target_contracts(&self, receipt: &TransactionReceipt) -> bool {
 		if let Some(to) = receipt.to {
-			return self.target_contracts.iter().any(|c| {
-				ethers::utils::to_checksum(c, None) == ethers::utils::to_checksum(&to, None)
-			})
+			return self.target_contracts.iter().any(|c| *c == to)
 		}
 		false
 	}
