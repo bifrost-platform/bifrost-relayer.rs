@@ -237,7 +237,12 @@ impl<T: JsonRpcClient> BridgeRelayBuilder for BridgeRelayHandler<T> {
 		is_inbound: bool,
 		relay_tx_chain_id: ChainID,
 	) -> TransactionRequest {
-		let to_socket = self.all_clients.get(&relay_tx_chain_id).expect(INVALID_CHAIN_ID).address();
+		let to_socket = self
+			.all_clients
+			.get(&relay_tx_chain_id)
+			.expect(INVALID_CHAIN_ID)
+			.socket
+			.address();
 
 		// the original msg must be used for building calldata
 		let signatures = self.build_signatures(sig_msg, is_inbound).await;
