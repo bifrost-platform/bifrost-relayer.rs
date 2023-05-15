@@ -486,7 +486,7 @@ impl<T: JsonRpcClient> BridgeRelayHandler<T> {
 
 		// build and send transaction request
 		let (tx_request, is_external) =
-			self.build_transaction(msg, is_inbound, relay_tx_chain_id).await;
+			self.build_transaction(submit_msg, sig_msg, is_inbound, relay_tx_chain_id).await;
 		self.request_send_transaction(relay_tx_chain_id, tx_request, metadata, is_external);
 	}
 
