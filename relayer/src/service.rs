@@ -1,64 +1,28 @@
+use crate::cli::{LOG_TARGET, SUB_LOG_TARGET};
 use cccp_client::eth::{
-	BlockManager, BridgeRelayArgs, BridgeRelayHandler, EthClient, EventSender, Handler,
-	RoundupRelayHandler, TransactionManager, WalletManager,
+	BlockManager, BridgeRelayHandler, EthClient, EventSender, Handler, RoundupRelayHandler,
+	TransactionManager, WalletManager,
 };
 use cccp_periodic::{
 	heartbeat_sender::HeartbeatSender, roundup_emitter::RoundupEmitter, OraclePriceFeeder,
 };
 use cccp_primitives::{
-	cli::{Configuration, HandlerConfig, HandlerType},
+	cli::{Configuration, HandlerType},
 	errors::{
 		INVALID_BIFROST_NATIVENESS, INVALID_CHAIN_ID, INVALID_CONTRACT_ADDRESS,
 		INVALID_PRIVATE_KEY, INVALID_PROVIDER_URL,
 	},
-	eth::{BootstrapState, BridgeDirection, Contract, EthClientConfiguration},
+	eth::BootstrapState,
 	periodic::PeriodicWorker,
-	socket_bifrost::SocketBifrost,
 	sub_display_format,
 };
-
 use ethers::{
 	providers::{Http, Provider},
 	types::H160,
 };
 use sc_service::{Error as ServiceError, TaskManager};
-use std::{str::FromStr, sync::Arc};
+use std::{collections::BTreeMap, str::FromStr, sync::Arc};
 use tokio::sync::{Barrier, Mutex, RwLock};
-
-use crate::cli::{LOG_TARGET, SUB_LOG_TARGET};
-
-/// Get the target contracts for the `BlockManager` to monitor.
-fn get_target_contracts_by_chain_id(
-	chain_id: u32,
-	handler_configs: &Vec<HandlerConfig>,
-) -> Vec<H160> {
-	let mut target_contracts = vec![];
-	for handler_config in handler_configs {
-		for target in &handler_config.watch_list {
-			let target_contract = H160::from_str(&target.contract).expect(INVALID_CONTRACT_ADDRESS);
-			if target.chain_id == chain_id && !target_contracts.contains(&target_contract) {
-				target_contracts.push(target_contract);
-			}
-		}
-	}
-	target_contracts
-}
-
-/// Builds socket `Contract` instances that supports CCCP.
-fn build_socket_contracts(handler_configs: &Vec<HandlerConfig>) -> Vec<Contract> {
-	let mut contracts = vec![];
-	for handler_config in handler_configs {
-		if let HandlerType::Socket = handler_config.handler_type {
-			for socket in &handler_config.watch_list {
-				contracts.push(Contract::new(
-					socket.chain_id,
-					H160::from_str(&socket.contract).expect(INVALID_CONTRACT_ADDRESS),
-				));
-			}
-		}
-	}
-	contracts
-}
 
 pub fn relay(config: Configuration) -> Result<TaskManager, ServiceError> {
 	new_relay_base(config).map(|RelayBase { task_manager, .. }| task_manager)
@@ -67,7 +31,8 @@ pub fn relay(config: Configuration) -> Result<TaskManager, ServiceError> {
 pub fn new_relay_base(config: Configuration) -> Result<RelayBase, ServiceError> {
 	let (bootstrap_states, socket_barrier_len) =
 		if config.relayer_config.bootstrap_config.is_enabled {
-			(BootstrapState::NodeSyncing, config.relayer_config.evm_providers.len() * 2 + 1)
+			// TODO: Review: Is this refactor correct?
+			(BootstrapState::NodeSyncing, config.relayer_config.evm_providers.len() + 1)
 		} else {
 			(BootstrapState::NormalStart, 1)
 		};
@@ -78,30 +43,16 @@ pub fn new_relay_base(config: Configuration) -> Result<RelayBase, ServiceError> 
 	let bootstrap_states =
 		Arc::new(RwLock::new(vec![bootstrap_states; config.relayer_config.evm_providers.len()]));
 
-	let authority_address = &config
-		.relayer_config
-		.periodic_configs
-		.as_ref()
-		.unwrap()
-		.roundup_emitter
-		.authority_address
-		.clone();
-
 	let mut number_of_relay_targets: usize = 0;
 
 	// initialize `EthClient`, `TransactionManager`, `BlockManager`
 	let (clients, tx_managers, block_managers, event_channels) = {
 		let mut clients = vec![];
 		let mut tx_managers = vec![];
-		let mut block_managers = vec![];
+		let mut block_managers = BTreeMap::new();
 		let mut event_senders = vec![];
 
-		config.relayer_config.evm_providers.into_iter().for_each(|evm_provider| {
-			let target_contracts = get_target_contracts_by_chain_id(
-				evm_provider.id,
-				&config.relayer_config.handler_configs,
-			);
-
+		config.relayer_config.evm_providers.iter().for_each(|evm_provider| {
 			let wallet = WalletManager::from_private_key(
 				config.relayer_config.private_key.as_str(),
 				evm_provider.id,
@@ -112,16 +63,17 @@ pub fn new_relay_base(config: Configuration) -> Result<RelayBase, ServiceError> 
 			let client = Arc::new(EthClient::new(
 				wallet,
 				Arc::new(
-					Provider::<Http>::try_from(evm_provider.provider).expect(INVALID_PROVIDER_URL),
+					Provider::<Http>::try_from(evm_provider.provider.clone())
+						.expect(INVALID_PROVIDER_URL),
 				),
-				evm_provider.name,
-				evm_provider.id,
+				evm_provider.name.clone(),
+				evm_provider.id.clone(),
 				evm_provider.block_confirmations,
 				evm_provider.call_interval,
 				is_native,
-				evm_provider.socket_address,
-				evm_provider.vault_address,
-				evm_provider.authority_address,
+				evm_provider.socket_address.clone(),
+				evm_provider.vault_address.clone(),
+				evm_provider.authority_address.clone(),
 			));
 
 			if evm_provider.is_relay_target {
@@ -135,15 +87,30 @@ pub fn new_relay_base(config: Configuration) -> Result<RelayBase, ServiceError> 
 
 				number_of_relay_targets += 1;
 			}
-			let block_manager =
-				BlockManager::new(client.clone(), target_contracts, bootstrap_states.clone());
+			let block_manager = BlockManager::new(
+				client.clone(),
+				vec![
+					H160::from_str(&evm_provider.vault_address).expect(INVALID_CONTRACT_ADDRESS),
+					H160::from_str(&evm_provider.socket_address).expect(INVALID_CONTRACT_ADDRESS),
+				],
+				bootstrap_states.clone(),
+			);
 
 			clients.push(client);
-			block_managers.push(block_manager);
+			block_managers.insert(block_manager.client.get_chain_id(), block_manager);
 		});
 
 		(clients, tx_managers, block_managers, event_senders)
 	};
+	let relayer_manager_address = config
+		.relayer_config
+		.evm_providers
+		.iter()
+		.find(|provider| provider.is_native.unwrap_or(false))
+		.expect(INVALID_BIFROST_NATIVENESS)
+		.relayer_manager_address
+		.clone()
+		.unwrap();
 
 	log::info!(
 		target: LOG_TARGET,
@@ -183,6 +150,7 @@ pub fn new_relay_base(config: Configuration) -> Result<RelayBase, ServiceError> 
 			.expect(INVALID_BIFROST_NATIVENESS)
 			.clone(),
 		event_channels.clone(),
+		relayer_manager_address.clone(),
 	);
 	task_manager
 		.spawn_essential_handle()
@@ -198,22 +166,15 @@ pub fn new_relay_base(config: Configuration) -> Result<RelayBase, ServiceError> 
 		.unwrap()
 		.iter()
 		.for_each(|price_feeder_config| {
-			let client = clients
-				.iter()
-				.find(|client| client.get_chain_id() == price_feeder_config.chain_id)
-				.expect(INVALID_CHAIN_ID)
-				.clone();
-			let channel = event_channels
-				.iter()
-				.find(|channel| channel.id == price_feeder_config.chain_id)
-				.expect(INVALID_CHAIN_ID)
-				.clone();
-
-			let mut oracle_price_feeder =
-				OraclePriceFeeder::new(channel, price_feeder_config.clone(), client.clone());
+			let mut oracle_price_feeder = OraclePriceFeeder::new(
+				event_channels.clone(),
+				price_feeder_config.clone(),
+				clients.clone(),
+			);
 			task_manager.spawn_essential_handle().spawn(
 				Box::leak(
-					format!("{}-oracle-price-feeder", client.get_chain_name()).into_boxed_str(),
+					format!("{}-oracle-price-feeder", oracle_price_feeder.client.get_chain_name())
+						.into_boxed_str(),
 				),
 				Some("periodic"),
 				async move { oracle_price_feeder.run().await },
@@ -221,118 +182,60 @@ pub fn new_relay_base(config: Configuration) -> Result<RelayBase, ServiceError> 
 		});
 
 	// Initialize handlers & spawn tasks
-
-	let socket_contracts = build_socket_contracts(&config.relayer_config.handler_configs);
 	config.relayer_config.handler_configs.iter().for_each(|handler_config| {
 		match handler_config.handler_type {
-			HandlerType::Socket | HandlerType::Vault =>
-				handler_config.watch_list.iter().for_each(|target| {
-					let block_manager = block_managers
-						.iter()
-						.find(|manager| manager.client.get_chain_id() == target.chain_id)
-						.expect(INVALID_CHAIN_ID);
-					// initialize a new block receiver
-					let block_receiver = block_manager.sender.subscribe();
-
-					let client = clients
-						.iter()
-						.find(|client| client.get_chain_id() == target.chain_id)
-						.cloned()
-						.expect(INVALID_CHAIN_ID);
-
-					let target_socket = socket_contracts
-						.iter()
-						.find(|socket| socket.chain_id == client.get_chain_id())
-						.expect(INVALID_CHAIN_ID);
-
-					let bridge_relay_args = BridgeRelayArgs {
-						event_senders: event_channels.clone(),
-						block_receiver,
-						client: client.clone(),
-						target_contract: H160::from_str(&target.contract)
-							.expect(INVALID_CONTRACT_ADDRESS),
-						target_socket: target_socket.address,
-						socket_contracts: socket_contracts.clone(),
-						bootstrap_states: bootstrap_states.clone(),
-						bootstrapping_count: socket_bootstrapping_count.clone(),
-						bootstrap_config: config.relayer_config.bootstrap_config.clone(),
-						authority_address: authority_address.clone(),
-						all_clients: clients.clone(),
-					};
-
-					let mut bridge_relay_handler = BridgeRelayHandler::new(bridge_relay_args);
-
-					let socket_barrier_clone = socket_barrier.clone();
-					let is_bootstrapped = bootstrap_states.clone();
-
-					task_manager.spawn_essential_handle().spawn(
-						Box::leak(
-							format!(
-								"{}-{}-handler",
-								client.get_chain_name(),
-								handler_config.handler_type.to_string(),
-							)
-							.into_boxed_str(),
-						),
-						Some("handlers"),
-						async move {
-							socket_barrier_clone.wait().await;
-
-							// After All of barrier complete the waiting
-							let mut guard = is_bootstrapped.write().await;
-							if guard.iter().all(|s| *s == BootstrapState::BootstrapRoundUp) {
-								for state in guard.iter_mut() {
-									*state = BootstrapState::BootstrapSocket;
-								}
-							}
-							drop(guard);
-
-							bridge_relay_handler.run().await
-						},
-					);
-				}),
-			HandlerType::Roundup => {
-				let client = clients
-					.iter()
-					.find(|client| client.get_chain_id() == handler_config.watch_list[0].chain_id)
-					.cloned()
-					.expect(INVALID_CHAIN_ID);
-				let block_receiver = block_managers
-					.iter()
-					.find(|manager| {
-						manager.client.get_chain_id() == handler_config.watch_list[0].chain_id
-					})
-					.expect(INVALID_CHAIN_ID)
-					.sender
-					.subscribe();
-
-				let mut external_event_channels = event_channels.clone();
-				external_event_channels.retain(|channel| !channel.is_native); // Remove bifrost network sender.
-
-				// Initialize SocketBifrost instance
-				let socket_bifrost = SocketBifrost::new(
-					H160::from_str(&handler_config.watch_list[0].contract)
-						.expect(INVALID_CONTRACT_ADDRESS),
-					client.get_provider(),
+			HandlerType::BridgeRelay => handler_config.watch_list.iter().for_each(|target| {
+				let mut bridge_relay_handler = BridgeRelayHandler::new(
+					*target,
+					event_channels.clone(),
+					block_managers.get(target).expect(INVALID_CHAIN_ID).sender.subscribe(),
+					clients.clone(),
+					bootstrap_states.clone(),
+					socket_bootstrapping_count.clone(),
+					config.relayer_config.bootstrap_config.clone(),
 				);
 
-				let mut external_clients = clients.clone();
-				external_clients.retain(|external_client| {
-					// Remove bifrost network client.
-					external_client.get_chain_id() != client.get_chain_id()
-				});
+				let socket_barrier_clone = socket_barrier.clone();
+				let is_bootstrapped = bootstrap_states.clone();
 
+				task_manager.spawn_essential_handle().spawn(
+					Box::leak(
+						format!(
+							"{}-{}-handler",
+							bridge_relay_handler.client.get_chain_name(),
+							handler_config.handler_type.to_string(),
+						)
+						.into_boxed_str(),
+					),
+					Some("handlers"),
+					async move {
+						socket_barrier_clone.wait().await;
+
+						// After All of barrier complete the waiting
+						let mut guard = is_bootstrapped.write().await;
+						if guard.iter().all(|s| *s == BootstrapState::BootstrapRoundUp) {
+							for state in guard.iter_mut() {
+								*state = BootstrapState::BootstrapSocket;
+							}
+						}
+						drop(guard);
+
+						bridge_relay_handler.run().await
+					},
+				);
+			}),
+			HandlerType::Roundup => {
 				let mut roundup_relay_handler = RoundupRelayHandler::new(
-					external_event_channels,
-					block_receiver,
-					client.clone(),
-					external_clients,
-					socket_bifrost,
-					handler_config.roundup_utils.clone().unwrap(),
+					event_channels.clone(),
+					block_managers
+						.get(&handler_config.watch_list[0])
+						.expect(INVALID_CHAIN_ID)
+						.sender
+						.subscribe(),
+					clients.clone(),
 					socket_barrier.clone(),
 					bootstrap_states.clone(),
 					config.relayer_config.bootstrap_config.clone(),
-					authority_address.clone(),
 					number_of_relay_targets,
 				);
 
@@ -347,19 +250,11 @@ pub fn new_relay_base(config: Configuration) -> Result<RelayBase, ServiceError> 
 
 	// initialize roundup feeder & spawn tasks
 	let mut roundup_emitter = RoundupEmitter::new(
-		event_channels
-			.iter()
-			.find(|sender| sender.is_native)
-			.expect(INVALID_BIFROST_NATIVENESS)
-			.clone(),
-		clients
-			.iter()
-			.find(|client| client.is_native)
-			.expect(INVALID_BIFROST_NATIVENESS)
-			.clone(),
+		event_channels.clone(),
+		clients.clone(),
 		config.relayer_config.periodic_configs.unwrap().roundup_emitter,
+		relayer_manager_address.clone(),
 	);
-
 	task_manager.spawn_essential_handle().spawn(
 		"roundup-emitter",
 		Some("roundup-emitter"),
@@ -367,7 +262,7 @@ pub fn new_relay_base(config: Configuration) -> Result<RelayBase, ServiceError> 
 	);
 
 	// spawn block managers' tasks
-	block_managers.into_iter().for_each(|mut block_manager| {
+	block_managers.into_iter().for_each(|(_chain_id, mut block_manager)| {
 		task_manager.spawn_essential_handle().spawn(
 			Box::leak(
 				format!("{}-block-manager", block_manager.client.get_chain_name()).into_boxed_str(),
