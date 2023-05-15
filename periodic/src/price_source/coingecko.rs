@@ -114,7 +114,7 @@ impl CoingeckoPriceFetcher {
 					},
 				},
 				Err(e) => {
-					log::error!(
+					log::warn!(
 						target: LOG_TARGET,
 						"-[{}] ❗️ Error fetching support coin list: {}, Retry in {:?} secs...",
 						sub_display_format(SUB_LOG_TARGET),
@@ -150,7 +150,7 @@ impl CoingeckoPriceFetcher {
 						},
 					},
 				Err(e) => {
-					log::error!(
+					log::warn!(
 						target: LOG_TARGET,
 						"-[{}] ❗️ Error fetching from coingecko: {}, Retry in {:?} secs...",
 						sub_display_format(SUB_LOG_TARGET),
