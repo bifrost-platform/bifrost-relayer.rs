@@ -326,7 +326,6 @@ impl<T: JsonRpcClient> RoundupRelayHandler<T> {
 		self.roundup_barrier.clone().wait().await;
 
 		// if all of chain is the latest round already
-		// TODO: Review: Is this refactor correct?
 		if *self.bootstrapping_count.lock().await == self.external_clients.len() as u8 {
 			log::info!(
 				target: &self.client.get_chain_name(),

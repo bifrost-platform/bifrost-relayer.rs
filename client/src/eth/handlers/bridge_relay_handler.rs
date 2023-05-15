@@ -601,7 +601,6 @@ impl<T: JsonRpcClient> BridgeRelayHandler<T> {
 		*bootstrap_count += 1;
 
 		// If All thread complete the task, starts the blockManager
-		// TODO: Review: Is this refactor correct?
 		if *bootstrap_count == self.all_clients.len() as u8 {
 			let mut bootstrap_guard = self.bootstrap_states.write().await;
 
@@ -634,7 +633,6 @@ impl<T: JsonRpcClient> BridgeRelayHandler<T> {
 			let chunk_to_block =
 				std::cmp::min(from_block + BOOTSTRAP_BLOCK_CHUNK_SIZE - 1, to_block);
 
-			// TODO: Review: Is this refactor correct?
 			let socket_filter = Filter::new()
 				.address(self.client.socket.address())
 				.topic0(self.socket_signature)

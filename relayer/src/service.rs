@@ -31,7 +31,6 @@ pub fn relay(config: Configuration) -> Result<TaskManager, ServiceError> {
 pub fn new_relay_base(config: Configuration) -> Result<RelayBase, ServiceError> {
 	let (bootstrap_states, socket_barrier_len) =
 		if config.relayer_config.bootstrap_config.is_enabled {
-			// TODO: Review: Is this refactor correct?
 			(BootstrapState::NodeSyncing, config.relayer_config.evm_providers.len() + 1)
 		} else {
 			(BootstrapState::NormalStart, 1)
