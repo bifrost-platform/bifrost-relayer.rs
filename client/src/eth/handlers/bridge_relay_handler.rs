@@ -201,8 +201,13 @@ impl<T: JsonRpcClient> Handler for BridgeRelayHandler<T> {
 									receipt.transaction_hash,
 								);
 
-								self.send_socket_message(socket.msg.clone(), metadata, is_inbound)
-									.await;
+								self.send_socket_message(
+									socket.msg.clone(),
+									socket.msg.clone(),
+									metadata,
+									is_inbound,
+								)
+								.await;
 							},
 						},
 						Err(error) => panic!(
@@ -242,7 +247,8 @@ impl<T: JsonRpcClient> BridgeRelayBuilder for BridgeRelayHandler<T> {
 
 	async fn build_transaction(
 		&self,
-		msg: SocketMessage,
+		submit_msg: SocketMessage,
+		sig_msg: SocketMessage,
 		is_inbound: bool,
 		relay_tx_chain_id: u32,
 	) -> TransactionRequest {
@@ -253,11 +259,9 @@ impl<T: JsonRpcClient> BridgeRelayBuilder for BridgeRelayHandler<T> {
 			.find(|socket| socket.chain_id == relay_tx_chain_id)
 			.unwrap()
 			.address;
-		// the original msg must be used for building calldata
-		let origin_msg = msg.clone();
 		let tx_request = TransactionRequest::default();
-		let signatures = self.build_signatures(msg, is_inbound).await;
-		tx_request.data(self.build_poll_call_data(origin_msg, signatures)).to(to_socket)
+		let signatures = self.build_signatures(sig_msg, is_inbound).await;
+		tx_request.data(self.build_poll_call_data(submit_msg, signatures)).to(to_socket)
 	}
 
 	async fn build_signatures(&self, mut msg: SocketMessage, is_inbound: bool) -> Signatures {
@@ -395,28 +399,31 @@ impl<T: JsonRpcClient> BridgeRelayHandler<T> {
 						.target_socket
 						.decode_with_selector::<SerializedPoll, Bytes>(poll_selector, tx.input)
 					{
-						Ok(mut poll) => {
+						Ok(poll) => {
 							let prev_status = SocketEventStatus::from_u8(poll.msg.status);
 							let src_chain_id = u32::from_be_bytes(poll.msg.req_id.chain);
 							let dst_chain_id = u32::from_be_bytes(poll.msg.ins_code.chain);
 							let is_inbound = self.is_inbound_sequence(dst_chain_id);
 
+							let mut submit_msg = poll.msg.clone();
+							let sig_msg = poll.msg;
+
 							if is_inbound && matches!(prev_status, SocketEventStatus::Requested) {
 								// if inbound-Requested
-								poll.msg.status = SocketEventStatus::Failed.into();
+								submit_msg.status = SocketEventStatus::Failed.into();
 							} else if !is_inbound &&
 								matches!(prev_status, SocketEventStatus::Accepted)
 							{
 								// if outbound-Accepted
-								poll.msg.status = SocketEventStatus::Rejected.into();
+								submit_msg.status = SocketEventStatus::Rejected.into();
 							} else {
 								return
 							}
 
 							let metadata = BridgeRelayMetadata::new(
 								is_inbound,
-								SocketEventStatus::from_u8(poll.msg.status),
-								poll.msg.req_id.sequence,
+								SocketEventStatus::from_u8(submit_msg.status),
+								sig_msg.req_id.sequence,
 								src_chain_id,
 								dst_chain_id,
 							);
@@ -430,7 +437,8 @@ impl<T: JsonRpcClient> BridgeRelayHandler<T> {
 								receipt.transaction_hash,
 							);
 
-							self.send_socket_message(poll.msg, metadata, is_inbound).await;
+							self.send_socket_message(submit_msg, sig_msg, metadata, is_inbound)
+								.await;
 						},
 						Err(error) => {
 							// ignore for now if function input data decode fails
@@ -453,11 +461,12 @@ impl<T: JsonRpcClient> BridgeRelayHandler<T> {
 	/// Sends the `SocketMessage` to the target chain channel.
 	async fn send_socket_message(
 		&self,
-		msg: SocketMessage,
+		submit_msg: SocketMessage,
+		sig_msg: SocketMessage,
 		metadata: BridgeRelayMetadata,
 		is_inbound: bool,
 	) {
-		let status = SocketEventStatus::from_u8(msg.status);
+		let status = SocketEventStatus::from_u8(submit_msg.status);
 
 		let relay_tx_chain_id = if is_inbound {
 			self.get_inbound_relay_tx_chain_id(status, metadata.src_chain_id, metadata.dst_chain_id)
@@ -470,7 +479,8 @@ impl<T: JsonRpcClient> BridgeRelayHandler<T> {
 		};
 
 		// build and send transaction request
-		let tx_request = self.build_transaction(msg, is_inbound, relay_tx_chain_id).await;
+		let tx_request =
+			self.build_transaction(submit_msg, sig_msg, is_inbound, relay_tx_chain_id).await;
 		self.request_send_transaction(relay_tx_chain_id, tx_request, metadata);
 	}
 
