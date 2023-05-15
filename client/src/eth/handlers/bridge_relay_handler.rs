@@ -172,8 +172,7 @@ impl<T: JsonRpcClient> Handler for BridgeRelayHandler<T> {
 								);
 
 								if Self::is_sequence_ended(status) ||
-									self.is_already_done(socket.msg.req_id.clone(), src_chain_id)
-										.await
+									self.is_already_done(&socket.msg.req_id, src_chain_id).await
 								{
 									// do nothing if protocol sequence ended
 									return
