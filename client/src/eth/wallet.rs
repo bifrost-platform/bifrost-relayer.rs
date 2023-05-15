@@ -1,4 +1,4 @@
-use cccp_primitives::errors::INVALID_PRIVATE_KEY;
+use cccp_primitives::{errors::INVALID_PRIVATE_KEY, eth::ChainID};
 use ethers::{
 	prelude::{k256::ecdsa::SigningKey, rand},
 	signers::{coins_bip39::English, LocalWallet, MnemonicBuilder, Signer},
@@ -22,7 +22,7 @@ pub struct WalletManager {
 }
 
 impl WalletManager {
-	pub fn new(output_path: PathBuf, chain_id: u32) -> WalletResult<Self> {
+	pub fn new(output_path: PathBuf, chain_id: ChainID) -> WalletResult<Self> {
 		let mut rng = rand::thread_rng();
 
 		fs::create_dir_all(&output_path)?;
@@ -36,7 +36,7 @@ impl WalletManager {
 
 	pub fn from_phrase_or_file<P: Into<PathOrString>>(
 		input_path: P,
-		chain_id: u32,
+		chain_id: ChainID,
 	) -> WalletResult<Self> {
 		let wallet = MnemonicBuilder::<English>::default().phrase(input_path).build()?;
 
@@ -44,8 +44,8 @@ impl WalletManager {
 	}
 
 	/// Initialize `WalletManager` by the given private key.
-	pub fn from_private_key(private_key: &str, chain_id: u32) -> WalletResult<Self> {
-		assert!(private_key.len() == 66, "{}", INVALID_PRIVATE_KEY);
+	pub fn from_private_key(private_key: &str, chain_id: ChainID) -> WalletResult<Self> {
+		assert_eq!(private_key.len(), 66, "{}", INVALID_PRIVATE_KEY);
 		assert!(private_key.starts_with("0x"), "{}", INVALID_PRIVATE_KEY);
 
 		let wallet = private_key.parse::<LocalWallet>().expect(INVALID_PRIVATE_KEY);

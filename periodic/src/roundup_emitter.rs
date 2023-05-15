@@ -1,11 +1,9 @@
 use cccp_client::eth::{EthClient, EventMessage, EventMetadata, EventSender, VSPPhase1Metadata};
 use cccp_primitives::{
-	authority_bifrost::AuthorityBifrost,
-	cli::RoundupEmitterConfig,
 	errors::{INVALID_CONTRACT_ADDRESS, INVALID_PERIODIC_SCHEDULE},
-	relayer_bifrost::RelayerManagerBifrost,
-	socket_bifrost::{RoundUpSubmit, Signatures, SocketBifrost},
-	sub_display_format, PeriodicWorker,
+	relayer_manager::RelayerManagerContract,
+	socket::{RoundUpSubmit, Signatures},
+	sub_display_format, PeriodicWorker, INVALID_BIFROST_NATIVENESS,
 };
 use cron::Schedule;
 use ethers::{
@@ -27,12 +25,8 @@ pub struct RoundupEmitter<T> {
 	pub event_sender: Arc<EventSender>,
 	/// The time schedule that represents when to check round info.
 	pub schedule: Schedule,
-	/// Relayer_authority contract instance
-	pub authority_contract: AuthorityBifrost<Provider<T>>,
-	/// Socket contract(bifrost) instance
-	pub socket_contract: SocketBifrost<Provider<T>>,
 	/// RelayerManager contract(bifrost) instance
-	pub relayer_contract: RelayerManagerBifrost<Provider<T>>,
+	pub relayer_contract: RelayerManagerContract<Provider<T>>,
 }
 
 #[async_trait::async_trait]
@@ -77,29 +71,30 @@ impl<T: JsonRpcClient> PeriodicWorker for RoundupEmitter<T> {
 impl<T: JsonRpcClient> RoundupEmitter<T> {
 	/// Instantiates a new `RoundupEmitter` instance.
 	pub fn new(
-		event_sender: Arc<EventSender>,
-		client: Arc<EthClient<T>>,
-		config: RoundupEmitterConfig,
+		event_senders: Vec<Arc<EventSender>>,
+		clients: Vec<Arc<EthClient<T>>>,
+		schedule: String,
+		relayer_manager_address: String,
 	) -> Self {
-		let provider = client.get_provider();
+		let client = clients
+			.iter()
+			.find(|client| client.is_native)
+			.expect(INVALID_BIFROST_NATIVENESS)
+			.clone();
 
 		Self {
 			current_round: U256::default(),
+			relayer_contract: RelayerManagerContract::new(
+				H160::from_str(&relayer_manager_address).expect(INVALID_CONTRACT_ADDRESS),
+				client.get_provider(),
+			),
 			client,
-			event_sender,
-			schedule: Schedule::from_str(&config.schedule).expect(INVALID_PERIODIC_SCHEDULE),
-			authority_contract: AuthorityBifrost::new(
-				H160::from_str(&config.authority_address).expect(INVALID_CONTRACT_ADDRESS),
-				provider.clone(),
-			),
-			socket_contract: SocketBifrost::new(
-				H160::from_str(&config.socket_address).expect(INVALID_CONTRACT_ADDRESS),
-				provider.clone(),
-			),
-			relayer_contract: RelayerManagerBifrost::new(
-				H160::from_str(&config.relayer_manager_address).expect(INVALID_CONTRACT_ADDRESS),
-				provider,
-			),
+			event_sender: event_senders
+				.iter()
+				.find(|event_sender| event_sender.is_native)
+				.expect(INVALID_BIFROST_NATIVENESS)
+				.clone(),
+			schedule: Schedule::from_str(&schedule).expect(INVALID_PERIODIC_SCHEDULE),
 		}
 	}
 
@@ -130,8 +125,8 @@ impl<T: JsonRpcClient> RoundupEmitter<T> {
 		let round_up_submit = RoundUpSubmit { round, new_relayers, sigs };
 
 		TransactionRequest::default()
-			.to(self.socket_contract.address())
-			.data(self.socket_contract.round_control_poll(round_up_submit).calldata().unwrap())
+			.to(self.client.socket.address())
+			.data(self.client.socket.round_control_poll(round_up_submit).calldata().unwrap())
 	}
 
 	/// Request send transaction to the target event channel.
@@ -140,7 +135,7 @@ impl<T: JsonRpcClient> RoundupEmitter<T> {
 		tx_request: TransactionRequest,
 		metadata: VSPPhase1Metadata,
 	) {
-		match self.event_sender.sender.send(EventMessage::new(
+		match self.event_sender.send(EventMessage::new(
 			tx_request,
 			EventMetadata::VSPPhase1(metadata.clone()),
 			false,
@@ -162,6 +157,6 @@ impl<T: JsonRpcClient> RoundupEmitter<T> {
 	}
 
 	async fn get_latest_round(&self) -> U256 {
-		self.authority_contract.latest_round().call().await.unwrap()
+		self.client.authority.latest_round().call().await.unwrap()
 	}
 }

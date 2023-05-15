@@ -1,7 +1,7 @@
 use ethers::prelude::abigen;
 
 abigen!(
-	AuthorityBifrost,
-	"../abi/abi.authority.bifrost.json",
+	AuthorityContract,
+	"../abi/abi.authority.merged.json",
 	event_derives(serde::Deserialize, serde::Serialize)
 );

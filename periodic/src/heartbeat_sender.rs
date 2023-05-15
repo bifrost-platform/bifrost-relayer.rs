@@ -1,9 +1,7 @@
 use cccp_client::eth::{EthClient, EventMessage, EventMetadata, EventSender, HeartbeatMetadata};
 use cccp_primitives::{
-	authority_bifrost::AuthorityBifrost,
-	cli::HeartbeatSenderConfig,
 	errors::{INVALID_BIFROST_NATIVENESS, INVALID_CONTRACT_ADDRESS, INVALID_PERIODIC_SCHEDULE},
-	relayer_bifrost::RelayerManagerBifrost,
+	relayer_manager::RelayerManagerContract,
 	sub_display_format, PeriodicWorker,
 };
 use cron::Schedule;
@@ -21,9 +19,7 @@ pub struct HeartbeatSender<T> {
 	/// The time schedule that represents when to check heartbeat pulsed.
 	pub schedule: Schedule,
 	/// The target RelayerManger contract instance.
-	pub relayer_manager: RelayerManagerBifrost<Provider<T>>,
-	/// The target Authority contract instance.
-	pub authority: AuthorityBifrost<Provider<T>>,
+	pub relayer_manager: RelayerManagerContract<Provider<T>>,
 	/// The event sender that sends messages to the event channel.
 	pub event_sender: Arc<EventSender>,
 	/// The `EthClient` to interact with the connected blockchain.
@@ -39,7 +35,7 @@ impl<T: JsonRpcClient> PeriodicWorker for HeartbeatSender<T> {
 			if self.relayer_manager.is_selected_relayer(address, true).call().await.unwrap() &&
 				!(self.relayer_manager.is_heartbeat_pulsed(address).call().await.unwrap())
 			{
-				let round_info = self.authority.round_info().call().await.unwrap();
+				let round_info = self.client.authority.round_info().call().await.unwrap();
 				self.request_send_transaction(
 					self.build_transaction(),
 					HeartbeatMetadata::new(
@@ -66,18 +62,15 @@ impl<T: JsonRpcClient> PeriodicWorker for HeartbeatSender<T> {
 impl<T: JsonRpcClient> HeartbeatSender<T> {
 	/// Instantiates a new `HeartbeatSender` instance.
 	pub fn new(
-		config: HeartbeatSenderConfig,
+		schedule: String,
 		client: Arc<EthClient<T>>,
 		event_senders: Vec<Arc<EventSender>>,
+		relayer_manager_address: String,
 	) -> Self {
 		Self {
-			schedule: Schedule::from_str(&config.schedule).expect(INVALID_PERIODIC_SCHEDULE),
-			relayer_manager: RelayerManagerBifrost::new(
-				H160::from_str(&config.relayer_manager_address).expect(INVALID_CONTRACT_ADDRESS),
-				client.get_provider(),
-			),
-			authority: AuthorityBifrost::new(
-				H160::from_str(&config.authority_address).expect(INVALID_CONTRACT_ADDRESS),
+			schedule: Schedule::from_str(&schedule).expect(INVALID_PERIODIC_SCHEDULE),
+			relayer_manager: RelayerManagerContract::new(
+				H160::from_str(&relayer_manager_address).expect(INVALID_CONTRACT_ADDRESS),
 				client.get_provider(),
 			),
 			event_sender: event_senders
@@ -102,7 +95,7 @@ impl<T: JsonRpcClient> HeartbeatSender<T> {
 		tx_request: TransactionRequest,
 		metadata: HeartbeatMetadata,
 	) {
-		match self.event_sender.sender.send(EventMessage::new(
+		match self.event_sender.send(EventMessage::new(
 			tx_request,
 			EventMetadata::Heartbeat(metadata.clone()),
 			false,
