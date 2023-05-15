@@ -125,8 +125,8 @@ impl<T: JsonRpcClient> RoundupEmitter<T> {
 		let round_up_submit = RoundUpSubmit { round, new_relayers, sigs };
 
 		TransactionRequest::default()
-			.to(self.socket_contract.address())
-			.data(self.socket_contract.round_control_poll(round_up_submit).calldata().unwrap())
+			.to(self.client.socket.address())
+			.data(self.client.socket.round_control_poll(round_up_submit).calldata().unwrap())
 	}
 
 	/// Request send transaction to the target event channel.
@@ -157,6 +157,6 @@ impl<T: JsonRpcClient> RoundupEmitter<T> {
 	}
 
 	async fn get_latest_round(&self) -> U256 {
-		self.authority_contract.latest_round().call().await.unwrap()
+		self.client.authority.latest_round().call().await.unwrap()
 	}
 }

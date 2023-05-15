@@ -17,7 +17,7 @@ use ethers::{
 	contract::EthLogDecode,
 	prelude::{TransactionReceipt, H256},
 	providers::{JsonRpcClient, Provider},
-	types::{Address, Bytes, Filter, Log, Signature, TransactionRequest, H160, U256, U64},
+	types::{Address, Bytes, Filter, Log, Signature, TransactionRequest, U256, U64},
 };
 use std::{collections::BTreeMap, str::FromStr, sync::Arc, time::Duration};
 use tokio::{
@@ -65,7 +65,7 @@ impl<T: JsonRpcClient> Handler for RoundupRelayHandler<T> {
 			{
 				self.bootstrap().await;
 
-				sleep(Duration::from_millis(self.client.config.call_interval)).await;
+				sleep(Duration::from_millis(self.client.call_interval)).await;
 			} else if self
 				.bootstrap_states
 				.read()
@@ -159,7 +159,7 @@ impl<T: JsonRpcClient> Handler for RoundupRelayHandler<T> {
 impl<T: JsonRpcClient> RoundupRelayHandler<T> {
 	/// Instantiates a new `RoundupRelayHandler` instance.
 	pub fn new(
-		event_senders_vec: Vec<Arc<EventSender>>,
+		mut event_senders_vec: Vec<Arc<EventSender>>,
 		block_receiver: Receiver<BlockMessage>,
 		clients: Vec<Arc<EthClient<T>>>,
 		socket_barrier: Arc<Barrier>,
@@ -167,6 +167,9 @@ impl<T: JsonRpcClient> RoundupRelayHandler<T> {
 		bootstrap_config: BootstrapConfig,
 		number_of_relay_targets: usize,
 	) -> Self {
+		// Only broadcast to external chain
+		event_senders_vec.retain(|channel| !channel.is_native);
+
 		let mut event_senders = BTreeMap::new();
 		event_senders_vec.iter().for_each(|event_sender| {
 			event_senders.insert(event_sender.id, event_sender.clone());

@@ -3,15 +3,15 @@ use async_trait::async_trait;
 use cccp_client::eth::{EthClient, EventMessage, EventMetadata, EventSender, PriceFeedMetadata};
 use cccp_primitives::{
 	cli::PriceFeederConfig,
-	errors::{INVALID_CONTRACT_ADDRESS, INVALID_PERIODIC_SCHEDULE},
+	errors::INVALID_PERIODIC_SCHEDULE,
 	periodic::{PeriodicWorker, PriceFetcher},
 	socket::get_asset_oids,
 	sub_display_format, INVALID_BIFROST_NATIVENESS,
 };
 use cron::Schedule;
 use ethers::{
-	providers::{JsonRpcClient, Provider},
-	types::{TransactionRequest, H160, H256, U256},
+	providers::JsonRpcClient,
+	types::{TransactionRequest, H256, U256},
 };
 use std::{collections::HashMap, str::FromStr, sync::Arc};
 use tokio::time::sleep;
@@ -112,7 +112,7 @@ impl<T: JsonRpcClient> OraclePriceFeeder<T> {
 		oid_bytes_list: Vec<[u8; 32]>,
 		price_bytes_list: Vec<[u8; 32]>,
 	) -> TransactionRequest {
-		TransactionRequest::default().to(self.contract.address()).data(
+		TransactionRequest::default().to(self.client.socket.address()).data(
 			self.client
 				.socket
 				.oracle_aggregate_feeding(oid_bytes_list, price_bytes_list)

@@ -74,16 +74,6 @@ impl<T: JsonRpcClient> EthClient<T> {
 	) -> Self {
 		Self {
 			wallet,
-			provider,
-			name,
-			id,
-			block_confirmations,
-			call_interval,
-			if_destination_chain: match is_native {
-				true => BridgeDirection::Inbound,
-				false => BridgeDirection::Outbound,
-			},
-			is_native,
 			socket: SocketContract::new(
 				H160::from_str(&socket_address).expect(INVALID_CONTRACT_ADDRESS),
 				provider.clone(),
@@ -96,6 +86,16 @@ impl<T: JsonRpcClient> EthClient<T> {
 				H160::from_str(&authority_address).expect(INVALID_CONTRACT_ADDRESS),
 				provider.clone(),
 			),
+			provider,
+			name,
+			id,
+			block_confirmations,
+			call_interval,
+			if_destination_chain: match is_native {
+				true => BridgeDirection::Inbound,
+				false => BridgeDirection::Outbound,
+			},
+			is_native,
 		}
 	}
 

@@ -1,27 +1,9 @@
-use crate::cli::EVMProvider;
-use ethers::types::{Address, Signature, H160, U64};
+use ethers::types::{Address, Signature};
 
 /// The native chain's average block time is seconds.
 pub const NATIVE_BLOCK_TIME: u32 = 3u32;
-
 pub const BOOTSTRAP_BLOCK_CHUNK_SIZE: u64 = 2000;
-
 pub const BOOTSTRAP_BLOCK_OFFSET: u32 = 100;
-
-#[derive(Clone, Copy, Debug)]
-/// Contract abstraction with an additional chain ID field.
-pub struct Contract {
-	/// The chain ID of the deployed network.
-	pub chain_id: u32,
-	/// The address of the contract.
-	pub address: H160,
-}
-
-impl Contract {
-	pub fn new(chain_id: u32, address: H160) -> Self {
-		Self { chain_id, address }
-	}
-}
 
 #[derive(Clone, Copy, Debug)]
 /// The roundup event status.
@@ -92,74 +74,6 @@ pub enum BridgeDirection {
 	Inbound,
 	/// From bifrost network, to external network.
 	Outbound,
-}
-
-#[derive(Clone, Debug)]
-/// The additional configuration details for an EVM-based chain.
-pub struct EthClientConfiguration {
-	/// The name of chain which this client interact with.
-	pub name: String,
-	/// Id of chain which this client interact with.
-	pub id: u32,
-	/// The number of confirmations required for a block to be processed.
-	pub block_confirmations: U64,
-	/// The `get_block` request interval in milliseconds.
-	pub call_interval: u64,
-	/// Bridge direction when bridge event points this chain as destination.
-	pub if_destination_chain: BridgeDirection,
-	/// Socket contract address
-	pub socket_address: String,
-	/// Vault contract address
-	pub vault_address: String,
-	/// Authority contract address
-	pub authority_address: String,
-	/// Relayer manager contract address (Only for Bifrost network)
-	pub relayer_manager_address: Option<String>,
-}
-
-impl EthClientConfiguration {
-	pub fn new(
-		name: String,
-		id: u32,
-		call_interval: u64,
-		block_confirmations: U64,
-		if_destination_chain: BridgeDirection,
-		socket_address: String,
-		vault_address: String,
-		authority_address: String,
-		relayer_manager_address: Option<String>,
-	) -> Self {
-		Self {
-			name,
-			id,
-			call_interval,
-			block_confirmations,
-			if_destination_chain,
-			socket_address,
-			vault_address,
-			authority_address,
-			relayer_manager_address,
-		}
-	}
-}
-
-impl From<EVMProvider> for EthClientConfiguration {
-	fn from(evm_provider: EVMProvider) -> EthClientConfiguration {
-		EthClientConfiguration::new(
-			evm_provider.name,
-			evm_provider.id,
-			evm_provider.call_interval,
-			evm_provider.block_confirmations,
-			match evm_provider.is_native.unwrap_or(false) {
-				true => BridgeDirection::Inbound,
-				_ => BridgeDirection::Outbound,
-			},
-			evm_provider.socket_address,
-			evm_provider.vault_address,
-			evm_provider.authority_address,
-			evm_provider.relayer_manager_address,
-		)
-	}
 }
 
 #[derive(Clone, Debug, PartialEq)]

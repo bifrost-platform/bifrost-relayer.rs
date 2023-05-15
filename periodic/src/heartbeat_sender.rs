@@ -1,9 +1,6 @@
 use cccp_client::eth::{EthClient, EventMessage, EventMetadata, EventSender, HeartbeatMetadata};
 use cccp_primitives::{
-	authority_bifrost::AuthorityBifrost,
-	cli::HeartbeatSenderConfig,
 	errors::{INVALID_BIFROST_NATIVENESS, INVALID_CONTRACT_ADDRESS, INVALID_PERIODIC_SCHEDULE},
-	relayer_bifrost::RelayerManagerBifrost,
 	relayer_manager::RelayerManagerContract,
 	sub_display_format, PeriodicWorker,
 };
@@ -22,7 +19,7 @@ pub struct HeartbeatSender<T> {
 	/// The time schedule that represents when to check heartbeat pulsed.
 	pub schedule: Schedule,
 	/// The target RelayerManger contract instance.
-	pub relayer_manager: RelayerManagerBifrost<Provider<T>>,
+	pub relayer_manager: RelayerManagerContract<Provider<T>>,
 	/// The event sender that sends messages to the event channel.
 	pub event_sender: Arc<EventSender>,
 	/// The `EthClient` to interact with the connected blockchain.
@@ -38,7 +35,7 @@ impl<T: JsonRpcClient> PeriodicWorker for HeartbeatSender<T> {
 			if self.relayer_manager.is_selected_relayer(address, true).call().await.unwrap() &&
 				!(self.relayer_manager.is_heartbeat_pulsed(address).call().await.unwrap())
 			{
-				let round_info = self.authority.round_info().call().await.unwrap();
+				let round_info = self.client.authority.round_info().call().await.unwrap();
 				self.request_send_transaction(
 					self.build_transaction(),
 					HeartbeatMetadata::new(

@@ -114,7 +114,7 @@ impl<T: JsonRpcClient> BlockManager<T> {
 				}
 			}
 
-			sleep(Duration::from_millis(self.client.config.call_interval)).await;
+			sleep(Duration::from_millis(self.client.call_interval)).await;
 		}
 	}
 
@@ -162,7 +162,7 @@ impl<T: JsonRpcClient> BlockManager<T> {
 
 	/// Verifies if the stored pending block waited for confirmations.
 	fn is_block_confirmed(&self, latest_block: U64) -> bool {
-		latest_block.saturating_sub(self.pending_block) > self.client.config.block_confirmations
+		latest_block.saturating_sub(self.pending_block) > self.client.block_confirmations
 	}
 
 	/// Verifies if the connected provider is in block sync mode.
@@ -187,7 +187,7 @@ impl<T: JsonRpcClient> BlockManager<T> {
 				}
 			}
 
-			sleep(Duration::from_millis(self.client.config.call_interval)).await;
+			sleep(Duration::from_millis(self.client.call_interval)).await;
 		}
 	}
 }
