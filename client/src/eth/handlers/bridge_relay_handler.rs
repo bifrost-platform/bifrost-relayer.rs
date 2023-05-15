@@ -55,51 +55,49 @@ pub struct BridgeRelayHandler<T> {
 	pub bootstrap_config: BootstrapConfig,
 }
 
-pub struct BridgeRelayArgs<T> {
-	pub event_senders: Vec<Arc<EventSender>>,
-	pub block_receiver: Receiver<BlockMessage>,
-	pub client: Arc<EthClient<T>>,
-	pub all_clients: Vec<Arc<EthClient<T>>>,
-	pub bootstrap_states: Arc<RwLock<Vec<BootstrapState>>>,
-	pub bootstrapping_count: Arc<Mutex<u8>>,
-	pub bootstrap_config: BootstrapConfig,
-}
-
 impl<T: JsonRpcClient> BridgeRelayHandler<T> {
 	/// Instantiates a new `BridgeRelayHandler` instance.
-	pub fn new(bridge_relay_args: BridgeRelayArgs<T>) -> Self {
+	pub fn new(
+		id: u32,
+		event_channels: Vec<Arc<EventSender>>,
+		block_receiver: Receiver<BlockMessage>,
+		all_clients_vec: Vec<Arc<EthClient<T>>>,
+		bootstrap_states: Arc<RwLock<Vec<BootstrapState>>>,
+		bootstrapping_count: Arc<Mutex<u8>>,
+		bootstrap_config: BootstrapConfig,
+	) -> Self {
 		let mut all_clients = BTreeMap::new();
-		bridge_relay_args.all_clients.iter().for_each(|client| {
+		all_clients_vec.iter().for_each(|client| {
 			all_clients.insert(client.get_chain_id(), client.clone());
 		});
 
+		let client = all_clients.get(&id).expect(INVALID_CHAIN_ID).clone();
+
 		let mut event_senders = BTreeMap::new();
-		bridge_relay_args.event_senders.iter().for_each(|event_sender| {
+		event_channels.iter().for_each(|event_sender| {
 			event_senders.insert(event_sender.id, event_sender.clone());
 		});
 
 		Self {
 			event_senders,
-			block_receiver: bridge_relay_args.block_receiver,
-			client: bridge_relay_args.client,
-			all_clients,
-			socket_signature: bridge_relay_args
-				.client
+			block_receiver,
+			socket_signature: client
 				.socket
 				.abi()
 				.event("Socket")
 				.expect(INVALID_CONTRACT_ABI)
 				.signature(),
-			authority_bifrost: bridge_relay_args
-				.all_clients
+			client,
+			all_clients,
+			authority_bifrost: all_clients_vec
 				.iter()
 				.find(|client| client.is_native)
 				.expect(INVALID_BIFROST_NATIVENESS)
 				.authority
 				.clone(),
-			bootstrap_states: bridge_relay_args.bootstrap_states,
-			bootstrapping_count: bridge_relay_args.bootstrapping_count,
-			bootstrap_config: bridge_relay_args.bootstrap_config,
+			bootstrap_states,
+			bootstrapping_count,
+			bootstrap_config,
 		}
 	}
 }
