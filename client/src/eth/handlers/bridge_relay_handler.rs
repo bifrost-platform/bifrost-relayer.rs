@@ -1,4 +1,4 @@
-use std::{str::FromStr, sync::Arc, time::Duration};
+use std::{collections::BTreeMap, str::FromStr, sync::Arc, time::Duration};
 
 use cccp_primitives::{
 	authority::{AuthorityContract, RoundMetaData},
@@ -35,14 +35,14 @@ const SUB_LOG_TARGET: &str = "bridge-handler";
 
 /// The essential task that handles `bridge relay` related events.
 pub struct BridgeRelayHandler<T> {
-	/// The event senders that sends messages to the event channel.
-	pub event_senders: Vec<Arc<EventSender>>,
+	/// The event senders that sends messages to the event channel. <chain_id, Arc<EventSender>>
+	pub event_senders: BTreeMap<u32, Arc<EventSender>>,
 	/// The block receiver that consumes new blocks from the block channel.
 	pub block_receiver: Receiver<BlockMessage>,
 	/// The `EthClient` to interact with the connected blockchain.
 	pub client: Arc<EthClient<T>>,
-	/// All of available clients
-	pub all_clients: Vec<Arc<EthClient<T>>>,
+	/// All of available clients. <chain_id, Arc<EthClient>>
+	pub all_clients: BTreeMap<u32, Arc<EthClient<T>>>,
 	/// Signature of the `Socket` Event.
 	pub socket_signature: H256,
 	/// Authority contract
@@ -68,11 +68,21 @@ pub struct BridgeRelayArgs<T> {
 impl<T: JsonRpcClient> BridgeRelayHandler<T> {
 	/// Instantiates a new `BridgeRelayHandler` instance.
 	pub fn new(bridge_relay_args: BridgeRelayArgs<T>) -> Self {
+		let mut all_clients = BTreeMap::new();
+		bridge_relay_args.all_clients.iter().for_each(|client| {
+			all_clients.insert(client.get_chain_id(), client.clone());
+		});
+
+		let mut event_senders = BTreeMap::new();
+		bridge_relay_args.event_senders.iter().for_each(|event_sender| {
+			event_senders.insert(event_sender.id, event_sender.clone());
+		});
+
 		Self {
-			event_senders: bridge_relay_args.event_senders,
+			event_senders,
 			block_receiver: bridge_relay_args.block_receiver,
 			client: bridge_relay_args.client,
-			all_clients: bridge_relay_args.all_clients,
+			all_clients,
 			socket_signature: bridge_relay_args
 				.client
 				.socket
@@ -229,12 +239,7 @@ impl<T: JsonRpcClient> BridgeRelayBuilder for BridgeRelayHandler<T> {
 		is_inbound: bool,
 		relay_tx_chain_id: u32,
 	) -> TransactionRequest {
-		let to_socket = self
-			.all_clients
-			.iter()
-			.find(|client| client.get_chain_id() == relay_tx_chain_id)
-			.unwrap()
-			.address();
+		let to_socket = self.all_clients.get(&relay_tx_chain_id).expect(INVALID_CHAIN_ID).address();
 
 		// the original msg must be used for building calldata
 		let signatures = self.build_signatures(sig_msg, is_inbound).await;
@@ -539,9 +544,7 @@ impl<T: JsonRpcClient> BridgeRelayHandler<T> {
 		tx_request: TransactionRequest,
 		metadata: BridgeRelayMetadata,
 	) {
-		if let Some(event_sender) =
-			self.event_senders.iter().find(|event_sender| event_sender.id == chain_id)
-		{
+		if let Some(event_sender) = self.event_senders.get(&chain_id) {
 			match event_sender.send(EventMessage::new(
 				tx_request,
 				EventMetadata::BridgeRelay(metadata.clone()),
@@ -694,12 +697,7 @@ impl<T: JsonRpcClient> BridgeRelayHandler<T> {
 	}
 
 	fn get_source_socket(&self, src_chain_id: u32) -> SocketContract<Provider<T>> {
-		self.all_clients
-			.iter()
-			.find(|client| client.get_chain_id() == src_chain_id)
-			.expect(INVALID_CHAIN_ID)
-			.socket
-			.clone()
+		self.all_clients.get(&src_chain_id).expect(INVALID_CHAIN_ID).socket.clone()
 	}
 }
 
