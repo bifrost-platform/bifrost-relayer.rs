@@ -123,7 +123,7 @@ impl<T: JsonRpcClient> Handler for RoundupRelayHandler<T> {
 									serialized_log.roundup.new_relayers,
 								)
 								.await;
-							self.broadcast_roundup(roundup_submit).await;
+							self.broadcast_roundup(&roundup_submit).await;
 						},
 						RoundUpEventStatus::NextAuthorityRelayed => continue,
 					}
@@ -212,7 +212,7 @@ impl<T: JsonRpcClient> RoundupRelayHandler<T> {
 	}
 
 	/// Get the submitted signatures of the updated round.
-	async fn get_sorted_signatures(&self, round: U256, new_relayers: Vec<Address>) -> Signatures {
+	async fn get_sorted_signatures(&self, round: U256, new_relayers: &Vec<Address>) -> Signatures {
 		let encoded_msg = encode(&[
 			Token::Uint(round),
 			Token::Array(new_relayers.iter().map(|address| Token::Address(*address)).collect()),
@@ -257,7 +257,7 @@ impl<T: JsonRpcClient> RoundupRelayHandler<T> {
 		mut new_relayers: Vec<Address>,
 	) -> RoundUpSubmit {
 		new_relayers.sort();
-		let sigs = self.get_sorted_signatures(round, new_relayers.clone()).await;
+		let sigs = self.get_sorted_signatures(round, &new_relayers).await;
 
 		RoundUpSubmit { round, new_relayers, sigs }
 	}
@@ -265,24 +265,22 @@ impl<T: JsonRpcClient> RoundupRelayHandler<T> {
 	/// Build `round_control_relay` method call transaction.
 	fn build_transaction_request(
 		&self,
-		target_contract: SocketContract<Provider<T>>,
-		roundup_submit: RoundUpSubmit,
+		target_socket: &SocketContract<Provider<T>>,
+		roundup_submit: &RoundUpSubmit,
 	) -> TransactionRequest {
 		TransactionRequest::default()
-			.to(target_contract.address())
-			.data(target_contract.round_control_relay(roundup_submit).calldata().unwrap())
+			.to(target_socket.address())
+			.data(target_socket.round_control_relay(roundup_submit.clone()).calldata().unwrap())
 	}
 
 	/// Check roundup submitted before. If not, call `round_control_relay`.
-	async fn broadcast_roundup(&self, roundup_submit: RoundUpSubmit) {
+	async fn broadcast_roundup(&self, roundup_submit: &RoundUpSubmit) {
 		let mut stream = tokio_stream::iter(self.external_clients.iter());
 		while let Some(target_client) = stream.next().await {
 			// Check roundup submitted to target chain before.
 			if roundup_submit.round > target_client.authority.latest_round().call().await.unwrap() {
-				let transaction_request = self.build_transaction_request(
-					target_client.socket.clone(),
-					roundup_submit.clone(),
-				);
+				let transaction_request =
+					self.build_transaction_request(&target_client.socket, roundup_submit);
 
 				let event_sender =
 					self.event_senders.get(&target_client.get_chain_id()).expect(INVALID_CHAIN_ID);
@@ -303,7 +301,7 @@ impl<T: JsonRpcClient> RoundupRelayHandler<T> {
 
 	async fn wait_if_latest_round(&self) {
 		let barrier_clone = self.roundup_barrier.clone();
-		let external_clients = self.external_clients.clone();
+		let external_clients = &self.external_clients;
 
 		for target_client in external_clients {
 			let barrier_clone_inner = barrier_clone.clone();

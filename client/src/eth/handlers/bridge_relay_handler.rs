@@ -8,8 +8,8 @@ use cccp_primitives::{
 		BOOTSTRAP_BLOCK_CHUNK_SIZE, BOOTSTRAP_BLOCK_OFFSET, NATIVE_BLOCK_TIME,
 	},
 	socket::{
-		BridgeRelayBuilder, PollSubmit, RequestID, SerializedPoll, Signatures, SocketContract,
-		SocketEvents, SocketMessage,
+		BridgeRelayBuilder, PollSubmit, RequestID, SerializedPoll, Signatures, SocketEvents,
+		SocketMessage,
 	},
 	sub_display_format, INVALID_BIFROST_NATIVENESS, INVALID_CHAIN_ID, INVALID_CONTRACT_ABI,
 };
@@ -154,7 +154,7 @@ impl<T: JsonRpcClient> Handler for BridgeRelayHandler<T> {
 
 			while let Some(log) = stream.next().await {
 				if self.is_target_event(log.topics[0]) {
-					let raw_log: RawLog = log.clone().into();
+					let raw_log = RawLog::from(log);
 					match decode_logs::<SocketEvents>(&[raw_log]) {
 						Ok(decoded) => match &decoded[0] {
 							SocketEvents::Socket(socket) => {
@@ -572,8 +572,8 @@ impl<T: JsonRpcClient> BridgeRelayHandler<T> {
 
 	/// Compare the request status recorded in source chain with event status to determine if the
 	/// event has already been executed
-	async fn is_already_done(&self, rid: RequestID, src_chain_id: u32) -> bool {
-		let socket_contract = self.get_source_socket(src_chain_id);
+	async fn is_already_done(&self, rid: &RequestID, src_chain_id: u32) -> bool {
+		let socket_contract = &self.all_clients.get(&src_chain_id).expect(INVALID_CHAIN_ID).socket;
 		let request = socket_contract.get_request(rid.clone()).call().await.unwrap();
 
 		let event_status = request.field[0].clone();
@@ -693,15 +693,12 @@ impl<T: JsonRpcClient> BridgeRelayHandler<T> {
 			.unwrap()
 			.into()
 	}
-
-	fn get_source_socket(&self, src_chain_id: u32) -> SocketContract<Provider<T>> {
-		self.all_clients.get(&src_chain_id).expect(INVALID_CHAIN_ID).socket.clone()
-	}
 }
 
 #[cfg(test)]
 mod tests {
 	use super::*;
+	use cccp_primitives::socket::SocketContract;
 	use ethers::{
 		providers::{Http, Provider},
 		types::H160,
