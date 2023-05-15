@@ -11,7 +11,7 @@ use br_primitives::{
 	utils::sub_display_format,
 };
 use serde::{de::DeserializeOwned, Serialize};
-use std::{fmt::Debug, sync::Arc};
+use std::{fmt::Debug, str::FromStr, sync::Arc};
 use tokio::time::{sleep, Duration};
 
 use ethers::{
@@ -210,12 +210,12 @@ impl<T: JsonRpcClient> EthClient<T> {
 
 	/// Returns name which chain this client interacts with.
 	pub fn get_chain_name(&self) -> String {
-		self.config.name.clone()
+		self.name.clone()
 	}
 
 	/// Returns id which chain this client interacts with.
-	pub fn get_chain_id(&self) -> u32 {
-		self.config.id
+	pub fn get_chain_id(&self) -> ChainID {
+		self.id
 	}
 
 	/// Returns `Arc<Provider>`.

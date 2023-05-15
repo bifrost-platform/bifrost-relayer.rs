@@ -1,4 +1,7 @@
-use cccp_primitives::{eth::BootstrapState, sub_display_format};
+use cccp_primitives::{
+	eth::{BootstrapState, ChainID},
+	sub_display_format,
+};
 use ethers::{
 	providers::JsonRpcClient,
 	types::{Block, SyncingStatus, TransactionReceipt, H160, H256, U64},
@@ -33,13 +36,13 @@ impl BlockMessage {
 /// The message receiver connected to the block channel.
 pub struct BlockReceiver {
 	/// The chain ID of the block channel.
-	pub id: u32,
+	pub id: ChainID,
 	/// The message receiver.
 	pub receiver: Receiver<BlockMessage>,
 }
 
 impl BlockReceiver {
-	pub fn new(id: u32, receiver: Receiver<BlockMessage>) -> Self {
+	pub fn new(id: ChainID, receiver: Receiver<BlockMessage>) -> Self {
 		Self { id, receiver }
 	}
 }
@@ -114,7 +117,7 @@ impl<T: JsonRpcClient> BlockManager<T> {
 				}
 			}
 
-			sleep(Duration::from_millis(self.client.config.call_interval)).await;
+			sleep(Duration::from_millis(self.client.call_interval)).await;
 		}
 	}
 
@@ -153,16 +156,14 @@ impl<T: JsonRpcClient> BlockManager<T> {
 	/// Verifies if the transaction was occurred from the target contracts.
 	fn is_in_target_contracts(&self, receipt: &TransactionReceipt) -> bool {
 		if let Some(to) = receipt.to {
-			return self.target_contracts.iter().any(|c| {
-				ethers::utils::to_checksum(c, None) == ethers::utils::to_checksum(&to, None)
-			})
+			return self.target_contracts.iter().any(|c| *c == to)
 		}
 		false
 	}
 
 	/// Verifies if the stored pending block waited for confirmations.
 	fn is_block_confirmed(&self, latest_block: U64) -> bool {
-		latest_block.saturating_sub(self.pending_block) > self.client.config.block_confirmations
+		latest_block.saturating_sub(self.pending_block) > self.client.block_confirmations
 	}
 
 	/// Verifies if the connected provider is in block sync mode.
@@ -187,7 +188,7 @@ impl<T: JsonRpcClient> BlockManager<T> {
 				}
 			}
 
-			sleep(Duration::from_millis(self.client.config.call_interval)).await;
+			sleep(Duration::from_millis(self.client.call_interval)).await;
 		}
 	}
 }
