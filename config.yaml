@@ -7,8 +7,6 @@ bitcoin:
   username: ""
   password: ""
 
-private_key: ""
-
 evm_providers:
   - name: "bfc-testnet"
     id: 49088

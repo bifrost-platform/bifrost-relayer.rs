@@ -66,7 +66,7 @@ pub fn new_relay_base(config: Configuration) -> Result<RelayBase, ServiceError> 
 						.expect(INVALID_PROVIDER_URL),
 				),
 				evm_provider.name.clone(),
-				evm_provider.id.clone(),
+				evm_provider.id,
 				evm_provider.block_confirmations,
 				evm_provider.call_interval,
 				is_native,
@@ -252,10 +252,10 @@ pub fn new_relay_base(config: Configuration) -> Result<RelayBase, ServiceError> 
 
 	// initialize roundup feeder & spawn tasks
 	let mut roundup_emitter = RoundupEmitter::new(
-		event_channels.clone(),
-		clients.clone(),
+		event_channels,
+		clients,
 		config.relayer_config.periodic_configs.unwrap().roundup_emitter,
-		relayer_manager_address.clone(),
+		relayer_manager_address,
 	);
 	task_manager.spawn_essential_handle().spawn(
 		"roundup-emitter",

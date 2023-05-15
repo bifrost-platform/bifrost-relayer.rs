@@ -201,7 +201,7 @@ impl<T: JsonRpcClient> Handler for BridgeRelayHandler<T> {
 							"[{}]-[{}] Unknown error while decoding socket event: {}",
 							self.client.get_chain_name(),
 							SUB_LOG_TARGET,
-							error.to_string(),
+							error,
 						),
 					}
 				}

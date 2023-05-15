@@ -211,7 +211,7 @@ impl<T: JsonRpcClient> RoundupRelayHandler<T> {
 	}
 
 	/// Get the submitted signatures of the updated round.
-	async fn get_sorted_signatures(&self, round: U256, new_relayers: &Vec<Address>) -> Signatures {
+	async fn get_sorted_signatures(&self, round: U256, new_relayers: &[Address]) -> Signatures {
 		let encoded_msg = encode(&[
 			Token::Uint(round),
 			Token::Array(new_relayers.iter().map(|address| Token::Address(*address)).collect()),
