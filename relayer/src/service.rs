@@ -53,7 +53,7 @@ pub fn new_relay_base(config: Configuration) -> Result<RelayBase, ServiceError> 
 
 		config.relayer_config.evm_providers.iter().for_each(|evm_provider| {
 			let wallet = WalletManager::from_private_key(
-				config.relayer_config.private_key.as_str(),
+				config.relayer_config.system.private_key.as_str(),
 				evm_provider.id,
 			)
 			.expect(INVALID_PRIVATE_KEY);
@@ -66,7 +66,7 @@ pub fn new_relay_base(config: Configuration) -> Result<RelayBase, ServiceError> 
 						.expect(INVALID_PROVIDER_URL),
 				),
 				evm_provider.name.clone(),
-				evm_provider.id.clone(),
+				evm_provider.id,
 				evm_provider.block_confirmations,
 				evm_provider.call_interval,
 				is_native,
@@ -76,7 +76,10 @@ pub fn new_relay_base(config: Configuration) -> Result<RelayBase, ServiceError> 
 			));
 
 			if evm_provider.is_relay_target {
-				let (tx_manager, event_sender) = TransactionManager::new(client.clone());
+				let (tx_manager, event_sender) = TransactionManager::new(
+					client.clone(),
+					config.relayer_config.system.debug_mode,
+				);
 				tx_managers.push((tx_manager, client.get_chain_name()));
 				event_senders.push(Arc::new(EventSender::new(
 					evm_provider.id,
@@ -249,10 +252,10 @@ pub fn new_relay_base(config: Configuration) -> Result<RelayBase, ServiceError> 
 
 	// initialize roundup feeder & spawn tasks
 	let mut roundup_emitter = RoundupEmitter::new(
-		event_channels.clone(),
-		clients.clone(),
+		event_channels,
+		clients,
 		config.relayer_config.periodic_configs.unwrap().roundup_emitter,
-		relayer_manager_address.clone(),
+		relayer_manager_address,
 	);
 	task_manager.spawn_essential_handle().spawn(
 		"roundup-emitter",
