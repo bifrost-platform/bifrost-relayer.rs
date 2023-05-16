@@ -100,17 +100,27 @@ impl<T: JsonRpcClient> RoundupEmitter<T> {
 
 	/// Check relayer has selected in previous round
 	async fn is_selected_relayer(&self) -> bool {
-		self.relayer_contract
-			.is_previous_selected_relayer(self.current_round - 1, self.client.address(), true)
-			.call()
+		self.client
+			.contract_call(
+				self.relayer_contract.is_previous_selected_relayer(
+					self.current_round - 1,
+					self.client.address(),
+					true,
+				),
+				"relayer_manager.is_previous_selected_relayer",
+			)
 			.await
-			.unwrap()
 	}
 
 	/// Fetch new validator list
 	async fn fetch_validator_list(&self) -> Vec<Address> {
-		let mut addresses =
-			self.relayer_contract.selected_relayers(true).call().await.unwrap_or_default();
+		let mut addresses = self
+			.client
+			.contract_call(
+				self.relayer_contract.selected_relayers(true),
+				"relayer_manager.selected_relayers",
+			)
+			.await;
 		addresses.sort();
 		addresses
 	}
@@ -158,6 +168,8 @@ impl<T: JsonRpcClient> RoundupEmitter<T> {
 	}
 
 	async fn get_latest_round(&self) -> U256 {
-		self.client.authority.latest_round().call().await.unwrap()
+		self.client
+			.contract_call(self.client.authority.latest_round(), "authority.latest_round")
+			.await
 	}
 }

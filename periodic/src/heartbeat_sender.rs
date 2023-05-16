@@ -32,10 +32,26 @@ impl<T: JsonRpcClient> PeriodicWorker for HeartbeatSender<T> {
 		loop {
 			let address = self.client.address();
 
-			if self.relayer_manager.is_selected_relayer(address, true).call().await.unwrap() &&
-				!(self.relayer_manager.is_heartbeat_pulsed(address).call().await.unwrap())
-			{
-				let round_info = self.client.authority.round_info().call().await.unwrap();
+			let is_selected = self
+				.client
+				.contract_call(
+					self.relayer_manager.is_selected_relayer(address, true),
+					"relayer_manager.is_selected_relayer",
+				)
+				.await;
+			let is_heartbeat_pulsed = self
+				.client
+				.contract_call(
+					self.relayer_manager.is_heartbeat_pulsed(address),
+					"relayer_manager.is_heartbeat_pulsed",
+				)
+				.await;
+
+			if is_selected && !is_heartbeat_pulsed {
+				let round_info = self
+					.client
+					.contract_call(self.client.authority.round_info(), "authority.round_info")
+					.await;
 				self.request_send_transaction(
 					self.build_transaction(),
 					HeartbeatMetadata::new(

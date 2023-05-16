@@ -14,7 +14,9 @@ mod wallet;
 pub use wallet::*;
 
 use ethers::{
-	providers::{JsonRpcClient, Provider},
+	abi::Detokenize,
+	prelude::ContractCall,
+	providers::{JsonRpcClient, Middleware, Provider},
 	types::{
 		Address, Block, BlockId, Filter, Log, SyncingStatus, Transaction, TransactionReceipt,
 		TxpoolContent, H160, H256, U64,
@@ -135,6 +137,37 @@ impl<T: JsonRpcClient> EthClient<T> {
 
 		while retries_remaining > 0 {
 			match self.provider.request(method, params.clone()).await {
+				Ok(result) => return result,
+				Err(error) => {
+					// retry on error
+					retries_remaining = retries_remaining.saturating_sub(1);
+					error_msg = error.to_string();
+				},
+			}
+			sleep(Duration::from_millis(DEFAULT_CALL_RETRY_INTERVAL_MS)).await;
+		}
+		panic!(
+			"[{}]-[{}] An internal error thrown when making a call to the provider. Please check your provider's status [method: {}]: {}",
+			&self.get_chain_name(),
+			SUB_LOG_TARGET,
+			method,
+			error_msg
+		);
+	}
+
+	/// Make an contract call to the chain provider via the internal connection, and return the
+	/// result. This method wraps the original contract call and retries whenever the request fails
+	/// until it exceeds the maximum retries.
+	pub async fn contract_call<M, D>(&self, raw_call: ContractCall<M, D>, method: &str) -> D
+	where
+		M: Middleware,
+		D: Serialize + DeserializeOwned + Debug + Send + Detokenize,
+	{
+		let mut retries_remaining: u8 = DEFAULT_CALL_RETRIES;
+		let mut error_msg = String::default();
+
+		while retries_remaining > 0 {
+			match raw_call.call().await {
 				Ok(result) => return result,
 				Err(error) => {
 					// retry on error
