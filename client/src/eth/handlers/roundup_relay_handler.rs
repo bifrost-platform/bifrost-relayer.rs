@@ -217,7 +217,13 @@ impl<T: JsonRpcClient> RoundupRelayHandler<T> {
 			Token::Array(new_relayers.iter().map(|address| Token::Address(*address)).collect()),
 		]);
 
-		let unordered_sigs = self.client.socket.get_round_signatures(round).call().await.unwrap();
+		let unordered_sigs = self
+			.client
+			.contract_call(
+				self.client.socket.get_round_signatures(round),
+				"socket.get_round_signatures",
+			)
+			.await;
 		let unordered_concated_v = &unordered_sigs.v.to_string()[2..];
 
 		let mut recovered_sigs = vec![];
@@ -277,7 +283,11 @@ impl<T: JsonRpcClient> RoundupRelayHandler<T> {
 		let mut stream = tokio_stream::iter(self.external_clients.iter());
 		while let Some(target_client) = stream.next().await {
 			// Check roundup submitted to target chain before.
-			if roundup_submit.round > target_client.authority.latest_round().call().await.unwrap() {
+			let latest_round = self
+				.client
+				.contract_call(target_client.authority.latest_round(), "authority.latest_round")
+				.await;
+			if roundup_submit.round > latest_round {
 				let transaction_request =
 					self.build_transaction_request(&target_client.socket, roundup_submit);
 
@@ -305,8 +315,14 @@ impl<T: JsonRpcClient> RoundupRelayHandler<T> {
 
 		for target_client in external_clients {
 			let barrier_clone_inner = barrier_clone.clone();
-			let current_round = self.client.authority.latest_round().call().await.unwrap();
-			let target_chain_round = target_client.authority.latest_round().call().await.unwrap();
+			let current_round = self
+				.client
+				.contract_call(self.client.authority.latest_round(), "authority.latest_round")
+				.await;
+			let target_chain_round = self
+				.client
+				.contract_call(target_client.authority.latest_round(), "authority.latest_round")
+				.await;
 			let bootstrap_guard = self.bootstrapping_count.clone();
 
 			tokio::spawn(async move {
@@ -396,7 +412,10 @@ impl<T: JsonRpcClient> RoundupRelayHandler<T> {
 	/// Get factor between the block time of native-chain and block time of this chain
 	/// Approximately bfc-testnet: 3s, matic-mumbai: 2s, bsc-testnet: 3s, eth-goerli: 12s
 	pub async fn get_bootstrap_offset_height_based_on_block_time(&self, round_offset: u32) -> U64 {
-		let round_info: RoundMetaData = self.client.authority.round_info().call().await.unwrap();
+		let round_info: RoundMetaData = self
+			.client
+			.contract_call(self.client.authority.round_info(), "authority.round_info")
+			.await;
 
 		let block_number = self.client.get_latest_block_number().await;
 
