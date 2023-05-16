@@ -295,6 +295,7 @@ impl<T: JsonRpcClient + 'static> OraclePriceFeeder<T> {
 			false,
 			GasCoefficient::Mid,
 			false,
+			false,
 		)) {
 			Ok(()) => log::info!(
 				target: &self.client.get_chain_name(),

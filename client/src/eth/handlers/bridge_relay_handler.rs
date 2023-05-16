@@ -198,10 +198,10 @@ impl<T: JsonRpcClient> Handler for BridgeRelayHandler<T> {
 							},
 						},
 						Err(error) => panic!(
-							"[{}]-[{}] Unknown error while decoding socket event: {}",
+							"[{}]-[{}] Unknown error while decoding socket event: {:?}",
 							self.client.get_chain_name(),
 							SUB_LOG_TARGET,
-							error.to_string(),
+							error,
 						),
 					}
 				}
@@ -236,7 +236,7 @@ impl<T: JsonRpcClient> BridgeRelayBuilder for BridgeRelayHandler<T> {
 		sig_msg: SocketMessage,
 		is_inbound: bool,
 		relay_tx_chain_id: ChainID,
-	) -> TransactionRequest {
+	) -> (TransactionRequest, bool) {
 		let to_socket = self
 			.all_clients
 			.get(&relay_tx_chain_id)
@@ -245,15 +245,23 @@ impl<T: JsonRpcClient> BridgeRelayBuilder for BridgeRelayHandler<T> {
 			.address();
 
 		// the original msg must be used for building calldata
-		let signatures = self.build_signatures(sig_msg, is_inbound).await;
-		TransactionRequest::default()
-			.data(self.build_poll_call_data(submit_msg, signatures))
-			.to(to_socket)
+		let (signatures, is_external) = self.build_signatures(sig_msg, is_inbound).await;
+		(
+			TransactionRequest::default()
+				.data(self.build_poll_call_data(submit_msg, signatures))
+				.to(to_socket),
+			is_external,
+		)
 	}
 
-	async fn build_signatures(&self, mut msg: SocketMessage, is_inbound: bool) -> Signatures {
+	async fn build_signatures(
+		&self,
+		mut msg: SocketMessage,
+		is_inbound: bool,
+	) -> (Signatures, bool) {
 		let status = SocketEventStatus::from_u8(msg.status);
-		if is_inbound {
+		let mut is_external = false;
+		let signatures = if is_inbound {
 			// build signatures for inbound requests
 			match status {
 				SocketEventStatus::Requested | SocketEventStatus::Failed => Signatures::default(),
@@ -265,8 +273,10 @@ impl<T: JsonRpcClient> BridgeRelayBuilder for BridgeRelayHandler<T> {
 					msg.status = SocketEventStatus::Rejected.into();
 					Signatures::from(self.sign_socket_message(msg))
 				},
-				SocketEventStatus::Accepted | SocketEventStatus::Rejected =>
-					self.get_sorted_signatures(msg).await,
+				SocketEventStatus::Accepted | SocketEventStatus::Rejected => {
+					is_external = true;
+					self.get_sorted_signatures(msg).await
+				},
 				_ => panic!(
 					"[{}]-[{}] Unknown socket event status received: {:?}",
 					&self.client.get_chain_name(),
@@ -281,8 +291,10 @@ impl<T: JsonRpcClient> BridgeRelayBuilder for BridgeRelayHandler<T> {
 					msg.status = SocketEventStatus::Accepted.into();
 					Signatures::from(self.sign_socket_message(msg))
 				},
-				SocketEventStatus::Accepted | SocketEventStatus::Rejected =>
-					self.get_sorted_signatures(msg).await,
+				SocketEventStatus::Accepted | SocketEventStatus::Rejected => {
+					is_external = true;
+					self.get_sorted_signatures(msg).await
+				},
 				SocketEventStatus::Executed | SocketEventStatus::Reverted => Signatures::default(),
 				_ => panic!(
 					"[{}]-[{}] Unknown socket event status received: {:?}",
@@ -291,7 +303,8 @@ impl<T: JsonRpcClient> BridgeRelayBuilder for BridgeRelayHandler<T> {
 					status
 				),
 			}
-		}
+		};
+		(signatures, is_external)
 	}
 
 	fn encode_socket_message(&self, msg: SocketMessage) -> Vec<u8> {
@@ -472,9 +485,9 @@ impl<T: JsonRpcClient> BridgeRelayHandler<T> {
 		};
 
 		// build and send transaction request
-		let tx_request =
+		let (tx_request, is_external) =
 			self.build_transaction(submit_msg, sig_msg, is_inbound, relay_tx_chain_id).await;
-		self.request_send_transaction(relay_tx_chain_id, tx_request, metadata);
+		self.request_send_transaction(relay_tx_chain_id, tx_request, metadata, is_external);
 	}
 
 	/// Get the chain ID of the inbound sequence relay transaction.
@@ -540,12 +553,14 @@ impl<T: JsonRpcClient> BridgeRelayHandler<T> {
 		chain_id: ChainID,
 		tx_request: TransactionRequest,
 		metadata: BridgeRelayMetadata,
+		is_external: bool,
 	) {
 		if let Some(event_sender) = self.event_senders.get(&chain_id) {
 			match event_sender.send(EventMessage::new(
 				tx_request,
 				EventMetadata::BridgeRelay(metadata.clone()),
 				true,
+				is_external,
 			)) {
 				Ok(()) => log::info!(
 					target: &self.client.get_chain_name(),
@@ -661,7 +676,7 @@ impl<T: JsonRpcClient> BridgeRelayHandler<T> {
 	}
 
 	/// Get factor between the block time of native-chain and block time of this chain
-	/// Approximately bfc-testnet: 3s, matic-mumbai: 2s, bsc-testnet: 3s, eth-goerli: 12s
+	/// Approximately BIFROST: 3s, Polygon: 2s, BSC: 3s, Ethereum: 12s
 	pub async fn get_bootstrap_offset_height_based_on_block_time(&self, round_offset: u32) -> U64 {
 		let round_info: RoundMetaData = self.authority_bifrost.round_info().call().await.unwrap();
 
