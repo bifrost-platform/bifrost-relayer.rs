@@ -223,7 +223,6 @@ impl<T: JsonRpcClient> RoundupEmitter<T> {
 			.await
 	}
 }
-
 #[async_trait::async_trait]
 impl<T: JsonRpcClient> BootstrapHandler for RoundupEmitter<T> {
 	fn bootstrap_shared_data(&self) -> Arc<BootstrapSharedData> {

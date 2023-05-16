@@ -343,11 +343,11 @@ impl<T: JsonRpcClient> BridgeRelayBuilder for BridgeRelayHandler<T> {
 	async fn get_sorted_signatures(&self, msg: SocketMessage) -> Signatures {
 		let raw_sigs = self
 			.client
-			.socket
-			.get_signatures(msg.clone().req_id, msg.clone().status)
-			.call()
-			.await
-			.unwrap_or_default();
+			.contract_call(
+				self.client.socket.get_signatures(msg.clone().req_id, msg.clone().status),
+				"socket.get_signatures",
+			)
+			.await;
 
 		let raw_concated_v = &raw_sigs.v.to_string()[2..];
 
@@ -588,7 +588,10 @@ impl<T: JsonRpcClient> BridgeRelayHandler<T> {
 	/// event has already been executed
 	async fn is_already_done(&self, rid: &RequestID, src_chain_id: ChainID) -> bool {
 		let socket_contract = &self.all_clients.get(&src_chain_id).expect(INVALID_CHAIN_ID).socket;
-		let request = socket_contract.get_request(rid.clone()).call().await.unwrap();
+		let request = self
+			.client
+			.contract_call(socket_contract.get_request(rid.clone()), "socket.get_request")
+			.await;
 
 		let event_status = request.field[0].clone();
 
@@ -678,7 +681,10 @@ impl<T: JsonRpcClient> BridgeRelayHandler<T> {
 	/// Get factor between the block time of native-chain and block time of this chain
 	/// Approximately BIFROST: 3s, Polygon: 2s, BSC: 3s, Ethereum: 12s
 	pub async fn get_bootstrap_offset_height_based_on_block_time(&self, round_offset: u32) -> U64 {
-		let round_info: RoundMetaData = self.authority_bifrost.round_info().call().await.unwrap();
+		let round_info: RoundMetaData = self
+			.client
+			.contract_call(self.authority_bifrost.round_info(), "authority.round_info")
+			.await;
 
 		let block_number = self.client.get_latest_block_number().await;
 
