@@ -1,7 +1,6 @@
-use crate::periodic::PriceSource;
+use crate::{eth::ChainID, periodic::PriceSource};
 use ethers::types::U64;
 use serde::Deserialize;
-use crate::eth::ChainID;
 
 pub type Result<T> = std::result::Result<T, Error>;
 
@@ -38,20 +37,28 @@ pub struct Configuration {
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct RelayerConfig {
+	/// System config
+	pub system: SystemConfig,
 	/// BTC config
 	pub bitcoin: BitcoinConfig,
 	/// EVM configs
 	pub evm_providers: Vec<EVMProvider>,
 	/// Handler configs
 	pub handler_configs: Vec<HandlerConfig>,
-	/// The private key of the relayer
-	pub private_key: String,
 	/// Periodic worker configs
 	pub periodic_configs: Option<PeriodicWorkerConfig>,
 	/// Bootstrapping configs
 	pub bootstrap_config: BootstrapConfig,
 	/// Sentry config
 	pub sentry_config: Option<SentryConfig>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct SystemConfig {
+	/// The private key of the relayer.
+	pub private_key: String,
+	/// Debug mode enabled if set to `true`.
+	pub debug_mode: bool,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -121,8 +128,6 @@ pub struct PriceFeederConfig {
 	pub chain_id: ChainID,
 	/// Periodic schedule in cron expression.
 	pub schedule: String,
-	/// Oracle contract address
-	pub contract: String,
 	/// Price source enum. (Coingecko is only available now.)
 	pub price_sources: Vec<PriceSource>,
 	/// Token/Coin symbols needs to get price

@@ -165,10 +165,11 @@ pub trait BridgeRelayBuilder {
 		sig_msg: SocketMessage,
 		is_inbound: bool,
 		relay_tx_chain_id: ChainID,
-	) -> TransactionRequest;
+	) -> (TransactionRequest, bool);
 
-	/// Build the signatures required to request `poll()`.
-	async fn build_signatures(&self, msg: SocketMessage, is_inbound: bool) -> Signatures;
+	/// Build the signatures required to request `poll()` and returns a flag which represents
+	/// whether the it should be processed to an external chain.
+	async fn build_signatures(&self, msg: SocketMessage, is_inbound: bool) -> (Signatures, bool);
 
 	/// Encodes the given socket message to bytes.
 	fn encode_socket_message(&self, msg: SocketMessage) -> Vec<u8>;

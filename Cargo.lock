@@ -838,6 +838,7 @@ dependencies = [
  "ethers",
  "k256",
  "log",
+ "rand 0.8.5",
  "sentry",
  "serde",
  "serde_json",
