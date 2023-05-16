@@ -107,6 +107,7 @@ impl<T: JsonRpcClient> HeartbeatSender<T> {
 			false,
 			GasCoefficient::Low,
 			false,
+			false,
 		)) {
 			Ok(()) => log::info!(
 				target: &self.client.get_chain_name(),
