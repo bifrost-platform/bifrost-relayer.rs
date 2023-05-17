@@ -1,7 +1,7 @@
 use std::{collections::BTreeMap, str::FromStr, sync::Arc, time::Duration};
 
 use cccp_primitives::{
-	authority::{AuthorityContract, RoundMetaData},
+	authority::RoundMetaData,
 	cli::BootstrapConfig,
 	eth::{
 		BootstrapState, BridgeDirection, ChainID, RecoveredSignature, SocketEventStatus,
@@ -16,7 +16,7 @@ use cccp_primitives::{
 use ethers::{
 	abi::{RawLog, Token},
 	prelude::decode_logs,
-	providers::{JsonRpcClient, Provider},
+	providers::JsonRpcClient,
 	types::{
 		Bytes, Filter, Log, Signature, TransactionReceipt, TransactionRequest, H256, U256, U64,
 	},
@@ -45,8 +45,6 @@ pub struct BridgeRelayHandler<T> {
 	pub system_clients: BTreeMap<ChainID, Arc<EthClient<T>>>,
 	/// Signature of the `Socket` Event.
 	pub socket_signature: H256,
-	/// Authority contract deployed on BIFROST.
-	pub authority_bifrost: AuthorityContract<Provider<T>>,
 	/// Completion of bootstrapping
 	pub bootstrap_states: Arc<RwLock<Vec<BootstrapState>>>,
 	/// Completion of bootstrapping count
@@ -89,12 +87,6 @@ impl<T: JsonRpcClient> BridgeRelayHandler<T> {
 				.signature(),
 			client,
 			system_clients,
-			authority_bifrost: system_clients_vec
-				.iter()
-				.find(|client| client.is_native)
-				.expect(INVALID_BIFROST_NATIVENESS)
-				.authority
-				.clone(),
 			bootstrap_states,
 			bootstrapping_count,
 			bootstrap_config,
@@ -722,10 +714,24 @@ impl<T: JsonRpcClient> BridgeRelayHandler<T> {
 	/// Get factor between the block time of native-chain and block time of this chain
 	/// Approximately BIFROST: 3s, Polygon: 2s, BSC: 3s, Ethereum: 12s
 	pub async fn get_bootstrap_offset_height_based_on_block_time(&self, round_offset: u32) -> U64 {
-		let round_info: RoundMetaData = self
-			.client
-			.contract_call(self.authority_bifrost.round_info(), "authority.round_info")
-			.await;
+		let round_info: RoundMetaData = if self.client.is_native {
+			self.client
+				.contract_call(self.client.authority.round_info(), "authority.round_info")
+				.await
+		} else if let Some((_id, native_client)) =
+			self.system_clients.iter().find(|(_id, client)| client.is_native)
+		{
+			native_client
+				.contract_call(native_client.authority.round_info(), "authority.round_info")
+				.await
+		} else {
+			panic!(
+				"[{}]-[{}] {}",
+				self.client.get_chain_name(),
+				SUB_LOG_TARGET,
+				INVALID_BIFROST_NATIVENESS,
+			);
+		};
 
 		let block_number = self.client.get_latest_block_number().await;
 
