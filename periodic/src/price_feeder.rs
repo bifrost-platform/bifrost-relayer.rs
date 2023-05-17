@@ -30,7 +30,7 @@ pub struct OraclePriceFeeder<T> {
 	pub config: PriceFeederConfig,
 	/// The pre-defined oracle ID's for each asset.
 	pub asset_oid: HashMap<String, H256>,
-	/// The `EthClient` to interact with the connected blockchain.
+	/// The `EthClient` to interact with the bifrost network.
 	pub client: Arc<EthClient<T>>,
 }
 
@@ -42,18 +42,20 @@ impl<T: JsonRpcClient> PeriodicWorker for OraclePriceFeeder<T> {
 		loop {
 			self.wait_until_next_time().await;
 
-			let price_responses = self.fetchers[0].get_price().await;
+			if self.is_selected_relayer().await {
+				let price_responses = self.fetchers[0].get_price().await;
 
-			let (mut oid_bytes_list, mut price_bytes_list) = (vec![], vec![]);
-			price_responses.iter().for_each(|price_response| {
-				oid_bytes_list
-					.push(self.asset_oid.get(&price_response.symbol).unwrap().to_fixed_bytes());
-				price_bytes_list.push(self.float_to_wei_bytes(&price_response.price));
-			});
+				let (mut oid_bytes_list, mut price_bytes_list) = (vec![], vec![]);
+				price_responses.iter().for_each(|price_response| {
+					oid_bytes_list
+						.push(self.asset_oid.get(&price_response.symbol).unwrap().to_fixed_bytes());
+					price_bytes_list.push(self.float_to_wei_bytes(&price_response.price));
+				});
 
-			let request = self.build_transaction(oid_bytes_list, price_bytes_list).await;
-			self.request_send_transaction(request, PriceFeedMetadata::new(price_responses))
-				.await;
+				let request = self.build_transaction(oid_bytes_list, price_bytes_list).await;
+				self.request_send_transaction(request, PriceFeedMetadata::new(price_responses))
+					.await;
+			}
 		}
 	}
 
@@ -152,5 +154,16 @@ impl<T: JsonRpcClient> OraclePriceFeeder<T> {
 				sentry::capture_error(&error);
 			},
 		}
+	}
+
+	/// Verifies whether the current relayer was selected at the current round.
+	async fn is_selected_relayer(&self) -> bool {
+		let relayer_manager = self.client.relayer_manager.as_ref().unwrap();
+		self.client
+			.contract_call(
+				relayer_manager.is_selected_relayer(self.client.address(), false),
+				"relayer_manager.is_selected_relayer",
+			)
+			.await
 	}
 }

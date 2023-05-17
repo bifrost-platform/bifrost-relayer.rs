@@ -1,15 +1,14 @@
 use cccp_client::eth::{EthClient, EventMessage, EventMetadata, EventSender, VSPPhase1Metadata};
 use cccp_primitives::{
-	errors::{INVALID_CONTRACT_ADDRESS, INVALID_PERIODIC_SCHEDULE},
-	relayer_manager::RelayerManagerContract,
+	errors::INVALID_PERIODIC_SCHEDULE,
 	socket::{RoundUpSubmit, Signatures},
 	sub_display_format, PeriodicWorker, INVALID_BIFROST_NATIVENESS,
 };
 use cron::Schedule;
 use ethers::{
 	abi::{encode, Token},
-	providers::{JsonRpcClient, Provider},
-	types::{Address, TransactionRequest, H160, U256},
+	providers::JsonRpcClient,
+	types::{Address, TransactionRequest, U256},
 };
 use std::{str::FromStr, sync::Arc};
 use tokio::time::sleep;
@@ -25,8 +24,6 @@ pub struct RoundupEmitter<T> {
 	pub event_sender: Arc<EventSender>,
 	/// The time schedule that represents when to check round info.
 	pub schedule: Schedule,
-	/// RelayerManager contract(bifrost) instance
-	pub relayer_contract: RelayerManagerContract<Provider<T>>,
 }
 
 #[async_trait::async_trait]
@@ -40,14 +37,17 @@ impl<T: JsonRpcClient> PeriodicWorker for RoundupEmitter<T> {
 			let latest_round = self.get_latest_round().await;
 
 			if self.current_round < latest_round {
+				log::info!(
+					target: &self.client.get_chain_name(),
+					"-[{}] 👤 RoundUp detected. Round({}) -> Round({})",
+					sub_display_format(SUB_LOG_TARGET),
+					self.current_round,
+					latest_round,
+				);
+
 				self.current_round = latest_round;
 
-				if !(self.is_selected_relayer().await) {
-					log::info!(
-						target: &self.client.get_chain_name(),
-						"-[{}] 👤 RoundUp detected. However this relayer was not selected in previous round.",
-						sub_display_format(SUB_LOG_TARGET),
-					);
+				if !self.is_selected_relayer().await {
 					continue
 				}
 
@@ -74,7 +74,6 @@ impl<T: JsonRpcClient> RoundupEmitter<T> {
 		event_senders: Vec<Arc<EventSender>>,
 		clients: Vec<Arc<EthClient<T>>>,
 		schedule: String,
-		relayer_manager_address: String,
 	) -> Self {
 		let client = clients
 			.iter()
@@ -84,10 +83,6 @@ impl<T: JsonRpcClient> RoundupEmitter<T> {
 
 		Self {
 			current_round: U256::default(),
-			relayer_contract: RelayerManagerContract::new(
-				H160::from_str(&relayer_manager_address).expect(INVALID_CONTRACT_ADDRESS),
-				client.get_provider(),
-			),
 			client,
 			event_sender: event_senders
 				.iter()
@@ -100,9 +95,10 @@ impl<T: JsonRpcClient> RoundupEmitter<T> {
 
 	/// Check relayer has selected in previous round
 	async fn is_selected_relayer(&self) -> bool {
+		let relayer_manager = self.client.relayer_manager.as_ref().unwrap();
 		self.client
 			.contract_call(
-				self.relayer_contract.is_previous_selected_relayer(
+				relayer_manager.is_previous_selected_relayer(
 					self.current_round - 1,
 					self.client.address(),
 					true,
@@ -114,10 +110,11 @@ impl<T: JsonRpcClient> RoundupEmitter<T> {
 
 	/// Fetch new validator list
 	async fn fetch_validator_list(&self) -> Vec<Address> {
+		let relayer_manager = self.client.relayer_manager.as_ref().unwrap();
 		let mut addresses = self
 			.client
 			.contract_call(
-				self.relayer_contract.selected_relayers(true),
+				relayer_manager.selected_relayers(true),
 				"relayer_manager.selected_relayers",
 			)
 			.await;

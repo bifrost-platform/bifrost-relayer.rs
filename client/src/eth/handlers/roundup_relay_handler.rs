@@ -117,6 +117,11 @@ impl<T: JsonRpcClient> Handler for RoundupRelayHandler<T> {
 					);
 					match status {
 						RoundUpEventStatus::NextAuthorityCommitted => {
+							if !self.is_selected_relayer(serialized_log.roundup.round - 1).await {
+								// do nothing if not verified
+								continue
+							}
+
 							let roundup_submit = self
 								.build_roundup_submit(
 									serialized_log.roundup.round,
@@ -166,7 +171,7 @@ impl<T: JsonRpcClient> RoundupRelayHandler<T> {
 		bootstrap_config: BootstrapConfig,
 		number_of_relay_targets: usize,
 	) -> Self {
-		// Only broadcast to external chain
+		// Only broadcast to external chains
 		event_senders_vec.retain(|channel| !channel.is_native);
 
 		let mut event_senders = BTreeMap::new();
@@ -255,6 +260,17 @@ impl<T: JsonRpcClient> RoundupRelayHandler<T> {
 		sorted_sigs
 	}
 
+	/// Verifies whether the current relayer was selected at the given round.
+	async fn is_selected_relayer(&self, round: U256) -> bool {
+		let relayer_manager = self.client.relayer_manager.as_ref().unwrap();
+		self.client
+			.contract_call(
+				relayer_manager.is_previous_selected_relayer(round, self.client.address(), true),
+				"relayer_manager.is_previous_selected_relayer",
+			)
+			.await
+	}
+
 	/// Build `round_control_relay` method call param.
 	async fn build_roundup_submit(
 		&self,
@@ -335,6 +351,12 @@ impl<T: JsonRpcClient> RoundupRelayHandler<T> {
 	}
 
 	async fn bootstrap(&self) {
+		log::info!(
+			target: &self.client.get_chain_name(),
+			"-[{}] ⚙️  [Bootstrap mode] Bootstrapping RoundUp events.",
+			sub_display_format(SUB_LOG_TARGET),
+		);
+
 		let mut bootstrap_guard = self.bootstrap_states.write().await;
 		// Checking if the current round is the latest round
 		self.wait_if_latest_round().await;
@@ -344,12 +366,6 @@ impl<T: JsonRpcClient> RoundupRelayHandler<T> {
 
 		// if all of chain is the latest round already
 		if *self.bootstrapping_count.lock().await == self.external_clients.len() as u8 {
-			log::info!(
-				target: &self.client.get_chain_name(),
-				"-[{}] ⚙️  [Bootstrap mode] Bootstrapping RoundUp events.",
-				sub_display_format(SUB_LOG_TARGET),
-			);
-
 			// set all of state to BootstrapSocket
 			for state in bootstrap_guard.iter_mut() {
 				*state = BootstrapState::BootstrapSocket;
