@@ -569,22 +569,20 @@ impl<T: JsonRpcClient> BridgeRelayHandler<T> {
 					"relayer_manager.is_previous_selected_relayer",
 				)
 				.await
-		} else {
-			if let Some((_id, native_client)) =
-				self.system_clients.iter().find(|(_id, client)| client.is_native)
-			{
-				let relayer_manager = native_client.relayer_manager.as_ref().unwrap();
-				return native_client
-					.contract_call(
-						relayer_manager.is_previous_selected_relayer(
-							round,
-							self.client.address(),
-							false,
-						),
-						"relayer_manager.is_previous_selected_relayer",
-					)
-					.await
-			}
+		} else if let Some((_id, native_client)) =
+			self.system_clients.iter().find(|(_id, client)| client.is_native)
+		{
+			let relayer_manager = native_client.relayer_manager.as_ref().unwrap();
+			return native_client
+				.contract_call(
+					relayer_manager.is_previous_selected_relayer(
+						round,
+						self.client.address(),
+						false,
+					),
+					"relayer_manager.is_previous_selected_relayer",
+				)
+				.await
 		}
 		false
 	}

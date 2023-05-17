@@ -95,13 +95,12 @@ impl<T: JsonRpcClient> EthClient<T> {
 				H160::from_str(&authority_address).expect(INVALID_CONTRACT_ADDRESS),
 				provider.clone(),
 			),
-			relayer_manager: match relayer_manager_address {
-				None => None,
-				Some(address) => Some(RelayerManagerContract::new(
+			relayer_manager: relayer_manager_address.map(|address| {
+				RelayerManagerContract::new(
 					H160::from_str(&address).expect(INVALID_CONTRACT_ADDRESS),
 					provider.clone(),
-				)),
-			},
+				)
+			}),
 			provider,
 			name,
 			id,
