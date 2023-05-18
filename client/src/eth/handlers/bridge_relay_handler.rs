@@ -1,7 +1,7 @@
 use std::{collections::BTreeMap, str::FromStr, sync::Arc, time::Duration};
 
 use cccp_primitives::{
-	authority::{AuthorityContract, RoundMetaData},
+	authority::RoundMetaData,
 	cli::BootstrapConfig,
 	eth::{
 		BootstrapState, BridgeDirection, ChainID, RecoveredSignature, SocketEventStatus,
@@ -16,7 +16,7 @@ use cccp_primitives::{
 use ethers::{
 	abi::{RawLog, Token},
 	prelude::decode_logs,
-	providers::{JsonRpcClient, Provider},
+	providers::JsonRpcClient,
 	types::{
 		Bytes, Filter, Log, Signature, TransactionReceipt, TransactionRequest, H256, U256, U64,
 	},
@@ -41,12 +41,10 @@ pub struct BridgeRelayHandler<T> {
 	pub block_receiver: Receiver<BlockMessage>,
 	/// The `EthClient` to interact with the connected blockchain.
 	pub client: Arc<EthClient<T>>,
-	/// All of available clients. <chain_id, Arc<EthClient>>
-	pub all_clients: BTreeMap<ChainID, Arc<EthClient<T>>>,
+	/// The entire clients instantiated in the system. <chain_id, Arc<EthClient>>
+	pub system_clients: BTreeMap<ChainID, Arc<EthClient<T>>>,
 	/// Signature of the `Socket` Event.
 	pub socket_signature: H256,
-	/// Authority contract
-	pub authority_bifrost: AuthorityContract<Provider<T>>,
 	/// Completion of bootstrapping
 	pub bootstrap_states: Arc<RwLock<Vec<BootstrapState>>>,
 	/// Completion of bootstrapping count
@@ -61,17 +59,17 @@ impl<T: JsonRpcClient> BridgeRelayHandler<T> {
 		id: ChainID,
 		event_channels: Vec<Arc<EventSender>>,
 		block_receiver: Receiver<BlockMessage>,
-		all_clients_vec: Vec<Arc<EthClient<T>>>,
+		system_clients_vec: Vec<Arc<EthClient<T>>>,
 		bootstrap_states: Arc<RwLock<Vec<BootstrapState>>>,
 		bootstrapping_count: Arc<Mutex<u8>>,
 		bootstrap_config: BootstrapConfig,
 	) -> Self {
-		let mut all_clients = BTreeMap::new();
-		all_clients_vec.iter().for_each(|client| {
-			all_clients.insert(client.get_chain_id(), client.clone());
+		let mut system_clients = BTreeMap::new();
+		system_clients_vec.iter().for_each(|client| {
+			system_clients.insert(client.get_chain_id(), client.clone());
 		});
 
-		let client = all_clients.get(&id).expect(INVALID_CHAIN_ID).clone();
+		let client = system_clients.get(&id).expect(INVALID_CHAIN_ID).clone();
 
 		let mut event_senders = BTreeMap::new();
 		event_channels.iter().for_each(|event_sender| {
@@ -88,13 +86,7 @@ impl<T: JsonRpcClient> BridgeRelayHandler<T> {
 				.expect(INVALID_CONTRACT_ABI)
 				.signature(),
 			client,
-			all_clients,
-			authority_bifrost: all_clients_vec
-				.iter()
-				.find(|client| client.is_native)
-				.expect(INVALID_BIFROST_NATIVENESS)
-				.authority
-				.clone(),
+			system_clients,
 			bootstrap_states,
 			bootstrapping_count,
 			bootstrap_config,
@@ -172,13 +164,6 @@ impl<T: JsonRpcClient> Handler for BridgeRelayHandler<T> {
 									dst_chain_id,
 								);
 
-								if Self::is_sequence_ended(status) ||
-									self.is_already_done(&socket.msg.req_id, src_chain_id).await
-								{
-									// do nothing if protocol sequence ended
-									return
-								}
-
 								log::info!(
 									target: &self.client.get_chain_name(),
 									"-[{}] 🔖 Detected socket event: {}, {:?}-{:?}",
@@ -187,6 +172,20 @@ impl<T: JsonRpcClient> Handler for BridgeRelayHandler<T> {
 									receipt.block_number.unwrap(),
 									receipt.transaction_hash,
 								);
+
+								if Self::is_sequence_ended(status) ||
+									self.is_already_done(&socket.msg.req_id, src_chain_id).await
+								{
+									// do nothing if protocol sequence ended
+									return
+								}
+								if !self
+									.is_selected_relayer(socket.msg.req_id.round_id.into())
+									.await
+								{
+									// do nothing if not verified
+									return
+								}
 
 								self.send_socket_message(
 									socket.msg.clone(),
@@ -238,7 +237,7 @@ impl<T: JsonRpcClient> BridgeRelayBuilder for BridgeRelayHandler<T> {
 		relay_tx_chain_id: ChainID,
 	) -> (TransactionRequest, bool) {
 		let to_socket = self
-			.all_clients
+			.system_clients
 			.get(&relay_tx_chain_id)
 			.expect(INVALID_CHAIN_ID)
 			.socket
@@ -547,6 +546,39 @@ impl<T: JsonRpcClient> BridgeRelayHandler<T> {
 		)
 	}
 
+	/// Verifies whether the current relayer was selected at the given round.
+	async fn is_selected_relayer(&self, round: U256) -> bool {
+		if self.client.is_native {
+			let relayer_manager = self.client.relayer_manager.as_ref().unwrap();
+			return self
+				.client
+				.contract_call(
+					relayer_manager.is_previous_selected_relayer(
+						round,
+						self.client.address(),
+						false,
+					),
+					"relayer_manager.is_previous_selected_relayer",
+				)
+				.await
+		} else if let Some((_id, native_client)) =
+			self.system_clients.iter().find(|(_id, client)| client.is_native)
+		{
+			let relayer_manager = native_client.relayer_manager.as_ref().unwrap();
+			return native_client
+				.contract_call(
+					relayer_manager.is_previous_selected_relayer(
+						round,
+						self.client.address(),
+						false,
+					),
+					"relayer_manager.is_previous_selected_relayer",
+				)
+				.await
+		}
+		false
+	}
+
 	/// Request send bridge relay transaction to the target event channel.
 	fn request_send_transaction(
 		&self,
@@ -587,7 +619,8 @@ impl<T: JsonRpcClient> BridgeRelayHandler<T> {
 	/// Compare the request status recorded in source chain with event status to determine if the
 	/// event has already been executed
 	async fn is_already_done(&self, rid: &RequestID, src_chain_id: ChainID) -> bool {
-		let socket_contract = &self.all_clients.get(&src_chain_id).expect(INVALID_CHAIN_ID).socket;
+		let socket_contract =
+			&self.system_clients.get(&src_chain_id).expect(INVALID_CHAIN_ID).socket;
 		let request = self
 			.client
 			.contract_call(socket_contract.get_request(rid.clone()), "socket.get_request")
@@ -624,7 +657,7 @@ impl<T: JsonRpcClient> BridgeRelayHandler<T> {
 		*bootstrap_count += 1;
 
 		// If All thread complete the task, starts the blockManager
-		if *bootstrap_count == self.all_clients.len() as u8 {
+		if *bootstrap_count == self.system_clients.len() as u8 {
 			let mut bootstrap_guard = self.bootstrap_states.write().await;
 
 			for state in bootstrap_guard.iter_mut() {
@@ -681,10 +714,24 @@ impl<T: JsonRpcClient> BridgeRelayHandler<T> {
 	/// Get factor between the block time of native-chain and block time of this chain
 	/// Approximately BIFROST: 3s, Polygon: 2s, BSC: 3s, Ethereum: 12s
 	pub async fn get_bootstrap_offset_height_based_on_block_time(&self, round_offset: u32) -> U64 {
-		let round_info: RoundMetaData = self
-			.client
-			.contract_call(self.authority_bifrost.round_info(), "authority.round_info")
-			.await;
+		let round_info: RoundMetaData = if self.client.is_native {
+			self.client
+				.contract_call(self.client.authority.round_info(), "authority.round_info")
+				.await
+		} else if let Some((_id, native_client)) =
+			self.system_clients.iter().find(|(_id, client)| client.is_native)
+		{
+			native_client
+				.contract_call(native_client.authority.round_info(), "authority.round_info")
+				.await
+		} else {
+			panic!(
+				"[{}]-[{}] {}",
+				self.client.get_chain_name(),
+				SUB_LOG_TARGET,
+				INVALID_BIFROST_NATIVENESS,
+			);
+		};
 
 		let block_number = self.client.get_latest_block_number().await;
 
