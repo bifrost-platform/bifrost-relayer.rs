@@ -1,6 +1,7 @@
 use async_recursion::async_recursion;
 use cccp_primitives::sub_display_format;
 
+use crate::eth::{DEFAULT_CALL_RETRIES, DEFAULT_CALL_RETRY_INTERVAL_MS};
 use ethers::{
 	prelude::{
 		gas_escalator::{Frequency, GasEscalatorMiddleware, GeometricGasPrice},
@@ -11,7 +12,7 @@ use ethers::{
 	types::{transaction::eip2718::TypedTransaction, TransactionReceipt, TransactionRequest, U256},
 };
 use rand::Rng;
-use std::{error::Error, sync::Arc};
+use std::{cmp::max, error::Error, sync::Arc};
 use tokio::{
 	sync::mpsc::{self, UnboundedReceiver, UnboundedSender},
 	time::{sleep, Duration},
@@ -224,6 +225,60 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> {
 		self.retry_transaction(msg).await;
 	}
 
+	/// Get current network's gas price
+	async fn get_gas_price(&self) -> U256 {
+		match self.middleware.get_gas_price().await {
+			Ok(gas_price) => gas_price,
+			Err(error) =>
+				self.handle_failed_get_gas_price(DEFAULT_CALL_RETRIES, error.to_string()).await,
+		}
+	}
+
+	/// Handles the failed get_gas_price().
+	async fn handle_failed_get_gas_price(&self, retries_remaining: u8, error: String) -> U256 {
+		let mut retries = retries_remaining;
+		let mut last_error = error;
+
+		while retries > 0 {
+			if self.debug_mode {
+				log::warn!(
+					target: &self.client.get_chain_name(),
+					"-[{}] ⚠️  Warning! Error encountered during get gas price, Retries left: {:?}, Error: {}",
+					sub_display_format(SUB_LOG_TARGET),
+					retries - 1,
+					last_error
+				);
+				sentry::capture_message(
+					format!(
+						"[{}]-[{}] ⚠️  Warning! Error encountered during get gas price, Retries left: {:?}, Error: {}",
+						&self.client.get_chain_name(),
+						SUB_LOG_TARGET,
+						retries - 1,
+						last_error
+					)
+					.as_str(),
+					sentry::Level::Warning,
+				);
+			}
+
+			match self.middleware.get_gas_price().await {
+				Ok(gas_price) => return gas_price,
+				Err(error) => {
+					sleep(Duration::from_millis(DEFAULT_CALL_RETRY_INTERVAL_MS)).await;
+					retries -= 1;
+					last_error = error.to_string();
+				},
+			}
+		}
+
+		panic!(
+			"[{}]-[{}] Error on call get_gas_price(): {:?}",
+			self.client.get_chain_name(),
+			SUB_LOG_TARGET,
+			last_error,
+		);
+	}
+
 	/// Sends the consumed transaction request to the connected chain. The transaction request will
 	/// be re-published to the event channel if the transaction fails to be mined in a block.
 	async fn try_send_transaction(&self, mut msg: EventMessage) {
@@ -253,11 +308,11 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> {
 		msg.tx_request = msg.tx_request.gas(escalated_gas);
 
 		// set the gas price to be used
-		let gas_price = self.middleware.get_gas_price().await.unwrap();
+		let gas_price = self.get_gas_price().await;
 		msg.tx_request = msg.tx_request.gas_price(gas_price);
 
 		// check the txpool for transaction duplication prevention
-		if !(self.is_duplicate_relay(&msg.tx_request, msg.check_mempool).await) {
+		if !(self.is_duplicate_relay(&mut msg.tx_request, msg.check_mempool).await) {
 			// no duplication found
 			match self.middleware.send_transaction(msg.tx_request.clone(), None).await {
 				Ok(pending_tx) => match pending_tx.await {
@@ -282,7 +337,7 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> {
 	/// has already been processed by another relayer.
 	async fn is_duplicate_relay(
 		&self,
-		tx_request: &TransactionRequest,
+		tx_request: &mut TransactionRequest,
 		check_mempool: bool,
 	) -> bool {
 		// does not check the txpool if the following condition satisfies
@@ -301,9 +356,15 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> {
 			for (_nonce, transaction) in tx_map.iter() {
 				if transaction.to.unwrap_or_default() == *to && transaction.input == *data {
 					// Trying gas escalating is not duplicate action
-					if transaction.from == tx_request.from.unwrap() &&
-						transaction.nonce == tx_request.nonce.unwrap()
-					{
+					if transaction.from == tx_request.from.unwrap() {
+						let current_network_gas_price = self.get_gas_price().await;
+						let escalated_gas_price = U256::from(
+							(tx_request.gas_price.unwrap().as_u64() as f64 * 1.5).ceil() as u64,
+						);
+
+						tx_request.gas_price =
+							Option::from(max(current_network_gas_price, escalated_gas_price));
+
 						return false
 					}
 					return true
