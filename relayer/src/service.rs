@@ -73,6 +73,7 @@ pub fn new_relay_base(config: Configuration) -> Result<RelayBase, ServiceError> 
 				evm_provider.socket_address.clone(),
 				evm_provider.vault_address.clone(),
 				evm_provider.authority_address.clone(),
+				evm_provider.relayer_manager_address.clone(),
 			));
 
 			if evm_provider.is_relay_target {
@@ -104,15 +105,6 @@ pub fn new_relay_base(config: Configuration) -> Result<RelayBase, ServiceError> 
 
 		(clients, tx_managers, block_managers, event_senders)
 	};
-	let relayer_manager_address = config
-		.relayer_config
-		.evm_providers
-		.iter()
-		.find(|provider| provider.is_native.unwrap_or(false))
-		.expect(INVALID_BIFROST_NATIVENESS)
-		.relayer_manager_address
-		.clone()
-		.unwrap();
 
 	log::info!(
 		target: LOG_TARGET,
@@ -152,7 +144,6 @@ pub fn new_relay_base(config: Configuration) -> Result<RelayBase, ServiceError> 
 			.expect(INVALID_BIFROST_NATIVENESS)
 			.clone(),
 		event_channels.clone(),
-		relayer_manager_address.clone(),
 	);
 	task_manager
 		.spawn_essential_handle()
@@ -255,7 +246,6 @@ pub fn new_relay_base(config: Configuration) -> Result<RelayBase, ServiceError> 
 		event_channels,
 		clients,
 		config.relayer_config.periodic_configs.unwrap().roundup_emitter,
-		relayer_manager_address,
 	);
 	task_manager.spawn_essential_handle().spawn(
 		"roundup-emitter",

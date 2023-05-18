@@ -1,14 +1,10 @@
 use cccp_client::eth::{EthClient, EventMessage, EventMetadata, EventSender, HeartbeatMetadata};
 use cccp_primitives::{
-	errors::{INVALID_BIFROST_NATIVENESS, INVALID_CONTRACT_ADDRESS, INVALID_PERIODIC_SCHEDULE},
-	relayer_manager::RelayerManagerContract,
+	errors::{INVALID_BIFROST_NATIVENESS, INVALID_PERIODIC_SCHEDULE},
 	sub_display_format, PeriodicWorker,
 };
 use cron::Schedule;
-use ethers::{
-	providers::{JsonRpcClient, Provider},
-	types::{TransactionRequest, H160},
-};
+use ethers::{providers::JsonRpcClient, types::TransactionRequest};
 use std::{str::FromStr, sync::Arc};
 use tokio::time::sleep;
 
@@ -18,11 +14,9 @@ const SUB_LOG_TARGET: &str = "heartbeat";
 pub struct HeartbeatSender<T> {
 	/// The time schedule that represents when to check heartbeat pulsed.
 	pub schedule: Schedule,
-	/// The target RelayerManger contract instance.
-	pub relayer_manager: RelayerManagerContract<Provider<T>>,
 	/// The event sender that sends messages to the event channel.
 	pub event_sender: Arc<EventSender>,
-	/// The `EthClient` to interact with the connected blockchain.
+	/// The `EthClient` to interact with the bifrost network.
 	pub client: Arc<EthClient<T>>,
 }
 
@@ -32,17 +26,18 @@ impl<T: JsonRpcClient> PeriodicWorker for HeartbeatSender<T> {
 		loop {
 			let address = self.client.address();
 
+			let relayer_manager = self.client.relayer_manager.as_ref().unwrap();
 			let is_selected = self
 				.client
 				.contract_call(
-					self.relayer_manager.is_selected_relayer(address, true),
+					relayer_manager.is_selected_relayer(address, false),
 					"relayer_manager.is_selected_relayer",
 				)
 				.await;
 			let is_heartbeat_pulsed = self
 				.client
 				.contract_call(
-					self.relayer_manager.is_heartbeat_pulsed(address),
+					relayer_manager.is_heartbeat_pulsed(address),
 					"relayer_manager.is_heartbeat_pulsed",
 				)
 				.await;
@@ -81,14 +76,9 @@ impl<T: JsonRpcClient> HeartbeatSender<T> {
 		schedule: String,
 		client: Arc<EthClient<T>>,
 		event_senders: Vec<Arc<EventSender>>,
-		relayer_manager_address: String,
 	) -> Self {
 		Self {
 			schedule: Schedule::from_str(&schedule).expect(INVALID_PERIODIC_SCHEDULE),
-			relayer_manager: RelayerManagerContract::new(
-				H160::from_str(&relayer_manager_address).expect(INVALID_CONTRACT_ADDRESS),
-				client.get_provider(),
-			),
 			event_sender: event_senders
 				.iter()
 				.find(|channel| channel.is_native)
@@ -100,9 +90,10 @@ impl<T: JsonRpcClient> HeartbeatSender<T> {
 
 	/// Build `heartbeat` transaction.
 	fn build_transaction(&self) -> TransactionRequest {
+		let relayer_manager = self.client.relayer_manager.as_ref().unwrap();
 		TransactionRequest::default()
-			.to(self.relayer_manager.address())
-			.data(self.relayer_manager.heartbeat().calldata().unwrap())
+			.to(relayer_manager.address())
+			.data(relayer_manager.heartbeat().calldata().unwrap())
 	}
 
 	/// Request send transaction to the target event channel.
