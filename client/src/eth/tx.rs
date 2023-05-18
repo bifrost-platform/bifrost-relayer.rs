@@ -225,6 +225,15 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> {
 		self.retry_transaction(msg).await;
 	}
 
+	/// Get current network's gas price
+	async fn get_gas_price(&self) -> U256 {
+		match self.middleware.get_gas_price().await {
+			Ok(gas_price) => gas_price,
+			Err(error) =>
+				self.handle_failed_get_gas_price(DEFAULT_CALL_RETRIES, error.to_string()).await,
+		}
+	}
+
 	/// Handles the failed get_gas_price().
 	async fn handle_failed_get_gas_price(&self, retries_remaining: u8, error: String) -> U256 {
 		let mut retries = retries_remaining;
@@ -299,7 +308,7 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> {
 		msg.tx_request = msg.tx_request.gas(escalated_gas);
 
 		// set the gas price to be used
-		let gas_price = self.middleware.get_gas_price().await.unwrap();
+		let gas_price = self.get_gas_price().await;
 		msg.tx_request = msg.tx_request.gas_price(gas_price);
 
 		// check the txpool for transaction duplication prevention
@@ -348,19 +357,9 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> {
 				if transaction.to.unwrap_or_default() == *to && transaction.input == *data {
 					// Trying gas escalating is not duplicate action
 					if transaction.from == tx_request.from.unwrap() {
-						let current_network_gas_price = match self.middleware.get_gas_price().await
-						{
-							Ok(estimated_gas) => estimated_gas,
-							Err(error) =>
-								self.handle_failed_get_gas_price(
-									DEFAULT_CALL_RETRIES,
-									error.to_string(),
-								)
-								.await,
-						};
+						let current_network_gas_price = self.get_gas_price().await;
 						let escalated_gas_price = U256::from(
-							(tx_request.gas_price.unwrap().as_u64() as f64 * GAS_COEFFICIENT).ceil()
-								as u64,
+							(tx_request.gas_price.unwrap().as_u64() as f64 * 1.5).ceil() as u64,
 						);
 
 						tx_request.gas_price =
