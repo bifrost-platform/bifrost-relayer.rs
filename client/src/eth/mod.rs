@@ -30,6 +30,7 @@ pub use cccp_primitives::contracts::*;
 use cccp_primitives::{
 	authority::AuthorityContract,
 	eth::{BridgeDirection, ChainID},
+	relayer_manager::RelayerManagerContract,
 	socket::SocketContract,
 	vault::VaultContract,
 	INVALID_CONTRACT_ADDRESS,
@@ -61,6 +62,8 @@ pub struct EthClient<T> {
 	pub vault: VaultContract<Provider<T>>,
 	/// AuthorityContract
 	pub authority: AuthorityContract<Provider<T>>,
+	/// RelayerManagerContract (only available on BIFROST)
+	pub relayer_manager: Option<RelayerManagerContract<Provider<T>>>,
 }
 
 impl<T: JsonRpcClient> EthClient<T> {
@@ -76,6 +79,7 @@ impl<T: JsonRpcClient> EthClient<T> {
 		socket_address: String,
 		vault_address: String,
 		authority_address: String,
+		relayer_manager_address: Option<String>,
 	) -> Self {
 		Self {
 			wallet,
@@ -91,6 +95,12 @@ impl<T: JsonRpcClient> EthClient<T> {
 				H160::from_str(&authority_address).expect(INVALID_CONTRACT_ADDRESS),
 				provider.clone(),
 			),
+			relayer_manager: relayer_manager_address.map(|address| {
+				RelayerManagerContract::new(
+					H160::from_str(&address).expect(INVALID_CONTRACT_ADDRESS),
+					provider.clone(),
+				)
+			}),
 			provider,
 			name,
 			id,
