@@ -108,10 +108,6 @@ impl<T: JsonRpcClient> RoundupEmitter<T> {
 
 		Self {
 			current_round: U256::default(),
-			relayer_contract: RelayerManagerContract::new(
-				H160::from_str(&relayer_manager_address).expect(INVALID_CONTRACT_ADDRESS),
-				client.get_provider(),
-			),
 			client,
 			tx_request_sender: tx_request_senders
 				.iter()
