@@ -206,9 +206,9 @@ pub fn new_relay_base(config: Configuration) -> Result<RelayBase, ServiceError> 
 
 						// After All of barrier complete the waiting
 						let mut guard = is_bootstrapped.write().await;
-						if guard.iter().all(|s| *s == BootstrapState::BootstrapRoundUp) {
+						if guard.iter().all(|s| *s == BootstrapState::BootstrapRoundUp2) {
 							for state in guard.iter_mut() {
-								*state = BootstrapState::BootstrapSocket;
+								*state = BootstrapState::BootstrapBridge;
 							}
 						}
 						drop(guard);
@@ -246,6 +246,8 @@ pub fn new_relay_base(config: Configuration) -> Result<RelayBase, ServiceError> 
 		event_channels,
 		clients,
 		config.relayer_config.periodic_configs.unwrap().roundup_emitter,
+		bootstrap_states.clone(),
+		config.relayer_config.bootstrap_config.clone(),
 	);
 	task_manager.spawn_essential_handle().spawn(
 		"roundup-emitter",
@@ -261,7 +263,7 @@ pub fn new_relay_base(config: Configuration) -> Result<RelayBase, ServiceError> 
 			),
 			Some("block-managers"),
 			async move {
-				block_manager.is_syncing().await;
+				block_manager.wait_provider_sync().await;
 
 				block_manager.run().await
 			},

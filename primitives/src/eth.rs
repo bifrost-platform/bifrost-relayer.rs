@@ -83,10 +83,12 @@ pub enum BridgeDirection {
 pub enum BootstrapState {
 	/// phase 0. check if the node is in syncing
 	NodeSyncing,
-	/// phase 1. bootstrap for RoundUp event
-	BootstrapRoundUp,
-	/// phase 2. bootstrap for Socket event
-	BootstrapSocket,
+	/// phase 1-1. emit all pushed RoundUp event
+	BootstrapRoundUp1,
+	/// phase 1-2. bootstrap for RoundUp event
+	BootstrapRoundUp2,
+	/// phase 2. bootstrap for Bridge event
+	BootstrapBridge,
 	/// phase 3. process for latest block as normal
 	NormalStart,
 }
