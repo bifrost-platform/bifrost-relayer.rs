@@ -84,8 +84,7 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> {
 
 	/// Initialize transaction manager.
 	async fn initialize(&mut self) {
-		let is_txpool_enabled = self.client.provider.txpool_content().await.is_ok();
-		self.set_txpool_activation(is_txpool_enabled);
+		self.is_txpool_enabled = self.client.provider.txpool_status().await.is_ok();
 	}
 
 	/// Starts the transaction manager. Listens to every new consumed event message.
@@ -110,11 +109,6 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> {
 		msg.build_retry_event();
 		sleep(Duration::from_millis(msg.retry_interval)).await;
 		self.try_send_transaction(msg).await;
-	}
-
-	/// Set the activation of txpool namespace related actions.
-	fn set_txpool_activation(&mut self, is_txpool_enabled: bool) {
-		self.is_txpool_enabled = is_txpool_enabled;
 	}
 
 	/// Handles the successfully mined transaction.
@@ -350,17 +344,17 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> {
 
 		let data = tx_request.data.as_ref().unwrap();
 		let to = tx_request.to.as_ref().unwrap().as_address().unwrap();
+		let from = tx_request.from.as_ref().unwrap();
+		let gas_price = tx_request.gas_price.unwrap().as_u64() as f64;
 
-		let mempool_pending_contents = self.client.get_txpool_content().await.pending;
-		for (_address, tx_map) in mempool_pending_contents.iter() {
-			for (_nonce, transaction) in tx_map.iter() {
-				if transaction.to.unwrap_or_default() == *to && transaction.input == *data {
+		let mempool = self.client.get_txpool_content().await;
+		for (_address, tx_map) in mempool.pending.iter().chain(mempool.queued.iter()) {
+			for (_nonce, mempool_tx) in tx_map.iter() {
+				if mempool_tx.to.unwrap_or_default() == *to && mempool_tx.input == *data {
 					// Trying gas escalating is not duplicate action
-					if transaction.from == tx_request.from.unwrap() {
+					if mempool_tx.from == *from {
 						let current_network_gas_price = self.get_gas_price().await;
-						let escalated_gas_price = U256::from(
-							(tx_request.gas_price.unwrap().as_u64() as f64 * 1.5).ceil() as u64,
-						);
+						let escalated_gas_price = U256::from((gas_price * 1.125).ceil() as u64);
 
 						tx_request.gas_price =
 							Option::from(max(current_network_gas_price, escalated_gas_price));
