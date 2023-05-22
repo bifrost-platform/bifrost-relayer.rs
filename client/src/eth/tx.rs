@@ -322,7 +322,7 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> {
 		}
 
 		// sets a random delay on external chain transactions on first try
-		if msg.is_external && msg.retries_remaining == DEFAULT_TX_RETRIES {
+		if msg.give_random_delay && msg.retries_remaining == DEFAULT_TX_RETRIES {
 			sleep(Duration::from_millis(generate_delay())).await;
 		}
 

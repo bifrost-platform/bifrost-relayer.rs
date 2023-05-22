@@ -202,7 +202,7 @@ pub struct EventMessage {
 	/// Check mempool to prevent duplicate relay.
 	pub check_mempool: bool,
 	/// The flag that represents whether the event is processed to an external chain.
-	pub is_external: bool,
+	pub give_random_delay: bool,
 }
 
 impl EventMessage {
@@ -211,7 +211,7 @@ impl EventMessage {
 		tx_request: TransactionRequest,
 		metadata: EventMetadata,
 		check_mempool: bool,
-		is_external: bool,
+		give_random_delay: bool,
 	) -> Self {
 		Self {
 			retries_remaining: DEFAULT_TX_RETRIES,
@@ -219,7 +219,7 @@ impl EventMessage {
 			tx_request,
 			metadata,
 			check_mempool,
-			is_external,
+			give_random_delay,
 		}
 	}
 
