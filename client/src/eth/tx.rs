@@ -15,7 +15,7 @@ use ethers::{
 	},
 };
 use rand::Rng;
-use std::{cmp::max, collections::BTreeMap, error::Error, sync::Arc};
+use std::{cmp::max, error::Error, sync::Arc};
 use tokio::{
 	sync::mpsc::{self, UnboundedReceiver, UnboundedSender},
 	time::{sleep, Duration},
