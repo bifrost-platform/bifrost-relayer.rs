@@ -15,7 +15,7 @@ use ethers::{
 	},
 };
 use rand::Rng;
-use std::{cmp::max, error::Error, sync::Arc};
+use std::{cmp::max, collections::BTreeMap, error::Error, sync::Arc};
 use tokio::{
 	sync::mpsc::{self, UnboundedReceiver, UnboundedSender},
 	time::{sleep, Duration},
@@ -96,27 +96,20 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> {
 		if self.is_txpool_enabled {
 			let mempool = self.client.get_txpool_content().await;
 
-			if let Some(pending_map) = mempool.pending.get(&self.client.address()) {
-				for (_nonce, transaction) in pending_map.iter() {
-					self.try_send_transaction(EventMessage::new(
-						self.stuck_transaction_to_transaction_request(transaction).await,
-						EventMetadata::Flush(FlushMetadata::new()),
-						false,
-						false,
-					))
-					.await;
-				}
-			}
-			if let Some(queued_map) = mempool.queued.get(&self.client.address()) {
-				for (_nonce, transaction) in queued_map.iter() {
-					self.try_send_transaction(EventMessage::new(
-						self.stuck_transaction_to_transaction_request(transaction).await,
-						EventMetadata::Flush(FlushMetadata::new()),
-						false,
-						false,
-					))
-					.await;
-				}
+			let mut transactions = Vec::new();
+			transactions
+				.extend(mempool.queued.get(&self.client.address()).cloned().unwrap_or_default());
+			transactions
+				.extend(mempool.pending.get(&self.client.address()).cloned().unwrap_or_default());
+
+			for (_nonce, transaction) in transactions {
+				self.try_send_transaction(EventMessage::new(
+					self.stuck_transaction_to_transaction_request(&transaction).await,
+					EventMetadata::Flush(FlushMetadata::new()),
+					false,
+					false,
+				))
+				.await;
 			}
 		}
 	}
