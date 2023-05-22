@@ -160,9 +160,8 @@ impl<T: JsonRpcClient> RoundupEmitter<T> {
 			match *state {
 				BootstrapState::BootstrapRoundUpPhase1 => {
 					*state = BootstrapState::BootstrapRoundUpPhase2;
-					return
 				},
-				_ => return,
+				_ => {},
 			}
 		}
 	}
