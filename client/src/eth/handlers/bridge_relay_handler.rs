@@ -103,7 +103,7 @@ impl<T: JsonRpcClient> Handler for BridgeRelayHandler<T> {
 				.read()
 				.await
 				.iter()
-				.all(|s| *s == BootstrapState::BootstrapBridge)
+				.all(|s| *s == BootstrapState::BootstrapBridgeRelay)
 			{
 				self.bootstrap().await;
 

@@ -61,7 +61,7 @@ impl<T: JsonRpcClient> Handler for RoundupRelayHandler<T> {
 				.read()
 				.await
 				.iter()
-				.all(|s| *s == BootstrapState::BootstrapRoundUp2)
+				.all(|s| *s == BootstrapState::BootstrapRoundUpPhase2)
 			{
 				self.bootstrap().await;
 
@@ -367,11 +367,11 @@ impl<T: JsonRpcClient> RoundupRelayHandler<T> {
 		if *self.bootstrapping_count.lock().await == self.external_clients.len() as u8 {
 			// set all of state to BootstrapSocket
 			for state in bootstrap_guard.iter_mut() {
-				*state = BootstrapState::BootstrapBridge;
+				*state = BootstrapState::BootstrapBridgeRelay;
 			}
 		}
 
-		if bootstrap_guard.iter().all(|s| *s == BootstrapState::BootstrapRoundUp2) {
+		if bootstrap_guard.iter().all(|s| *s == BootstrapState::BootstrapRoundUpPhase2) {
 			drop(bootstrap_guard);
 			let logs = self.get_roundup_logs().await;
 

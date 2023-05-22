@@ -206,9 +206,9 @@ pub fn new_relay_base(config: Configuration) -> Result<RelayBase, ServiceError> 
 
 						// After All of barrier complete the waiting
 						let mut guard = is_bootstrapped.write().await;
-						if guard.iter().all(|s| *s == BootstrapState::BootstrapRoundUp2) {
+						if guard.iter().all(|s| *s == BootstrapState::BootstrapRoundUpPhase2) {
 							for state in guard.iter_mut() {
-								*state = BootstrapState::BootstrapBridge;
+								*state = BootstrapState::BootstrapBridgeRelay;
 							}
 						}
 						drop(guard);

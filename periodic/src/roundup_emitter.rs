@@ -48,7 +48,7 @@ impl<T: JsonRpcClient> PeriodicWorker for RoundupEmitter<T> {
 				.read()
 				.await
 				.iter()
-				.all(|s| *s == BootstrapState::BootstrapRoundUp2)
+				.all(|s| *s == BootstrapState::BootstrapRoundUpPhase1)
 			{
 				self.bootstrap().await;
 				break
@@ -79,17 +79,17 @@ impl<T: JsonRpcClient> PeriodicWorker for RoundupEmitter<T> {
 					latest_round,
 				);
 
-				self.current_round = latest_round;
-
-				if !self.is_selected_relayer().await {
+				if !self.is_selected_relayer(latest_round).await {
 					continue
 				}
 
-				let new_relayers = self.fetch_validator_list().await;
+				let new_relayers = self.fetch_validator_list(latest_round).await;
 				self.request_send_transaction(
 					self.build_transaction(latest_round, new_relayers.clone()),
 					VSPPhase1Metadata::new(latest_round, new_relayers),
 				);
+
+				self.current_round = latest_round;
 			}
 		}
 	}
@@ -132,15 +132,18 @@ impl<T: JsonRpcClient> RoundupEmitter<T> {
 	}
 
 	async fn bootstrap(&self) {
-		if self.is_selected_relayer().await {
-			let next_poll_round =
-				self.get_next_poll_round(self.bootstrap_config.round_offset).await;
-
+		if self
+			.is_selected_relayer(self.get_next_poll_round(self.bootstrap_config.round_offset).await)
+			.await
+		{
 			loop {
+				let next_poll_round =
+					self.get_next_poll_round(self.bootstrap_config.round_offset).await;
+
 				if next_poll_round == self.current_round + 1 {
 					break
 				} else if next_poll_round <= self.current_round {
-					let new_relayers = self.fetch_validator_list().await;
+					let new_relayers = self.fetch_validator_list(next_poll_round).await;
 					self.request_send_transaction(
 						self.build_transaction(next_poll_round, new_relayers.clone()),
 						VSPPhase1Metadata::new(next_poll_round, new_relayers),
@@ -158,8 +161,8 @@ impl<T: JsonRpcClient> RoundupEmitter<T> {
 
 		for state in self.bootstrap_states.write().await.iter_mut() {
 			match *state {
-				BootstrapState::BootstrapRoundUp1 => {
-					*state = BootstrapState::BootstrapRoundUp2;
+				BootstrapState::BootstrapRoundUpPhase1 => {
+					*state = BootstrapState::BootstrapRoundUpPhase2;
 					return
 				},
 				_ => return,
@@ -175,7 +178,7 @@ impl<T: JsonRpcClient> RoundupEmitter<T> {
 		let mut from_block = latest_block_number.saturating_sub(bootstrap_offset_height);
 		let to_block = latest_block_number;
 
-		let mut logs = vec![];
+		let mut round_up_events = vec![];
 
 		// Split from_block into smaller chunks
 		while from_block <= to_block {
@@ -202,21 +205,32 @@ impl<T: JsonRpcClient> RoundupEmitter<T> {
 				.iter()
 				.map(|log| self.decode_log(log.clone()).unwrap())
 				.collect();
-			logs.extend(chunk_logs);
+			round_up_events.extend(chunk_logs);
 
 			from_block = chunk_to_block + 1;
 		}
 
-		if logs.is_empty() {
-			panic!("Panic on BootstrapRoundUp1. Use higher bootstrap offset");
+		if round_up_events.is_empty() {
+			panic!(
+				"[{}]-[{}] Failed to find the latest RoundUp event. Please use a higher bootstrap offset. Current offset: {:?}",
+				self.client.get_chain_name(),
+				SUB_LOG_TARGET,
+				offset,
+			);
 		}
 
-		let max_round = logs.iter().map(|round_up| round_up.roundup.round).max().unwrap();
-		let max_logs: Vec<&SerializedRoundUp> =
-			logs.iter().filter(|log| log.roundup.round == max_round).collect();
+		let max_round = round_up_events
+			.iter()
+			.map(|round_up_event| round_up_event.roundup.round)
+			.max()
+			.unwrap();
+		let max_events: Vec<&SerializedRoundUp> = round_up_events
+			.iter()
+			.filter(|round_up_event| round_up_event.roundup.round == max_round)
+			.collect();
 
 		let status = RoundUpEventStatus::from_u8(
-			max_logs.iter().map(|round_up| round_up.status).max().unwrap(),
+			max_events.iter().map(|round_up| round_up.status).max().unwrap(),
 		);
 
 		match status {
@@ -268,12 +282,12 @@ impl<T: JsonRpcClient> RoundupEmitter<T> {
 	}
 
 	/// Check relayer has selected in previous round
-	async fn is_selected_relayer(&self) -> bool {
+	async fn is_selected_relayer(&self, round: U256) -> bool {
 		let relayer_manager = self.client.relayer_manager.as_ref().unwrap();
 		self.client
 			.contract_call(
 				relayer_manager.is_previous_selected_relayer(
-					self.current_round - 1,
+					round - 1,
 					self.client.address(),
 					true,
 				),
@@ -283,12 +297,12 @@ impl<T: JsonRpcClient> RoundupEmitter<T> {
 	}
 
 	/// Fetch new validator list
-	async fn fetch_validator_list(&self) -> Vec<Address> {
+	async fn fetch_validator_list(&self, round: U256) -> Vec<Address> {
 		let relayer_manager = self.client.relayer_manager.as_ref().unwrap();
 		let mut addresses = self
 			.client
 			.contract_call(
-				relayer_manager.selected_relayers(true),
+				relayer_manager.previous_selected_relayers(round, true),
 				"relayer_manager.selected_relayers",
 			)
 			.await;
