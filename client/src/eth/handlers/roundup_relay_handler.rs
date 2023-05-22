@@ -10,7 +10,7 @@ use cccp_primitives::{
 		BOOTSTRAP_BLOCK_CHUNK_SIZE, BOOTSTRAP_BLOCK_OFFSET, NATIVE_BLOCK_TIME,
 	},
 	socket::{RoundUpSubmit, SerializedRoundUp, Signatures, SocketContract, SocketContractEvents},
-	sub_display_format, INVALID_BIFROST_NATIVENESS, INVALID_CHAIN_ID, INVALID_CONTRACT_ABI,
+	sub_display_format, INVALID_BIFROST_NATIVENESS, INVALID_CONTRACT_ABI,
 };
 use ethers::{
 	abi::{encode, Detokenize, Token, Tokenize},
@@ -310,20 +310,19 @@ impl<T: JsonRpcClient> RoundupRelayHandler<T> {
 				let transaction_request =
 					self.build_transaction_request(&target_client.socket, roundup_submit);
 
-				let event_sender =
-					self.event_senders.get(&target_client.get_chain_id()).expect(INVALID_CHAIN_ID);
-
-				event_sender
-					.send(EventMessage::new(
-						transaction_request,
-						EventMetadata::VSPPhase2(VSPPhase2Metadata::new(
-							roundup_submit.round,
-							target_client.get_chain_id(),
-						)),
-						true,
-						true,
-					))
-					.unwrap()
+				if let Some(event_sender) = self.event_senders.get(&target_client.get_chain_id()) {
+					event_sender
+						.send(EventMessage::new(
+							transaction_request,
+							EventMetadata::VSPPhase2(VSPPhase2Metadata::new(
+								roundup_submit.round,
+								target_client.get_chain_id(),
+							)),
+							true,
+							true,
+						))
+						.unwrap()
+				}
 			}
 		}
 	}
