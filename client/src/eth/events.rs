@@ -147,12 +147,28 @@ impl Display for HeartbeatMetadata {
 }
 
 #[derive(Clone, Debug)]
+pub struct FlushMetadata {}
+
+impl FlushMetadata {
+	pub fn new() -> Self {
+		Self {}
+	}
+}
+
+impl Display for FlushMetadata {
+	fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+		write!(f, "Flush mempool")
+	}
+}
+
+#[derive(Clone, Debug)]
 pub enum EventMetadata {
 	BridgeRelay(BridgeRelayMetadata),
 	PriceFeed(PriceFeedMetadata),
 	VSPPhase1(VSPPhase1Metadata),
 	VSPPhase2(VSPPhase2Metadata),
 	Heartbeat(HeartbeatMetadata),
+	Flush(FlushMetadata),
 }
 
 impl Display for EventMetadata {
@@ -166,6 +182,7 @@ impl Display for EventMetadata {
 				EventMetadata::VSPPhase1(metadata) => metadata.to_string(),
 				EventMetadata::VSPPhase2(metadata) => metadata.to_string(),
 				EventMetadata::Heartbeat(metadata) => metadata.to_string(),
+				EventMetadata::Flush(metadata) => metadata.to_string(),
 			}
 		)
 	}
@@ -185,7 +202,7 @@ pub struct EventMessage {
 	/// Check mempool to prevent duplicate relay.
 	pub check_mempool: bool,
 	/// The flag that represents whether the event is processed to an external chain.
-	pub is_external: bool,
+	pub give_random_delay: bool,
 }
 
 impl EventMessage {
@@ -194,7 +211,7 @@ impl EventMessage {
 		tx_request: TransactionRequest,
 		metadata: EventMetadata,
 		check_mempool: bool,
-		is_external: bool,
+		give_random_delay: bool,
 	) -> Self {
 		Self {
 			retries_remaining: DEFAULT_TX_RETRIES,
@@ -202,7 +219,7 @@ impl EventMessage {
 			tx_request,
 			metadata,
 			check_mempool,
-			is_external,
+			give_random_delay,
 		}
 	}
 

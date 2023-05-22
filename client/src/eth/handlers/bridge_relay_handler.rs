@@ -103,7 +103,7 @@ impl<T: JsonRpcClient> Handler for BridgeRelayHandler<T> {
 				.read()
 				.await
 				.iter()
-				.all(|s| *s == BootstrapState::BootstrapSocket)
+				.all(|s| *s == BootstrapState::BootstrapBridgeRelay)
 			{
 				self.bootstrap().await;
 
@@ -585,14 +585,14 @@ impl<T: JsonRpcClient> BridgeRelayHandler<T> {
 		chain_id: ChainID,
 		tx_request: TransactionRequest,
 		metadata: BridgeRelayMetadata,
-		is_external: bool,
+		give_random_delay: bool,
 	) {
 		if let Some(event_sender) = self.event_senders.get(&chain_id) {
 			match event_sender.send(EventMessage::new(
 				tx_request,
 				EventMetadata::BridgeRelay(metadata.clone()),
 				true,
-				is_external,
+				give_random_delay,
 			)) {
 				Ok(()) => log::info!(
 					target: &self.client.get_chain_name(),

@@ -167,7 +167,7 @@ impl<T: JsonRpcClient> BlockManager<T> {
 	}
 
 	/// Verifies if the connected provider is in block sync mode.
-	pub async fn is_syncing(&self) {
+	pub async fn wait_provider_sync(&self) {
 		loop {
 			if let SyncingStatus::IsSyncing(status) = self.client.is_syncing().await {
 				log::info!(
@@ -179,11 +179,12 @@ impl<T: JsonRpcClient> BlockManager<T> {
 				);
 			} else {
 				for state in self.bootstrap_states.write().await.iter_mut() {
-					if *state == BootstrapState::NodeSyncing {
-						*state = BootstrapState::BootstrapRoundUp;
-						return
-					} else if *state == BootstrapState::NormalStart {
-						return
+					match *state {
+						BootstrapState::NodeSyncing => {
+							*state = BootstrapState::BootstrapRoundUpPhase1;
+							return
+						},
+						_ => return,
 					}
 				}
 			}

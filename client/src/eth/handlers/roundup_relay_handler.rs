@@ -61,7 +61,7 @@ impl<T: JsonRpcClient> Handler for RoundupRelayHandler<T> {
 				.read()
 				.await
 				.iter()
-				.all(|s| *s == BootstrapState::BootstrapRoundUp)
+				.all(|s| *s == BootstrapState::BootstrapRoundUpPhase2)
 			{
 				self.bootstrap().await;
 
@@ -107,7 +107,6 @@ impl<T: JsonRpcClient> Handler for RoundupRelayHandler<T> {
 
 			match self.decode_log(log).await {
 				Ok(serialized_log) => {
-					let status = RoundUpEventStatus::from_u8(serialized_log.status);
 					log::info!(
 						target: &self.client.get_chain_name(),
 						"-[{}] 👤 RoundUp event detected. ({:?}-{:?})",
@@ -115,7 +114,7 @@ impl<T: JsonRpcClient> Handler for RoundupRelayHandler<T> {
 						serialized_log.status,
 						receipt.transaction_hash,
 					);
-					match status {
+					match RoundUpEventStatus::from_u8(serialized_log.status) {
 						RoundUpEventStatus::NextAuthorityCommitted => {
 							if !self.is_selected_relayer(serialized_log.roundup.round - 1).await {
 								// do nothing if not verified
@@ -368,11 +367,11 @@ impl<T: JsonRpcClient> RoundupRelayHandler<T> {
 		if *self.bootstrapping_count.lock().await == self.external_clients.len() as u8 {
 			// set all of state to BootstrapSocket
 			for state in bootstrap_guard.iter_mut() {
-				*state = BootstrapState::BootstrapSocket;
+				*state = BootstrapState::BootstrapBridgeRelay;
 			}
 		}
 
-		if bootstrap_guard.iter().all(|s| *s == BootstrapState::BootstrapRoundUp) {
+		if bootstrap_guard.iter().all(|s| *s == BootstrapState::BootstrapRoundUpPhase2) {
 			drop(bootstrap_guard);
 			let logs = self.get_roundup_logs().await;
 
