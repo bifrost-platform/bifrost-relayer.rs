@@ -295,6 +295,10 @@ impl<T: JsonRpcClient> RoundupRelayHandler<T> {
 
 	/// Check roundup submitted before. If not, call `round_control_relay`.
 	async fn broadcast_roundup(&self, roundup_submit: &RoundUpSubmit) {
+		if self.external_clients.is_empty() {
+			return
+		}
+
 		let mut stream = tokio_stream::iter(self.external_clients.iter());
 		while let Some(target_client) = stream.next().await {
 			// Check roundup submitted to target chain before.
