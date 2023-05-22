@@ -182,11 +182,11 @@ impl<T: JsonRpcClient> BlockManager<T> {
 					match *state {
 						BootstrapState::NodeSyncing => {
 							*state = BootstrapState::BootstrapRoundUpPhase1;
-							return
 						},
-						_ => return,
+						_ => {},
 					}
 				}
+				return
 			}
 
 			sleep(Duration::from_millis(self.client.call_interval)).await;
