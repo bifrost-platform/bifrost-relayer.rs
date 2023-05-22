@@ -1,7 +1,7 @@
 use async_recursion::async_recursion;
 use cccp_primitives::sub_display_format;
 
-use crate::eth::{DEFAULT_CALL_RETRIES, DEFAULT_CALL_RETRY_INTERVAL_MS};
+use crate::eth::{FlushMetadata, DEFAULT_CALL_RETRIES, DEFAULT_CALL_RETRY_INTERVAL_MS};
 use ethers::{
 	prelude::{
 		gas_escalator::{Frequency, GasEscalatorMiddleware, GeometricGasPrice},
@@ -9,7 +9,10 @@ use ethers::{
 	},
 	providers::{JsonRpcClient, Middleware, Provider},
 	signers::{LocalWallet, Signer},
-	types::{transaction::eip2718::TypedTransaction, TransactionReceipt, TransactionRequest, U256},
+	types::{
+		transaction::eip2718::TypedTransaction, Transaction, TransactionReceipt,
+		TransactionRequest, U256,
+	},
 };
 use rand::Rng;
 use std::{cmp::max, error::Error, sync::Arc};
@@ -85,6 +88,51 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> {
 	/// Initialize transaction manager.
 	async fn initialize(&mut self) {
 		self.is_txpool_enabled = self.client.provider.txpool_status().await.is_ok();
+		self.flush_stuck_transaction().await;
+	}
+
+	/// Flush all transaction from mempool.
+	async fn flush_stuck_transaction(&self) {
+		if self.is_txpool_enabled {
+			let mempool = self.client.get_txpool_content().await;
+
+			if let Some(pending_map) = mempool.pending.get(&self.client.address()) {
+				for (_nonce, transaction) in pending_map.iter() {
+					self.try_send_transaction(EventMessage::new(
+						self.stuck_transaction_to_transaction_request(transaction).await,
+						EventMetadata::Flush(FlushMetadata::new()),
+						false,
+						false,
+					))
+					.await;
+				}
+			}
+			if let Some(queued_map) = mempool.queued.get(&self.client.address()) {
+				for (_nonce, transaction) in queued_map.iter() {
+					self.try_send_transaction(EventMessage::new(
+						self.stuck_transaction_to_transaction_request(transaction).await,
+						EventMetadata::Flush(FlushMetadata::new()),
+						false,
+						false,
+					))
+					.await;
+				}
+			}
+		}
+	}
+
+	pub async fn stuck_transaction_to_transaction_request(
+		&self,
+		transaction: &Transaction,
+	) -> TransactionRequest {
+		TransactionRequest::default()
+			.nonce(transaction.nonce)
+			.from(transaction.from)
+			.gas_price(self.get_gas_price_for_retry(transaction.gas_price.unwrap()).await)
+			.gas(transaction.gas)
+			.to(transaction.to.unwrap_or_default())
+			.value(transaction.value)
+			.data(transaction.input.clone())
 	}
 
 	/// Starts the transaction manager. Listens to every new consumed event message.
@@ -327,6 +375,14 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> {
 		}
 	}
 
+	async fn get_gas_price_for_retry(&self, previous_gas_price: U256) -> U256 {
+		let current_network_gas_price = self.get_gas_price().await;
+		let escalated_gas_price =
+			U256::from((previous_gas_price.as_u64() as f64 * 1.125).ceil() as u64);
+
+		max(current_network_gas_price, escalated_gas_price)
+	}
+
 	/// Function that query mempool for check if the relay event that this relayer is about to send
 	/// has already been processed by another relayer.
 	async fn is_duplicate_relay(
@@ -345,7 +401,7 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> {
 		let data = tx_request.data.as_ref().unwrap();
 		let to = tx_request.to.as_ref().unwrap().as_address().unwrap();
 		let from = tx_request.from.as_ref().unwrap();
-		let gas_price = tx_request.gas_price.unwrap().as_u64() as f64;
+		let gas_price = tx_request.gas_price.unwrap();
 
 		let mempool = self.client.get_txpool_content().await;
 		for (_address, tx_map) in mempool.pending.iter().chain(mempool.queued.iter()) {
@@ -353,11 +409,8 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> {
 				if mempool_tx.to.unwrap_or_default() == *to && mempool_tx.input == *data {
 					// Trying gas escalating is not duplicate action
 					if mempool_tx.from == *from {
-						let current_network_gas_price = self.get_gas_price().await;
-						let escalated_gas_price = U256::from((gas_price * 1.125).ceil() as u64);
-
 						tx_request.gas_price =
-							Option::from(max(current_network_gas_price, escalated_gas_price));
+							Option::from(self.get_gas_price_for_retry(gas_price).await);
 
 						return false
 					}

@@ -147,12 +147,28 @@ impl Display for HeartbeatMetadata {
 }
 
 #[derive(Clone, Debug)]
+pub struct FlushMetadata {}
+
+impl FlushMetadata {
+	pub fn new() -> Self {
+		Self {}
+	}
+}
+
+impl Display for FlushMetadata {
+	fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+		write!(f, "Flush mempool")
+	}
+}
+
+#[derive(Clone, Debug)]
 pub enum EventMetadata {
 	BridgeRelay(BridgeRelayMetadata),
 	PriceFeed(PriceFeedMetadata),
 	VSPPhase1(VSPPhase1Metadata),
 	VSPPhase2(VSPPhase2Metadata),
 	Heartbeat(HeartbeatMetadata),
+	Flush(FlushMetadata),
 }
 
 impl Display for EventMetadata {
@@ -166,6 +182,7 @@ impl Display for EventMetadata {
 				EventMetadata::VSPPhase1(metadata) => metadata.to_string(),
 				EventMetadata::VSPPhase2(metadata) => metadata.to_string(),
 				EventMetadata::Heartbeat(metadata) => metadata.to_string(),
+				EventMetadata::Flush(metadata) => metadata.to_string(),
 			}
 		)
 	}
