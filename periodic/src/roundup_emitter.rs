@@ -132,29 +132,26 @@ impl<T: JsonRpcClient> RoundupEmitter<T> {
 	}
 
 	async fn bootstrap(&self) {
-		if self
-			.is_selected_relayer(self.get_next_poll_round(self.bootstrap_config.round_offset).await)
-			.await
-		{
-			loop {
-				let next_poll_round =
-					self.get_next_poll_round(self.bootstrap_config.round_offset).await;
+		loop {
+			let next_poll_round =
+				self.get_next_poll_round(self.bootstrap_config.round_offset).await;
 
-				if next_poll_round == self.current_round + 1 {
-					break
-				} else if next_poll_round <= self.current_round {
+			if next_poll_round == self.current_round + 1 {
+				break
+			} else if next_poll_round <= self.current_round {
+				if self.is_selected_relayer(next_poll_round).await {
 					let new_relayers = self.fetch_validator_list(next_poll_round).await;
 					self.request_send_transaction(
 						self.build_transaction(next_poll_round, new_relayers.clone()),
 						VSPPhase1Metadata::new(next_poll_round, new_relayers),
 					);
+				}
 
-					loop {
-						if next_poll_round < self.get_next_poll_round(1).await {
-							break
-						}
-						sleep(Duration::from_millis(self.client.call_interval)).await;
+				loop {
+					if next_poll_round < self.get_next_poll_round(1).await {
+						break
 					}
+					sleep(Duration::from_millis(self.client.call_interval)).await;
 				}
 			}
 		}
