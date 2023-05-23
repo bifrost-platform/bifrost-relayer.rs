@@ -148,7 +148,7 @@ impl<T: JsonRpcClient> RoundupEmitter<T> {
 				}
 
 				loop {
-					if next_poll_round < self.get_next_poll_round(1).await {
+					if next_poll_round < self.get_next_poll_round(self.bootstrap_config.round_offset).await {
 						break
 					}
 					sleep(Duration::from_millis(self.client.call_interval)).await;
