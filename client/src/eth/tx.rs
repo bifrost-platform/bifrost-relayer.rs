@@ -64,7 +64,7 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> {
 		let gas_escalator = GasEscalatorMiddleware::new(
 			client.provider.clone(),
 			geometric_gas_price,
-			Frequency::PerBlock,
+			Frequency::Duration(12000),
 		);
 		// Signs transactions locally, with a private key or a hardware wallet.
 		let signer = SignerMiddleware::new(gas_escalator, client.wallet.signer.clone());
