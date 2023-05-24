@@ -25,6 +25,7 @@ evm_providers:
     call_interval: 6000
     block_confirmations: 1
     is_relay_target: false
+    eip1559: true
     socket_address: "0xeF5260Db045200142a6B5DDB297e860099ffd51d"
     vault_address: "0x7EB02c73349B3De1406e6b433c5bA1a526CBF253"
     authority_address: "0xF51f7e267D2D966f8d3Ff2fea42B410bB14800e1"
@@ -49,16 +50,16 @@ evm_providers:
 
 handler_configs:
   - handler_type: BridgeRelay
-    watch_list: [49088, 5, 97, 80001]
+    watch_list: [ 49088, 5, 97, 80001 ]
   - handler_type: Roundup
-    watch_list: [49088]
+    watch_list: [ 49088 ]
 
 periodic_configs:
   oracle_price_feeder:
     - chain_id: 49088
       schedule: "0 */5 * * * * *" # Every 5th minute.
-      price_sources: [Coingecko]
-      symbols: ["ETH", "BFC", "BNB", "MATIC", "USDC", "BIFI", "USDT"]
+      price_sources: [ Coingecko ]
+      symbols: [ "ETH", "BFC", "BNB", "MATIC", "USDC", "BIFI", "USDT" ]
   roundup_emitter: "*/15 * * * * * *" # Every 15th seconds.
   heartbeat: "0 * * * * * *" # Every minute.
 

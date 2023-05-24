@@ -87,6 +87,8 @@ pub struct EVMProvider {
 	pub is_native: Option<bool>,
 	/// The flag whether it will handle relay transactions to the current chain.
 	pub is_relay_target: bool,
+	/// If true, enables Eip1559
+	pub eip1559: Option<bool>,
 	/// Socket contract address
 	pub socket_address: String,
 	/// Vault contract address

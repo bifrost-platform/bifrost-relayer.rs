@@ -2,7 +2,9 @@ use async_recursion::async_recursion;
 use cccp_primitives::sub_display_format;
 
 use crate::eth::{FlushMetadata, DEFAULT_CALL_RETRIES, DEFAULT_CALL_RETRY_INTERVAL_MS};
-use cccp_primitives::eth::ETHEREUM_BLOCK_TIME;
+use cccp_primitives::eth::{
+	ETHEREUM_BLOCK_TIME, MAX_FEE_TOLERANCE_LIMIT, MAX_PRIORITY_FEE_PER_GAS,
+};
 use ethers::{
 	prelude::{
 		gas_escalator::{Frequency, GasEscalatorMiddleware, GeometricGasPrice},
@@ -11,12 +13,12 @@ use ethers::{
 	providers::{JsonRpcClient, Middleware, Provider},
 	signers::{LocalWallet, Signer},
 	types::{
-		transaction::eip2718::TypedTransaction, Transaction, TransactionReceipt,
-		TransactionRequest, U256,
+		transaction::eip2718::TypedTransaction, Eip1559TransactionRequest, Transaction,
+		TransactionReceipt, TransactionRequest, U256,
 	},
 };
 use rand::Rng;
-use std::{cmp::max, error::Error, sync::Arc};
+use std::{error::Error, sync::Arc};
 use tokio::{
 	sync::mpsc::{self, UnboundedReceiver, UnboundedSender},
 	time::{sleep, Duration},
@@ -40,15 +42,15 @@ pub struct TransactionManager<T> {
 	/// The ethereum client for the connected chain.
 	pub client: Arc<EthClient<T>>,
 	/// The client signs transaction for the connected chain with local nonce manager.
-	pub middleware: TransactionMiddleware<T>,
-	/// The sender connected to the event channel.
-	pub sender: UnboundedSender<EventMessage>,
+	middleware: TransactionMiddleware<T>,
 	/// The receiver connected to the event channel.
-	pub receiver: UnboundedReceiver<EventMessage>,
+	receiver: UnboundedReceiver<EventMessage>,
 	/// The flag whether the client has enabled txpool namespace.
-	pub is_txpool_enabled: bool,
+	is_txpool_enabled: bool,
 	/// The flag whether debug mode is enabled. If enabled, certain errors will be logged.
-	pub debug_mode: bool,
+	debug_mode: bool,
+	/// If true, send transaction with EIP1559
+	eip1559: bool,
 }
 
 impl<T: 'static + JsonRpcClient> TransactionManager<T> {
@@ -56,6 +58,7 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> {
 	pub fn new(
 		client: Arc<EthClient<T>>,
 		debug_mode: bool,
+		eip1559: bool,
 	) -> (Self, UnboundedSender<EventMessage>) {
 		let (sender, receiver) = mpsc::unbounded_channel::<EventMessage>();
 
@@ -74,21 +77,16 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> {
 		let middleware = NonceManagerMiddleware::new(signer, client.wallet.signer.address());
 
 		(
-			Self {
-				client,
-				sender: sender.clone(),
-				middleware,
-				receiver,
-				is_txpool_enabled: false,
-				debug_mode,
-			},
+			Self { client, middleware, receiver, is_txpool_enabled: false, debug_mode, eip1559 },
 			sender,
 		)
 	}
 
 	/// Initialize transaction manager.
 	async fn initialize(&mut self) {
+		// check txpool namespace available
 		self.is_txpool_enabled = self.client.provider.txpool_status().await.is_ok();
+
 		self.flush_stuck_transaction().await;
 	}
 
@@ -344,7 +342,24 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> {
 		// check the txpool for transaction duplication prevention
 		if !(self.is_duplicate_relay(&mut msg.tx_request, msg.check_mempool).await) {
 			// no duplication found
-			match self.middleware.send_transaction(msg.tx_request.clone(), None).await {
+			let result = if self.eip1559 {
+				let base_fee = self.get_gas_price().await.as_u128();
+				let mut tx_request_1559 = Eip1559TransactionRequest::default()
+					.from(msg.tx_request.from.unwrap())
+					.to(msg.tx_request.to.clone().unwrap())
+					.gas(msg.tx_request.gas.unwrap())
+					.data(msg.tx_request.data.clone().unwrap())
+					.value(msg.tx_request.value.unwrap_or_default())
+					.max_fee_per_gas(base_fee + MAX_FEE_TOLERANCE_LIMIT)
+					.max_priority_fee_per_gas(MAX_PRIORITY_FEE_PER_GAS);
+				tx_request_1559.nonce = msg.tx_request.nonce;
+
+				self.middleware.send_transaction(tx_request_1559, None).await
+			} else {
+				self.middleware.send_transaction(msg.tx_request.clone(), None).await
+			};
+
+			match result {
 				Ok(pending_tx) => match pending_tx.await {
 					Ok(receipt) =>
 						if let Some(receipt) = receipt {
@@ -359,16 +374,8 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> {
 				Err(error) => {
 					self.handle_failed_tx_request(msg, &error).await;
 				},
-			};
+			}
 		}
-	}
-
-	async fn get_gas_price_for_retry(&self, previous_gas_price: U256) -> U256 {
-		let current_network_gas_price = self.get_gas_price().await;
-		let escalated_gas_price =
-			U256::from((previous_gas_price.as_u64() as f64 * 1.125).ceil() as u64);
-
-		max(current_network_gas_price, escalated_gas_price)
 	}
 
 	/// Function that query mempool for check if the relay event that this relayer is about to send
@@ -389,7 +396,6 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> {
 		let data = tx_request.data.as_ref().unwrap();
 		let to = tx_request.to.as_ref().unwrap().as_address().unwrap();
 		let from = tx_request.from.as_ref().unwrap();
-		// let gas_price = tx_request.gas_price.unwrap();
 
 		let mempool = self.client.get_txpool_content().await;
 		for (_address, tx_map) in mempool.pending.iter().chain(mempool.queued.iter()) {
