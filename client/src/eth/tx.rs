@@ -2,6 +2,7 @@ use async_recursion::async_recursion;
 use cccp_primitives::sub_display_format;
 
 use crate::eth::{FlushMetadata, DEFAULT_CALL_RETRIES, DEFAULT_CALL_RETRY_INTERVAL_MS};
+use cccp_primitives::eth::ETHEREUM_BLOCK_TIME;
 use ethers::{
 	prelude::{
 		gas_escalator::{Frequency, GasEscalatorMiddleware, GeometricGasPrice},
@@ -60,11 +61,11 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> {
 
 		// Bumps transactions gas price in the background to avoid getting them stuck in the memory
 		// pool.
-		let geometric_gas_price = GeometricGasPrice::new(1.5, 12u64, None::<u64>);
+		let geometric_gas_price = GeometricGasPrice::new(1.5, ETHEREUM_BLOCK_TIME, None::<u64>);
 		let gas_escalator = GasEscalatorMiddleware::new(
 			client.provider.clone(),
 			geometric_gas_price,
-			Frequency::Duration(12000),
+			Frequency::Duration(ETHEREUM_BLOCK_TIME * 1000),
 		);
 		// Signs transactions locally, with a private key or a hardware wallet.
 		let signer = SignerMiddleware::new(gas_escalator, client.wallet.signer.clone());
