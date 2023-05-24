@@ -2,8 +2,10 @@ use ethers::types::{Address, Signature};
 
 pub type ChainID = u32;
 
-/// The native chain's average block time is seconds.
+/// The native chain's average block time in seconds.
 pub const NATIVE_BLOCK_TIME: u32 = 3u32;
+/// Ethereum network's average block time in seconds.
+pub const ETHEREUM_BLOCK_TIME: u64 = 12u64;
 pub const BOOTSTRAP_BLOCK_CHUNK_SIZE: u64 = 2000;
 pub const BOOTSTRAP_BLOCK_OFFSET: u32 = 100;
 
