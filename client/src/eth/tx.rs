@@ -2,6 +2,7 @@ use async_recursion::async_recursion;
 use cccp_primitives::sub_display_format;
 
 use crate::eth::{FlushMetadata, DEFAULT_CALL_RETRIES, DEFAULT_CALL_RETRY_INTERVAL_MS};
+use cccp_primitives::eth::ETHEREUM_BLOCK_TIME;
 use ethers::{
 	prelude::{
 		gas_escalator::{Frequency, GasEscalatorMiddleware, GeometricGasPrice},
@@ -60,11 +61,11 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> {
 
 		// Bumps transactions gas price in the background to avoid getting them stuck in the memory
 		// pool.
-		let geometric_gas_price = GeometricGasPrice::new(1.5, 12u64, None::<u64>);
+		let geometric_gas_price = GeometricGasPrice::new(1.5, ETHEREUM_BLOCK_TIME, None::<u64>);
 		let gas_escalator = GasEscalatorMiddleware::new(
 			client.provider.clone(),
 			geometric_gas_price,
-			Frequency::PerBlock,
+			Frequency::Duration(ETHEREUM_BLOCK_TIME * 1000),
 		);
 		// Signs transactions locally, with a private key or a hardware wallet.
 		let signer = SignerMiddleware::new(gas_escalator, client.wallet.signer.clone());
@@ -121,7 +122,7 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> {
 		TransactionRequest::default()
 			.nonce(transaction.nonce)
 			.from(transaction.from)
-			.gas_price(self.get_gas_price_for_retry(transaction.gas_price.unwrap()).await)
+			.gas_price(transaction.gas_price.unwrap_or_default())
 			.to(transaction.to.unwrap_or_default())
 			.value(transaction.value)
 			.data(transaction.input.clone())
@@ -341,7 +342,9 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> {
 			U256::from((estimated_gas.as_u64() as f64 * GAS_COEFFICIENT).ceil() as u64);
 		msg.tx_request = msg.tx_request.gas(escalated_gas);
 
-		if let Some(_gas_price) = msg.tx_request.gas_price {
+		if let Some(previous_gas_price) = msg.tx_request.gas_price {
+			msg.tx_request =
+				msg.tx_request.gas_price(self.get_gas_price_for_retry(previous_gas_price).await);
 		} else {
 			// set the gas price to be used
 			msg.tx_request = msg.tx_request.gas_price(self.get_gas_price().await);
