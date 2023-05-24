@@ -121,7 +121,7 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> {
 		TransactionRequest::default()
 			.nonce(transaction.nonce)
 			.from(transaction.from)
-			.gas_price(self.get_gas_price_for_retry(transaction.gas_price.unwrap()).await)
+			.gas_price(transaction.gas_price.unwrap_or_default())
 			.to(transaction.to.unwrap_or_default())
 			.value(transaction.value)
 			.data(transaction.input.clone())
@@ -341,7 +341,9 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> {
 			U256::from((estimated_gas.as_u64() as f64 * GAS_COEFFICIENT).ceil() as u64);
 		msg.tx_request = msg.tx_request.gas(escalated_gas);
 
-		if let Some(_gas_price) = msg.tx_request.gas_price {
+		if let Some(previous_gas_price) = msg.tx_request.gas_price {
+			msg.tx_request =
+				msg.tx_request.gas_price(self.get_gas_price_for_retry(previous_gas_price).await);
 		} else {
 			// set the gas price to be used
 			msg.tx_request = msg.tx_request.gas_price(self.get_gas_price().await);
