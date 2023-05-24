@@ -122,7 +122,6 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> {
 		TransactionRequest::default()
 			.nonce(transaction.nonce)
 			.from(transaction.from)
-			.gas_price(transaction.gas_price.unwrap_or_default())
 			.to(transaction.to.unwrap_or_default())
 			.value(transaction.value)
 			.data(transaction.input.clone())
@@ -342,14 +341,6 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> {
 			U256::from((estimated_gas.as_u64() as f64 * GAS_COEFFICIENT).ceil() as u64);
 		msg.tx_request = msg.tx_request.gas(escalated_gas);
 
-		if let Some(previous_gas_price) = msg.tx_request.gas_price {
-			msg.tx_request =
-				msg.tx_request.gas_price(self.get_gas_price_for_retry(previous_gas_price).await);
-		} else {
-			// set the gas price to be used
-			msg.tx_request = msg.tx_request.gas_price(self.get_gas_price().await);
-		}
-
 		// check the txpool for transaction duplication prevention
 		if !(self.is_duplicate_relay(&mut msg.tx_request, msg.check_mempool).await) {
 			// no duplication found
@@ -398,7 +389,7 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> {
 		let data = tx_request.data.as_ref().unwrap();
 		let to = tx_request.to.as_ref().unwrap().as_address().unwrap();
 		let from = tx_request.from.as_ref().unwrap();
-		let gas_price = tx_request.gas_price.unwrap();
+		// let gas_price = tx_request.gas_price.unwrap();
 
 		let mempool = self.client.get_txpool_content().await;
 		for (_address, tx_map) in mempool.pending.iter().chain(mempool.queued.iter()) {
@@ -406,9 +397,6 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> {
 				if mempool_tx.to.unwrap_or_default() == *to && mempool_tx.input == *data {
 					// Trying gas escalating is not duplicate action
 					if mempool_tx.from == *from {
-						tx_request.gas_price =
-							Option::from(self.get_gas_price_for_retry(gas_price).await);
-
 						return false
 					}
 					return true
