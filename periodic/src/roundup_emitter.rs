@@ -132,13 +132,15 @@ impl<T: JsonRpcClient> RoundupEmitter<T> {
 	}
 
 	async fn bootstrap(&self) {
-		loop {
-			let next_poll_round =
-				self.get_next_poll_round(self.bootstrap_config.round_offset).await;
+		let mut next_poll_round =
+			self.get_next_poll_round(self.bootstrap_config.round_offset).await;
 
+		loop {
 			if next_poll_round == self.current_round + 1 {
+				// If RoundUp reached to latest round, escape loop
 				break
 			} else if next_poll_round <= self.current_round {
+				// If RoundUp not reached to latest round, process round_control_poll
 				if self.is_selected_relayer(next_poll_round).await {
 					let new_relayers = self.fetch_validator_list(next_poll_round).await;
 					self.request_send_transaction(
@@ -147,8 +149,13 @@ impl<T: JsonRpcClient> RoundupEmitter<T> {
 					);
 				}
 
+				// Wait for RoundUp event's status changes via RoundUpSubmit right before
 				loop {
-					if next_poll_round < self.get_next_poll_round(self.bootstrap_config.round_offset).await {
+					let new_next_poll_round =
+						self.get_next_poll_round(self.bootstrap_config.round_offset).await;
+
+					if next_poll_round < new_next_poll_round {
+						next_poll_round = new_next_poll_round;
 						break
 					}
 					sleep(Duration::from_millis(self.client.call_interval)).await;
@@ -166,6 +173,7 @@ impl<T: JsonRpcClient> RoundupEmitter<T> {
 		}
 	}
 
+	/// Returns round of round_control_poll that this relayer should submit.
 	async fn get_next_poll_round(&self, offset: u32) -> U256 {
 		let bootstrap_offset_height =
 			self.get_bootstrap_offset_height_based_on_block_time(offset).await;
