@@ -1,4 +1,4 @@
-use cccp_primitives::sub_display_format;
+use cccp_primitives::{sub_display_format, INVALID_CHAIN_SPECIFICATION};
 use chrono::{Datelike, Local};
 use clap::{CommandFactory, FromArgMatches, Parser};
 
@@ -108,6 +108,20 @@ impl Cli {
 		2023
 	}
 
+	/// Chain spec factory
+	pub fn load_spec(&self) -> &str {
+		let mut spec = TESTNET_CONFIG_FILE_PATH;
+		if let Some(chain) = &self.chain {
+			match chain.as_str() {
+				"dev" => spec = TESTNET_CONFIG_FILE_PATH,
+				"testnet" => spec = TESTNET_CONFIG_FILE_PATH,
+				"mainnet" => spec = MAINNET_CONFIG_FILE_PATH,
+				_ => panic!("{}", INVALID_CHAIN_SPECIFICATION),
+			}
+		}
+		spec
+	}
+
 	/// Log information about the relayer itself.
 	pub fn print_relayer_infos(&self) {
 		let target = LOG_TARGET;
@@ -133,3 +147,6 @@ impl Cli {
 
 pub const LOG_TARGET: &str = "cccp-relayer";
 pub const SUB_LOG_TARGET: &str = "main";
+
+const TESTNET_CONFIG_FILE_PATH: &str = "config.testnet.yaml";
+const MAINNET_CONFIG_FILE_PATH: &str = "config.mainnet.yaml";
