@@ -54,7 +54,7 @@ fn main() {
 
 	cli.print_relayer_infos();
 
-	let runner = Runner::new(configuration, tokio_runtime).unwrap();
+	let runner = Runner::new(configuration, tokio_runtime, cli.chain.clone()).unwrap();
 	runner
 		.run_relayer_until_exit(|config| async move {
 			service::relay(config).map_err(sc_cli::Error::Service)
