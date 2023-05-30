@@ -4,7 +4,7 @@ use cccp_primitives::{
 };
 use ethers::{
 	providers::JsonRpcClient,
-	types::{Block, SyncingStatus, TransactionReceipt, H160, H256, U64},
+	types::{SyncingStatus, TransactionReceipt, H160, H256, U64},
 };
 use std::sync::Arc;
 use tokio::{
@@ -22,14 +22,19 @@ use super::EthClient;
 /// The message format passed through the block channel.
 pub struct BlockMessage {
 	/// The information of the processed block.
-	pub raw_block: Block<H256>,
+	pub block_number: U64,
+	pub block_hash: H256,
 	/// The transaction receipts from the target contracts.
 	pub target_receipts: Vec<TransactionReceipt>,
 }
 
 impl BlockMessage {
-	pub fn new(raw_block: Block<H256>, target_receipts: Vec<TransactionReceipt>) -> Self {
-		Self { raw_block, target_receipts }
+	pub fn new(
+		block_number: U64,
+		block_hash: H256,
+		target_receipts: Vec<TransactionReceipt>,
+	) -> Self {
+		Self { block_number, block_hash, target_receipts }
 	}
 }
 
@@ -111,7 +116,7 @@ impl<T: JsonRpcClient> BlockManager<T> {
 				.all(|s| *s == BootstrapState::NormalStart)
 			{
 				let latest_block = self.client.get_latest_block_number().await;
-				if self.is_block_confirmed(latest_block) {
+				while self.is_block_confirmed(latest_block) {
 					self.process_pending_block().await;
 					self.increment_pending_block();
 				}
@@ -123,19 +128,25 @@ impl<T: JsonRpcClient> BlockManager<T> {
 
 	/// Process the pending block and verifies if any action occurred from the target contracts.
 	async fn process_pending_block(&self) {
-		if let Some(block) = self.client.get_block(self.pending_block.into()).await {
+		if let Some(block) = self.client.get_block_with_txs(self.pending_block.into()).await {
 			let mut target_receipts = vec![];
 			let mut stream = tokio_stream::iter(block.clone().transactions);
 
 			while let Some(tx) = stream.next().await {
-				if let Some(receipt) = self.client.get_transaction_receipt(tx).await {
-					if self.is_in_target_contracts(&receipt) {
+				if self.is_in_target_contracts(tx.to) {
+					if let Some(receipt) = self.client.get_transaction_receipt(tx.hash).await {
 						target_receipts.push(receipt);
 					}
 				}
 			}
 			if !target_receipts.is_empty() {
-				self.sender.send(BlockMessage::new(block.clone(), target_receipts)).unwrap();
+				self.sender
+					.send(BlockMessage::new(
+						block.number.unwrap(),
+						block.hash.unwrap(),
+						target_receipts,
+					))
+					.unwrap();
 			}
 
 			log::info!(
@@ -154,8 +165,8 @@ impl<T: JsonRpcClient> BlockManager<T> {
 	}
 
 	/// Verifies if the transaction was occurred from the target contracts.
-	fn is_in_target_contracts(&self, receipt: &TransactionReceipt) -> bool {
-		if let Some(to) = receipt.to {
+	fn is_in_target_contracts(&self, to: Option<H160>) -> bool {
+		if let Some(to) = to {
 			return self.target_contracts.iter().any(|c| *c == to)
 		}
 		false
