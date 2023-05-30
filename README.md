@@ -13,7 +13,7 @@ Learn to use the Bifrost network with our [technical docs](https://docs.bifrostn
 ### Bifrost Network Testnet (ChainID: 49088)
 
 | Public Endpoints (rpc/ws)                        |
-|--------------------------------------------------|
+| ------------------------------------------------ |
 | https://public-01.testnet.bifrostnetwork.com/rpc |
 | https://public-02.testnet.bifrostnetwork.com/rpc |
 | wss://public-01.testnet.bifrostnetwork.com/wss   |
@@ -22,7 +22,7 @@ Learn to use the Bifrost network with our [technical docs](https://docs.bifrostn
 ### Bifrost Network Mainnet (ChainID: 3068)
 
 | Public Endpoints (rpc/ws)                        |
-|--------------------------------------------------|
+| ------------------------------------------------ |
 | https://public-01.mainnet.bifrostnetwork.com/rpc |
 | https://public-02.mainnet.bifrostnetwork.com/rpc |
 | wss://public-01.mainnet.bifrostnetwork.com/wss   |
