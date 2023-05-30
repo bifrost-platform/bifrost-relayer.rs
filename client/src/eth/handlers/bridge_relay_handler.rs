@@ -121,8 +121,8 @@ impl<T: JsonRpcClient> Handler for BridgeRelayHandler<T> {
 					target: &self.client.get_chain_name(),
 					"-[{}] 📦 Imported #{:?} ({}) with target transactions({:?})",
 					sub_display_format(SUB_LOG_TARGET),
-					block_msg.raw_block.number.unwrap(),
-					block_msg.raw_block.hash.unwrap(),
+					block_msg.block_number,
+					block_msg.block_hash,
 					block_msg.target_receipts.len(),
 				);
 
