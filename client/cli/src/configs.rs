@@ -8,7 +8,7 @@ pub fn create_configuration(
 	tokio_handle: tokio::runtime::Handle,
 	chain: Option<String>,
 ) -> CliResult<Configuration> {
-	let mut config_path = "";
+	let mut config_path = "config.testnet.yaml";
 	if let Some(chain) = chain {
 		match chain.as_str() {
 			"dev" => config_path = "config.testnet.yaml",
