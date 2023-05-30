@@ -124,23 +124,31 @@ impl Cli {
 
 	/// Log information about the relayer itself.
 	pub fn print_relayer_infos(&self) {
-		let target = LOG_TARGET;
-		let sub_target = SUB_LOG_TARGET;
-
-		log::info!(target: target, "-[{}] {}", sub_display_format(sub_target), Self::impl_name());
 		log::info!(
-			target: target,
+			target: LOG_TARGET,
+			"-[{}] {}",
+			sub_display_format(SUB_LOG_TARGET),
+			Self::impl_name()
+		);
+		log::info!(
+			target: LOG_TARGET,
 			"-[{}] ✌️  version {}",
-			sub_display_format(sub_target),
+			sub_display_format(SUB_LOG_TARGET),
 			Self::impl_version()
 		);
 		log::info!(
-			target: target,
+			target: LOG_TARGET,
 			"-[{}] ❤️  by {}, {}-{}",
-			sub_display_format(sub_target),
+			sub_display_format(SUB_LOG_TARGET),
 			Self::author(),
 			Self::copyright_start_year(),
 			Local::now().year()
+		);
+		log::info!(
+			target: LOG_TARGET,
+			"-[{}] ⛓  Chain specification: {}",
+			sub_display_format(SUB_LOG_TARGET),
+			self.chain.clone().unwrap_or("dev".into())
 		);
 	}
 }
