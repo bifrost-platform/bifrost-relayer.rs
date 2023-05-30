@@ -1,4 +1,4 @@
-use cccp_primitives::{sub_display_format, INVALID_CHAIN_SPECIFICATION};
+use cccp_primitives::sub_display_format;
 use chrono::{Datelike, Local};
 use clap::{CommandFactory, FromArgMatches, Parser};
 
@@ -116,7 +116,7 @@ impl Cli {
 				"dev" => spec = TESTNET_CONFIG_FILE_PATH,
 				"testnet" => spec = TESTNET_CONFIG_FILE_PATH,
 				"mainnet" => spec = MAINNET_CONFIG_FILE_PATH,
-				_ => panic!("{}", INVALID_CHAIN_SPECIFICATION),
+				path => spec = path,
 			}
 		}
 		spec
@@ -156,5 +156,5 @@ impl Cli {
 pub const LOG_TARGET: &str = "cccp-relayer";
 pub const SUB_LOG_TARGET: &str = "main";
 
-const TESTNET_CONFIG_FILE_PATH: &str = "config.testnet.yaml";
-const MAINNET_CONFIG_FILE_PATH: &str = "config.mainnet.yaml";
+const TESTNET_CONFIG_FILE_PATH: &str = "configs/config.testnet.yaml";
+const MAINNET_CONFIG_FILE_PATH: &str = "configs/config.mainnet.yaml";
