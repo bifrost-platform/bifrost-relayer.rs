@@ -202,6 +202,11 @@ impl<T: JsonRpcClient> EthClient<T> {
 	}
 
 	/// Retrieves the block information of the given block hash.
+	pub async fn get_block_with_txs(&self, id: BlockId) -> Option<Block<Transaction>> {
+		self.rpc_call("eth_getBlockByNumber", (id, true)).await
+	}
+
+	/// Retrieves the block information of the given block hash.
 	pub async fn get_block(&self, id: BlockId) -> Option<Block<H256>> {
 		self.rpc_call("eth_getBlockByNumber", (id, false)).await
 	}
