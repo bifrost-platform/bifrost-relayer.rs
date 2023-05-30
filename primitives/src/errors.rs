@@ -24,3 +24,6 @@ pub const INVALID_CONFIG_FILE_PATH: &str =
 
 pub const INVALID_CONFIG_FILE_STRUCTURE: &str =
 	"Invalid config.yaml file structure provided. Please check your file structure.";
+
+pub const INVALID_CHAIN_SPECIFICATION: &str =
+	"Invalid --chain specification provided. Please check your CLI options.";
