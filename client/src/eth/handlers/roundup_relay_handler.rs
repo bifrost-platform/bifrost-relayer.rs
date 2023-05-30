@@ -1,5 +1,6 @@
 use crate::eth::{
-	BlockMessage, EthClient, EventMessage, EventMetadata, EventSender, Handler, VSPPhase2Metadata,
+	BlockMessage, EthClient, EventMessage, EventMetadata, EventSender, Handler, TxRequest,
+	VSPPhase2Metadata,
 };
 use async_trait::async_trait;
 use cccp_primitives::{
@@ -313,7 +314,7 @@ impl<T: JsonRpcClient> RoundupRelayHandler<T> {
 				if let Some(event_sender) = self.event_senders.get(&target_client.get_chain_id()) {
 					event_sender
 						.send(EventMessage::new(
-							transaction_request,
+							TxRequest::Legacy(transaction_request),
 							EventMetadata::VSPPhase2(VSPPhase2Metadata::new(
 								roundup_submit.round,
 								target_client.get_chain_id(),

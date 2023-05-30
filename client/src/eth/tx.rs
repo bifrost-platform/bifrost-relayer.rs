@@ -1,10 +1,8 @@
 use async_recursion::async_recursion;
 use cccp_primitives::sub_display_format;
 
-use crate::eth::{FlushMetadata, DEFAULT_CALL_RETRIES, DEFAULT_CALL_RETRY_INTERVAL_MS};
-use cccp_primitives::eth::{
-	ETHEREUM_BLOCK_TIME, MAX_FEE_TOLERANCE_LIMIT, MAX_PRIORITY_FEE_PER_GAS,
-};
+use crate::eth::{FlushMetadata, TxRequest, DEFAULT_CALL_RETRIES, DEFAULT_CALL_RETRY_INTERVAL_MS};
+use cccp_primitives::eth::ETHEREUM_BLOCK_TIME;
 use ethers::{
 	prelude::{
 		gas_escalator::{Frequency, GasEscalatorMiddleware, GeometricGasPrice},
@@ -13,12 +11,12 @@ use ethers::{
 	providers::{JsonRpcClient, Middleware, Provider},
 	signers::{LocalWallet, Signer},
 	types::{
-		transaction::eip2718::TypedTransaction, Eip1559TransactionRequest, Transaction,
-		TransactionReceipt, TransactionRequest, U256,
+		BlockNumber, Eip1559TransactionRequest, Transaction, TransactionReceipt,
+		TransactionRequest, U256,
 	},
 };
 use rand::Rng;
-use std::{error::Error, sync::Arc};
+use std::{cmp::max, error::Error, sync::Arc};
 use tokio::{
 	sync::mpsc::{self, UnboundedReceiver, UnboundedSender},
 	time::{sleep, Duration},
@@ -26,15 +24,14 @@ use tokio::{
 
 use super::{EthClient, EventMessage, EventMetadata, DEFAULT_TX_RETRIES, GAS_COEFFICIENT};
 
-type TransactionMiddleware<T> =
+pub type TransactionMiddleware<T> =
 	NonceManagerMiddleware<SignerMiddleware<GasEscalatorMiddleware<Arc<Provider<T>>>, LocalWallet>>;
 
 const SUB_LOG_TARGET: &str = "transaction-manager";
 
-/// Generates a random delay that is ranged as 0 to 12 seconds (in milliseconds).
+/// Generates a random delay that is ranged as 0 to 12000 milliseconds (in milliseconds).
 fn generate_delay() -> u64 {
-	let delay: u64 = rand::thread_rng().gen_range(0..=12);
-	delay.saturating_mul(1_000)
+	rand::thread_rng().gen_range(0..=12000)
 }
 
 /// The essential task that sends asynchronous transactions.
@@ -116,13 +113,30 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> {
 	pub async fn stuck_transaction_to_transaction_request(
 		&self,
 		transaction: &Transaction,
-	) -> TransactionRequest {
-		TransactionRequest::default()
-			.nonce(transaction.nonce)
-			.from(transaction.from)
-			.to(transaction.to.unwrap_or_default())
-			.value(transaction.value)
-			.data(transaction.input.clone())
+	) -> TxRequest {
+		match self.eip1559 {
+			true => {
+				let request: Eip1559TransactionRequest = transaction.into();
+				let new_max_fee_per_gas =
+					self.get_gas_price_for_retry(request.max_fee_per_gas.unwrap()).await;
+				let new_priority_fee = U256::from(
+					(request.max_priority_fee_per_gas.unwrap().as_u64() as f64 * 1.125).ceil()
+						as u64,
+				);
+
+				TxRequest::Eip1559(
+					request
+						.max_fee_per_gas(new_max_fee_per_gas)
+						.max_priority_fee_per_gas(new_priority_fee),
+				)
+			},
+			false => {
+				let request: TransactionRequest = transaction.into();
+				let new_gas_price = self.get_gas_price_for_retry(request.gas_price.unwrap()).await;
+
+				TxRequest::Legacy(request.gas_price(new_gas_price))
+			},
+		}
 	}
 
 	/// Starts the transaction manager. Listens to every new consumed event message.
@@ -141,7 +155,7 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> {
 		}
 	}
 
-	/// Sends the transaction request to the event channel to retry transaction execution.
+	/// Retry send_transaction() for failed transaction execution.
 	#[async_recursion]
 	async fn retry_transaction(&self, mut msg: EventMessage) {
 		msg.build_retry_event();
@@ -257,12 +271,22 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> {
 		self.retry_transaction(msg).await;
 	}
 
-	/// Get current network's gas price
+	/// Get current network's gas price (If eip1559 flag is true, returns pending block's base fee)
 	async fn get_gas_price(&self) -> U256 {
-		match self.middleware.get_gas_price().await {
-			Ok(gas_price) => gas_price,
-			Err(error) =>
-				self.handle_failed_get_gas_price(DEFAULT_CALL_RETRIES, error.to_string()).await,
+		match self.eip1559 {
+			true => self
+				.middleware
+				.get_block(BlockNumber::Pending)
+				.await
+				.unwrap()
+				.unwrap()
+				.base_fee_per_gas
+				.unwrap(),
+			false => match self.middleware.get_gas_price().await {
+				Ok(gas_price) => gas_price,
+				Err(error) =>
+					self.handle_failed_get_gas_price(DEFAULT_CALL_RETRIES, error.to_string()).await,
+			},
 		}
 	}
 
@@ -311,8 +335,17 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> {
 		);
 	}
 
-	/// Sends the consumed transaction request to the connected chain. The transaction request will
-	/// be re-published to the event channel if the transaction fails to be mined in a block.
+	async fn get_gas_price_for_retry(&self, previous_gas_price: U256) -> U256 {
+		let previous_gas_price = previous_gas_price.as_u64() as f64;
+
+		let current_network_gas_price = self.get_gas_price().await;
+		let escalated_gas_price = U256::from((previous_gas_price * 1.125).ceil() as u64);
+
+		max(current_network_gas_price, escalated_gas_price)
+	}
+
+	/// Sends the consumed transaction request to the connected chain. The transaction send will
+	/// be retry if the transaction fails to be mined in a block.
 	async fn try_send_transaction(&self, mut msg: EventMessage) {
 		if msg.retries_remaining == 0 {
 			return
@@ -327,36 +360,28 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> {
 		msg.tx_request = msg.tx_request.from(self.client.address());
 
 		// estimate the gas amount to be used
-		let estimated_gas = match self
-			.middleware
-			.estimate_gas(&TypedTransaction::Legacy(msg.tx_request.clone()), None)
-			.await
-		{
-			Ok(estimated_gas) => estimated_gas,
-			Err(error) => return self.handle_failed_gas_estimation(msg, &error).await,
-		};
-		let escalated_gas =
-			U256::from((estimated_gas.as_u64() as f64 * GAS_COEFFICIENT).ceil() as u64);
-		msg.tx_request = msg.tx_request.gas(escalated_gas);
+		let estimated_gas =
+			match self.middleware.estimate_gas(&msg.tx_request.to_typed(), None).await {
+				Ok(estimated_gas) =>
+					U256::from((estimated_gas.as_u64() as f64 * GAS_COEFFICIENT).ceil() as u64),
+				Err(error) => return self.handle_failed_gas_estimation(msg, &error).await,
+			};
+		msg.tx_request = msg.tx_request.gas(estimated_gas);
 
 		// check the txpool for transaction duplication prevention
 		if !(self.is_duplicate_relay(&mut msg.tx_request, msg.check_mempool).await) {
 			// no duplication found
 			let result = if self.eip1559 {
-				let base_fee = self.get_gas_price().await.as_u128();
-				let mut tx_request_1559 = Eip1559TransactionRequest::default()
-					.from(msg.tx_request.from.unwrap())
-					.to(msg.tx_request.to.clone().unwrap())
-					.gas(msg.tx_request.gas.unwrap())
-					.data(msg.tx_request.data.clone().unwrap())
-					.value(msg.tx_request.value.unwrap_or_default())
-					.max_fee_per_gas(base_fee + MAX_FEE_TOLERANCE_LIMIT)
-					.max_priority_fee_per_gas(MAX_PRIORITY_FEE_PER_GAS);
-				tx_request_1559.nonce = msg.tx_request.nonce;
-
-				self.middleware.send_transaction(tx_request_1559, None).await
+				self.middleware
+					.send_transaction(
+						msg.tx_request.to_eip1559(
+							self.middleware.estimate_eip1559_fees(None).await.unwrap().0,
+						),
+						None,
+					)
+					.await
 			} else {
-				self.middleware.send_transaction(msg.tx_request.clone(), None).await
+				self.middleware.send_transaction(msg.tx_request.to_legacy(), None).await
 			};
 
 			match result {
@@ -380,11 +405,7 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> {
 
 	/// Function that query mempool for check if the relay event that this relayer is about to send
 	/// has already been processed by another relayer.
-	async fn is_duplicate_relay(
-		&self,
-		tx_request: &mut TransactionRequest,
-		check_mempool: bool,
-	) -> bool {
+	async fn is_duplicate_relay(&self, tx_request: &TxRequest, check_mempool: bool) -> bool {
 		// does not check the txpool if the following condition satisfies
 		// 1. the txpool namespace is disabled for the client
 		// 2. the txpool check flag is false
@@ -393,9 +414,18 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> {
 			return false
 		}
 
-		let data = tx_request.data.as_ref().unwrap();
-		let to = tx_request.to.as_ref().unwrap().as_address().unwrap();
-		let from = tx_request.from.as_ref().unwrap();
+		let (data, to, from) = match tx_request {
+			TxRequest::Legacy(request) => (
+				request.data.as_ref().unwrap(),
+				request.to.as_ref().unwrap().as_address().unwrap(),
+				request.from.as_ref().unwrap(),
+			),
+			TxRequest::Eip1559(request) => (
+				request.data.as_ref().unwrap(),
+				request.to.as_ref().unwrap().as_address().unwrap(),
+				request.from.as_ref().unwrap(),
+			),
+		};
 
 		let mempool = self.client.get_txpool_content().await;
 		for (_address, tx_map) in mempool.pending.iter().chain(mempool.queued.iter()) {

@@ -1,7 +1,10 @@
 use cccp_primitives::{eth::SocketEventStatus, PriceResponse};
 
-use cccp_primitives::eth::ChainID;
-use ethers::types::{Address, TransactionRequest, U256};
+use cccp_primitives::eth::{ChainID, MAX_PRIORITY_FEE_PER_GAS};
+use ethers::types::{
+	transaction::eip2718::TypedTransaction, Address, Eip1559TransactionRequest, TransactionRequest,
+	U256,
+};
 use std::fmt::{Display, Formatter};
 use tokio::sync::mpsc::{error::SendError, UnboundedSender};
 
@@ -189,6 +192,71 @@ impl Display for EventMetadata {
 }
 
 #[derive(Clone, Debug)]
+pub enum TxRequest {
+	Legacy(TransactionRequest),
+	Eip1559(Eip1559TransactionRequest),
+}
+
+impl TxRequest {
+	pub fn from(&self, address: Address) -> Self {
+		match self {
+			TxRequest::Legacy(tx_request) => TxRequest::Legacy(tx_request.clone().from(address)),
+			TxRequest::Eip1559(tx_request) => TxRequest::Eip1559(tx_request.clone().from(address)),
+		}
+	}
+
+	pub fn gas(&self, estimated_gas: U256) -> Self {
+		match self {
+			TxRequest::Legacy(tx_request) =>
+				TxRequest::Legacy(tx_request.clone().gas(estimated_gas)),
+			TxRequest::Eip1559(tx_request) =>
+				TxRequest::Eip1559(tx_request.clone().gas(estimated_gas)),
+		}
+	}
+
+	pub fn to_eip1559(&self, max_fee_per_gas: U256) -> Eip1559TransactionRequest {
+		match self {
+			TxRequest::Legacy(tx_request) => {
+				let mut ret = Eip1559TransactionRequest::default();
+				ret.from = tx_request.from;
+				ret.to = tx_request.to.clone();
+				ret.value = tx_request.value;
+				ret.nonce = tx_request.nonce;
+				ret.data = tx_request.data.clone();
+				ret.gas = tx_request.gas;
+				ret = ret.max_fee_per_gas(max_fee_per_gas);
+				ret = ret.max_priority_fee_per_gas(MAX_PRIORITY_FEE_PER_GAS);
+				return ret
+			},
+			TxRequest::Eip1559(tx_request) => tx_request.clone(),
+		}
+	}
+
+	pub fn to_legacy(&self) -> TransactionRequest {
+		match self {
+			TxRequest::Legacy(tx_request) => tx_request.clone(),
+			TxRequest::Eip1559(tx_request) => {
+				let mut ret = TransactionRequest::default();
+				ret.from = tx_request.from;
+				ret.to = tx_request.to.clone();
+				ret.value = tx_request.value;
+				ret.nonce = tx_request.nonce;
+				ret.data = tx_request.data.clone();
+				ret.gas = tx_request.gas;
+				return ret
+			},
+		}
+	}
+
+	pub fn to_typed(&self) -> TypedTransaction {
+		match self {
+			TxRequest::Legacy(tx_request) => TypedTransaction::Legacy(tx_request.clone()),
+			TxRequest::Eip1559(tx_request) => TypedTransaction::Eip1559(tx_request.clone()),
+		}
+	}
+}
+
+#[derive(Clone, Debug)]
 /// The message format passed through the event channel.
 pub struct EventMessage {
 	/// The remaining retries of the transaction request.
@@ -196,7 +264,7 @@ pub struct EventMessage {
 	/// The retry interval in milliseconds.
 	pub retry_interval: u64,
 	/// The raw transaction request.
-	pub tx_request: TransactionRequest,
+	pub tx_request: TxRequest,
 	/// Additional data of the transaction request.
 	pub metadata: EventMetadata,
 	/// Check mempool to prevent duplicate relay.
@@ -208,7 +276,7 @@ pub struct EventMessage {
 impl EventMessage {
 	/// Instantiates a new `EventMessage` instance.
 	pub fn new(
-		tx_request: TransactionRequest,
+		tx_request: TxRequest,
 		metadata: EventMetadata,
 		check_mempool: bool,
 		give_random_delay: bool,

@@ -1,4 +1,6 @@
-use cccp_client::eth::{EthClient, EventMessage, EventMetadata, EventSender, HeartbeatMetadata};
+use cccp_client::eth::{
+	EthClient, EventMessage, EventMetadata, EventSender, HeartbeatMetadata, TxRequest,
+};
 use cccp_primitives::{
 	errors::{INVALID_BIFROST_NATIVENESS, INVALID_PERIODIC_SCHEDULE},
 	sub_display_format, PeriodicWorker,
@@ -103,7 +105,7 @@ impl<T: JsonRpcClient> HeartbeatSender<T> {
 		metadata: HeartbeatMetadata,
 	) {
 		match self.event_sender.send(EventMessage::new(
-			tx_request,
+			TxRequest::Legacy(tx_request),
 			EventMetadata::Heartbeat(metadata.clone()),
 			false,
 			false,
