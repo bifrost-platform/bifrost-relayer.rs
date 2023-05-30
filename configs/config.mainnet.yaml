@@ -1,0 +1,70 @@
+system:
+  private_key: ""
+  debug_mode: false
+
+bitcoin:
+  provider: ""
+  username: ""
+  password: ""
+
+evm_providers:
+  - name: "bifrost"
+    id: 3068
+    provider: ""
+    call_interval: 1500
+    block_confirmations: 5
+    is_native: true
+    is_relay_target: true
+    socket_address: "0xd551F33Ca8eCb0Be83d8799D9C68a368BA36Dd52"
+    vault_address: "0xD85EB87caB9041ad00764b95796702b1104F42D7"
+    authority_address: "0x0000000000000000000000000000000000000400"
+    relayer_manager_address: "0x0000000000000000000000000000000000002000"
+  - name: "ethereum"
+    id: 1
+    provider: ""
+    call_interval: 6000
+    block_confirmations: 1
+    is_relay_target: false
+    socket_address: "0x4A31FfeAc276CC5e508cAC0568d932d398C4DD84"
+    vault_address: "0x2F95C102Cc26875406BC689Fb01aE382B82AA535"
+    authority_address: "0xAdcaa90cabDc730855064d5b0f5242c16A9B7E10"
+  - name: "bsc"
+    id: 56
+    provider: ""
+    call_interval: 1500
+    block_confirmations: 5
+    is_relay_target: false
+    socket_address: "0xb5Fa48E8B9b89760a9f9176388D1B64A8D4968dF"
+    vault_address: "0x78ae4c0FD4f02CA79A2d8738d3369A4Bc5D4E323"
+    authority_address: "0xF0500d77d5446665314722b963ab1F71872063E9"
+  - name: "polygon"
+    id: 137
+    provider: ""
+    call_interval: 1000
+    block_confirmations: 7
+    is_relay_target: false
+    socket_address: "0x050606CC2Bcd9504991Be2c309D6c6c832Bb5bd0"
+    vault_address: "0x5fA7fe5F94f2D15585a3134C1C5d3019c8c1645d"
+    authority_address: "0x7F48909fBd1E38f1e05B5E326A44175fc2462B13"
+
+handler_configs:
+  - handler_type: BridgeRelay
+    watch_list: [3068, 1, 56, 137]
+  - handler_type: Roundup
+    watch_list: [3068]
+
+periodic_configs:
+  oracle_price_feeder:
+    - chain_id: 3068
+      schedule: "0 */5 * * * * *" # Every 5th minute.
+      price_sources: [Coingecko]
+      symbols: ["ETH", "BFC", "BNB", "MATIC", "USDC", "BIFI", "USDT"]
+  roundup_emitter: "*/15 * * * * * *" # Every 15th seconds.
+  heartbeat: "0 * * * * * *" # Every minute.
+
+sentry_config:
+  dsn: ""
+
+bootstrap_config:
+  is_enabled: true
+  round_offset: 6

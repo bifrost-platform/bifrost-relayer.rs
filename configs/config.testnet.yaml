@@ -1,0 +1,70 @@
+system:
+  private_key: ""
+  debug_mode: false
+
+bitcoin:
+  provider: ""
+  username: ""
+  password: ""
+
+evm_providers:
+  - name: "bifrost"
+    id: 49088
+    provider: ""
+    call_interval: 1500
+    block_confirmations: 5
+    is_native: true
+    is_relay_target: true
+    socket_address: "0x0218371b18340aBD460961bdF3Bd5F01858dAB53"
+    vault_address: "0x90381bB369D4F8069fdA9246b23637a78c5d1c83"
+    authority_address: "0x0000000000000000000000000000000000000400"
+    relayer_manager_address: "0x0000000000000000000000000000000000002000"
+  - name: "goerli"
+    id: 5
+    provider: ""
+    call_interval: 6000
+    block_confirmations: 1
+    is_relay_target: false
+    socket_address: "0xeF5260Db045200142a6B5DDB297e860099ffd51d"
+    vault_address: "0x7EB02c73349B3De1406e6b433c5bA1a526CBF253"
+    authority_address: "0xF51f7e267D2D966f8d3Ff2fea42B410bB14800e1"
+  - name: "bsc"
+    id: 97
+    provider: ""
+    call_interval: 1500
+    block_confirmations: 5
+    is_relay_target: false
+    socket_address: "0x8039c3AD8ED55509fD3f6Daa78867923fDe6E61c"
+    vault_address: "0x27C66cb5caa07C9B332939c357c789C606f5054C"
+    authority_address: "0xCf9f6428A309b6652a1dfaA4d8aB8B61C9c7E8CF"
+  - name: "mumbai"
+    id: 80001
+    provider: ""
+    call_interval: 1000
+    block_confirmations: 7
+    is_relay_target: false
+    socket_address: "0xA25357F3C313Bd13885678f935178211f0dF6722"
+    vault_address: "0xB2ba0020560cF6c164DC48D1E29559AbA8472208"
+    authority_address: "0x2FD5232fDFa6e1c127e7821CC48108Ca79281a38"
+
+handler_configs:
+  - handler_type: BridgeRelay
+    watch_list: [49088, 5, 97, 80001]
+  - handler_type: Roundup
+    watch_list: [49088]
+
+periodic_configs:
+  oracle_price_feeder:
+    - chain_id: 49088
+      schedule: "0 */5 * * * * *" # Every 5th minute.
+      price_sources: [Coingecko]
+      symbols: ["ETH", "BFC", "BNB", "MATIC", "USDC", "BIFI", "USDT"]
+  roundup_emitter: "*/15 * * * * * *" # Every 15th seconds.
+  heartbeat: "0 * * * * * *" # Every minute.
+
+sentry_config:
+  dsn: ""
+
+bootstrap_config:
+  is_enabled: true
+  round_offset: 6

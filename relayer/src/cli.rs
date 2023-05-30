@@ -3,7 +3,13 @@ use chrono::{Datelike, Local};
 use clap::{CommandFactory, FromArgMatches, Parser};
 
 #[derive(Debug, Parser)]
-pub struct Cli {}
+pub struct Cli {
+	/// Specify the chain specification.
+	///
+	/// It can be one of the predefined ones (dev, testnet or mainnet).
+	#[arg(long, value_name = "CHAIN_SPEC")]
+	pub chain: Option<String>,
+}
 
 impl Cli {
 	/// Helper function used to parse the command line arguments. This is the equivalent of
