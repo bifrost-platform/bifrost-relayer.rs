@@ -1,5 +1,7 @@
 # ![BIFROST Network](media/bifrost_header.jpeg)
 
+### Designed to be the successor of https://github.com/bifrost-platform/bifrost-relayer.
+
 The BIFROST Network is a fast and scalable EVM-compatible blockchain that
 provides an all-in-one environment for developers to build multichain DApps.
 
