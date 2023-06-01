@@ -110,6 +110,7 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> {
 		}
 	}
 
+	/// Converts stuck transaction to `TxRequest(TransactionRequest | Eip1559TransactionRequest)`
 	pub async fn stuck_transaction_to_transaction_request(
 		&self,
 		transaction: &Transaction,
@@ -335,6 +336,8 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> {
 		);
 	}
 
+	/// Get gas_price for retry transaction request.
+	/// returns `max(current_network_gas_price,escalated_gas_price)`
 	async fn get_gas_price_for_retry(&self, previous_gas_price: U256) -> U256 {
 		let previous_gas_price = previous_gas_price.as_u64() as f64;
 

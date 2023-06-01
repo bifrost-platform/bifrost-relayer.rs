@@ -191,6 +191,8 @@ impl Display for EventMetadata {
 	}
 }
 
+/// Wrapper for TransactionRequest|Eip1559TransactionRequest to support both fee payment in one
+/// relayer
 #[derive(Clone, Debug)]
 pub enum TxRequest {
 	Legacy(TransactionRequest),
@@ -198,6 +200,7 @@ pub enum TxRequest {
 }
 
 impl TxRequest {
+	/// Sets the `from` field in the transaction to the provided value
 	pub fn from(&self, address: Address) -> Self {
 		match self {
 			TxRequest::Legacy(tx_request) => TxRequest::Legacy(tx_request.clone().from(address)),
@@ -205,6 +208,7 @@ impl TxRequest {
 		}
 	}
 
+	/// Sets the `gas` field in the transaction to the provided
 	pub fn gas(&self, estimated_gas: U256) -> Self {
 		match self {
 			TxRequest::Legacy(tx_request) =>
@@ -214,6 +218,8 @@ impl TxRequest {
 		}
 	}
 
+	/// If self is Eip1559, returns it self.
+	/// If self is Legacy, converts it self to Eip1559 and return it.
 	pub fn to_eip1559(&self, max_fee_per_gas: U256) -> Eip1559TransactionRequest {
 		match self {
 			TxRequest::Legacy(tx_request) => {
@@ -232,6 +238,8 @@ impl TxRequest {
 		}
 	}
 
+	/// If self is Eip1559, converts it self to Legacy and return it.
+	/// If self is Legacy, returns it self.
 	pub fn to_legacy(&self) -> TransactionRequest {
 		match self {
 			TxRequest::Legacy(tx_request) => tx_request.clone(),
@@ -248,6 +256,7 @@ impl TxRequest {
 		}
 	}
 
+	/// Converts to `TypedTransaction`
 	pub fn to_typed(&self) -> TypedTransaction {
 		match self {
 			TxRequest::Legacy(tx_request) => TypedTransaction::Legacy(tx_request.clone()),
