@@ -28,7 +28,8 @@ use tokio::{
 use tokio_stream::StreamExt;
 
 use crate::eth::{
-	BlockMessage, BridgeRelayMetadata, EthClient, EventMessage, EventMetadata, EventSender, Handler,
+	BlockMessage, BridgeRelayMetadata, EthClient, EventMessage, EventMetadata, EventSender,
+	Handler, TxRequest,
 };
 
 const SUB_LOG_TARGET: &str = "bridge-handler";
@@ -589,7 +590,7 @@ impl<T: JsonRpcClient> BridgeRelayHandler<T> {
 	) {
 		if let Some(event_sender) = self.event_senders.get(&chain_id) {
 			match event_sender.send(EventMessage::new(
-				tx_request,
+				TxRequest::Legacy(tx_request),
 				EventMetadata::BridgeRelay(metadata.clone()),
 				true,
 				give_random_delay,

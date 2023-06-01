@@ -9,6 +9,9 @@ pub const ETHEREUM_BLOCK_TIME: u64 = 12u64;
 pub const BOOTSTRAP_BLOCK_CHUNK_SIZE: u64 = 2000;
 pub const BOOTSTRAP_BLOCK_OFFSET: u32 = 100;
 
+/// EIP-1559 constant priority fee
+pub const MAX_PRIORITY_FEE_PER_GAS: u128 = 1000000000; // 1 GWEI
+
 #[derive(Clone, Copy, Debug)]
 /// The roundup event status.
 pub enum RoundUpEventStatus {

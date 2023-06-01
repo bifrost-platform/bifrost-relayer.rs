@@ -1,6 +1,8 @@
 use crate::price_source::PriceFetchers;
 use async_trait::async_trait;
-use cccp_client::eth::{EthClient, EventMessage, EventMetadata, EventSender, PriceFeedMetadata};
+use cccp_client::eth::{
+	EthClient, EventMessage, EventMetadata, EventSender, PriceFeedMetadata, TxRequest,
+};
 use cccp_primitives::{
 	cli::PriceFeederConfig,
 	errors::INVALID_PERIODIC_SCHEDULE,
@@ -130,7 +132,7 @@ impl<T: JsonRpcClient> OraclePriceFeeder<T> {
 		metadata: PriceFeedMetadata,
 	) {
 		match self.event_sender.send(EventMessage::new(
-			tx_request,
+			TxRequest::Legacy(tx_request),
 			EventMetadata::PriceFeed(metadata.clone()),
 			false,
 			false,
