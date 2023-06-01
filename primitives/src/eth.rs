@@ -224,6 +224,9 @@ impl From<&GasCoefficient> for f64 {
 	}
 }
 
+/// EIP-1559 constant priority fee
+pub const MAX_PRIORITY_FEE_PER_GAS: u128 = 1000000000; // 1 GWEI
+
 #[derive(Clone, Copy, Debug)]
 /// The roundup event status.
 pub enum RoundUpEventStatus {
