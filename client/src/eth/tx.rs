@@ -11,7 +11,7 @@ use ethers::{
 	providers::{JsonRpcClient, Middleware, Provider},
 	signers::{LocalWallet, Signer},
 	types::{
-		transaction::eip2718::TypedTransaction, BlockId, BlockNumber, Eip1559TransactionRequest,
+		transaction::eip2718::TypedTransaction, BlockNumber, Bytes, Eip1559TransactionRequest,
 		Transaction, TransactionReceipt, TransactionRequest, U256,
 	},
 };
@@ -131,15 +131,12 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> {
 
 				match self
 					.middleware
-					.estimate_gas(
-						&TypedTransaction::Eip1559(request.clone()),
-						Option::from(BlockId::Number(BlockNumber::Pending)),
-					)
+					.estimate_gas(&TypedTransaction::Eip1559(request.clone()), None)
 					.await
 				{
 					Ok(_estimated_gas) => {},
 					Err(_error) => {
-						request = request.to(self.client.address()).value(0);
+						request = request.to(self.client.address()).value(0).data(Bytes::default());
 					},
 				};
 
@@ -377,37 +374,21 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> {
 		msg.tx_request = msg.tx_request.from(self.client.address());
 
 		// estimate the gas amount to be used
-		let estimated_gas = match self
-			.middleware
-			.estimate_gas(
-				&msg.tx_request.to_typed(),
-				Option::from(BlockId::Number(BlockNumber::Pending)),
-			)
-			.await
-		{
-			Ok(estimated_gas) =>
-				U256::from((estimated_gas.as_u64() as f64 * GAS_COEFFICIENT).ceil() as u64),
-			Err(error) => return self.handle_failed_gas_estimation(msg, &error).await,
-		};
+		let estimated_gas =
+			match self.middleware.estimate_gas(&msg.tx_request.to_typed(), None).await {
+				Ok(estimated_gas) =>
+					U256::from((estimated_gas.as_u64() as f64 * GAS_COEFFICIENT).ceil() as u64),
+				Err(error) => return self.handle_failed_gas_estimation(msg, &error).await,
+			};
 		msg.tx_request = msg.tx_request.gas(estimated_gas);
 
 		// check the txpool for transaction duplication prevention
 		if !(self.is_duplicate_relay(&mut msg.tx_request, msg.check_mempool).await) {
 			// no duplication found
 			let result = if self.eip1559 {
-				self.middleware
-					.send_transaction(
-						msg.tx_request.to_eip1559(),
-						Option::from(BlockId::Number(BlockNumber::Pending)),
-					)
-					.await
+				self.middleware.send_transaction(msg.tx_request.to_eip1559(), None).await
 			} else {
-				self.middleware
-					.send_transaction(
-						msg.tx_request.to_legacy(),
-						Option::from(BlockId::Number(BlockNumber::Pending)),
-					)
-					.await
+				self.middleware.send_transaction(msg.tx_request.to_legacy(), None).await
 			};
 
 			match result {
