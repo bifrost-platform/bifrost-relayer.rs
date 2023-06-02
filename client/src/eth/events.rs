@@ -1,6 +1,6 @@
 use cccp_primitives::{eth::SocketEventStatus, PriceResponse};
 
-use cccp_primitives::eth::{ChainID, MAX_PRIORITY_FEE_PER_GAS};
+use cccp_primitives::eth::ChainID;
 use ethers::types::{
 	transaction::eip2718::TypedTransaction, Address, Eip1559TransactionRequest, TransactionRequest,
 	U256,
@@ -220,7 +220,7 @@ impl TxRequest {
 
 	/// If self is Eip1559, returns it self.
 	/// If self is Legacy, converts it self to Eip1559 and return it.
-	pub fn to_eip1559(&self, max_fee_per_gas: U256) -> Eip1559TransactionRequest {
+	pub fn to_eip1559(&self) -> Eip1559TransactionRequest {
 		match self {
 			TxRequest::Legacy(tx_request) => {
 				let mut ret = Eip1559TransactionRequest::default();
@@ -230,8 +230,6 @@ impl TxRequest {
 				ret.nonce = tx_request.nonce;
 				ret.data = tx_request.data.clone();
 				ret.gas = tx_request.gas;
-				ret = ret.max_fee_per_gas(max_fee_per_gas);
-				ret = ret.max_priority_fee_per_gas(MAX_PRIORITY_FEE_PER_GAS);
 				return ret
 			},
 			TxRequest::Eip1559(tx_request) => tx_request.clone(),

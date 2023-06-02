@@ -375,14 +375,7 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> {
 		if !(self.is_duplicate_relay(&mut msg.tx_request, msg.check_mempool).await) {
 			// no duplication found
 			let result = if self.eip1559 {
-				self.middleware
-					.send_transaction(
-						msg.tx_request.to_eip1559(
-							self.middleware.estimate_eip1559_fees(None).await.unwrap().0,
-						),
-						None,
-					)
-					.await
+				self.middleware.send_transaction(msg.tx_request.to_eip1559(), None).await
 			} else {
 				self.middleware.send_transaction(msg.tx_request.to_legacy(), None).await
 			};
