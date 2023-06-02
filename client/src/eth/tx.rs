@@ -11,7 +11,7 @@ use ethers::{
 	providers::{JsonRpcClient, Middleware, Provider},
 	signers::{LocalWallet, Signer},
 	types::{
-		BlockNumber, Eip1559TransactionRequest, Transaction, TransactionReceipt,
+		BlockId, BlockNumber, Eip1559TransactionRequest, Transaction, TransactionReceipt,
 		TransactionRequest, U256,
 	},
 };
@@ -118,11 +118,12 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> {
 		match self.eip1559 {
 			true => {
 				let request: Eip1559TransactionRequest = transaction.into();
-				let new_max_fee_per_gas =
-					self.get_gas_price_for_retry(request.max_fee_per_gas.unwrap()).await;
-				let new_priority_fee = U256::from(
-					(request.max_priority_fee_per_gas.unwrap().as_u64() as f64 * 1.2).ceil() as u64,
-				);
+
+				let current_fees = self.middleware.estimate_eip1559_fees(None).await.unwrap();
+
+				let new_max_fee_per_gas = max(request.max_fee_per_gas.unwrap(), current_fees.0);
+				let new_priority_fee =
+					max(request.max_priority_fee_per_gas.unwrap() * 2, current_fees.1);
 
 				TxRequest::Eip1559(
 					request
@@ -362,21 +363,37 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> {
 		msg.tx_request = msg.tx_request.from(self.client.address());
 
 		// estimate the gas amount to be used
-		let estimated_gas =
-			match self.middleware.estimate_gas(&msg.tx_request.to_typed(), None).await {
-				Ok(estimated_gas) =>
-					U256::from((estimated_gas.as_u64() as f64 * GAS_COEFFICIENT).ceil() as u64),
-				Err(error) => return self.handle_failed_gas_estimation(msg, &error).await,
-			};
+		let estimated_gas = match self
+			.middleware
+			.estimate_gas(
+				&msg.tx_request.to_typed(),
+				Option::from(BlockId::Number(BlockNumber::Pending)),
+			)
+			.await
+		{
+			Ok(estimated_gas) =>
+				U256::from((estimated_gas.as_u64() as f64 * GAS_COEFFICIENT).ceil() as u64),
+			Err(error) => return self.handle_failed_gas_estimation(msg, &error).await,
+		};
 		msg.tx_request = msg.tx_request.gas(estimated_gas);
 
 		// check the txpool for transaction duplication prevention
 		if !(self.is_duplicate_relay(&mut msg.tx_request, msg.check_mempool).await) {
 			// no duplication found
 			let result = if self.eip1559 {
-				self.middleware.send_transaction(msg.tx_request.to_eip1559(), None).await
+				self.middleware
+					.send_transaction(
+						msg.tx_request.to_eip1559(),
+						Option::from(BlockId::Number(BlockNumber::Pending)),
+					)
+					.await
 			} else {
-				self.middleware.send_transaction(msg.tx_request.to_legacy(), None).await
+				self.middleware
+					.send_transaction(
+						msg.tx_request.to_legacy(),
+						Option::from(BlockId::Number(BlockNumber::Pending)),
+					)
+					.await
 			};
 
 			match result {
