@@ -121,8 +121,7 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> {
 				let new_max_fee_per_gas =
 					self.get_gas_price_for_retry(request.max_fee_per_gas.unwrap()).await;
 				let new_priority_fee = U256::from(
-					(request.max_priority_fee_per_gas.unwrap().as_u64() as f64 * 1.125).ceil()
-						as u64,
+					(request.max_priority_fee_per_gas.unwrap().as_u64() as f64 * 1.2).ceil() as u64,
 				);
 
 				TxRequest::Eip1559(
@@ -342,7 +341,7 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> {
 		let previous_gas_price = previous_gas_price.as_u64() as f64;
 
 		let current_network_gas_price = self.get_gas_price().await;
-		let escalated_gas_price = U256::from((previous_gas_price * 1.125).ceil() as u64);
+		let escalated_gas_price = U256::from((previous_gas_price * 1.2).ceil() as u64);
 
 		max(current_network_gas_price, escalated_gas_price)
 	}
