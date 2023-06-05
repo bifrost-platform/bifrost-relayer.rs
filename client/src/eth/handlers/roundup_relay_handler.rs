@@ -75,13 +75,13 @@ impl<T: JsonRpcClient> Handler for RoundupRelayHandler<T> {
 
 				let mut stream = tokio_stream::iter(block_msg.target_receipts);
 				while let Some(receipt) = stream.next().await {
-					self.process_confirmed_transaction(receipt).await;
+					self.process_confirmed_transaction(receipt, false).await;
 				}
 			}
 		}
 	}
 
-	async fn process_confirmed_transaction(&self, receipt: TransactionReceipt) {
+	async fn process_confirmed_transaction(&self, receipt: TransactionReceipt, is_bootstrap: bool) {
 		// Pass if interacted contract was not socket contract
 		if !self.is_target_contract(&receipt) {
 			return
@@ -96,13 +96,15 @@ impl<T: JsonRpcClient> Handler for RoundupRelayHandler<T> {
 
 			match self.decode_log(log).await {
 				Ok(serialized_log) => {
-					log::info!(
-						target: &self.client.get_chain_name(),
-						"-[{}] 👤 RoundUp event detected. ({:?}-{:?})",
-						sub_display_format(SUB_LOG_TARGET),
-						serialized_log.status,
-						receipt.transaction_hash,
-					);
+					if !is_bootstrap {
+						log::info!(
+							target: &self.client.get_chain_name(),
+							"-[{}] 👤 RoundUp event detected. ({:?}-{:?})",
+							sub_display_format(SUB_LOG_TARGET),
+							serialized_log.status,
+							receipt.transaction_hash,
+						);
+					}
 					match RoundUpEventStatus::from_u8(serialized_log.status) {
 						RoundUpEventStatus::NextAuthorityCommitted => {
 							if !self.is_selected_relayer(serialized_log.roundup.round - 1).await {
@@ -377,7 +379,7 @@ impl<T: JsonRpcClient> RoundupRelayHandler<T> {
 				if let Some(receipt) =
 					self.client.get_transaction_receipt(log.transaction_hash.unwrap()).await
 				{
-					self.process_confirmed_transaction(receipt).await;
+					self.process_confirmed_transaction(receipt, true).await;
 				}
 			}
 		}

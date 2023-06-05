@@ -117,13 +117,13 @@ impl<T: JsonRpcClient> Handler for BridgeRelayHandler<T> {
 
 				let mut stream = tokio_stream::iter(block_msg.target_receipts);
 				while let Some(receipt) = stream.next().await {
-					self.process_confirmed_transaction(receipt).await;
+					self.process_confirmed_transaction(receipt, false).await;
 				}
 			}
 		}
 	}
 
-	async fn process_confirmed_transaction(&self, receipt: TransactionReceipt) {
+	async fn process_confirmed_transaction(&self, receipt: TransactionReceipt, is_bootstrap: bool) {
 		if self.is_target_contract(&receipt) {
 			let status = receipt.status.unwrap();
 			if status.is_zero() {
@@ -153,14 +153,16 @@ impl<T: JsonRpcClient> Handler for BridgeRelayHandler<T> {
 									dst_chain_id,
 								);
 
-								log::info!(
-									target: &self.client.get_chain_name(),
-									"-[{}] 🔖 Detected socket event: {}, {:?}-{:?}",
-									sub_display_format(SUB_LOG_TARGET),
-									metadata,
-									receipt.block_number.unwrap(),
-									receipt.transaction_hash,
-								);
+								if !is_bootstrap {
+									log::info!(
+										target: &self.client.get_chain_name(),
+										"-[{}] 🔖 Detected socket event: {}, {:?}-{:?}",
+										sub_display_format(SUB_LOG_TARGET),
+										metadata,
+										receipt.block_number.unwrap(),
+										receipt.transaction_hash,
+									);
+								}
 
 								if Self::is_sequence_ended(status) ||
 									self.is_already_done(&socket.msg.req_id, src_chain_id).await
@@ -643,7 +645,7 @@ impl<T: JsonRpcClient> BridgeRelayHandler<T> {
 			if let Some(receipt) =
 				self.client.get_transaction_receipt(log.transaction_hash.unwrap()).await
 			{
-				self.process_confirmed_transaction(receipt).await;
+				self.process_confirmed_transaction(receipt, true).await;
 			}
 		}
 

@@ -12,7 +12,7 @@ pub trait Handler {
 	async fn run(&mut self);
 
 	/// Decode and parse the event if the given transaction triggered an event.
-	async fn process_confirmed_transaction(&self, receipt: TransactionReceipt);
+	async fn process_confirmed_transaction(&self, receipt: TransactionReceipt, is_bootstrap: bool);
 
 	/// Verifies whether the given transaction interacted with the target contract.
 	fn is_target_contract(&self, receipt: &TransactionReceipt) -> bool;
