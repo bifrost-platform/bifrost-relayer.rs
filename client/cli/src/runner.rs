@@ -48,10 +48,7 @@ pub fn build_runtime() -> Result<tokio::runtime::Runtime, std::io::Error> {
 }
 
 /// Builds a sentry client only when the sentry config exists.
-fn build_sentry_client(
-	sentry_config: Option<SentryConfig>,
-	chain: Option<String>,
-) -> Option<ClientInitGuard> {
+fn build_sentry_client(id: String, sentry_config: Option<SentryConfig>) -> Option<ClientInitGuard> {
 	if let Some(sentry_config) = sentry_config {
 		let dsn = sentry_config.dsn.unwrap();
 		if !dsn.is_empty() {
@@ -59,7 +56,7 @@ fn build_sentry_client(
 				dsn,
 				sentry::ClientOptions {
 					release: sentry::release_name!(),
-					environment: Some(chain.unwrap_or("dev".into()).into()),
+					environment: Some(id.into()),
 					..Default::default()
 				},
 			));
@@ -77,15 +74,14 @@ pub struct Runner {
 }
 
 impl Runner {
-	pub fn new(
-		config: Configuration,
-		tokio_runtime: tokio::runtime::Runtime,
-		chain: Option<String>,
-	) -> CliResult<Runner> {
+	pub fn new(config: Configuration, tokio_runtime: tokio::runtime::Runtime) -> CliResult<Runner> {
 		Ok(Runner {
 			config: config.clone(),
 			tokio_runtime,
-			sentry_client: build_sentry_client(config.relayer_config.sentry_config, chain),
+			sentry_client: build_sentry_client(
+				config.relayer_config.system.id,
+				config.relayer_config.sentry_config,
+			),
 		})
 	}
 

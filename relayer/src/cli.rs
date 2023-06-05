@@ -123,7 +123,7 @@ impl Cli {
 	}
 
 	/// Log information about the relayer itself.
-	pub fn print_relayer_infos(&self) {
+	pub fn print_relayer_infos(&self, id: &String) {
 		log::info!(
 			target: LOG_TARGET,
 			"-[{}] {}",
@@ -148,7 +148,7 @@ impl Cli {
 			target: LOG_TARGET,
 			"-[{}] ⛓  Chain specification: {}",
 			sub_display_format(SUB_LOG_TARGET),
-			self.chain.clone().unwrap_or("dev".into())
+			id
 		);
 	}
 }

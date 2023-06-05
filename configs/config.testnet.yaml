@@ -1,4 +1,5 @@
 system:
+  id: "testnet"
   private_key: ""
   debug_mode: false
 
@@ -44,22 +45,23 @@ evm_providers:
     call_interval: 1000
     block_confirmations: 7
     is_relay_target: false
+    eip1559: true
     socket_address: "0xA25357F3C313Bd13885678f935178211f0dF6722"
     vault_address: "0xB2ba0020560cF6c164DC48D1E29559AbA8472208"
     authority_address: "0x2FD5232fDFa6e1c127e7821CC48108Ca79281a38"
 
 handler_configs:
   - handler_type: BridgeRelay
-    watch_list: [ 49088, 5, 97, 80001 ]
+    watch_list: [49088, 5, 97, 80001]
   - handler_type: Roundup
-    watch_list: [ 49088 ]
+    watch_list: [49088]
 
 periodic_configs:
   oracle_price_feeder:
     - chain_id: 49088
       schedule: "0 */5 * * * * *" # Every 5th minute.
-      price_sources: [ Coingecko ]
-      symbols: [ "ETH", "BFC", "BNB", "MATIC", "USDC", "BIFI", "USDT" ]
+      price_sources: [Coingecko]
+      symbols: ["ETH", "BFC", "BNB", "MATIC", "USDC", "BIFI", "USDT"]
   roundup_emitter: "*/15 * * * * * *" # Every 15th seconds.
   heartbeat: "0 * * * * * *" # Every minute.
 

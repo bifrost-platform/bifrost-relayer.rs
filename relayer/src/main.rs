@@ -42,9 +42,9 @@ fn main() {
 	let configuration =
 		create_configuration(tokio_runtime.handle().clone(), cli.load_spec()).unwrap();
 
-	cli.print_relayer_infos();
+	cli.print_relayer_infos(&configuration.relayer_config.system.id);
 
-	let runner = Runner::new(configuration, tokio_runtime, cli.chain.clone()).unwrap();
+	let runner = Runner::new(configuration, tokio_runtime).unwrap();
 	runner
 		.run_relayer_until_exit(|config| async move {
 			service::relay(config).map_err(sc_cli::Error::Service)
