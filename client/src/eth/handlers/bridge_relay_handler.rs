@@ -99,23 +99,11 @@ impl<T: JsonRpcClient> BridgeRelayHandler<T> {
 impl<T: JsonRpcClient> Handler for BridgeRelayHandler<T> {
 	async fn run(&mut self) {
 		loop {
-			if self
-				.bootstrap_states
-				.read()
-				.await
-				.iter()
-				.all(|s| *s == BootstrapState::BootstrapBridgeRelay)
-			{
+			if self.is_bootstrap_state_synced_as(BootstrapState::BootstrapBridgeRelay).await {
 				self.bootstrap().await;
 
 				sleep(Duration::from_millis(self.client.call_interval)).await;
-			} else if self
-				.bootstrap_states
-				.read()
-				.await
-				.iter()
-				.all(|s| *s == BootstrapState::NormalStart)
-			{
+			} else if self.is_bootstrap_state_synced_as(BootstrapState::NormalStart).await {
 				let block_msg = self.block_receiver.recv().await.unwrap();
 
 				log::info!(
@@ -578,6 +566,11 @@ impl<T: JsonRpcClient> BridgeRelayHandler<T> {
 				.await
 		}
 		false
+	}
+
+	/// Verifies whether the bootstrap state has been synced to the given state.
+	async fn is_bootstrap_state_synced_as(&self, state: BootstrapState) -> bool {
+		self.bootstrap_states.read().await.iter().all(|s| *s == state)
 	}
 
 	/// Request send bridge relay transaction to the target event channel.

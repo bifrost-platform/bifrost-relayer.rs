@@ -57,23 +57,11 @@ pub struct RoundupRelayHandler<T> {
 impl<T: JsonRpcClient> Handler for RoundupRelayHandler<T> {
 	async fn run(&mut self) {
 		loop {
-			if self
-				.bootstrap_states
-				.read()
-				.await
-				.iter()
-				.all(|s| *s == BootstrapState::BootstrapRoundUpPhase2)
-			{
+			if self.is_bootstrap_state_synced_as(BootstrapState::BootstrapRoundUpPhase2).await {
 				self.bootstrap().await;
 
 				sleep(Duration::from_millis(self.client.call_interval)).await;
-			} else if self
-				.bootstrap_states
-				.read()
-				.await
-				.iter()
-				.all(|s| *s == BootstrapState::NormalStart)
-			{
+			} else if self.is_bootstrap_state_synced_as(BootstrapState::NormalStart).await {
 				let block_msg = self.block_receiver.recv().await.unwrap();
 
 				log::info!(
@@ -269,6 +257,11 @@ impl<T: JsonRpcClient> RoundupRelayHandler<T> {
 				"relayer_manager.is_previous_selected_relayer",
 			)
 			.await
+	}
+
+	/// Verifies whether the bootstrap state has been synced to the given state.
+	async fn is_bootstrap_state_synced_as(&self, state: BootstrapState) -> bool {
+		self.bootstrap_states.read().await.iter().all(|s| *s == state)
 	}
 
 	/// Build `round_control_relay` method call param.

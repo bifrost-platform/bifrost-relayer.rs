@@ -108,13 +108,7 @@ impl<T: JsonRpcClient> BlockManager<T> {
 		self.initialize().await;
 
 		loop {
-			if self
-				.bootstrap_states
-				.read()
-				.await
-				.iter()
-				.all(|s| *s == BootstrapState::NormalStart)
-			{
+			if self.is_bootstrap_state_synced_as(BootstrapState::NormalStart).await {
 				let latest_block = self.client.get_latest_block_number().await;
 				while self.is_block_confirmed(latest_block) {
 					self.process_confirmed_block().await;
@@ -176,6 +170,11 @@ impl<T: JsonRpcClient> BlockManager<T> {
 	/// Verifies if the stored waiting block has waited enough.
 	fn is_block_confirmed(&self, latest_block: U64) -> bool {
 		latest_block.saturating_sub(self.waiting_block) > self.client.block_confirmations
+	}
+
+	/// Verifies whether the bootstrap state has been synced to the given state.
+	async fn is_bootstrap_state_synced_as(&self, state: BootstrapState) -> bool {
+		self.bootstrap_states.read().await.iter().all(|s| *s == state)
 	}
 
 	/// Verifies if the connected provider is in block sync mode.

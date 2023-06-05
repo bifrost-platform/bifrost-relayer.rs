@@ -45,22 +45,10 @@ impl<T: JsonRpcClient> PeriodicWorker for RoundupEmitter<T> {
 		self.current_round = self.get_latest_round().await;
 
 		loop {
-			if self
-				.bootstrap_states
-				.read()
-				.await
-				.iter()
-				.all(|s| *s == BootstrapState::BootstrapRoundUpPhase1)
-			{
+			if self.is_bootstrap_state_synced_as(BootstrapState::BootstrapRoundUpPhase1).await {
 				self.bootstrap().await;
 				break
-			} else if self
-				.bootstrap_states
-				.read()
-				.await
-				.iter()
-				.all(|s| *s == BootstrapState::NormalStart)
-			{
+			} else if self.is_bootstrap_state_synced_as(BootstrapState::NormalStart).await {
 				break
 			}
 
@@ -300,6 +288,11 @@ impl<T: JsonRpcClient> RoundupEmitter<T> {
 				"relayer_manager.is_previous_selected_relayer",
 			)
 			.await
+	}
+
+	/// Verifies whether the bootstrap state has been synced to the given state.
+	async fn is_bootstrap_state_synced_as(&self, state: BootstrapState) -> bool {
+		self.bootstrap_states.read().await.iter().all(|s| *s == state)
 	}
 
 	/// Fetch new validator list
