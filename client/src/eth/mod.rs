@@ -28,8 +28,8 @@ use tokio::time::{sleep, Duration};
 
 pub use cccp_primitives::contracts::*;
 use cccp_primitives::{
-	authority::AuthorityContract,
-	eth::{BridgeDirection, ChainID},
+	authority::{AuthorityContract, RoundMetaData},
+	eth::{BridgeDirection, ChainID, BOOTSTRAP_BLOCK_OFFSET, NATIVE_BLOCK_TIME},
 	relayer_manager::RelayerManagerContract,
 	socket::SocketContract,
 	vault::VaultContract,
@@ -235,5 +235,35 @@ impl<T: JsonRpcClient> EthClient<T> {
 	/// Returns an object with data about the sync status or false.
 	pub async fn is_syncing(&self) -> SyncingStatus {
 		self.rpc_call("eth_syncing", ()).await
+	}
+
+	/// Get factor between the block time of native-chain and block time of this chain
+	/// Approximately BIFROST: 3s, Polygon: 2s, BSC: 3s, Ethereum: 12s
+	pub async fn get_bootstrap_offset_height_based_on_block_time(
+		&self,
+		round_offset: u32,
+		round_info: RoundMetaData,
+	) -> U64 {
+		let block_number = self.get_latest_block_number().await;
+
+		let current_block = self.get_block((block_number).into()).await.unwrap();
+		let prev_block =
+			self.get_block((block_number - BOOTSTRAP_BLOCK_OFFSET).into()).await.unwrap();
+
+		let diff = current_block
+			.timestamp
+			.checked_sub(prev_block.timestamp)
+			.unwrap()
+			.checked_div(BOOTSTRAP_BLOCK_OFFSET.into())
+			.unwrap();
+
+		round_offset
+			.checked_mul(round_info.round_length.as_u32())
+			.unwrap()
+			.checked_mul(NATIVE_BLOCK_TIME)
+			.unwrap()
+			.checked_div(diff.as_u32())
+			.unwrap()
+			.into()
 	}
 }
