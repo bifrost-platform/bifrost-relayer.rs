@@ -22,7 +22,10 @@ use tokio::{
 	time::{sleep, Duration},
 };
 
-use super::{EthClient, EventMessage, EventMetadata, DEFAULT_TX_RETRIES, GAS_COEFFICIENT};
+use super::{
+	EthClient, EventMessage, EventMetadata, DEFAULT_TX_RETRIES, GAS_COEFFICIENT,
+	MAX_FEE_COEFFICIENT, MAX_PRIORITY_FEE_COEFFICIENT, RETRY_GAS_PRICE_COEFFICIENT,
+};
 
 pub type TransactionMiddleware<T> =
 	NonceManagerMiddleware<SignerMiddleware<GasEscalatorMiddleware<Arc<Provider<T>>>, LocalWallet>>;
@@ -122,8 +125,10 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> {
 				let current_fees = self.middleware.estimate_eip1559_fees(None).await.unwrap();
 
 				let new_max_fee_per_gas = max(request.max_fee_per_gas.unwrap(), current_fees.0);
-				let new_priority_fee =
-					max(request.max_priority_fee_per_gas.unwrap() * 2, current_fees.1);
+				let new_priority_fee = max(
+					request.max_priority_fee_per_gas.unwrap() * MAX_PRIORITY_FEE_COEFFICIENT,
+					current_fees.1,
+				);
 
 				request = request
 					.max_fee_per_gas(new_max_fee_per_gas)
@@ -353,7 +358,8 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> {
 		let previous_gas_price = previous_gas_price.as_u64() as f64;
 
 		let current_network_gas_price = self.get_gas_price().await;
-		let escalated_gas_price = U256::from((previous_gas_price * 1.2).ceil() as u64);
+		let escalated_gas_price =
+			U256::from((previous_gas_price * RETRY_GAS_PRICE_COEFFICIENT).ceil() as u64);
 
 		max(current_network_gas_price, escalated_gas_price)
 	}
@@ -386,7 +392,14 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> {
 		if !(self.is_duplicate_relay(&mut msg.tx_request, msg.check_mempool).await) {
 			// no duplication found
 			let result = if self.eip1559 {
-				self.middleware.send_transaction(msg.tx_request.to_eip1559(), None).await
+				self.middleware
+					.send_transaction(
+						msg.tx_request
+							.to_eip1559()
+							.max_fee_per_gas(self.get_gas_price().await * MAX_FEE_COEFFICIENT),
+						None,
+					)
+					.await
 			} else {
 				self.middleware.send_transaction(msg.tx_request.to_legacy(), None).await
 			};
