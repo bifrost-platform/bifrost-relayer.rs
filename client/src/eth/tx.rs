@@ -293,12 +293,11 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> {
 		match self.eip1559 {
 			true => self
 				.middleware
-				.get_block(BlockNumber::Pending)
+				.estimate_eip1559_fees(None)
 				.await
 				.unwrap()
-				.unwrap()
-				.base_fee_per_gas
-				.unwrap(),
+				.0
+				.saturating_mul(MAX_FEE_COEFFICIENT.into()),
 			false => match self.middleware.get_gas_price().await {
 				Ok(gas_price) => gas_price,
 				Err(error) =>
@@ -394,9 +393,7 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> {
 			let result = if self.eip1559 {
 				self.middleware
 					.send_transaction(
-						msg.tx_request
-							.to_eip1559()
-							.max_fee_per_gas(self.get_gas_price().await * MAX_FEE_COEFFICIENT),
+						msg.tx_request.to_eip1559().max_fee_per_gas(self.get_gas_price().await),
 						None,
 					)
 					.await
