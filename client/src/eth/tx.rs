@@ -11,8 +11,8 @@ use ethers::{
 	providers::{JsonRpcClient, Middleware, Provider},
 	signers::{LocalWallet, Signer},
 	types::{
-		BlockNumber, Eip1559TransactionRequest, Transaction, TransactionReceipt,
-		TransactionRequest, U256,
+		transaction::eip2718::TypedTransaction, BlockNumber, Bytes, Eip1559TransactionRequest,
+		Transaction, TransactionReceipt, TransactionRequest, U256,
 	},
 };
 use rand::Rng;
@@ -22,7 +22,10 @@ use tokio::{
 	time::{sleep, Duration},
 };
 
-use super::{EthClient, EventMessage, EventMetadata, DEFAULT_TX_RETRIES, GAS_COEFFICIENT};
+use super::{
+	EthClient, EventMessage, EventMetadata, DEFAULT_TX_RETRIES, GAS_COEFFICIENT,
+	MAX_FEE_COEFFICIENT, MAX_PRIORITY_FEE_COEFFICIENT, RETRY_GAS_PRICE_COEFFICIENT,
+};
 
 pub type TransactionMiddleware<T> =
 	NonceManagerMiddleware<SignerMiddleware<GasEscalatorMiddleware<Arc<Provider<T>>>, LocalWallet>>;
@@ -117,19 +120,32 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> {
 	) -> TxRequest {
 		match self.eip1559 {
 			true => {
-				let request: Eip1559TransactionRequest = transaction.into();
-				let new_max_fee_per_gas =
-					self.get_gas_price_for_retry(request.max_fee_per_gas.unwrap()).await;
-				let new_priority_fee = U256::from(
-					(request.max_priority_fee_per_gas.unwrap().as_u64() as f64 * 1.125).ceil()
-						as u64,
+				let mut request: Eip1559TransactionRequest = transaction.into();
+
+				let current_fees = self.middleware.estimate_eip1559_fees(None).await.unwrap();
+
+				let new_max_fee_per_gas = max(request.max_fee_per_gas.unwrap(), current_fees.0);
+				let new_priority_fee = max(
+					request.max_priority_fee_per_gas.unwrap() * MAX_PRIORITY_FEE_COEFFICIENT,
+					current_fees.1,
 				);
 
-				TxRequest::Eip1559(
-					request
-						.max_fee_per_gas(new_max_fee_per_gas)
-						.max_priority_fee_per_gas(new_priority_fee),
-				)
+				request = request
+					.max_fee_per_gas(new_max_fee_per_gas)
+					.max_priority_fee_per_gas(new_priority_fee);
+
+				match self
+					.middleware
+					.estimate_gas(&TypedTransaction::Eip1559(request.clone()), None)
+					.await
+				{
+					Ok(_estimated_gas) => {},
+					Err(_error) => {
+						request = request.to(self.client.address()).value(0).data(Bytes::default());
+					},
+				};
+
+				TxRequest::Eip1559(request)
 			},
 			false => {
 				let request: TransactionRequest = transaction.into();
@@ -342,7 +358,8 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> {
 		let previous_gas_price = previous_gas_price.as_u64() as f64;
 
 		let current_network_gas_price = self.get_gas_price().await;
-		let escalated_gas_price = U256::from((previous_gas_price * 1.125).ceil() as u64);
+		let escalated_gas_price =
+			U256::from((previous_gas_price * RETRY_GAS_PRICE_COEFFICIENT).ceil() as u64);
 
 		max(current_network_gas_price, escalated_gas_price)
 	}
@@ -377,9 +394,9 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> {
 			let result = if self.eip1559 {
 				self.middleware
 					.send_transaction(
-						msg.tx_request.to_eip1559(
-							self.middleware.estimate_eip1559_fees(None).await.unwrap().0,
-						),
+						msg.tx_request
+							.to_eip1559()
+							.max_fee_per_gas(self.get_gas_price().await * MAX_FEE_COEFFICIENT),
 						None,
 					)
 					.await
