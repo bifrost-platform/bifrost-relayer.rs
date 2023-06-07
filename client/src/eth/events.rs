@@ -1,6 +1,6 @@
 use cccp_primitives::{eth::SocketEventStatus, PriceResponse};
 
-use cccp_primitives::eth::{ChainID, MAX_PRIORITY_FEE_PER_GAS};
+use cccp_primitives::eth::ChainID;
 use ethers::types::{
 	transaction::eip2718::TypedTransaction, Address, Eip1559TransactionRequest, TransactionRequest,
 	U256,
@@ -23,8 +23,17 @@ pub const DEFAULT_TX_RETRY_INTERVAL_MS: u64 = 3000;
 /// The coefficient that will be multiplied to the retry interval on every new retry.
 pub const RETRY_TX_COEFFICIENT: u64 = 2;
 
+/// The coefficient that will be multiplied on the previously send transaction gas price.
+pub const RETRY_GAS_PRICE_COEFFICIENT: f64 = 1.2;
+
 /// The coefficient that will be multiplied to the estimated gas.
 pub const GAS_COEFFICIENT: f64 = 10.0;
+
+/// The coefficient that will be multiplied on the max fee.
+pub const MAX_FEE_COEFFICIENT: u64 = 3;
+
+/// The coefficient that will be multipled on the max priority fee.
+pub const MAX_PRIORITY_FEE_COEFFICIENT: u64 = 2;
 
 #[derive(Clone, Debug)]
 pub struct BridgeRelayMetadata {
@@ -220,7 +229,7 @@ impl TxRequest {
 
 	/// If self is Eip1559, returns it self.
 	/// If self is Legacy, converts it self to Eip1559 and return it.
-	pub fn to_eip1559(&self, max_fee_per_gas: U256) -> Eip1559TransactionRequest {
+	pub fn to_eip1559(&self) -> Eip1559TransactionRequest {
 		match self {
 			TxRequest::Legacy(tx_request) => {
 				let mut ret = Eip1559TransactionRequest::default();
@@ -230,8 +239,6 @@ impl TxRequest {
 				ret.nonce = tx_request.nonce;
 				ret.data = tx_request.data.clone();
 				ret.gas = tx_request.gas;
-				ret = ret.max_fee_per_gas(max_fee_per_gas);
-				ret = ret.max_priority_fee_per_gas(MAX_PRIORITY_FEE_PER_GAS);
 				return ret
 			},
 			TxRequest::Eip1559(tx_request) => tx_request.clone(),
