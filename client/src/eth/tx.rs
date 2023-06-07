@@ -392,10 +392,14 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> {
 		if !(self.is_duplicate_relay(&mut msg.tx_request, msg.check_mempool).await) {
 			// no duplication found
 			let result = if self.eip1559 {
-				let mut eip1559_request = msg.tx_request.to_eip1559();
-				eip1559_request = eip1559_request
-					.max_fee_per_gas(self.get_gas_price().await * MAX_FEE_COEFFICIENT);
-				self.middleware.send_transaction(eip1559_request, None).await
+				self.middleware
+					.send_transaction(
+						msg.tx_request
+							.to_eip1559()
+							.max_fee_per_gas(self.get_gas_price().await * MAX_FEE_COEFFICIENT),
+						None,
+					)
+					.await
 			} else {
 				self.middleware.send_transaction(msg.tx_request.to_legacy(), None).await
 			};
