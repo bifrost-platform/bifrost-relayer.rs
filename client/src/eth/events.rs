@@ -29,8 +29,17 @@ pub const DEFAULT_TX_RETRY_INTERVAL_MS: u64 = 3000;
 /// The coefficient that will be multiplied to the retry interval on every new retry.
 pub const RETRY_TX_COEFFICIENT: u64 = 2;
 
+/// The coefficient that will be multiplied on the previously send transaction gas price.
+pub const RETRY_GAS_PRICE_COEFFICIENT: f64 = 1.2;
+
 /// The coefficient that will be multiplied to the estimated gas.
 pub const GAS_COEFFICIENT: f64 = 10.0;
+
+/// The coefficient that will be multiplied on the max fee.
+pub const MAX_FEE_COEFFICIENT: u64 = 3;
+
+/// The coefficient that will be multipled on the max priority fee.
+pub const MAX_PRIORITY_FEE_COEFFICIENT: u64 = 2;
 
 #[derive(Clone, Debug)]
 /// The message format passed through the block channel.
