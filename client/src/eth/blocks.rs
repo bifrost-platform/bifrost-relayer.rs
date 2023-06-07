@@ -185,11 +185,8 @@ impl<T: JsonRpcClient> BlockManager<T> {
 				);
 			} else {
 				for state in self.bootstrap_states.write().await.iter_mut() {
-					match *state {
-						BootstrapState::NodeSyncing => {
-							*state = BootstrapState::BootstrapRoundUpPhase1;
-						},
-						_ => {},
+					if *state == BootstrapState::NodeSyncing {
+						*state = BootstrapState::BootstrapRoundUpPhase1;
 					}
 				}
 				return

@@ -263,11 +263,8 @@ impl<T: JsonRpcClient> BootstrapHandler for RoundupEmitter<T> {
 		}
 
 		for state in self.bootstrap_states.write().await.iter_mut() {
-			match *state {
-				BootstrapState::BootstrapRoundUpPhase1 => {
-					*state = BootstrapState::BootstrapRoundUpPhase2;
-				},
-				_ => {},
+			if *state == BootstrapState::BootstrapRoundUpPhase1 {
+				*state = BootstrapState::BootstrapRoundUpPhase2;
 			}
 		}
 	}
