@@ -6,7 +6,8 @@ use clap::{CommandFactory, FromArgMatches, Parser};
 pub struct Cli {
 	/// Specify the chain specification.
 	///
-	/// It can be one of the predefined ones (dev, testnet or mainnet).
+	/// It can be one of the predefined ones (testnet or mainnet) or it can be a path to a file
+	/// with the chainspec.
 	#[arg(long, value_name = "CHAIN_SPEC")]
 	pub chain: Option<String>,
 }
@@ -113,7 +114,6 @@ impl Cli {
 		let mut spec = TESTNET_CONFIG_FILE_PATH;
 		if let Some(chain) = &self.chain {
 			match chain.as_str() {
-				"dev" => spec = TESTNET_CONFIG_FILE_PATH,
 				"testnet" => spec = TESTNET_CONFIG_FILE_PATH,
 				"mainnet" => spec = MAINNET_CONFIG_FILE_PATH,
 				path => spec = path,
@@ -123,7 +123,7 @@ impl Cli {
 	}
 
 	/// Log information about the relayer itself.
-	pub fn print_relayer_infos(&self) {
+	pub fn print_relayer_infos(&self, id: &String) {
 		log::info!(
 			target: LOG_TARGET,
 			"-[{}] {}",
@@ -148,7 +148,7 @@ impl Cli {
 			target: LOG_TARGET,
 			"-[{}] ⛓  Chain specification: {}",
 			sub_display_format(SUB_LOG_TARGET),
-			self.chain.clone().unwrap_or("dev".into())
+			id
 		);
 	}
 }

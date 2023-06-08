@@ -7,8 +7,7 @@ use cccp_primitives::{
 	authority::RoundMetaData,
 	cli::BootstrapConfig,
 	eth::{
-		BootstrapState, ChainID, RecoveredSignature, RoundUpEventStatus,
-		BOOTSTRAP_BLOCK_CHUNK_SIZE, BOOTSTRAP_BLOCK_OFFSET, NATIVE_BLOCK_TIME,
+		BootstrapState, ChainID, RecoveredSignature, RoundUpEventStatus, BOOTSTRAP_BLOCK_CHUNK_SIZE,
 	},
 	socket::{RoundUpSubmit, SerializedRoundUp, Signatures, SocketContract, SocketContractEvents},
 	sub_display_format, INVALID_BIFROST_NATIVENESS, INVALID_CONTRACT_ABI,
@@ -18,7 +17,7 @@ use ethers::{
 	contract::EthLogDecode,
 	prelude::{TransactionReceipt, H256},
 	providers::{JsonRpcClient, Provider},
-	types::{Address, Bytes, Filter, Log, Signature, TransactionRequest, U256, U64},
+	types::{Address, Bytes, Filter, Log, Signature, TransactionRequest, U256},
 };
 use std::{collections::BTreeMap, str::FromStr, sync::Arc, time::Duration};
 use tokio::{
@@ -26,6 +25,8 @@ use tokio::{
 	time::sleep,
 };
 use tokio_stream::StreamExt;
+
+use super::BootstrapHandler;
 
 const SUB_LOG_TARGET: &str = "roundup-handler";
 
@@ -57,23 +58,11 @@ pub struct RoundupRelayHandler<T> {
 impl<T: JsonRpcClient> Handler for RoundupRelayHandler<T> {
 	async fn run(&mut self) {
 		loop {
-			if self
-				.bootstrap_states
-				.read()
-				.await
-				.iter()
-				.all(|s| *s == BootstrapState::BootstrapRoundUpPhase2)
-			{
+			if self.is_bootstrap_state_synced_as(BootstrapState::BootstrapRoundUpPhase2).await {
 				self.bootstrap().await;
 
 				sleep(Duration::from_millis(self.client.call_interval)).await;
-			} else if self
-				.bootstrap_states
-				.read()
-				.await
-				.iter()
-				.all(|s| *s == BootstrapState::NormalStart)
-			{
+			} else if self.is_bootstrap_state_synced_as(BootstrapState::NormalStart).await {
 				let block_msg = self.block_receiver.recv().await.unwrap();
 
 				log::info!(
@@ -87,13 +76,13 @@ impl<T: JsonRpcClient> Handler for RoundupRelayHandler<T> {
 
 				let mut stream = tokio_stream::iter(block_msg.target_receipts);
 				while let Some(receipt) = stream.next().await {
-					self.process_confirmed_transaction(receipt).await;
+					self.process_confirmed_transaction(receipt, false).await;
 				}
 			}
 		}
 	}
 
-	async fn process_confirmed_transaction(&self, receipt: TransactionReceipt) {
+	async fn process_confirmed_transaction(&self, receipt: TransactionReceipt, is_bootstrap: bool) {
 		// Pass if interacted contract was not socket contract
 		if !self.is_target_contract(&receipt) {
 			return
@@ -108,13 +97,15 @@ impl<T: JsonRpcClient> Handler for RoundupRelayHandler<T> {
 
 			match self.decode_log(log).await {
 				Ok(serialized_log) => {
-					log::info!(
-						target: &self.client.get_chain_name(),
-						"-[{}] 👤 RoundUp event detected. ({:?}-{:?})",
-						sub_display_format(SUB_LOG_TARGET),
-						serialized_log.status,
-						receipt.transaction_hash,
-					);
+					if !is_bootstrap {
+						log::info!(
+							target: &self.client.get_chain_name(),
+							"-[{}] 👤 RoundUp event detected. ({:?}-{:?})",
+							sub_display_format(SUB_LOG_TARGET),
+							serialized_log.status,
+							receipt.transaction_hash,
+						);
+					}
 					match RoundUpEventStatus::from_u8(serialized_log.status) {
 						RoundUpEventStatus::NextAuthorityCommitted => {
 							if !self.is_selected_relayer(serialized_log.roundup.round - 1).await {
@@ -271,6 +262,11 @@ impl<T: JsonRpcClient> RoundupRelayHandler<T> {
 			.await
 	}
 
+	/// Verifies whether the bootstrap state has been synced to the given state.
+	async fn is_bootstrap_state_synced_as(&self, state: BootstrapState) -> bool {
+		self.bootstrap_states.read().await.iter().all(|s| *s == state)
+	}
+
 	/// Build `round_control_relay` method call param.
 	async fn build_roundup_submit(
 		&self,
@@ -352,7 +348,10 @@ impl<T: JsonRpcClient> RoundupRelayHandler<T> {
 			});
 		}
 	}
+}
 
+#[async_trait::async_trait]
+impl<T: JsonRpcClient> BootstrapHandler for RoundupRelayHandler<T> {
 	async fn bootstrap(&self) {
 		log::info!(
 			target: &self.client.get_chain_name(),
@@ -377,14 +376,14 @@ impl<T: JsonRpcClient> RoundupRelayHandler<T> {
 
 		if bootstrap_guard.iter().all(|s| *s == BootstrapState::BootstrapRoundUpPhase2) {
 			drop(bootstrap_guard);
-			let logs = self.get_roundup_logs().await;
+			let logs = self.get_bootstrap_events().await;
 
 			let mut stream = tokio_stream::iter(logs);
 			while let Some(log) = stream.next().await {
 				if let Some(receipt) =
 					self.client.get_transaction_receipt(log.transaction_hash.unwrap()).await
 				{
-					self.process_confirmed_transaction(receipt).await;
+					self.process_confirmed_transaction(receipt, true).await;
 				}
 			}
 		}
@@ -397,9 +396,17 @@ impl<T: JsonRpcClient> RoundupRelayHandler<T> {
 		});
 	}
 
-	async fn get_roundup_logs(&self) -> Vec<Log> {
+	async fn get_bootstrap_events(&self) -> Vec<Log> {
+		let round_info: RoundMetaData = self
+			.client
+			.contract_call(self.client.authority.round_info(), "authority.round_info")
+			.await;
 		let bootstrap_offset_height = self
-			.get_bootstrap_offset_height_based_on_block_time(self.bootstrap_config.round_offset)
+			.client
+			.get_bootstrap_offset_height_based_on_block_time(
+				self.bootstrap_config.round_offset,
+				round_info,
+			)
 			.await;
 
 		let latest_block_number = self.client.get_latest_block_number().await;
@@ -428,37 +435,8 @@ impl<T: JsonRpcClient> RoundupRelayHandler<T> {
 		logs
 	}
 
-	/// Get factor between the block time of native-chain and block time of this chain
-	/// Approximately BIFROST: 3s, Polygon: 2s, BSC: 3s, Ethereum: 12s
-	pub async fn get_bootstrap_offset_height_based_on_block_time(&self, round_offset: u32) -> U64 {
-		let round_info: RoundMetaData = self
-			.client
-			.contract_call(self.client.authority.round_info(), "authority.round_info")
-			.await;
-
-		let block_number = self.client.get_latest_block_number().await;
-
-		let current_block = self.client.get_block((block_number).into()).await.unwrap();
-		let prev_block = self
-			.client
-			.get_block((block_number - BOOTSTRAP_BLOCK_OFFSET).into())
-			.await
-			.unwrap();
-
-		let diff = current_block
-			.timestamp
-			.checked_sub(prev_block.timestamp)
-			.unwrap()
-			.checked_div(BOOTSTRAP_BLOCK_OFFSET.into())
-			.unwrap();
-
-		round_offset
-			.checked_mul(round_info.round_length.as_u32())
-			.unwrap()
-			.checked_mul(NATIVE_BLOCK_TIME)
-			.unwrap()
-			.checked_div(diff.as_u32())
-			.unwrap()
-			.into()
+	/// Verifies whether the bootstrap state has been synced to the given state.
+	async fn is_bootstrap_state_synced_as(&self, state: BootstrapState) -> bool {
+		self.bootstrap_states.read().await.iter().all(|s| *s == state)
 	}
 }

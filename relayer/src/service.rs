@@ -247,8 +247,8 @@ pub fn new_relay_base(config: Configuration) -> Result<RelayBase, ServiceError> 
 		event_channels,
 		clients,
 		config.relayer_config.periodic_configs.unwrap().roundup_emitter,
-		bootstrap_states.clone(),
-		config.relayer_config.bootstrap_config.clone(),
+		bootstrap_states,
+		config.relayer_config.bootstrap_config,
 	);
 	task_manager.spawn_essential_handle().spawn(
 		"roundup-emitter",
