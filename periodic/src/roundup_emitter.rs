@@ -257,6 +257,13 @@ impl<T: JsonRpcClient> BootstrapHandler for RoundupEmitter<T> {
 						next_poll_round = new_next_poll_round;
 						break
 					}
+
+					log::info!(
+						target: &self.client.get_chain_name(),
+						"-[{}] 👤 VSP phase1 is still in process. The majority must reach quorum to move on to phase2.",
+						sub_display_format(SUB_LOG_TARGET),
+					);
+
 					sleep(Duration::from_millis(self.client.call_interval)).await;
 				}
 			}
