@@ -5,7 +5,7 @@ use cccp_primitives::{
 	cli::BootstrapConfig,
 	eth::{
 		BootstrapState, BridgeDirection, ChainID, RecoveredSignature, SocketEventStatus,
-		BOOTSTRAP_BLOCK_CHUNK_SIZE, BOOTSTRAP_BLOCK_OFFSET, NATIVE_BLOCK_TIME,
+		BOOTSTRAP_BLOCK_CHUNK_SIZE,
 	},
 	socket::{
 		BridgeRelayBuilder, PollSubmit, RequestID, SerializedPoll, Signatures, SocketEvents,
@@ -17,9 +17,7 @@ use ethers::{
 	abi::{RawLog, Token},
 	prelude::decode_logs,
 	providers::JsonRpcClient,
-	types::{
-		Bytes, Filter, Log, Signature, TransactionReceipt, TransactionRequest, H256, U256, U64,
-	},
+	types::{Bytes, Filter, Log, Signature, TransactionReceipt, TransactionRequest, H256, U256},
 };
 use tokio::{
 	sync::{broadcast::Receiver, Mutex, RwLock},
@@ -31,6 +29,8 @@ use crate::eth::{
 	BlockMessage, BridgeRelayMetadata, EthClient, EventMessage, EventMetadata, EventSender,
 	Handler, TxRequest,
 };
+
+use super::BootstrapHandler;
 
 const SUB_LOG_TARGET: &str = "bridge-handler";
 
@@ -99,23 +99,11 @@ impl<T: JsonRpcClient> BridgeRelayHandler<T> {
 impl<T: JsonRpcClient> Handler for BridgeRelayHandler<T> {
 	async fn run(&mut self) {
 		loop {
-			if self
-				.bootstrap_states
-				.read()
-				.await
-				.iter()
-				.all(|s| *s == BootstrapState::BootstrapBridgeRelay)
-			{
+			if self.is_bootstrap_state_synced_as(BootstrapState::BootstrapBridgeRelay).await {
 				self.bootstrap().await;
 
 				sleep(Duration::from_millis(self.client.call_interval)).await;
-			} else if self
-				.bootstrap_states
-				.read()
-				.await
-				.iter()
-				.all(|s| *s == BootstrapState::NormalStart)
-			{
+			} else if self.is_bootstrap_state_synced_as(BootstrapState::NormalStart).await {
 				let block_msg = self.block_receiver.recv().await.unwrap();
 
 				log::info!(
@@ -129,13 +117,13 @@ impl<T: JsonRpcClient> Handler for BridgeRelayHandler<T> {
 
 				let mut stream = tokio_stream::iter(block_msg.target_receipts);
 				while let Some(receipt) = stream.next().await {
-					self.process_confirmed_transaction(receipt).await;
+					self.process_confirmed_transaction(receipt, false).await;
 				}
 			}
 		}
 	}
 
-	async fn process_confirmed_transaction(&self, receipt: TransactionReceipt) {
+	async fn process_confirmed_transaction(&self, receipt: TransactionReceipt, is_bootstrap: bool) {
 		if self.is_target_contract(&receipt) {
 			let status = receipt.status.unwrap();
 			if status.is_zero() {
@@ -165,14 +153,16 @@ impl<T: JsonRpcClient> Handler for BridgeRelayHandler<T> {
 									dst_chain_id,
 								);
 
-								log::info!(
-									target: &self.client.get_chain_name(),
-									"-[{}] 🔖 Detected socket event: {}, {:?}-{:?}",
-									sub_display_format(SUB_LOG_TARGET),
-									metadata,
-									receipt.block_number.unwrap(),
-									receipt.transaction_hash,
-								);
+								if !is_bootstrap {
+									log::info!(
+										target: &self.client.get_chain_name(),
+										"-[{}] 🔖 Detected socket event: {}, {:?}-{:?}",
+										sub_display_format(SUB_LOG_TARGET),
+										metadata,
+										receipt.block_number.unwrap(),
+										receipt.transaction_hash,
+									);
+								}
 
 								if Self::is_sequence_ended(status) ||
 									self.is_already_done(&socket.msg.req_id, src_chain_id).await
@@ -634,8 +624,10 @@ impl<T: JsonRpcClient> BridgeRelayHandler<T> {
 			SocketEventStatus::Committed | SocketEventStatus::Rollbacked
 		)
 	}
+}
 
-	/// Get a receipt from each log and add it to the processing routine
+#[async_trait::async_trait]
+impl<T: JsonRpcClient> BootstrapHandler for BridgeRelayHandler<T> {
 	async fn bootstrap(&self) {
 		log::info!(
 			target: &self.client.get_chain_name(),
@@ -643,14 +635,14 @@ impl<T: JsonRpcClient> BridgeRelayHandler<T> {
 			sub_display_format(SUB_LOG_TARGET),
 		);
 
-		let logs = self.bootstrap_socket().await;
+		let logs = self.get_bootstrap_events().await;
 
 		let mut stream = tokio_stream::iter(logs);
 		while let Some(log) = stream.next().await {
 			if let Some(receipt) =
 				self.client.get_transaction_receipt(log.transaction_hash.unwrap()).await
 			{
-				self.process_confirmed_transaction(receipt).await;
+				self.process_confirmed_transaction(receipt, true).await;
 			}
 		}
 
@@ -673,10 +665,32 @@ impl<T: JsonRpcClient> BridgeRelayHandler<T> {
 		}
 	}
 
-	/// Calculate the logs to look up when bootstrapping
-	async fn bootstrap_socket(&self) -> Vec<Log> {
+	async fn get_bootstrap_events(&self) -> Vec<Log> {
+		let round_info: RoundMetaData = if self.client.is_native {
+			self.client
+				.contract_call(self.client.authority.round_info(), "authority.round_info")
+				.await
+		} else if let Some((_id, native_client)) =
+			self.system_clients.iter().find(|(_id, client)| client.is_native)
+		{
+			native_client
+				.contract_call(native_client.authority.round_info(), "authority.round_info")
+				.await
+		} else {
+			panic!(
+				"[{}]-[{}] {}",
+				self.client.get_chain_name(),
+				SUB_LOG_TARGET,
+				INVALID_BIFROST_NATIVENESS,
+			);
+		};
+
 		let bootstrap_offset_height = self
-			.get_bootstrap_offset_height_based_on_block_time(self.bootstrap_config.round_offset)
+			.client
+			.get_bootstrap_offset_height_based_on_block_time(
+				self.bootstrap_config.round_offset,
+				round_info,
+			)
 			.await;
 
 		let latest_block_number = self.client.get_latest_block_number().await;
@@ -712,52 +726,8 @@ impl<T: JsonRpcClient> BridgeRelayHandler<T> {
 		logs
 	}
 
-	/// Get factor between the block time of native-chain and block time of this chain
-	/// Approximately BIFROST: 3s, Polygon: 2s, BSC: 3s, Ethereum: 12s
-	pub async fn get_bootstrap_offset_height_based_on_block_time(&self, round_offset: u32) -> U64 {
-		let round_info: RoundMetaData = if self.client.is_native {
-			self.client
-				.contract_call(self.client.authority.round_info(), "authority.round_info")
-				.await
-		} else if let Some((_id, native_client)) =
-			self.system_clients.iter().find(|(_id, client)| client.is_native)
-		{
-			native_client
-				.contract_call(native_client.authority.round_info(), "authority.round_info")
-				.await
-		} else {
-			panic!(
-				"[{}]-[{}] {}",
-				self.client.get_chain_name(),
-				SUB_LOG_TARGET,
-				INVALID_BIFROST_NATIVENESS,
-			);
-		};
-
-		let block_number = self.client.get_latest_block_number().await;
-
-		let current_block = self.client.get_block((block_number).into()).await.unwrap();
-		let prev_block = self
-			.client
-			.get_block((block_number - BOOTSTRAP_BLOCK_OFFSET).into())
-			.await
-			.unwrap();
-
-		let diff = current_block
-			.timestamp
-			.checked_sub(prev_block.timestamp)
-			.unwrap()
-			.checked_div(BOOTSTRAP_BLOCK_OFFSET.into())
-			.unwrap();
-
-		round_offset
-			.checked_mul(round_info.round_length.as_u32())
-			.unwrap()
-			.checked_mul(NATIVE_BLOCK_TIME)
-			.unwrap()
-			.checked_div(diff.as_u32())
-			.unwrap()
-			.into()
+	async fn is_bootstrap_state_synced_as(&self, state: BootstrapState) -> bool {
+		self.bootstrap_states.read().await.iter().all(|s| *s == state)
 	}
 }
 
