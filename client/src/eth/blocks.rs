@@ -4,7 +4,7 @@ use cccp_primitives::{
 };
 use ethers::{
 	providers::JsonRpcClient,
-	types::{SyncingStatus, TransactionReceipt, H160, H256, U64},
+	types::{Log, SyncingStatus, TransactionReceipt, H160, H256, U64},
 };
 use std::sync::Arc;
 use tokio::{
@@ -16,7 +16,7 @@ use tokio::{
 };
 use tokio_stream::StreamExt;
 
-use super::EthClient;
+use super::{BootstrapHandler, EthClient};
 
 #[derive(Clone, Debug)]
 /// The message format passed through the block channel.
@@ -108,13 +108,7 @@ impl<T: JsonRpcClient> BlockManager<T> {
 		self.initialize().await;
 
 		loop {
-			if self
-				.bootstrap_states
-				.read()
-				.await
-				.iter()
-				.all(|s| *s == BootstrapState::NormalStart)
-			{
+			if self.is_bootstrap_state_synced_as(BootstrapState::NormalStart).await {
 				let latest_block = self.client.get_latest_block_number().await;
 				while self.is_block_confirmed(latest_block) {
 					self.process_confirmed_block().await;
@@ -191,11 +185,8 @@ impl<T: JsonRpcClient> BlockManager<T> {
 				);
 			} else {
 				for state in self.bootstrap_states.write().await.iter_mut() {
-					match *state {
-						BootstrapState::NodeSyncing => {
-							*state = BootstrapState::BootstrapRoundUpPhase1;
-						},
-						_ => {},
+					if *state == BootstrapState::NodeSyncing {
+						*state = BootstrapState::BootstrapRoundUpPhase1;
 					}
 				}
 				return
@@ -203,5 +194,18 @@ impl<T: JsonRpcClient> BlockManager<T> {
 
 			sleep(Duration::from_millis(self.client.call_interval)).await;
 		}
+	}
+}
+
+#[async_trait::async_trait]
+impl<T: JsonRpcClient> BootstrapHandler for BlockManager<T> {
+	async fn bootstrap(&self) {}
+
+	async fn get_bootstrap_events(&self) -> Vec<Log> {
+		vec![]
+	}
+
+	async fn is_bootstrap_state_synced_as(&self, state: BootstrapState) -> bool {
+		self.bootstrap_states.read().await.iter().all(|s| *s == state)
 	}
 }

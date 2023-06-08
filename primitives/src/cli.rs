@@ -60,6 +60,8 @@ pub struct RelayerConfig {
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct SystemConfig {
+	/// The identifier of the environment.
+	pub id: String,
 	/// The private key of the relayer.
 	pub private_key: String,
 	/// Path of the keystore. (default: `./keys`)
