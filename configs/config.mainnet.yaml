@@ -1,4 +1,5 @@
 system:
+  id: "mainnet"
   private_key: ""
   debug_mode: false
 
@@ -25,6 +26,7 @@ evm_providers:
     call_interval: 6000
     block_confirmations: 1
     is_relay_target: false
+    eip1559: true
     socket_address: "0x4A31FfeAc276CC5e508cAC0568d932d398C4DD84"
     vault_address: "0x2F95C102Cc26875406BC689Fb01aE382B82AA535"
     authority_address: "0xAdcaa90cabDc730855064d5b0f5242c16A9B7E10"
@@ -43,6 +45,7 @@ evm_providers:
     call_interval: 1000
     block_confirmations: 7
     is_relay_target: false
+    eip1559: true
     socket_address: "0x050606CC2Bcd9504991Be2c309D6c6c832Bb5bd0"
     vault_address: "0x5fA7fe5F94f2D15585a3134C1C5d3019c8c1645d"
     authority_address: "0x7F48909fBd1E38f1e05B5E326A44175fc2462B13"

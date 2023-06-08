@@ -11,8 +11,8 @@ use ethers::{
 	providers::{JsonRpcClient, Middleware, Provider},
 	signers::{LocalWallet, Signer},
 	types::{
-		transaction::eip2718::TypedTransaction, BlockNumber, Bytes, Eip1559TransactionRequest,
-		Transaction, TransactionReceipt, TransactionRequest, U256,
+		transaction::eip2718::TypedTransaction, Bytes, Eip1559TransactionRequest, Transaction,
+		TransactionReceipt, TransactionRequest, U256,
 	},
 };
 use rand::Rng;
@@ -388,7 +388,7 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> {
 		msg.tx_request = msg.tx_request.gas(estimated_gas);
 
 		// check the txpool for transaction duplication prevention
-		if !(self.is_duplicate_relay(&mut msg.tx_request, msg.check_mempool).await) {
+		if !(self.is_duplicate_relay(&msg.tx_request, msg.check_mempool).await) {
 			// no duplication found
 			let result = if self.eip1559 {
 				self.middleware

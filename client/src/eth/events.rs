@@ -239,7 +239,7 @@ impl TxRequest {
 				ret.nonce = tx_request.nonce;
 				ret.data = tx_request.data.clone();
 				ret.gas = tx_request.gas;
-				return ret
+				ret
 			},
 			TxRequest::Eip1559(tx_request) => tx_request.clone(),
 		}
@@ -258,7 +258,7 @@ impl TxRequest {
 				ret.nonce = tx_request.nonce;
 				ret.data = tx_request.data.clone();
 				ret.gas = tx_request.gas;
-				return ret
+				ret
 			},
 		}
 	}
