@@ -5,10 +5,10 @@ StartLimitIntervalSec=5
 
 [Service]
 Type=simple
-Restart=always
+Restart=on-failure
 SyslogIdentifier=cccp-relayer
 SyslogFacility=local7
-WorkingDirectory=<PATH_TO_BIFROST_RELAYER>
+WorkingDirectory=<PATH_TO_CCCP_RELAYER>
 ExecStart=<PATH_TO_CCCP_RELAYER> --chain <Mainnet|Testnet|<PATH_TO_CONFIG_FILE>>
 KillSignal=SIGHUP
 
