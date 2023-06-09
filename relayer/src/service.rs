@@ -18,7 +18,7 @@ use cccp_primitives::{
 };
 use ethers::{
 	providers::{Http, Provider},
-	types::H160,
+	types::{H160, U256},
 };
 use sc_service::{Error as ServiceError, TaskManager};
 use std::{collections::BTreeMap, str::FromStr, sync::Arc};
