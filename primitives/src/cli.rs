@@ -1,5 +1,5 @@
 use crate::{eth::ChainID, periodic::PriceSource};
-use ethers::types::{U256, U64};
+use ethers::types::U64;
 use serde::Deserialize;
 
 pub type Result<T> = std::result::Result<T, Error>;

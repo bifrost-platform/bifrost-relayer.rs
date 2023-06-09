@@ -2,6 +2,7 @@
 members = [
     "client",
     "client/cli",
+	"monitors",
     "periodic",
     "primitives",
     "relayer",
@@ -45,10 +46,14 @@ sha3 = "0.10.7"
 tokio = "1.22.0"
 tokio-stream = "0.1"
 
+prometheus = { version = "0.13.0", default-features = false }
+lazy_static = "1.4.0"
+
 # Substrate Client
-sc-cli = { git = "https://github.com/bifrost-platform/bifrost-substrate", branch = "bifrost-polkadot-v0.9.37" }
-sc-utils = { git = "https://github.com/bifrost-platform/bifrost-substrate", branch = "bifrost-polkadot-v0.9.37" }
-sc-service = { git = "https://github.com/bifrost-platform/bifrost-substrate", branch = "bifrost-polkadot-v0.9.37" }
+sc-cli = { git = "https://github.com/bifrost-platform/bifrost-substrate", branch = "bifrost-polkadot-v0.9.39" }
+sc-utils = { git = "https://github.com/bifrost-platform/bifrost-substrate", branch = "bifrost-polkadot-v0.9.39" }
+sc-service = { git = "https://github.com/bifrost-platform/bifrost-substrate", branch = "bifrost-polkadot-v0.9.39" }
+prometheus-endpoint = { package = "substrate-prometheus-endpoint", git = "https://github.com/bifrost-platform/bifrost-substrate", branch = "bifrost-polkadot-v0.9.39" }
 
 # Substrate Builds
-substrate-build-script-utils = { git = "https://github.com/bifrost-platform/bifrost-substrate", branch = "bifrost-polkadot-v0.9.37" }
+substrate-build-script-utils = { git = "https://github.com/bifrost-platform/bifrost-substrate", branch = "bifrost-polkadot-v0.9.39" }

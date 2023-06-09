@@ -1,0 +1,17 @@
+[package]
+name = "cccp-monitors"
+version = "0.1.0"
+description = "The monitoring tools for BIFROST relayer"
+authors = { workspace = true }
+homepage = { workspace = true }
+edition = { workspace = true }
+license = { workspace = true }
+repository = { workspace = true }
+
+[dependencies]
+# General
+lazy_static = { workspace = true }
+prometheus = { workspace = true }
+
+# CCCP
+cccp-primitives = { path = "../primitives" }

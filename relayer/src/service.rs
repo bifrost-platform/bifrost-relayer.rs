@@ -3,6 +3,7 @@ use cccp_client::eth::{
 	BlockManager, BridgeRelayHandler, EthClient, EventSender, Handler, RoundupRelayHandler,
 	TransactionManager, WalletManager,
 };
+use cccp_monitors::register_metrics;
 use cccp_periodic::{
 	heartbeat_sender::HeartbeatSender, roundup_emitter::RoundupEmitter, OraclePriceFeeder,
 };
@@ -18,10 +19,16 @@ use cccp_primitives::{
 };
 use ethers::{
 	providers::{Http, Provider},
-	types::{H160, U256},
+	types::H160,
 };
-use sc_service::{Error as ServiceError, TaskManager};
-use std::{collections::BTreeMap, str::FromStr, sync::Arc};
+use futures::FutureExt;
+use sc_service::{config::PrometheusConfig, Error as ServiceError, TaskManager};
+use std::{
+	collections::BTreeMap,
+	net::{Ipv4Addr, SocketAddr},
+	str::FromStr,
+	sync::Arc,
+};
 use tokio::sync::{Barrier, Mutex, RwLock};
 
 pub fn relay(config: Configuration) -> Result<TaskManager, ServiceError> {
@@ -271,6 +278,22 @@ pub fn new_relay_base(config: Configuration) -> Result<RelayBase, ServiceError> 
 			},
 		)
 	});
+	// let interface =
+	// 			if self.prometheus_external { Ipv4Addr::UNSPECIFIED } else { Ipv4Addr::LOCALHOST };
+
+	let prometheus_config = PrometheusConfig::new_with_default_registry(
+		SocketAddr::new(Ipv4Addr::LOCALHOST.into(), 9090),
+		config.relayer_config.system.id,
+	);
+	register_metrics(&prometheus_config.registry);
+
+	// spawn prometheus
+	task_manager.spawn_handle().spawn(
+		"prometheus-endpoint",
+		None,
+		prometheus_endpoint::init_prometheus(prometheus_config.port, prometheus_config.registry)
+			.map(drop),
+	);
 
 	Ok(RelayBase { task_manager })
 }
