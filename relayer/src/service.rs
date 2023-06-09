@@ -18,7 +18,7 @@ use cccp_primitives::{
 };
 use ethers::{
 	providers::{Http, Provider},
-	types::H160,
+	types::{H160, U256},
 };
 use sc_service::{Error as ServiceError, TaskManager};
 use std::{collections::BTreeMap, str::FromStr, sync::Arc};
@@ -81,6 +81,7 @@ pub fn new_relay_base(config: Configuration) -> Result<RelayBase, ServiceError> 
 					client.clone(),
 					config.relayer_config.system.debug_mode,
 					evm_provider.eip1559.unwrap_or(false),
+					evm_provider.min_priority_fee.unwrap_or(U256::default()),
 				);
 				tx_managers.push((tx_manager, client.get_chain_name()));
 				event_senders.push(Arc::new(EventSender::new(

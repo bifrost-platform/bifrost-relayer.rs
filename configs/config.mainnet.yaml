@@ -46,6 +46,7 @@ evm_providers:
     block_confirmations: 7
     is_relay_target: false
     eip1559: true
+    min_priority_fee: 30000000000
     socket_address: "0x050606CC2Bcd9504991Be2c309D6c6c832Bb5bd0"
     vault_address: "0x5fA7fe5F94f2D15585a3134C1C5d3019c8c1645d"
     authority_address: "0x7F48909fBd1E38f1e05B5E326A44175fc2462B13"
