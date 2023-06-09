@@ -1,8 +1,7 @@
 use async_recursion::async_recursion;
-use cccp_primitives::sub_display_format;
 
 use crate::eth::{FlushMetadata, TxRequest, DEFAULT_CALL_RETRIES, DEFAULT_CALL_RETRY_INTERVAL_MS};
-use cccp_primitives::eth::ETHEREUM_BLOCK_TIME;
+use cccp_primitives::{eth::ETHEREUM_BLOCK_TIME, sub_display_format};
 use ethers::{
 	prelude::{
 		gas_escalator::{Frequency, GasEscalatorMiddleware, GeometricGasPrice},
@@ -11,8 +10,8 @@ use ethers::{
 	providers::{JsonRpcClient, Middleware, Provider},
 	signers::{LocalWallet, Signer},
 	types::{
-		transaction::eip2718::TypedTransaction, Bytes, Eip1559TransactionRequest, Transaction,
-		TransactionReceipt, TransactionRequest, U256,
+		transaction::eip2718::TypedTransaction, BlockId, BlockNumber, Bytes,
+		Eip1559TransactionRequest, Transaction, TransactionReceipt, TransactionRequest, U256,
 	},
 };
 use rand::Rng;
@@ -37,6 +36,41 @@ fn generate_delay() -> u64 {
 	rand::thread_rng().gen_range(0..=12000)
 }
 
+trait OnSuccessHandler {
+	/// Handles the successfully mined transaction.
+	fn handle_success_tx_receipt(&self, receipt: TransactionReceipt, metadata: EventMetadata);
+}
+
+#[async_trait::async_trait]
+trait OnFailHandler {
+	/// Handles the failed transaction receipt generation.
+	async fn handle_failed_tx_receipt(&self, msg: EventMessage);
+
+	/// Handles the failed transaction request.
+	async fn handle_failed_tx_request<E: Error + Sync + ?Sized>(
+		&self,
+		msg: EventMessage,
+		error: &E,
+	);
+
+	/// Handles the failed gas estimation.
+	async fn handle_failed_gas_estimation<E: Error + Sync + ?Sized>(
+		&self,
+		msg: EventMessage,
+		error: &E,
+	);
+
+	/// Handles the failed `get_estimated_eip1559_fees()`.
+	async fn handle_failed_get_estimated_eip1559_fees(
+		&self,
+		retries_remaining: u8,
+		error: String,
+	) -> (U256, U256);
+
+	/// Handles the failed `get_gas_price()`.
+	async fn handle_failed_get_gas_price(&self, retries_remaining: u8, error: String) -> U256;
+}
+
 /// The essential task that sends asynchronous transactions.
 pub struct TransactionManager<T> {
 	/// The ethereum client for the connected chain.
@@ -51,6 +85,8 @@ pub struct TransactionManager<T> {
 	debug_mode: bool,
 	/// If true, send transaction with EIP1559
 	eip1559: bool,
+	/// The minimum priority fee required.
+	min_priority_fee: U256,
 }
 
 impl<T: 'static + JsonRpcClient> TransactionManager<T> {
@@ -59,6 +95,7 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> {
 		client: Arc<EthClient<T>>,
 		debug_mode: bool,
 		eip1559: bool,
+		min_priority_fee: U256,
 	) -> (Self, UnboundedSender<EventMessage>) {
 		let (sender, receiver) = mpsc::unbounded_channel::<EventMessage>();
 
@@ -77,7 +114,15 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> {
 		let middleware = NonceManagerMiddleware::new(signer, client.wallet.signer.address());
 
 		(
-			Self { client, middleware, receiver, is_txpool_enabled: false, debug_mode, eip1559 },
+			Self {
+				client,
+				middleware,
+				receiver,
+				is_txpool_enabled: false,
+				debug_mode,
+				eip1559,
+				min_priority_fee,
+			},
 			sender,
 		)
 	}
@@ -122,28 +167,26 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> {
 			true => {
 				let mut request: Eip1559TransactionRequest = transaction.into();
 
-				let current_fees = self.middleware.estimate_eip1559_fees(None).await.unwrap();
+				let current_fees = self.get_estimated_eip1559_fees().await;
 
 				let new_max_fee_per_gas = max(request.max_fee_per_gas.unwrap(), current_fees.0);
 				let new_priority_fee = max(
 					request.max_priority_fee_per_gas.unwrap() * MAX_PRIORITY_FEE_COEFFICIENT,
-					current_fees.1,
+					max(current_fees.1, self.min_priority_fee),
 				);
 
 				request = request
 					.max_fee_per_gas(new_max_fee_per_gas)
 					.max_priority_fee_per_gas(new_priority_fee);
 
-				match self
+				if self
 					.middleware
 					.estimate_gas(&TypedTransaction::Eip1559(request.clone()), None)
 					.await
+					.is_err()
 				{
-					Ok(_estimated_gas) => {},
-					Err(_error) => {
-						request = request.to(self.client.address()).value(0).data(Bytes::default());
-					},
-				};
+					request = request.to(self.client.address()).value(0).data(Bytes::default());
+				}
 
 				TxRequest::Eip1559(request)
 			},
@@ -180,124 +223,16 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> {
 		self.try_send_transaction(msg).await;
 	}
 
-	/// Handles the successfully mined transaction.
-	fn handle_success_tx_receipt(&self, receipt: TransactionReceipt, metadata: EventMetadata) {
-		let status = receipt.status.unwrap();
-		log::info!(
-			target: &self.client.get_chain_name(),
-			"-[{}] 🎁 The requested transaction has been successfully mined in block: {}, {:?}-{:?}-{:?}",
-			sub_display_format(SUB_LOG_TARGET),
-			metadata.to_string(),
-			receipt.block_number.unwrap(),
-			status,
-			receipt.transaction_hash
-		);
-		if status.is_zero() && self.debug_mode {
-			log::warn!(
-				target: &self.client.get_chain_name(),
-				"-[{}] ⚠️  Warning! Error encountered during contract execution [execution reverted]. A prior transaction might have been already submitted: {}, {:?}-{:?}-{:?}",
-				sub_display_format(SUB_LOG_TARGET),
-				metadata,
-				receipt.block_number.unwrap(),
-				status,
-				receipt.transaction_hash
-			);
-			sentry::capture_message(
-				format!(
-					"[{}]-[{}] ⚠️  Warning! Error encountered during contract execution [execution reverted]. A prior transaction might have been already submitted: {}, {:?}-{:?}-{:?}",
-					&self.client.get_chain_name(),
-					SUB_LOG_TARGET,
-					metadata,
-					receipt.block_number.unwrap(),
-					status,
-					receipt.transaction_hash
-				)
-				.as_str(),
-				sentry::Level::Warning,
-			);
-		}
-	}
-
-	/// Handles the failed transaction receipt generation.
-	async fn handle_failed_tx_receipt(&self, msg: EventMessage) {
-		log::error!(
-			target: &self.client.get_chain_name(),
-			"-[{}] ♻️  The requested transaction failed to generate a receipt: {}, Retries left: {:?}",
-			sub_display_format(SUB_LOG_TARGET),
-			msg.metadata,
-			msg.retries_remaining - 1,
-		);
-		sentry::capture_message(
-			format!(
-				"[{}]-[{}] ♻️  The requested transaction failed to generate a receipt: {}, Retries left: {:?}",
-				&self.client.get_chain_name(),
-				SUB_LOG_TARGET,
-				msg.metadata,
-				msg.retries_remaining - 1,
-			)
-			.as_str(),
-			sentry::Level::Error,
-		);
-		self.retry_transaction(msg).await;
-	}
-
-	/// Handles the failed transaction request.
-	async fn handle_failed_tx_request<E>(&self, msg: EventMessage, error: &E)
-	where
-		E: Error + ?Sized,
-	{
-		log::error!(
-			target: &self.client.get_chain_name(),
-			"-[{}] ♻️  Unknown error while requesting a transaction request: {}, Retries left: {:?}, Error: {}",
-			sub_display_format(SUB_LOG_TARGET),
-			msg.metadata,
-			msg.retries_remaining - 1,
-			error.to_string(),
-		);
-		sentry::capture_error(&error);
-		self.retry_transaction(msg).await;
-	}
-
-	/// Handles the failed gas estimation.
-	async fn handle_failed_gas_estimation<E>(&self, msg: EventMessage, error: &E)
-	where
-		E: Error + ?Sized,
-	{
-		if self.debug_mode {
-			log::warn!(
-				target: &self.client.get_chain_name(),
-				"-[{}] ⚠️  Warning! Error encountered during gas estimation: {}, Retries left: {:?}, Error: {}",
-				sub_display_format(SUB_LOG_TARGET),
-				msg.metadata,
-				msg.retries_remaining - 1,
-				error.to_string()
-			);
-			sentry::capture_message(
-				format!(
-					"[{}]-[{}] ⚠️  Warning! Error encountered during gas estimation: {}, Retries left: {:?}, Error: {}",
-					&self.client.get_chain_name(),
-					SUB_LOG_TARGET,
-					msg.metadata,
-					msg.retries_remaining - 1,
-					error
-				)
-				.as_str(),
-				sentry::Level::Warning,
-			);
-		}
-		self.retry_transaction(msg).await;
-	}
-
 	/// Get current network's gas price (If eip1559 flag is true, returns pending block's base fee)
 	async fn get_gas_price(&self) -> U256 {
 		match self.eip1559 {
 			true => self
-				.middleware
-				.estimate_eip1559_fees(None)
+				.client
+				.get_block(BlockId::Number(BlockNumber::Pending))
 				.await
 				.unwrap()
-				.0
-				.saturating_mul(MAX_FEE_COEFFICIENT.into()),
+				.base_fee_per_gas
+				.unwrap(),
 			false => match self.middleware.get_gas_price().await {
 				Ok(gas_price) => gas_price,
 				Err(error) =>
@@ -306,52 +241,21 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> {
 		}
 	}
 
-	/// Handles the failed get_gas_price().
-	async fn handle_failed_get_gas_price(&self, retries_remaining: u8, error: String) -> U256 {
-		let mut retries = retries_remaining;
-		let mut last_error = error;
-
-		while retries > 0 {
-			if self.debug_mode {
-				log::warn!(
-					target: &self.client.get_chain_name(),
-					"-[{}] ⚠️  Warning! Error encountered during get gas price, Retries left: {:?}, Error: {}",
-					sub_display_format(SUB_LOG_TARGET),
-					retries - 1,
-					last_error
-				);
-				sentry::capture_message(
-					format!(
-						"[{}]-[{}] ⚠️  Warning! Error encountered during get gas price, Retries left: {:?}, Error: {}",
-						&self.client.get_chain_name(),
-						SUB_LOG_TARGET,
-						retries - 1,
-						last_error
-					)
-					.as_str(),
-					sentry::Level::Warning,
-				);
-			}
-
-			match self.middleware.get_gas_price().await {
-				Ok(gas_price) => return gas_price,
-				Err(error) => {
-					sleep(Duration::from_millis(DEFAULT_CALL_RETRY_INTERVAL_MS)).await;
-					retries -= 1;
-					last_error = error.to_string();
-				},
-			}
+	/// Gets a heuristic recommendation of max fee per gas and max priority fee per gas for EIP-1559
+	/// compatible transactions.
+	async fn get_estimated_eip1559_fees(&self) -> (U256, U256) {
+		match self.middleware.estimate_eip1559_fees(None).await {
+			Ok(fees) => fees,
+			Err(error) =>
+				self.handle_failed_get_estimated_eip1559_fees(
+					DEFAULT_CALL_RETRIES,
+					error.to_string(),
+				)
+				.await,
 		}
-
-		panic!(
-			"[{}]-[{}] Error on call get_gas_price(): {:?}",
-			self.client.get_chain_name(),
-			SUB_LOG_TARGET,
-			last_error,
-		);
 	}
 
-	/// Get gas_price for retry transaction request.
+	/// Get gas_price for legacy retry transaction request.
 	/// returns `max(current_network_gas_price,escalated_gas_price)`
 	async fn get_gas_price_for_retry(&self, previous_gas_price: U256) -> U256 {
 		let previous_gas_price = previous_gas_price.as_u64() as f64;
@@ -391,9 +295,13 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> {
 		if !(self.is_duplicate_relay(&msg.tx_request, msg.check_mempool).await) {
 			// no duplication found
 			let result = if self.eip1559 {
+				let fees = self.get_estimated_eip1559_fees().await;
 				self.middleware
 					.send_transaction(
-						msg.tx_request.to_eip1559().max_fee_per_gas(self.get_gas_price().await),
+						msg.tx_request
+							.to_eip1559()
+							.max_fee_per_gas(fees.0.saturating_mul(MAX_FEE_COEFFICIENT.into()))
+							.max_priority_fee_per_gas(max(fees.1, self.min_priority_fee)),
 						None,
 					)
 					.await
@@ -457,6 +365,207 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> {
 			}
 		}
 		false
+	}
+}
+
+impl<T: 'static + JsonRpcClient> OnSuccessHandler for TransactionManager<T> {
+	fn handle_success_tx_receipt(&self, receipt: TransactionReceipt, metadata: EventMetadata) {
+		let status = receipt.status.unwrap();
+		log::info!(
+			target: &self.client.get_chain_name(),
+			"-[{}] 🎁 The requested transaction has been successfully mined in block: {}, {:?}-{:?}-{:?}",
+			sub_display_format(SUB_LOG_TARGET),
+			metadata.to_string(),
+			receipt.block_number.unwrap(),
+			status,
+			receipt.transaction_hash
+		);
+		if status.is_zero() && self.debug_mode {
+			log::warn!(
+				target: &self.client.get_chain_name(),
+				"-[{}] ⚠️  Warning! Error encountered during contract execution [execution reverted]. A prior transaction might have been already submitted: {}, {:?}-{:?}-{:?}",
+				sub_display_format(SUB_LOG_TARGET),
+				metadata,
+				receipt.block_number.unwrap(),
+				status,
+				receipt.transaction_hash
+			);
+			sentry::capture_message(
+					format!(
+						"[{}]-[{}] ⚠️  Warning! Error encountered during contract execution [execution reverted]. A prior transaction might have been already submitted: {}, {:?}-{:?}-{:?}",
+						&self.client.get_chain_name(),
+						SUB_LOG_TARGET,
+						metadata,
+						receipt.block_number.unwrap(),
+						status,
+						receipt.transaction_hash
+					)
+					.as_str(),
+					sentry::Level::Warning,
+				);
+		}
+	}
+}
+
+#[async_trait::async_trait]
+impl<T: 'static + JsonRpcClient> OnFailHandler for TransactionManager<T> {
+	async fn handle_failed_tx_receipt(&self, msg: EventMessage) {
+		log::error!(
+			target: &self.client.get_chain_name(),
+			"-[{}] ♻️  The requested transaction failed to generate a receipt: {}, Retries left: {:?}",
+			sub_display_format(SUB_LOG_TARGET),
+			msg.metadata,
+			msg.retries_remaining - 1,
+		);
+		sentry::capture_message(
+			format!(
+					"[{}]-[{}] ♻️  The requested transaction failed to generate a receipt: {}, Retries left: {:?}",
+					&self.client.get_chain_name(),
+					SUB_LOG_TARGET,
+					msg.metadata,
+					msg.retries_remaining - 1,
+				)
+			.as_str(),
+			sentry::Level::Error,
+		);
+		self.retry_transaction(msg).await;
+	}
+
+	async fn handle_failed_tx_request<E>(&self, msg: EventMessage, error: &E)
+	where
+		E: Error + Sync + ?Sized,
+	{
+		log::error!(
+			target: &self.client.get_chain_name(),
+			"-[{}] ♻️  Unknown error while requesting a transaction request: {}, Retries left: {:?}, Error: {}",
+			sub_display_format(SUB_LOG_TARGET),
+			msg.metadata,
+			msg.retries_remaining - 1,
+			error.to_string(),
+		);
+		sentry::capture_error(&error);
+		self.retry_transaction(msg).await;
+	}
+
+	async fn handle_failed_gas_estimation<E>(&self, msg: EventMessage, error: &E)
+	where
+		E: Error + Sync + ?Sized,
+	{
+		if self.debug_mode {
+			log::warn!(
+				target: &self.client.get_chain_name(),
+				"-[{}] ⚠️  Warning! Error encountered during gas estimation: {}, Retries left: {:?}, Error: {}",
+				sub_display_format(SUB_LOG_TARGET),
+				msg.metadata,
+				msg.retries_remaining - 1,
+				error.to_string()
+			);
+			sentry::capture_message(
+				format!(
+						"[{}]-[{}] ⚠️  Warning! Error encountered during gas estimation: {}, Retries left: {:?}, Error: {}",
+						&self.client.get_chain_name(),
+						SUB_LOG_TARGET,
+						msg.metadata,
+						msg.retries_remaining - 1,
+						error
+					)
+				.as_str(),
+				sentry::Level::Warning,
+			);
+		}
+		self.retry_transaction(msg).await;
+	}
+
+	async fn handle_failed_get_estimated_eip1559_fees(
+		&self,
+		retries_remaining: u8,
+		error: String,
+	) -> (U256, U256) {
+		let mut retries = retries_remaining;
+		let mut last_error = error;
+
+		while retries > 0 {
+			if self.debug_mode {
+				log::warn!(
+					target: &self.client.get_chain_name(),
+					"-[{}] ⚠️  Warning! Error encountered during get estimated eip1559 fees, Retries left: {:?}, Error: {}",
+					sub_display_format(SUB_LOG_TARGET),
+					retries - 1,
+					last_error
+				);
+				sentry::capture_message(
+						format!(
+							"[{}]-[{}] ⚠️  Warning! Error encountered during get estimated eip1559 fees, Retries left: {:?}, Error: {}",
+							&self.client.get_chain_name(),
+							SUB_LOG_TARGET,
+							retries - 1,
+							last_error
+						)
+						.as_str(),
+						sentry::Level::Warning,
+					);
+			}
+
+			match self.middleware.estimate_eip1559_fees(None).await {
+				Ok(fees) => return fees,
+				Err(error) => {
+					sleep(Duration::from_millis(DEFAULT_CALL_RETRY_INTERVAL_MS)).await;
+					retries -= 1;
+					last_error = error.to_string();
+				},
+			}
+		}
+
+		panic!(
+			"[{}]-[{}] Error on call get_estimated_eip1559_fees(): {:?}",
+			self.client.get_chain_name(),
+			SUB_LOG_TARGET,
+			last_error,
+		);
+	}
+
+	async fn handle_failed_get_gas_price(&self, retries_remaining: u8, error: String) -> U256 {
+		let mut retries = retries_remaining;
+		let mut last_error = error;
+
+		while retries > 0 {
+			if self.debug_mode {
+				log::warn!(
+					target: &self.client.get_chain_name(),
+					"-[{}] ⚠️  Warning! Error encountered during get gas price, Retries left: {:?}, Error: {}",
+					sub_display_format(SUB_LOG_TARGET),
+					retries - 1,
+					last_error
+				);
+				sentry::capture_message(
+					format!(
+							"[{}]-[{}] ⚠️  Warning! Error encountered during get gas price, Retries left: {:?}, Error: {}",
+							&self.client.get_chain_name(),
+							SUB_LOG_TARGET,
+							retries - 1,
+							last_error
+						)
+					.as_str(),
+					sentry::Level::Warning,
+				);
+			}
+
+			match self.middleware.get_gas_price().await {
+				Ok(gas_price) => return gas_price,
+				Err(error) => {
+					sleep(Duration::from_millis(DEFAULT_CALL_RETRY_INTERVAL_MS)).await;
+					retries -= 1;
+					last_error = error.to_string();
+				},
+			}
+		}
+
+		panic!(
+			"[{}]-[{}] Error on call get_gas_price(): {:?}",
+			self.client.get_chain_name(),
+			SUB_LOG_TARGET,
+			last_error,
+		);
 	}
 }
 
