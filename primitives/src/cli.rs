@@ -1,5 +1,5 @@
 use crate::{eth::ChainID, periodic::PriceSource};
-use ethers::types::U64;
+use ethers::types::{U256, U64};
 use serde::Deserialize;
 
 pub type Result<T> = std::result::Result<T, Error>;
@@ -91,6 +91,8 @@ pub struct EVMProvider {
 	pub is_relay_target: bool,
 	/// If true, enables Eip1559
 	pub eip1559: Option<bool>,
+	/// The minimum priority fee required.
+	pub min_priority_fee: Option<U256>,
 	/// Socket contract address
 	pub socket_address: String,
 	/// Vault contract address
