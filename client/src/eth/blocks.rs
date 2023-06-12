@@ -1,4 +1,3 @@
-use cccp_metrics::BLOCK_HEIGHT;
 use cccp_primitives::{
 	eth::{BootstrapState, ChainID},
 	sub_display_format,
@@ -158,9 +157,7 @@ impl<T: JsonRpcClient> BlockManager<T> {
 	/// Increment the waiting block.
 	fn increment_waiting_block(&mut self) {
 		self.waiting_block = self.waiting_block.saturating_add(U64::from(1u64));
-		BLOCK_HEIGHT
-			.with_label_values(&[&self.client.get_chain_name()])
-			.set(self.waiting_block.as_u64());
+		cccp_metrics::set_block_height(&self.client.get_chain_name(), self.waiting_block.as_u64());
 	}
 
 	/// Verifies if the transaction has interacted with the target contracts.

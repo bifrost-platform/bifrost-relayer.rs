@@ -142,6 +142,7 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> {
 	async fn flush_stuck_transaction(&self) {
 		if self.is_txpool_enabled {
 			let mempool = self.client.get_txpool_content().await;
+			cccp_metrics::increase_rpc_calls(&self.client.get_chain_name());
 
 			let mut transactions = Vec::new();
 			transactions
@@ -238,7 +239,10 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> {
 				.base_fee_per_gas
 				.unwrap(),
 			false => match self.middleware.get_gas_price().await {
-				Ok(gas_price) => gas_price,
+				Ok(gas_price) => {
+					cccp_metrics::increase_rpc_calls(&self.client.get_chain_name());
+					gas_price
+				},
 				Err(error) =>
 					self.handle_failed_get_gas_price(DEFAULT_CALL_RETRIES, error.to_string()).await,
 			},
@@ -249,7 +253,10 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> {
 	/// compatible transactions.
 	async fn get_estimated_eip1559_fees(&self) -> (U256, U256) {
 		match self.middleware.estimate_eip1559_fees(None).await {
-			Ok(fees) => fees,
+			Ok(fees) => {
+				cccp_metrics::increase_rpc_calls(&self.client.get_chain_name());
+				fees
+			},
 			Err(error) =>
 				self.handle_failed_get_estimated_eip1559_fees(
 					DEFAULT_CALL_RETRIES,
@@ -289,9 +296,13 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> {
 		// estimate the gas amount to be used
 		let estimated_gas =
 			match self.middleware.estimate_gas(&msg.tx_request.to_typed(), None).await {
-				Ok(estimated_gas) => U256::from(
-					(estimated_gas.as_u64() as f64 * msg.gas_coefficient.into_f64()).ceil() as u64,
-				),
+				Ok(estimated_gas) => {
+					cccp_metrics::increase_rpc_calls(&self.client.get_chain_name());
+					U256::from(
+						(estimated_gas.as_u64() as f64 * msg.gas_coefficient.into_f64()).ceil()
+							as u64,
+					)
+				},
 				Err(error) => return self.handle_failed_gas_estimation(msg, &error).await,
 			};
 		msg.tx_request = msg.tx_request.gas(estimated_gas);
@@ -318,6 +329,7 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> {
 			} else {
 				self.middleware.send_transaction(msg.tx_request.to_legacy(), None).await
 			};
+			cccp_metrics::increase_rpc_calls(&self.client.get_chain_name());
 
 			match result {
 				Ok(pending_tx) => match pending_tx.await {
@@ -363,6 +375,8 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> {
 		};
 
 		let mempool = self.client.get_txpool_content().await;
+		cccp_metrics::increase_rpc_calls(&self.client.get_chain_name());
+
 		for (_address, tx_map) in mempool.pending.iter().chain(mempool.queued.iter()) {
 			for (_nonce, mempool_tx) in tx_map.iter() {
 				if mempool_tx.to.unwrap_or_default() == *to && mempool_tx.input == *data {
@@ -415,6 +429,8 @@ impl<T: 'static + JsonRpcClient> OnSuccessHandler for TransactionManager<T> {
 					sentry::Level::Warning,
 				);
 		}
+		cccp_metrics::increase_relayed_transactions(&self.client.get_chain_name());
+		cccp_metrics::set_payed_fees(&self.client.get_chain_name(), &receipt);
 	}
 }
 
@@ -510,6 +526,8 @@ impl<T: 'static + JsonRpcClient> OnFailHandler for TransactionManager<T> {
 		let mut last_error = error;
 
 		while retries > 0 {
+			cccp_metrics::increase_rpc_calls(&self.client.get_chain_name());
+
 			if self.debug_mode {
 				log::warn!(
 					target: &self.client.get_chain_name(),
@@ -555,6 +573,8 @@ impl<T: 'static + JsonRpcClient> OnFailHandler for TransactionManager<T> {
 		let mut last_error = error;
 
 		while retries > 0 {
+			cccp_metrics::increase_rpc_calls(&self.client.get_chain_name());
+
 			if self.debug_mode {
 				log::warn!(
 					target: &self.client.get_chain_name(),
