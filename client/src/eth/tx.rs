@@ -443,7 +443,18 @@ impl<T: 'static + JsonRpcClient> OnFailHandler for TransactionManager<T> {
 			msg.retries_remaining - 1,
 			error.to_string(),
 		);
-		sentry::capture_error(&error);
+		sentry::capture_message(
+			format!(
+				"[{}]-[{}] ♻️  Unknown error while requesting a transaction request: {}, Retries left: {:?}, Error: {}",
+				&self.client.get_chain_name(),
+				SUB_LOG_TARGET,
+				msg.metadata,
+				msg.retries_remaining - 1,
+				error
+			)
+			.as_str(),
+			sentry::Level::Error,
+		);
 		self.retry_transaction(msg).await;
 	}
 
