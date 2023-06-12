@@ -25,7 +25,7 @@ cc-cli = { path = "../client/cli" }
 cccp-client = { path = "../client" }
 cccp-periodic = { path = "../periodic" }
 cccp-primitives = { path = "../primitives" }
-cccp-monitors = { path = "../monitors" }
+cccp-metrics = { path = "../metrics" }
 
 # Substrate
 sc-cli = { workspace = true }

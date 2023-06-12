@@ -1,6 +1,4 @@
-use prometheus::{
-	HistogramOpts, HistogramVec, IntCounter, IntCounterVec, IntGauge, Opts, Registry,
-};
+use prometheus::{IntCounter, Registry};
 
 lazy_static! {
 	// TODO: 체인별로 메트릭 구분?
@@ -14,11 +12,9 @@ lazy_static! {
 		IntCounter::new("payed_transaction_fees", "Payed Transaction Fees").unwrap();
 }
 
-pub fn register_metrics(registry: &Registry) {
+pub fn register_prometheus_metrics(registry: &Registry) {
 	registry.register(Box::new(BRIDGE_RELAY_TRANSACTIONS.clone())).unwrap();
 	registry.register(Box::new(ROUNDUP_RELAY_TRANSACTIONS.clone())).unwrap();
 	registry.register(Box::new(PRICE_FEED_TRANSACTIONS.clone())).unwrap();
 	registry.register(Box::new(PAYED_TRANSACTION_FEES.clone())).unwrap();
 }
-
-// TODO: init_prometheus from substrate

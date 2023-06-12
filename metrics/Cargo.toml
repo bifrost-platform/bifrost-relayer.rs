@@ -1,7 +1,7 @@
 [package]
-name = "cccp-monitors"
+name = "cccp-metrics"
 version = "0.1.0"
-description = "The monitoring tools for BIFROST relayer"
+description = "The monitoring & metric tools for BIFROST relayer"
 authors = { workspace = true }
 homepage = { workspace = true }
 edition = { workspace = true }

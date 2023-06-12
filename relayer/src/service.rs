@@ -3,7 +3,7 @@ use cccp_client::eth::{
 	BlockManager, BridgeRelayHandler, EthClient, EventSender, Handler, RoundupRelayHandler,
 	TransactionManager, WalletManager,
 };
-use cccp_monitors::register_metrics;
+use cccp_metrics::register_prometheus_metrics;
 use cccp_periodic::{
 	heartbeat_sender::HeartbeatSender, roundup_emitter::RoundupEmitter, OraclePriceFeeder,
 };
@@ -278,22 +278,27 @@ pub fn new_relay_base(config: Configuration) -> Result<RelayBase, ServiceError> 
 			},
 		)
 	});
-	// let interface =
-	// 			if self.prometheus_external { Ipv4Addr::UNSPECIFIED } else { Ipv4Addr::LOCALHOST };
 
-	let prometheus_config = PrometheusConfig::new_with_default_registry(
-		SocketAddr::new(Ipv4Addr::LOCALHOST.into(), 9090),
-		config.relayer_config.system.id,
-	);
-	register_metrics(&prometheus_config.registry);
+	let prometheus_config = config.relayer_config.prometheus_config;
+	if prometheus_config.is_enabled {
+		let interface = match prometheus_config.is_external {
+			true => Ipv4Addr::UNSPECIFIED,
+			false => Ipv4Addr::LOCALHOST,
+		};
 
-	// spawn prometheus
-	task_manager.spawn_handle().spawn(
-		"prometheus-endpoint",
-		None,
-		prometheus_endpoint::init_prometheus(prometheus_config.port, prometheus_config.registry)
-			.map(drop),
-	);
+		let prometheus = PrometheusConfig::new_with_default_registry(
+			SocketAddr::new(interface.into(), prometheus_config.port),
+			config.relayer_config.system.id,
+		);
+		register_prometheus_metrics(&prometheus.registry);
+
+		// spawn prometheus
+		task_manager.spawn_handle().spawn(
+			"prometheus-endpoint",
+			None,
+			prometheus_endpoint::init_prometheus(prometheus.port, prometheus.registry).map(drop),
+		);
+	}
 
 	Ok(RelayBase { task_manager })
 }
