@@ -22,6 +22,7 @@ tokio = { workspace = true, features = ["signal", "rt-multi-thread", "parking_lo
 # CCCP
 cccp-client = { path = "../../client" }
 cccp-primitives = { path = "../../primitives" }
+cccp-metrics = { path = "../../metrics" }
 
 # Substrate
 sc-service = { workspace = true }

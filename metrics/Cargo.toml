@@ -12,6 +12,7 @@ repository = { workspace = true }
 # General
 lazy_static = { workspace = true }
 prometheus = { workspace = true }
+sentry = { workspace = true }
 
 # CCCP
 cccp-primitives = { path = "../primitives" }

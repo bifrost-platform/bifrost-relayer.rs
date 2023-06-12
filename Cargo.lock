@@ -863,6 +863,7 @@ name = "cc-cli"
 version = "0.1.0"
 dependencies = [
  "cccp-client",
+ "cccp-metrics",
  "cccp-primitives",
  "chrono",
  "futures",
@@ -903,6 +904,7 @@ dependencies = [
  "cccp-primitives",
  "lazy_static",
  "prometheus",
+ "sentry",
 ]
 
 [[package]]
