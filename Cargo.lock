@@ -903,9 +903,11 @@ name = "cccp-metrics"
 version = "0.1.0"
 dependencies = [
  "cccp-primitives",
+ "ethers",
  "lazy_static",
  "prometheus",
  "sentry",
+ "substrate-prometheus-endpoint",
 ]
 
 [[package]]

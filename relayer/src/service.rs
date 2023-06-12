@@ -84,7 +84,6 @@ pub fn new_relay_base(config: Configuration) -> Result<RelayBase, ServiceError> 
 				evm_provider.vault_address.clone(),
 				evm_provider.authority_address.clone(),
 				evm_provider.relayer_manager_address.clone(),
-				prometheus_config.is_enabled,
 			));
 
 			if evm_provider.is_relay_target {
@@ -288,9 +287,7 @@ pub fn new_relay_base(config: Configuration) -> Result<RelayBase, ServiceError> 
 			system.id,
 		);
 
-		clients.iter().for_each(|client| {
-			register_evm_prometheus_metrics(&client.prometheus_metrics, &prometheus.registry)
-		});
+		register_evm_prometheus_metrics(&prometheus.registry);
 
 		// spawn prometheus
 		task_manager.spawn_handle().spawn(

@@ -1,5 +1,5 @@
 mod events;
-use cccp_metrics::EvmPrometheusMetrics;
+use cccp_metrics::RPC_CALLS;
 pub use events::*;
 
 mod handlers;
@@ -65,8 +65,6 @@ pub struct EthClient<T> {
 	pub authority: AuthorityContract<Provider<T>>,
 	/// RelayerManagerContract (only available on BIFROST)
 	pub relayer_manager: Option<RelayerManagerContract<Provider<T>>>,
-	/// Prometheus metrics
-	pub prometheus_metrics: Option<EvmPrometheusMetrics>,
 }
 
 impl<T: JsonRpcClient> EthClient<T> {
@@ -83,7 +81,6 @@ impl<T: JsonRpcClient> EthClient<T> {
 		vault_address: String,
 		authority_address: String,
 		relayer_manager_address: Option<String>,
-		is_prometheus_enabled: bool,
 	) -> Self {
 		Self {
 			wallet,
@@ -115,10 +112,6 @@ impl<T: JsonRpcClient> EthClient<T> {
 				false => BridgeDirection::Outbound,
 			},
 			is_native,
-			prometheus_metrics: match is_prometheus_enabled {
-				true => Some(EvmPrometheusMetrics::new(name)),
-				false => None,
-			},
 		}
 	}
 
@@ -154,6 +147,7 @@ impl<T: JsonRpcClient> EthClient<T> {
 		let mut error_msg = String::default();
 
 		while retries_remaining > 0 {
+			RPC_CALLS.with_label_values(&[&self.get_chain_name()]).inc();
 			match self.provider.request(method, params.clone()).await {
 				Ok(result) => return result,
 				Err(error) => {
@@ -185,6 +179,7 @@ impl<T: JsonRpcClient> EthClient<T> {
 		let mut error_msg = String::default();
 
 		while retries_remaining > 0 {
+			RPC_CALLS.with_label_values(&[&self.get_chain_name()]).inc();
 			match raw_call.call().await {
 				Ok(result) => return result,
 				Err(error) => {

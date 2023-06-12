@@ -1,51 +1,33 @@
-use prometheus::{Gauge, Registry};
+use prometheus::Opts;
+use prometheus_endpoint::{GaugeVec, Registry, U64};
 
-pub fn register_evm_prometheus_metrics(
-	metrics: &Option<EvmPrometheusMetrics>,
-	registry: &Registry,
-) {
-	if let Some(metrics) = metrics {
-		registry.register(Box::new(metrics.block_height.clone())).unwrap();
-		registry.register(Box::new(metrics.rpc_calls.clone())).unwrap();
-		registry.register(Box::new(metrics.payed_fees.clone())).unwrap();
-		registry.register(Box::new(metrics.relayed_transactions.clone())).unwrap();
-	}
+/// Register EVM chain related prometheus metrics.
+pub fn register_evm_prometheus_metrics(registry: &Registry) {
+	registry.register(Box::new(BLOCK_HEIGHT.clone())).unwrap();
+	registry.register(Box::new(RPC_CALLS.clone())).unwrap();
+	registry.register(Box::new(PAYED_FEES.clone())).unwrap();
+	registry.register(Box::new(RELAYED_TRANSACTIONS.clone())).unwrap();
 }
 
-pub struct EvmPrometheusMetrics {
-	/// The highest processed block.
-	pub block_height: Gauge,
-	/// The JSON RPC call count.
-	pub rpc_calls: Gauge,
-	/// The transaction fees payed.
-	pub payed_fees: Gauge,
-	/// The relayed transaction count.
-	pub relayed_transactions: Gauge,
-}
-
-impl EvmPrometheusMetrics {
-	pub fn new(chain_name: String) -> Self {
-		Self {
-			block_height: Gauge::new(
-				format!("{}_block_height", chain_name.to_lowercase()),
-				format!("Block Height [{}]", chain_name.to_uppercase()),
-			)
-			.unwrap(),
-			rpc_calls: Gauge::new(
-				format!("{}_rpc_calls", chain_name.to_lowercase()),
-				format!("RPC Calls [{}]", chain_name.to_uppercase()),
-			)
-			.unwrap(),
-			payed_fees: Gauge::new(
-				format!("{}_payed_fees", chain_name.to_lowercase()),
-				format!("Payed Fees [{}]", chain_name.to_uppercase()),
-			)
-			.unwrap(),
-			relayed_transactions: Gauge::new(
-				format!("{}_relayed_transactions", chain_name.to_lowercase()),
-				format!("Relayed Transactions [{}]", chain_name.to_uppercase()),
-			)
-			.unwrap(),
-		}
-	}
+lazy_static! {
+	pub static ref BLOCK_HEIGHT: GaugeVec<U64> = GaugeVec::<U64>::new(
+		Opts::new("relayer_block_height", "Block height of the chain"),
+		&["chain_name"],
+	)
+	.unwrap();
+	pub static ref RPC_CALLS: GaugeVec<U64> = GaugeVec::<U64>::new(
+		Opts::new("relayer_rpc_calls", "Requested RPC calls of the chain"),
+		&["chain_name"],
+	)
+	.unwrap();
+	pub static ref PAYED_FEES: GaugeVec<U64> = GaugeVec::<U64>::new(
+		Opts::new("relayer_payed_fees", "Payed transaction fees of the chain"),
+		&["chain_name"],
+	)
+	.unwrap();
+	pub static ref RELAYED_TRANSACTIONS: GaugeVec<U64> = GaugeVec::<U64>::new(
+		Opts::new("relayer_relayed_transactions", "Relayed transactions of the chain"),
+		&["chain_name"],
+	)
+	.unwrap();
 }
