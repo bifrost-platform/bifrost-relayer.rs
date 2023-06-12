@@ -446,7 +446,18 @@ impl<T: JsonRpcClient> BridgeRelayHandler<T> {
 								receipt.block_number.unwrap(),
 								receipt.transaction_hash,
 							);
-							sentry::capture_error(&error);
+							sentry::capture_message(
+								format!(
+									"[{}]-[{}] ⚠️  Tried to re-process the reverted relay transaction but failed to decode function input: {}, Reverted at: {:?}-{:?}",
+									&self.client.get_chain_name(),
+									SUB_LOG_TARGET,
+									error.to_string(),
+									receipt.block_number.unwrap(),
+									receipt.transaction_hash,
+								)
+								.as_str(),
+								sentry::Level::Warning,
+							);
 						},
 					}
 				}
@@ -601,7 +612,18 @@ impl<T: JsonRpcClient> BridgeRelayHandler<T> {
 						metadata,
 						error.to_string()
 					);
-					sentry::capture_error(&error);
+					sentry::capture_message(
+						format!(
+							"[{}]-[{}] ❗️ Failed to send relay transaction to chain({:?}): {}, Error: {}",
+							&self.client.get_chain_name(),
+							SUB_LOG_TARGET,
+							chain_id,
+							metadata,
+							error
+						)
+						.as_str(),
+						sentry::Level::Error,
+					);
 				},
 			}
 		}

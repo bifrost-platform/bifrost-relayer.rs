@@ -153,7 +153,18 @@ impl<T: JsonRpcClient> OraclePriceFeeder<T> {
 					metadata,
 					error.to_string()
 				);
-				sentry::capture_error(&error);
+				sentry::capture_message(
+					format!(
+						"[{}]-[{}] ❗️ Failed to request price feed transaction to chain({:?}): {}, Error: {}",
+						&self.client.get_chain_name(),
+						SUB_LOG_TARGET,
+						self.config.chain_id,
+						metadata,
+						error
+					)
+					.as_str(),
+					sentry::Level::Error,
+				);
 			},
 		}
 	}
