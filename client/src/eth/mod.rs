@@ -1,4 +1,5 @@
 mod events;
+use cccp_metrics::EvmPrometheusMetrics;
 pub use events::*;
 
 mod handlers;
@@ -64,6 +65,8 @@ pub struct EthClient<T> {
 	pub authority: AuthorityContract<Provider<T>>,
 	/// RelayerManagerContract (only available on BIFROST)
 	pub relayer_manager: Option<RelayerManagerContract<Provider<T>>>,
+	/// Prometheus metrics
+	pub prometheus_metrics: Option<EvmPrometheusMetrics>,
 }
 
 impl<T: JsonRpcClient> EthClient<T> {
@@ -80,6 +83,7 @@ impl<T: JsonRpcClient> EthClient<T> {
 		vault_address: String,
 		authority_address: String,
 		relayer_manager_address: Option<String>,
+		is_prometheus_enabled: bool,
 	) -> Self {
 		Self {
 			wallet,
@@ -102,7 +106,7 @@ impl<T: JsonRpcClient> EthClient<T> {
 				)
 			}),
 			provider,
-			name,
+			name: name.clone(),
 			id,
 			block_confirmations,
 			call_interval,
@@ -111,6 +115,10 @@ impl<T: JsonRpcClient> EthClient<T> {
 				false => BridgeDirection::Outbound,
 			},
 			is_native,
+			prometheus_metrics: match is_prometheus_enabled {
+				true => Some(EvmPrometheusMetrics::new(name)),
+				false => None,
+			},
 		}
 	}
 

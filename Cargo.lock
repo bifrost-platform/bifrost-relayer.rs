@@ -883,6 +883,7 @@ version = "0.1.0"
 dependencies = [
  "async-recursion",
  "async-trait",
+ "cccp-metrics",
  "cccp-primitives",
  "ethers",
  "k256",

@@ -1,20 +1,51 @@
-use prometheus::{IntCounter, Registry};
+use prometheus::{Gauge, Registry};
 
-lazy_static! {
-	// TODO: 체인별로 메트릭 구분?
-	pub static ref BRIDGE_RELAY_TRANSACTIONS: IntCounter =
-		IntCounter::new("bridge_relay_transactions", "Bridge Relay Transactions").unwrap();
-	pub static ref ROUNDUP_RELAY_TRANSACTIONS: IntCounter =
-		IntCounter::new("roundup_relay_transactions", "RoundUp Relay Transactions").unwrap();
-	pub static ref PRICE_FEED_TRANSACTIONS: IntCounter =
-		IntCounter::new("price_feed_transactions", "Price Feed Transactions").unwrap();
-	pub static ref PAYED_TRANSACTION_FEES: IntCounter =
-		IntCounter::new("payed_transaction_fees", "Payed Transaction Fees").unwrap();
+pub fn register_evm_prometheus_metrics(
+	metrics: &Option<EvmPrometheusMetrics>,
+	registry: &Registry,
+) {
+	if let Some(metrics) = metrics {
+		registry.register(Box::new(metrics.block_height.clone())).unwrap();
+		registry.register(Box::new(metrics.rpc_calls.clone())).unwrap();
+		registry.register(Box::new(metrics.payed_fees.clone())).unwrap();
+		registry.register(Box::new(metrics.relayed_transactions.clone())).unwrap();
+	}
 }
 
-pub fn register_prometheus_metrics(registry: &Registry) {
-	registry.register(Box::new(BRIDGE_RELAY_TRANSACTIONS.clone())).unwrap();
-	registry.register(Box::new(ROUNDUP_RELAY_TRANSACTIONS.clone())).unwrap();
-	registry.register(Box::new(PRICE_FEED_TRANSACTIONS.clone())).unwrap();
-	registry.register(Box::new(PAYED_TRANSACTION_FEES.clone())).unwrap();
+pub struct EvmPrometheusMetrics {
+	/// The highest processed block.
+	pub block_height: Gauge,
+	/// The JSON RPC call count.
+	pub rpc_calls: Gauge,
+	/// The transaction fees payed.
+	pub payed_fees: Gauge,
+	/// The relayed transaction count.
+	pub relayed_transactions: Gauge,
+}
+
+impl EvmPrometheusMetrics {
+	pub fn new(chain_name: String) -> Self {
+		Self {
+			block_height: Gauge::new(
+				format!("{}_block_height", chain_name.to_lowercase()),
+				format!("Block Height [{}]", chain_name.to_uppercase()),
+			)
+			.unwrap(),
+			rpc_calls: Gauge::new(
+				format!("{}_rpc_calls", chain_name.to_lowercase()),
+				format!("RPC Calls [{}]", chain_name.to_uppercase()),
+			)
+			.unwrap(),
+			payed_fees: Gauge::new(
+				format!("{}_payed_fees", chain_name.to_lowercase()),
+				format!("Payed Fees [{}]", chain_name.to_uppercase()),
+			)
+			.unwrap(),
+			relayed_transactions: Gauge::new(
+				format!("{}_relayed_transactions", chain_name.to_lowercase()),
+				format!("Relayed Transactions [{}]", chain_name.to_uppercase()),
+			)
+			.unwrap(),
+		}
+	}
 }
