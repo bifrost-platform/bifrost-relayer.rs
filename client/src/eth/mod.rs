@@ -19,7 +19,7 @@ use ethers::{
 	providers::{JsonRpcClient, Middleware, Provider},
 	types::{
 		Address, Block, BlockId, Filter, Log, SyncingStatus, Transaction, TransactionReceipt,
-		TxpoolContent, H160, H256, U64,
+		TxpoolContent, H160, H256, U256, U64,
 	},
 };
 use serde::{de::DeserializeOwned, Serialize};
@@ -196,6 +196,11 @@ impl<T: JsonRpcClient> EthClient<T> {
 			method,
 			error_msg
 		);
+	}
+
+	/// Retrieves the balance of the given address.
+	pub async fn get_balance(&self, who: Address) -> U256 {
+		self.rpc_call("eth_getBalance", (who, "latest")).await
 	}
 
 	/// Retrieves the latest mined block number of the connected chain.

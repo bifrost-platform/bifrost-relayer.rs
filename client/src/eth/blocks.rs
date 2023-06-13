@@ -5,6 +5,7 @@ use cccp_primitives::{
 use ethers::{
 	providers::JsonRpcClient,
 	types::{Log, SyncingStatus, TransactionReceipt, H160, H256, U64},
+	utils::format_units,
 };
 use std::sync::Arc;
 use tokio::{
@@ -113,6 +114,14 @@ impl<T: JsonRpcClient> BlockManager<T> {
 				while self.is_block_confirmed(latest_block) {
 					self.process_confirmed_block().await;
 					self.increment_waiting_block();
+
+					cccp_metrics::set_native_balance(
+						&self.client.get_chain_name(),
+						format_units(self.client.get_balance(self.client.address()).await, "ether")
+							.unwrap()
+							.parse::<f64>()
+							.unwrap(),
+					);
 				}
 			}
 
