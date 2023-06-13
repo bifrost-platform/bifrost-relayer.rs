@@ -176,7 +176,7 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> {
 				);
 
 				request = request
-					.max_fee_per_gas(new_max_fee_per_gas)
+					.max_fee_per_gas(new_max_fee_per_gas.saturating_add(new_priority_fee))
 					.max_priority_fee_per_gas(new_priority_fee);
 
 				if self
@@ -296,12 +296,17 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> {
 			// no duplication found
 			let result = if self.eip1559 {
 				let fees = self.get_estimated_eip1559_fees().await;
+				let priority_fee = max(fees.1, self.min_priority_fee);
 				self.middleware
 					.send_transaction(
 						msg.tx_request
 							.to_eip1559()
-							.max_fee_per_gas(fees.0.saturating_mul(MAX_FEE_COEFFICIENT.into()))
-							.max_priority_fee_per_gas(max(fees.1, self.min_priority_fee)),
+							.max_fee_per_gas(
+								fees.0
+									.saturating_add(priority_fee)
+									.saturating_mul(MAX_FEE_COEFFICIENT.into()),
+							)
+							.max_priority_fee_per_gas(priority_fee),
 						None,
 					)
 					.await
