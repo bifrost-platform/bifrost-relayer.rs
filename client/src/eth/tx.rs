@@ -392,9 +392,10 @@ impl<T: 'static + JsonRpcClient> OnSuccessHandler for TransactionManager<T> {
 			);
 			sentry::capture_message(
 					format!(
-						"[{}]-[{}] ⚠️  Warning! Error encountered during contract execution [execution reverted]. A prior transaction might have been already submitted: {}, {:?}-{:?}-{:?}",
+						"[{}]-[{}]-[{}] ⚠️  Warning! Error encountered during contract execution [execution reverted]. A prior transaction might have been already submitted: {}, {:?}-{:?}-{:?}",
 						&self.client.get_chain_name(),
 						SUB_LOG_TARGET,
+						self.client.address(),
 						metadata,
 						receipt.block_number.unwrap(),
 						status,
@@ -419,9 +420,10 @@ impl<T: 'static + JsonRpcClient> OnFailHandler for TransactionManager<T> {
 		);
 		sentry::capture_message(
 			format!(
-					"[{}]-[{}] ♻️  The requested transaction failed to generate a receipt: {}, Retries left: {:?}",
+					"[{}]-[{}]-[{}] ♻️  The requested transaction failed to generate a receipt: {}, Retries left: {:?}",
 					&self.client.get_chain_name(),
 					SUB_LOG_TARGET,
+					self.client.address(),
 					msg.metadata,
 					msg.retries_remaining - 1,
 				)
@@ -445,9 +447,10 @@ impl<T: 'static + JsonRpcClient> OnFailHandler for TransactionManager<T> {
 		);
 		sentry::capture_message(
 			format!(
-				"[{}]-[{}] ♻️  Unknown error while requesting a transaction request: {}, Retries left: {:?}, Error: {}",
+				"[{}]-[{}]-[{}] ♻️  Unknown error while requesting a transaction request: {}, Retries left: {:?}, Error: {}",
 				&self.client.get_chain_name(),
 				SUB_LOG_TARGET,
+				self.client.address(),
 				msg.metadata,
 				msg.retries_remaining - 1,
 				error
@@ -473,9 +476,10 @@ impl<T: 'static + JsonRpcClient> OnFailHandler for TransactionManager<T> {
 			);
 			sentry::capture_message(
 				format!(
-						"[{}]-[{}] ⚠️  Warning! Error encountered during gas estimation: {}, Retries left: {:?}, Error: {}",
+						"[{}]-[{}]-[{}] ⚠️  Warning! Error encountered during gas estimation: {}, Retries left: {:?}, Error: {}",
 						&self.client.get_chain_name(),
 						SUB_LOG_TARGET,
+						self.client.address(),
 						msg.metadata,
 						msg.retries_remaining - 1,
 						error
@@ -506,9 +510,10 @@ impl<T: 'static + JsonRpcClient> OnFailHandler for TransactionManager<T> {
 				);
 				sentry::capture_message(
 						format!(
-							"[{}]-[{}] ⚠️  Warning! Error encountered during get estimated eip1559 fees, Retries left: {:?}, Error: {}",
+							"[{}]-[{}]-[{}] ⚠️  Warning! Error encountered during get estimated eip1559 fees, Retries left: {:?}, Error: {}",
 							&self.client.get_chain_name(),
 							SUB_LOG_TARGET,
+							self.client.address(),
 							retries - 1,
 							last_error
 						)
@@ -550,9 +555,10 @@ impl<T: 'static + JsonRpcClient> OnFailHandler for TransactionManager<T> {
 				);
 				sentry::capture_message(
 					format!(
-							"[{}]-[{}] ⚠️  Warning! Error encountered during get gas price, Retries left: {:?}, Error: {}",
+							"[{}]-[{}]-[{}] ⚠️  Warning! Error encountered during get gas price, Retries left: {:?}, Error: {}",
 							&self.client.get_chain_name(),
 							SUB_LOG_TARGET,
+							self.client.address(),
 							retries - 1,
 							last_error
 						)
