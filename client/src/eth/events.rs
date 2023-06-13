@@ -33,10 +33,10 @@ pub const RETRY_TX_COEFFICIENT: u64 = 2;
 pub const RETRY_GAS_PRICE_COEFFICIENT: f64 = 1.2;
 
 /// The coefficient that will be multiplied to the estimated gas.
-pub const GAS_COEFFICIENT: f64 = 10.0;
+pub const GAS_COEFFICIENT: f64 = 7.0;
 
 /// The coefficient that will be multiplied on the max fee.
-pub const MAX_FEE_COEFFICIENT: u64 = 3;
+pub const MAX_FEE_COEFFICIENT: u64 = 2;
 
 /// The coefficient that will be multipled on the max priority fee.
 pub const MAX_PRIORITY_FEE_COEFFICIENT: u64 = 2;
