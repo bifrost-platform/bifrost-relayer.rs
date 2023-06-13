@@ -6,7 +6,6 @@ use async_trait::async_trait;
 use cccp_primitives::periodic::{PriceFetcher, PriceResponse, PriceSource};
 
 pub mod binance;
-pub mod chainlink;
 pub mod coingecko;
 pub mod gateio;
 pub mod upbit;
