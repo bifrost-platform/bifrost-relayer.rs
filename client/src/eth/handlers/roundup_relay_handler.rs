@@ -134,9 +134,10 @@ impl<T: JsonRpcClient> Handler for RoundupRelayHandler<T> {
 					);
 					sentry::capture_message(
 						format!(
-							"[{}]-[{}] Error on decoding RoundUp event ({:?}):{}",
+							"[{}]-[{}]-[{}] Error on decoding RoundUp event ({:?}):{}",
 							&self.client.get_chain_name(),
 							SUB_LOG_TARGET,
+							self.client.address(),
 							receipt.transaction_hash,
 							e
 						)
