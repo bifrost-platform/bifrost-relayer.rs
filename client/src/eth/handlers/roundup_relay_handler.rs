@@ -7,7 +7,8 @@ use cccp_primitives::{
 	authority::RoundMetaData,
 	cli::BootstrapConfig,
 	eth::{
-		BootstrapState, ChainID, RecoveredSignature, RoundUpEventStatus, BOOTSTRAP_BLOCK_CHUNK_SIZE,
+		BootstrapState, ChainID, GasCoefficient, RecoveredSignature, RoundUpEventStatus,
+		BOOTSTRAP_BLOCK_CHUNK_SIZE,
 	},
 	socket::{RoundUpSubmit, SerializedRoundUp, Signatures, SocketContract, SocketContractEvents},
 	sub_display_format, INVALID_BIFROST_NATIVENESS, INVALID_CONTRACT_ABI,
@@ -328,6 +329,7 @@ impl<T: JsonRpcClient> RoundupRelayHandler<T> {
 							)),
 							true,
 							true,
+							GasCoefficient::Low,
 						))
 						.unwrap()
 				}

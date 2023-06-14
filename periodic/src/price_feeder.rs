@@ -6,6 +6,7 @@ use cccp_client::eth::{
 use cccp_primitives::{
 	cli::PriceFeederConfig,
 	errors::INVALID_PERIODIC_SCHEDULE,
+	eth::GasCoefficient,
 	periodic::{PeriodicWorker, PriceFetcher},
 	socket::get_asset_oids,
 	sub_display_format, INVALID_BIFROST_NATIVENESS,
@@ -136,6 +137,7 @@ impl<T: JsonRpcClient> OraclePriceFeeder<T> {
 			EventMetadata::PriceFeed(metadata.clone()),
 			false,
 			false,
+			GasCoefficient::Mid,
 		)) {
 			Ok(()) => log::info!(
 				target: &self.client.get_chain_name(),

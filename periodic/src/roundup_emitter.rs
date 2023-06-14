@@ -6,7 +6,7 @@ use cccp_primitives::{
 	authority::RoundMetaData,
 	cli::BootstrapConfig,
 	errors::INVALID_PERIODIC_SCHEDULE,
-	eth::{BootstrapState, RoundUpEventStatus, BOOTSTRAP_BLOCK_CHUNK_SIZE},
+	eth::{BootstrapState, GasCoefficient, RoundUpEventStatus, BOOTSTRAP_BLOCK_CHUNK_SIZE},
 	socket::{RoundUpSubmit, SerializedRoundUp, Signatures, SocketContractEvents},
 	sub_display_format, PeriodicWorker, INVALID_BIFROST_NATIVENESS, INVALID_CONTRACT_ABI,
 };
@@ -181,6 +181,7 @@ impl<T: JsonRpcClient> RoundupEmitter<T> {
 			EventMetadata::VSPPhase1(metadata.clone()),
 			false,
 			false,
+			GasCoefficient::Mid,
 		)) {
 			Ok(()) => log::info!(
 				target: &self.client.get_chain_name(),

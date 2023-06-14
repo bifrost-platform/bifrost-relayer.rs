@@ -1,6 +1,6 @@
 use cccp_primitives::{eth::SocketEventStatus, PriceResponse};
 
-use cccp_primitives::eth::ChainID;
+use cccp_primitives::eth::{ChainID, GasCoefficient};
 use ethers::types::{
 	transaction::eip2718::TypedTransaction, Address, Eip1559TransactionRequest, TransactionRequest,
 	U256,
@@ -25,9 +25,6 @@ pub const RETRY_TX_COEFFICIENT: u64 = 2;
 
 /// The coefficient that will be multiplied on the previously send transaction gas price.
 pub const RETRY_GAS_PRICE_COEFFICIENT: f64 = 1.2;
-
-/// The coefficient that will be multiplied to the estimated gas.
-pub const GAS_COEFFICIENT: f64 = 7.0;
 
 /// The coefficient that will be multiplied on the max fee.
 pub const MAX_FEE_COEFFICIENT: u64 = 2;
@@ -287,6 +284,8 @@ pub struct EventMessage {
 	pub check_mempool: bool,
 	/// The flag that represents whether the event is processed to an external chain.
 	pub give_random_delay: bool,
+	/// The gas coefficient that will be multiplied to the estimated gas amount.
+	pub gas_coefficient: GasCoefficient,
 }
 
 impl EventMessage {
@@ -296,6 +295,7 @@ impl EventMessage {
 		metadata: EventMetadata,
 		check_mempool: bool,
 		give_random_delay: bool,
+		gas_coefficient: GasCoefficient,
 	) -> Self {
 		Self {
 			retries_remaining: DEFAULT_TX_RETRIES,
@@ -304,6 +304,7 @@ impl EventMessage {
 			metadata,
 			check_mempool,
 			give_random_delay,
+			gas_coefficient,
 		}
 	}
 
