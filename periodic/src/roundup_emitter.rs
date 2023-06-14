@@ -192,6 +192,7 @@ impl<T: JsonRpcClient> RoundupEmitter<T> {
 			GasCoefficient::Mid,
 			false,
 			false,
+			GasCoefficient::Mid,
 		)) {
 			Ok(()) => log::info!(
 				target: &self.client.get_chain_name(),

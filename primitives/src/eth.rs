@@ -224,6 +224,23 @@ impl From<&GasCoefficient> for f64 {
 	}
 }
 
+#[derive(Clone, Debug)]
+pub enum GasCoefficient {
+	Low,
+	Mid,
+	High,
+}
+
+impl GasCoefficient {
+	pub fn into_f64(&self) -> f64 {
+		match self {
+			GasCoefficient::Low => 1.2,
+			GasCoefficient::Mid => 7.0,
+			GasCoefficient::High => 10.0,
+		}
+	}
+}
+
 #[derive(Clone, Copy, Debug)]
 /// The roundup event status.
 pub enum RoundUpEventStatus {
