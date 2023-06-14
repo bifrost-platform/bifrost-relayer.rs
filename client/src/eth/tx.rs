@@ -429,7 +429,6 @@ impl<T: 'static + JsonRpcClient> OnSuccessHandler for TransactionManager<T> {
 					sentry::Level::Warning,
 				);
 		}
-		cccp_metrics::increase_relayed_transactions(&self.client.get_chain_name());
 		cccp_metrics::set_payed_fees(&self.client.get_chain_name(), &receipt);
 	}
 }
