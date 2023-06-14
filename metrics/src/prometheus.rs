@@ -32,6 +32,7 @@ lazy_static! {
 	.unwrap();
 }
 
+/// Register prometheus metrics and setup initial values.
 pub fn setup(registry: &Registry) {
 	register_system_prometheus_metrics(registry);
 	register_evm_prometheus_metrics(registry);
@@ -79,6 +80,7 @@ pub fn set_payed_fees(label: &str, receipt: &TransactionReceipt) {
 	}
 }
 
+/// Set the relayer uptime.
 fn set_system_uptime() {
 	let start_time_since_epoch =
 		SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap_or_default();
