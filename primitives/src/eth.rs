@@ -19,9 +19,9 @@ pub enum GasCoefficient {
 impl GasCoefficient {
 	pub fn into_f64(&self) -> f64 {
 		match self {
-			GasCoefficient::Low => f64::from(1.2),
-			GasCoefficient::Mid => f64::from(7.0),
-			GasCoefficient::High => f64::from(10.0),
+			GasCoefficient::Low => 1.2,
+			GasCoefficient::Mid => 7.0,
+			GasCoefficient::High => 10.0,
 		}
 	}
 }

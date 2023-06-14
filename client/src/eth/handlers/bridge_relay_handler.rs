@@ -452,7 +452,7 @@ impl<T: JsonRpcClient> BridgeRelayHandler<T> {
 									&self.client.get_chain_name(),
 									SUB_LOG_TARGET,
 									self.client.address(),
-									error.to_string(),
+									error,
 									receipt.block_number.unwrap(),
 									receipt.transaction_hash,
 								)
