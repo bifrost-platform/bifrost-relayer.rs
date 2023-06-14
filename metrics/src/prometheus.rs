@@ -1,6 +1,8 @@
+use std::time::SystemTime;
+
 use ethers::{types::TransactionReceipt, utils::format_units};
 use prometheus::Opts;
-use prometheus_endpoint::{GaugeVec, Registry, F64, U64};
+use prometheus_endpoint::{Gauge, GaugeVec, Registry, F64, U64};
 
 lazy_static! {
 	pub static ref BLOCK_HEIGHT: GaugeVec<U64> = GaugeVec::<U64>::new(
@@ -23,10 +25,26 @@ lazy_static! {
 		&["chain_name"],
 	)
 	.unwrap();
+	pub static ref PROCESS_UPTIME: Gauge<U64> = Gauge::<U64>::new(
+		"relayer_process_start_time_seconds",
+		"Number of seconds between the UNIX epoch and the moment the process started",
+	)
+	.unwrap();
+}
+
+pub fn setup(registry: &Registry) {
+	register_system_prometheus_metrics(registry);
+	register_evm_prometheus_metrics(registry);
+	set_system_uptime();
+}
+
+/// Register system related prometheus metrics.
+fn register_system_prometheus_metrics(registry: &Registry) {
+	registry.register(Box::new(PROCESS_UPTIME.clone())).unwrap();
 }
 
 /// Register EVM chain related prometheus metrics.
-pub fn register_evm_prometheus_metrics(registry: &Registry) {
+fn register_evm_prometheus_metrics(registry: &Registry) {
 	registry.register(Box::new(BLOCK_HEIGHT.clone())).unwrap();
 	registry.register(Box::new(RPC_CALLS.clone())).unwrap();
 	registry.register(Box::new(NATIVE_BALANCE.clone())).unwrap();
@@ -59,4 +77,10 @@ pub fn set_payed_fees(label: &str, receipt: &TransactionReceipt) {
 			.with_label_values(&[label])
 			.set(PAYED_FEES.with_label_values(&[label]).get() + payed_fee)
 	}
+}
+
+fn set_system_uptime() {
+	let start_time_since_epoch =
+		SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap_or_default();
+	PROCESS_UPTIME.set(start_time_since_epoch.as_secs());
 }

@@ -3,7 +3,6 @@ use cccp_client::eth::{
 	BlockManager, BridgeRelayHandler, EthClient, EventSender, Handler, RoundupRelayHandler,
 	TransactionManager, WalletManager,
 };
-use cccp_metrics::register_evm_prometheus_metrics;
 use cccp_periodic::{
 	heartbeat_sender::HeartbeatSender, roundup_emitter::RoundupEmitter, OraclePriceFeeder,
 };
@@ -287,7 +286,7 @@ pub fn new_relay_base(config: Configuration) -> Result<RelayBase, ServiceError> 
 			system.id,
 		);
 
-		register_evm_prometheus_metrics(&prometheus.registry);
+		cccp_metrics::setup(&prometheus.registry);
 
 		// spawn prometheus
 		task_manager.spawn_handle().spawn(
