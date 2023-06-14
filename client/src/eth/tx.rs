@@ -1,7 +1,10 @@
 use async_recursion::async_recursion;
 
 use crate::eth::{FlushMetadata, TxRequest, DEFAULT_CALL_RETRIES, DEFAULT_CALL_RETRY_INTERVAL_MS};
-use cccp_primitives::{eth::ETHEREUM_BLOCK_TIME, sub_display_format};
+use cccp_primitives::{
+	eth::{GasCoefficient, ETHEREUM_BLOCK_TIME},
+	sub_display_format,
+};
 use ethers::{
 	prelude::{
 		gas_escalator::{Frequency, GasEscalatorMiddleware, GeometricGasPrice},
@@ -22,8 +25,8 @@ use tokio::{
 };
 
 use super::{
-	EthClient, EventMessage, EventMetadata, DEFAULT_TX_RETRIES, GAS_COEFFICIENT,
-	MAX_FEE_COEFFICIENT, MAX_PRIORITY_FEE_COEFFICIENT, RETRY_GAS_PRICE_COEFFICIENT,
+	EthClient, EventMessage, EventMetadata, DEFAULT_TX_RETRIES, MAX_FEE_COEFFICIENT,
+	MAX_PRIORITY_FEE_COEFFICIENT, RETRY_GAS_PRICE_COEFFICIENT,
 };
 
 pub type TransactionMiddleware<T> =
@@ -152,6 +155,7 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> {
 					EventMetadata::Flush(FlushMetadata::new()),
 					false,
 					false,
+					GasCoefficient::Low,
 				))
 				.await;
 			}
@@ -285,8 +289,9 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> {
 		// estimate the gas amount to be used
 		let estimated_gas =
 			match self.middleware.estimate_gas(&msg.tx_request.to_typed(), None).await {
-				Ok(estimated_gas) =>
-					U256::from((estimated_gas.as_u64() as f64 * GAS_COEFFICIENT).ceil() as u64),
+				Ok(estimated_gas) => U256::from(
+					(estimated_gas.as_u64() as f64 * msg.gas_coefficient.into_f64()).ceil() as u64,
+				),
 				Err(error) => return self.handle_failed_gas_estimation(msg, &error).await,
 			};
 		msg.tx_request = msg.tx_request.gas(estimated_gas);
