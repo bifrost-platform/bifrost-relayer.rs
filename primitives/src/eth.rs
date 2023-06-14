@@ -9,6 +9,23 @@ pub const ETHEREUM_BLOCK_TIME: u64 = 12u64;
 pub const BOOTSTRAP_BLOCK_CHUNK_SIZE: u64 = 2000;
 pub const BOOTSTRAP_BLOCK_OFFSET: u32 = 100;
 
+#[derive(Clone, Debug)]
+pub enum GasCoefficient {
+	Low,
+	Mid,
+	High,
+}
+
+impl GasCoefficient {
+	pub fn into_f64(&self) -> f64 {
+		match self {
+			GasCoefficient::Low => 1.2,
+			GasCoefficient::Mid => 7.0,
+			GasCoefficient::High => 10.0,
+		}
+	}
+}
+
 #[derive(Clone, Copy, Debug)]
 /// The roundup event status.
 pub enum RoundUpEventStatus {

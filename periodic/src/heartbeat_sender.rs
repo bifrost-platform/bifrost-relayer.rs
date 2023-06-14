@@ -3,6 +3,7 @@ use cccp_client::eth::{
 };
 use cccp_primitives::{
 	errors::{INVALID_BIFROST_NATIVENESS, INVALID_PERIODIC_SCHEDULE},
+	eth::GasCoefficient,
 	sub_display_format, PeriodicWorker,
 };
 use cron::Schedule;
@@ -109,6 +110,7 @@ impl<T: JsonRpcClient> HeartbeatSender<T> {
 			EventMetadata::Heartbeat(metadata.clone()),
 			false,
 			false,
+			GasCoefficient::Low,
 		)) {
 			Ok(()) => log::info!(
 				target: &self.client.get_chain_name(),

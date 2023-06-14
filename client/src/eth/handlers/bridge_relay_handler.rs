@@ -4,8 +4,8 @@ use cccp_primitives::{
 	authority::RoundMetaData,
 	cli::BootstrapConfig,
 	eth::{
-		BootstrapState, BridgeDirection, ChainID, RecoveredSignature, SocketEventStatus,
-		BOOTSTRAP_BLOCK_CHUNK_SIZE,
+		BootstrapState, BridgeDirection, ChainID, GasCoefficient, RecoveredSignature,
+		SocketEventStatus, BOOTSTRAP_BLOCK_CHUNK_SIZE,
 	},
 	socket::{
 		BridgeRelayBuilder, PollSubmit, RequestID, SerializedPoll, Signatures, SocketEvents,
@@ -452,7 +452,7 @@ impl<T: JsonRpcClient> BridgeRelayHandler<T> {
 									&self.client.get_chain_name(),
 									SUB_LOG_TARGET,
 									self.client.address(),
-									error.to_string(),
+									error,
 									receipt.block_number.unwrap(),
 									receipt.transaction_hash,
 								)
@@ -489,7 +489,13 @@ impl<T: JsonRpcClient> BridgeRelayHandler<T> {
 		// build and send transaction request
 		let (tx_request, is_external) =
 			self.build_transaction(submit_msg, sig_msg, is_inbound, relay_tx_chain_id).await;
-		self.request_send_transaction(relay_tx_chain_id, tx_request, metadata, is_external);
+		self.request_send_transaction(
+			relay_tx_chain_id,
+			tx_request,
+			metadata,
+			is_external,
+			if is_external { GasCoefficient::Low } else { GasCoefficient::Mid },
+		);
 	}
 
 	/// Get the chain ID of the inbound sequence relay transaction.
@@ -589,6 +595,7 @@ impl<T: JsonRpcClient> BridgeRelayHandler<T> {
 		tx_request: TransactionRequest,
 		metadata: BridgeRelayMetadata,
 		give_random_delay: bool,
+		gas_coefficient: GasCoefficient,
 	) {
 		if let Some(event_sender) = self.event_senders.get(&chain_id) {
 			match event_sender.send(EventMessage::new(
@@ -596,6 +603,7 @@ impl<T: JsonRpcClient> BridgeRelayHandler<T> {
 				EventMetadata::BridgeRelay(metadata.clone()),
 				true,
 				give_random_delay,
+				gas_coefficient,
 			)) {
 				Ok(()) => log::info!(
 					target: &self.client.get_chain_name(),
