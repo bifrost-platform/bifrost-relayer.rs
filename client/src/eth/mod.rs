@@ -102,7 +102,7 @@ impl<T: JsonRpcClient> EthClient<T> {
 				)
 			}),
 			provider,
-			name: name.clone(),
+			name,
 			id,
 			block_confirmations,
 			call_interval,

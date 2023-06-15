@@ -249,7 +249,7 @@ pub fn new_relay_base(config: Configuration) -> Result<RelayBase, ServiceError> 
 	// initialize roundup feeder & spawn tasks
 	let mut roundup_emitter = RoundupEmitter::new(
 		event_channels,
-		clients.clone(),
+		clients,
 		periodic_configs.unwrap().roundup_emitter,
 		bootstrap_states,
 		bootstrap_config,
