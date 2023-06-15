@@ -5,7 +5,6 @@ use cccp_primitives::{
 use ethers::{
 	providers::JsonRpcClient,
 	types::{Log, SyncingStatus, TransactionReceipt, H160, H256, U64},
-	utils::format_units,
 };
 use std::sync::Arc;
 use tokio::{
@@ -101,6 +100,8 @@ impl<T: JsonRpcClient> BlockManager<T> {
 				block.hash.unwrap(),
 			);
 		}
+
+		self.client.sync_balance().await;
 	}
 
 	/// Starts the block manager. Reads every new mined block of the connected chain and starts to
@@ -115,13 +116,7 @@ impl<T: JsonRpcClient> BlockManager<T> {
 					self.process_confirmed_block().await;
 					self.increment_waiting_block();
 
-					cccp_metrics::set_native_balance(
-						&self.client.get_chain_name(),
-						format_units(self.client.get_balance(self.client.address()).await, "ether")
-							.unwrap()
-							.parse::<f64>()
-							.unwrap(),
-					);
+					self.client.sync_balance().await;
 				}
 			}
 

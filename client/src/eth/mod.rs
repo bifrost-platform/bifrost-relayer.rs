@@ -21,6 +21,7 @@ use ethers::{
 		Address, Block, BlockId, Filter, Log, SyncingStatus, Transaction, TransactionReceipt,
 		TxpoolContent, H160, H256, U256, U64,
 	},
+	utils::format_units,
 };
 use serde::{de::DeserializeOwned, Serialize};
 use std::{fmt::Debug, str::FromStr, sync::Arc};
@@ -272,5 +273,16 @@ impl<T: JsonRpcClient> EthClient<T> {
 			.checked_div(diff.as_u32())
 			.unwrap()
 			.into()
+	}
+
+	/// Send prometheus metric of the current balance.
+	pub async fn sync_balance(&self) {
+		cccp_metrics::set_native_balance(
+			&self.get_chain_name(),
+			format_units(self.get_balance(self.address()).await, "ether")
+				.unwrap()
+				.parse::<f64>()
+				.unwrap(),
+		);
 	}
 }
