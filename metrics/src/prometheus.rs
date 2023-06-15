@@ -1,8 +1,7 @@
 use std::time::SystemTime;
 
 use ethers::{types::TransactionReceipt, utils::format_units};
-use prometheus::Opts;
-use prometheus_endpoint::{Gauge, GaugeVec, Registry, F64, U64};
+use prometheus_endpoint::{Gauge, GaugeVec, Opts, Registry, F64, U64};
 
 lazy_static! {
 	pub static ref BLOCK_HEIGHT: GaugeVec<U64> = GaugeVec::<U64>::new(
