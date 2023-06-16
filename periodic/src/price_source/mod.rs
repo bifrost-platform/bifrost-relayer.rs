@@ -1,4 +1,4 @@
-use std::ops::Mul;
+use std::{collections::BTreeMap, ops::Mul};
 
 use async_trait::async_trait;
 use ethers::types::U256;
@@ -63,14 +63,13 @@ pub async fn krw_to_usd(krw_amount: U256) -> U256 {
 }
 
 impl PriceFetchers {
-	pub async fn new(exchange: PriceSource, symbols: Vec<String>) -> Self {
+	pub async fn new(exchange: PriceSource) -> Self {
 		match exchange {
-			PriceSource::Binance => PriceFetchers::Binance(BinancePriceFetcher::new(symbols).await),
-			PriceSource::Coingecko =>
-				PriceFetchers::CoinGecko(CoingeckoPriceFetcher::new(symbols).await),
-			PriceSource::Gateio => PriceFetchers::Gateio(GateioPriceFetcher::new(symbols).await),
-			PriceSource::Kucoin => PriceFetchers::Kucoin(KucoinPriceFetcher::new(symbols).await),
-			PriceSource::Upbit => PriceFetchers::Upbit(UpbitPriceFetcher::new(symbols).await),
+			PriceSource::Binance => PriceFetchers::Binance(BinancePriceFetcher::new().await),
+			PriceSource::Coingecko => PriceFetchers::CoinGecko(CoingeckoPriceFetcher::new().await),
+			PriceSource::Gateio => PriceFetchers::Gateio(GateioPriceFetcher::new().await),
+			PriceSource::Kucoin => PriceFetchers::Kucoin(KucoinPriceFetcher::new().await),
+			PriceSource::Upbit => PriceFetchers::Upbit(UpbitPriceFetcher::new().await),
 		}
 	}
 }
@@ -87,7 +86,7 @@ impl PriceFetcher for PriceFetchers {
 		}
 	}
 
-	async fn get_tickers(&self) -> Vec<PriceResponse> {
+	async fn get_tickers(&self) -> BTreeMap<String, PriceResponse> {
 		match self {
 			PriceFetchers::Binance(fetcher) => fetcher.get_tickers().await,
 			PriceFetchers::CoinGecko(fetcher) => fetcher.get_tickers().await,
@@ -106,10 +105,9 @@ mod tests {
 
 	#[tokio::test]
 	async fn fetcher_enum_matching() {
-		let symbols = vec!["BTC".to_string(), "ETH".to_string()];
 		let fetchers = vec![
-			PriceFetchers::new(PriceSource::Gateio, symbols.clone()).await,
-			PriceFetchers::new(PriceSource::Binance, symbols.clone()).await,
+			PriceFetchers::new(PriceSource::Gateio).await,
+			PriceFetchers::new(PriceSource::Binance).await,
 		];
 
 		for fetcher in fetchers {

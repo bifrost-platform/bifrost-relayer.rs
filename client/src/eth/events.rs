@@ -1,12 +1,18 @@
-use cccp_primitives::{eth::SocketEventStatus, PriceResponse};
+use std::{
+	collections::BTreeMap,
+	fmt::{Display, Formatter},
+};
 
-use cccp_primitives::eth::{ChainID, GasCoefficient};
 use ethers::types::{
 	transaction::eip2718::TypedTransaction, Address, Eip1559TransactionRequest, TransactionRequest,
 	U256,
 };
-use std::fmt::{Display, Formatter};
 use tokio::sync::mpsc::{error::SendError, UnboundedSender};
+
+use cccp_primitives::{
+	eth::{ChainID, GasCoefficient, SocketEventStatus},
+	PriceResponse,
+};
 
 /// The default retries of a single json rpc request.
 pub const DEFAULT_CALL_RETRIES: u8 = 3;
@@ -77,11 +83,11 @@ impl Display for BridgeRelayMetadata {
 #[derive(Clone, Debug)]
 pub struct PriceFeedMetadata {
 	/// The fetched price responses mapped to token symbol.
-	pub prices: Vec<PriceResponse>,
+	pub prices: BTreeMap<String, PriceResponse>,
 }
 
 impl PriceFeedMetadata {
-	pub fn new(prices: Vec<PriceResponse>) -> Self {
+	pub fn new(prices: BTreeMap<String, PriceResponse>) -> Self {
 		Self { prices }
 	}
 }

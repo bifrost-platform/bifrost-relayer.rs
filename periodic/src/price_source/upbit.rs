@@ -1,3 +1,5 @@
+use std::collections::BTreeMap;
+
 use ethers::{types::U256, utils::parse_ether};
 use reqwest::Url;
 use serde::Deserialize;
@@ -31,18 +33,19 @@ impl PriceFetcher for UpbitPriceFetcher {
 			url.query_pairs_mut().append_pair("markets", format!("KRW-{}", symbol).as_str());
 		}
 
-		self.format_response(self._send_request(url).await[0].clone()).await
+		self.format_response(self._send_request(url).await[0].clone()).await.1
 	}
 
-	async fn get_tickers(&self) -> Vec<PriceResponse> {
+	async fn get_tickers(&self) -> BTreeMap<String, PriceResponse> {
 		let mut url = self.base_url.join("ticker").unwrap();
 		url.query_pairs_mut().append_pair("markets", self.symbols.as_str());
 
 		let responses = self._send_request(url).await;
 
-		let mut ret = vec![];
+		let mut ret = BTreeMap::new();
 		for response in responses {
-			ret.push(self.format_response(response).await);
+			let formatted_response = self.format_response(response).await;
+			ret.insert(formatted_response.0, formatted_response.1);
 		}
 
 		ret
@@ -50,7 +53,9 @@ impl PriceFetcher for UpbitPriceFetcher {
 }
 
 impl UpbitPriceFetcher {
-	pub async fn new(symbols: Vec<String>) -> Self {
+	pub async fn new() -> Self {
+		let symbols: Vec<String> = vec!["ETH".into(), "BFC".into(), "MATIC".into()];
+
 		let formatted_symbols: Vec<String> = symbols
 			.into_iter()
 			.map(|symbol| {
@@ -68,23 +73,26 @@ impl UpbitPriceFetcher {
 		}
 	}
 
-	async fn format_response(&self, response: UpbitResponse) -> PriceResponse {
+	async fn format_response(&self, response: UpbitResponse) -> (String, PriceResponse) {
 		if response.market.contains("KRW-") {
 			let usd_price = krw_to_usd(parse_ether(response.trade_price).unwrap()).await;
-			PriceResponse {
-				symbol: response.market.replace("KRW-", ""),
-				price: usd_price,
-				volume: parse_ether(response.acc_trade_volume_24h).unwrap().into(),
-			}
+			(
+				response.market.replace("KRW-", ""),
+				PriceResponse {
+					price: usd_price,
+					volume: parse_ether(response.acc_trade_volume_24h).unwrap().into(),
+				},
+			)
 		} else if response.market.contains("BTC-") {
 			let krw_price = self.btc_to_krw(response.trade_price).await;
 			let usd_price = krw_to_usd(krw_price).await;
-
-			PriceResponse {
-				symbol: response.market.replace("BTC-", ""),
-				price: usd_price,
-				volume: parse_ether(response.acc_trade_volume_24h).unwrap().into(),
-			}
+			(
+				response.market.replace("BTC-", ""),
+				PriceResponse {
+					price: usd_price,
+					volume: parse_ether(response.acc_trade_volume_24h).unwrap().into(),
+				},
+			)
 		} else {
 			todo!()
 		}
@@ -114,7 +122,7 @@ mod tests {
 
 	#[tokio::test]
 	async fn fetch_price() {
-		let upbit_fetcher = UpbitPriceFetcher::new(vec!["BTC".to_string()]).await;
+		let upbit_fetcher = UpbitPriceFetcher::new().await;
 		let res = upbit_fetcher.get_ticker_with_symbol("BFC".to_string()).await;
 
 		println!("{:?}", res);
@@ -122,9 +130,7 @@ mod tests {
 
 	#[tokio::test]
 	async fn fetch_prices() {
-		let upbit_fetcher =
-			UpbitPriceFetcher::new(vec!["BTC".to_string(), "ETH".to_string(), "BFC".to_string()])
-				.await;
+		let upbit_fetcher = UpbitPriceFetcher::new().await;
 		let res = upbit_fetcher.get_tickers().await;
 
 		println!("{:#?}", res);
@@ -132,7 +138,7 @@ mod tests {
 
 	#[tokio::test]
 	async fn btc_krw_conversion() {
-		let upbit_fetcher = UpbitPriceFetcher::new(vec![]).await;
+		let upbit_fetcher = UpbitPriceFetcher::new().await;
 		let res = upbit_fetcher.btc_to_krw(0.00000175f64).await;
 
 		println!("{:?}", res);

@@ -1,3 +1,5 @@
+use std::collections::BTreeMap;
+
 use ethers::utils::parse_ether;
 use reqwest::Url;
 use serde::Deserialize;
@@ -29,15 +31,16 @@ impl PriceFetcher for BinancePriceFetcher {
 		let res = self._send_request(url).await;
 
 		PriceResponse {
-			symbol: res.symbol.clone().replace("USDT", ""),
 			price: parse_ether(&res.lastPrice).unwrap(),
 			volume: parse_ether(&res.volume).unwrap().into(),
 		}
 	}
 
-	async fn get_tickers(&self) -> Vec<PriceResponse> {
+	async fn get_tickers(&self) -> BTreeMap<String, PriceResponse> {
 		let mut url = self.base_url.join("ticker/24hr").unwrap();
 		url.query_pairs_mut().append_pair("symbols", self.symbols.as_str());
+
+		let mut ret = BTreeMap::new();
 
 		reqwest::get(url)
 			.await
@@ -46,17 +49,23 @@ impl PriceFetcher for BinancePriceFetcher {
 			.await
 			.unwrap()
 			.iter()
-			.map(|ticker| PriceResponse {
-				symbol: ticker.symbol.clone().replace("USDT", ""),
-				price: parse_ether(&ticker.lastPrice).unwrap(),
-				volume: parse_ether(&ticker.volume).unwrap().into(),
-			})
-			.collect()
+			.for_each(|ticker| {
+				ret.insert(
+					ticker.symbol.clone().replace("USDT", ""),
+					PriceResponse {
+						price: parse_ether(&ticker.lastPrice).unwrap(),
+						volume: parse_ether(&ticker.volume).unwrap().into(),
+					},
+				);
+			});
+
+		ret
 	}
 }
 
 impl BinancePriceFetcher {
-	pub async fn new(mut symbols: Vec<String>) -> Self {
+	pub async fn new() -> Self {
+		let mut symbols: Vec<String> = vec!["ETH".into(), "BNB".into(), "MATIC".into()];
 		symbols.iter_mut().for_each(|symbol| symbol.push_str("USDT"));
 
 		Self {
@@ -76,7 +85,7 @@ mod tests {
 
 	#[tokio::test]
 	async fn fetch_price() {
-		let binance_fetcher = BinancePriceFetcher::new(vec!["BTC".to_string()]).await;
+		let binance_fetcher = BinancePriceFetcher::new().await;
 		let res = binance_fetcher.get_ticker_with_symbol("BTC".to_string()).await;
 
 		println!("{:?}", res);
@@ -84,8 +93,7 @@ mod tests {
 
 	#[tokio::test]
 	async fn fetch_prices() {
-		let binance_fetcher =
-			BinancePriceFetcher::new(vec!["BTC".to_string(), "ETH".to_string()]).await;
+		let binance_fetcher = BinancePriceFetcher::new().await;
 		let res = binance_fetcher.get_tickers().await;
 
 		println!("{:#?}", res);

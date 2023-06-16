@@ -1,4 +1,4 @@
-use std::{collections::HashMap, str::FromStr, sync::Arc};
+use std::{collections::BTreeMap, str::FromStr, sync::Arc};
 
 use async_trait::async_trait;
 use cron::Schedule;
@@ -12,12 +12,9 @@ use cccp_client::eth::{
 	EthClient, EventMessage, EventMetadata, EventSender, PriceFeedMetadata, TxRequest,
 };
 use cccp_primitives::{
-	cli::PriceFeederConfig,
-	errors::INVALID_PERIODIC_SCHEDULE,
-	eth::GasCoefficient,
-	periodic::{PeriodicWorker, PriceFetcher},
-	socket::get_asset_oids,
-	sub_display_format, INVALID_BIFROST_NATIVENESS,
+	cli::PriceFeederConfig, errors::INVALID_PERIODIC_SCHEDULE, eth::GasCoefficient,
+	periodic::PeriodicWorker,
+	socket::get_asset_oids, sub_display_format, PriceFetcher, INVALID_BIFROST_NATIVENESS,
 };
 
 use crate::price_source::PriceFetchers;
@@ -28,14 +25,16 @@ const SUB_LOG_TARGET: &str = "price-oracle";
 pub struct OraclePriceFeeder<T> {
 	/// The time schedule that represents when to send price feeds.
 	pub schedule: Schedule,
-	/// The source for fetching prices.
-	pub fetchers: Vec<PriceFetchers>,
+	/// The primary source for fetching prices. (Coingecko)
+	pub primary_source: Vec<PriceFetchers>,
+	/// The secondary source for fetching prices. (aggregate from sources)
+	pub secondary_sources: Vec<PriceFetchers>,
 	/// The event sender that sends messages to the event channel.
 	pub event_sender: Arc<EventSender>,
 	/// The price feeder configurations.
 	pub config: PriceFeederConfig,
 	/// The pre-defined oracle ID's for each asset.
-	pub asset_oid: HashMap<String, H256>,
+	pub asset_oid: BTreeMap<String, H256>,
 	/// The `EthClient` to interact with the bifrost network.
 	pub client: Arc<EthClient<T>>,
 }
@@ -49,13 +48,12 @@ impl<T: JsonRpcClient> PeriodicWorker for OraclePriceFeeder<T> {
 			self.wait_until_next_time().await;
 
 			if self.is_selected_relayer().await {
-				let price_responses = self.fetchers[0].get_tickers().await;
+				let price_responses = self.primary_source[0].get_tickers().await;
 
 				let mut oid_bytes_list: Vec<[u8; 32]> = vec![];
 				let mut price_bytes_list: Vec<[u8; 32]> = vec![];
-				price_responses.iter().for_each(|price_response| {
-					oid_bytes_list
-						.push(self.asset_oid.get(&price_response.symbol).unwrap().to_fixed_bytes());
+				price_responses.iter().for_each(|(symbol, price_response)| {
+					oid_bytes_list.push(self.asset_oid.get(symbol).unwrap().to_fixed_bytes());
 					price_bytes_list.push(price_response.price.into());
 				});
 
@@ -85,7 +83,8 @@ impl<T: JsonRpcClient> OraclePriceFeeder<T> {
 
 		Self {
 			schedule: Schedule::from_str(&config.schedule).expect(INVALID_PERIODIC_SCHEDULE),
-			fetchers: vec![],
+			primary_source: vec![],
+			secondary_sources: vec![],
 			event_sender: event_senders
 				.iter()
 				.find(|event_sender| event_sender.is_native)
@@ -103,12 +102,15 @@ impl<T: JsonRpcClient> OraclePriceFeeder<T> {
 
 	/// Initialize price fetchers. Can't move into new().
 	async fn initialize_fetchers(&mut self) {
-		for price_source in &self.config.price_sources {
-			let fetcher =
-				PriceFetchers::new(price_source.clone(), self.config.symbols.clone()).await;
+		// for price_source in &self.config.price_sources {
+		// 	let fetcher =
+		// 		PriceFetchers::new(price_source.clone()).await;
+		// 		// PriceFetchers::new(price_source.clone(), self.config.symbols.clone()).await;
+		//
+		// 	self.fetchers.push(fetcher);
+		// }
 
-			self.fetchers.push(fetcher);
-		}
+		todo!()
 	}
 
 	/// Build price feed transaction.

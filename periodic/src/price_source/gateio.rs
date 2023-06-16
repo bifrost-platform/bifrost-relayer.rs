@@ -1,3 +1,5 @@
+use std::collections::BTreeMap;
+
 use ethers::utils::parse_ether;
 use reqwest::Url;
 use serde::Deserialize;
@@ -29,34 +31,36 @@ impl PriceFetcher for GateioPriceFetcher {
 		let res = &self._send_request(url).await[0];
 
 		PriceResponse {
-			symbol,
 			price: parse_ether(&res.last).unwrap(),
 			volume: parse_ether(&res.base_volume).unwrap().into(),
 		}
 	}
 
-	async fn get_tickers(&self) -> Vec<PriceResponse> {
+	async fn get_tickers(&self) -> BTreeMap<String, PriceResponse> {
 		let url = self.base_url.join("spot/tickers").unwrap();
-		self._send_request(url)
-			.await
-			.iter()
-			.filter_map(|ticker| {
-				if self.symbols.contains(&ticker.currency_pair) {
-					Some(PriceResponse {
-						symbol: ticker.currency_pair.replace("_USDT", ""),
+
+		let mut ret = BTreeMap::new();
+		self._send_request(url).await.iter().for_each(|ticker| {
+			if self.symbols.contains(&ticker.currency_pair) {
+				ret.insert(
+					ticker.currency_pair.replace("_USDT", ""),
+					PriceResponse {
 						price: parse_ether(&ticker.last).unwrap(),
 						volume: parse_ether(&ticker.base_volume).unwrap().into(),
-					})
-				} else {
-					None
-				}
-			})
-			.collect()
+					},
+				);
+			}
+		});
+
+		ret
 	}
 }
 
 impl GateioPriceFetcher {
-	pub async fn new(mut symbols: Vec<String>) -> Self {
+	pub async fn new() -> Self {
+		let mut symbols: Vec<String> =
+			vec!["ETH".into(), "BFC".into(), "BNB".into(), "MATIC".into(), "BIFI".into()];
+
 		symbols.iter_mut().for_each(|symbol| {
 			if symbol.contains("BIFI") {
 				symbol.push_str("F_USDT");
@@ -88,7 +92,7 @@ mod tests {
 
 	#[tokio::test]
 	async fn fetch_price() {
-		let gateio_fetcher = GateioPriceFetcher::new(vec!["BTC".to_string()]).await;
+		let gateio_fetcher = GateioPriceFetcher::new().await;
 		let res = gateio_fetcher.get_ticker_with_symbol("BTC".to_string()).await;
 
 		println!("{:?}", res);
@@ -96,9 +100,7 @@ mod tests {
 
 	#[tokio::test]
 	async fn fetch_prices() {
-		let gateio_fetcher =
-			GateioPriceFetcher::new(vec!["BTC".to_string(), "BIFI".to_string(), "BFC".to_string()])
-				.await;
+		let gateio_fetcher = GateioPriceFetcher::new().await;
 		let res = gateio_fetcher.get_tickers().await;
 
 		println!("{:#?}", res);

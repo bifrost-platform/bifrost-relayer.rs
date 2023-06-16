@@ -1,3 +1,5 @@
+use std::collections::BTreeMap;
+
 use async_trait::async_trait;
 use ethers::types::U256;
 use serde::Deserialize;
@@ -12,8 +14,6 @@ pub trait PeriodicWorker {
 
 #[derive(Clone, Debug, Deserialize)]
 pub struct PriceResponse {
-	/// The token symbol.
-	pub symbol: String,
 	/// The current price of the token.
 	pub price: U256,
 	/// Base currency trade volume in the last 24h (for secondary sources)
@@ -35,5 +35,5 @@ pub trait PriceFetcher {
 	async fn get_ticker_with_symbol(&self, symbol: String) -> PriceResponse;
 
 	/// Get all prices of support coin/token.
-	async fn get_tickers(&self) -> Vec<PriceResponse>;
+	async fn get_tickers(&self) -> BTreeMap<String, PriceResponse>;
 }

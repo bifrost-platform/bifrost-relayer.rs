@@ -1,3 +1,5 @@
+use std::collections::BTreeMap;
+
 use ethers::utils::parse_ether;
 use reqwest::Url;
 use serde::Deserialize;
@@ -6,8 +8,6 @@ use cccp_primitives::{PriceFetcher, PriceResponse};
 
 #[derive(Debug, Clone, Deserialize)]
 struct Inner {
-	/// Symbol
-	symbol: String,
 	/// Last traded price
 	last: String,
 	/// 24h volume, executed based on base currency
@@ -33,24 +33,26 @@ impl PriceFetcher for KucoinPriceFetcher {
 		let res = &self._send_request(url).await.data;
 
 		PriceResponse {
-			symbol: res.symbol.replace("-USDT", ""),
 			price: parse_ether(&res.last).unwrap(),
 			volume: parse_ether(&res.vol).unwrap().into(),
 		}
 	}
 
-	async fn get_tickers(&self) -> Vec<PriceResponse> {
-		let mut res = vec![];
+	async fn get_tickers(&self) -> BTreeMap<String, PriceResponse> {
+		let mut ret = BTreeMap::new();
 		for symbol in &self.symbols {
-			res.push(self.get_ticker_with_symbol(symbol.clone()).await);
+			ret.insert(symbol.clone(), self.get_ticker_with_symbol(symbol.clone()).await);
 		}
 
-		res
+		ret
 	}
 }
 
 impl KucoinPriceFetcher {
-	pub async fn new(symbols: Vec<String>) -> Self {
+	pub async fn new() -> Self {
+		let symbols: Vec<String> =
+			vec!["ETH".into(), "BFC".into(), "BNB".into(), "MATIC".into(), "BIFI".into()];
+
 		Self {
 			base_url: Url::parse("https://api.kucoin.com/api/v1/")
 				.expect("Failed to parse KuCoin URL"),
@@ -74,7 +76,7 @@ mod tests {
 
 	#[tokio::test]
 	async fn fetch_price() {
-		let kucoin_fetcher = KucoinPriceFetcher::new(vec!["BFC".to_string()]).await;
+		let kucoin_fetcher = KucoinPriceFetcher::new().await;
 		let res = kucoin_fetcher.get_ticker_with_symbol("BFC".to_string()).await;
 
 		println!("{:#?}", res);
@@ -82,8 +84,7 @@ mod tests {
 
 	#[tokio::test]
 	async fn fetch_prices() {
-		let kucoin_fetcher =
-			KucoinPriceFetcher::new(vec!["BTC".to_string(), "ETH".to_string()]).await;
+		let kucoin_fetcher = KucoinPriceFetcher::new().await;
 		let res = kucoin_fetcher.get_tickers().await;
 
 		println!("{:#?}", res);

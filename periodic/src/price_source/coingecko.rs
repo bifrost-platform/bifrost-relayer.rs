@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 
 use ethers::utils::parse_ether;
 use reqwest::{Response, Url};
@@ -45,35 +45,45 @@ impl PriceFetcher for CoingeckoPriceFetcher {
 			.expect("Cannot find usd price in response")
 			.clone();
 
-		PriceResponse { symbol, price: parse_ether(price).unwrap(), volume: None }
+		PriceResponse { price: parse_ether(price).unwrap(), volume: None }
 	}
 
-	async fn get_tickers(&self) -> Vec<PriceResponse> {
+	async fn get_tickers(&self) -> BTreeMap<String, PriceResponse> {
 		let url = self
 			.base_url
 			.join(&format!("simple/price?ids={}&vs_currencies=usd", self.ids.join(",")))
 			.unwrap();
 		let response = self._send_request(url).await;
 
-		self.ids
-			.iter()
-			.map(|id| {
-				let price = response.get(id).unwrap().get("usd").unwrap();
-				let symbol = self
-					.supported_coins
-					.iter()
-					.find(|coin| coin.id == *id)
-					.unwrap()
-					.symbol
-					.to_uppercase();
-				PriceResponse { symbol, price: parse_ether(price).unwrap(), volume: None }
-			})
-			.collect()
+		let mut ret = BTreeMap::new();
+		self.ids.iter().for_each(|id| {
+			let price = response.get(id).unwrap().get("usd").unwrap();
+			let symbol = self
+				.supported_coins
+				.iter()
+				.find(|coin| coin.id == *id)
+				.unwrap()
+				.symbol
+				.to_uppercase();
+			ret.insert(symbol, PriceResponse { price: parse_ether(price).unwrap(), volume: None });
+		});
+
+		ret
 	}
 }
 
 impl CoingeckoPriceFetcher {
-	pub async fn new(symbols: Vec<String>) -> Self {
+	pub async fn new() -> Self {
+		let symbols: Vec<String> = vec![
+			"ETH".into(),
+			"BFC".into(),
+			"BNB".into(),
+			"MATIC".into(),
+			"USDC".into(),
+			"BIFI".into(),
+			"USDT".into(),
+		];
+
 		let support_coin_list: Vec<SupportedCoin> =
 			CoingeckoPriceFetcher::get_all_coin_list().await;
 
@@ -135,12 +145,12 @@ impl CoingeckoPriceFetcher {
 		}
 	}
 
-	async fn _send_request(&self, url: Url) -> HashMap<String, HashMap<String, f64>> {
+	async fn _send_request(&self, url: Url) -> BTreeMap<String, BTreeMap<String, f64>> {
 		let mut retry_interval = Duration::from_secs(30);
 		loop {
 			match reqwest::get(url.clone()).await.and_then(Response::error_for_status) {
 				Ok(response) =>
-					match response.json::<HashMap<String, HashMap<String, f64>>>().await {
+					match response.json::<BTreeMap<String, BTreeMap<String, f64>>>().await {
 						Ok(result) => return result,
 						Err(e) => {
 							log::error!(
@@ -187,7 +197,7 @@ mod tests {
 
 	#[tokio::test]
 	async fn fetch_price() {
-		let coingecko_fetcher = CoingeckoPriceFetcher::new(vec!["BTC".to_string()]).await;
+		let coingecko_fetcher = CoingeckoPriceFetcher::new().await;
 		let res = coingecko_fetcher.get_ticker_with_symbol("BTC".to_string()).await;
 
 		println!("{:?}", res);
@@ -195,8 +205,7 @@ mod tests {
 
 	#[tokio::test]
 	async fn fetch_prices() {
-		let binance_fetcher =
-			CoingeckoPriceFetcher::new(vec!["BTC".to_string(), "ETH".to_string()]).await;
+		let binance_fetcher = CoingeckoPriceFetcher::new().await;
 		let res = binance_fetcher.get_tickers().await;
 
 		println!("{:#?}", res);
