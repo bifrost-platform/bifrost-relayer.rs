@@ -1,5 +1,13 @@
-use crate::price_source::PriceFetchers;
+use std::{collections::HashMap, str::FromStr, sync::Arc};
+
 use async_trait::async_trait;
+use cron::Schedule;
+use ethers::{
+	providers::JsonRpcClient,
+	types::{TransactionRequest, H256},
+};
+use tokio::time::sleep;
+
 use cccp_client::eth::{
 	EthClient, EventMessage, EventMetadata, EventSender, PriceFeedMetadata, TxRequest,
 };
@@ -11,13 +19,8 @@ use cccp_primitives::{
 	socket::get_asset_oids,
 	sub_display_format, INVALID_BIFROST_NATIVENESS,
 };
-use cron::Schedule;
-use ethers::{
-	providers::JsonRpcClient,
-	types::{TransactionRequest, H256, U256},
-};
-use std::{collections::HashMap, str::FromStr, sync::Arc};
-use tokio::time::sleep;
+
+use crate::price_source::PriceFetchers;
 
 const SUB_LOG_TARGET: &str = "price-oracle";
 
@@ -46,13 +49,14 @@ impl<T: JsonRpcClient> PeriodicWorker for OraclePriceFeeder<T> {
 			self.wait_until_next_time().await;
 
 			if self.is_selected_relayer().await {
-				let price_responses = self.fetchers[0].get_price().await;
+				let price_responses = self.fetchers[0].get_tickers().await;
 
-				let (mut oid_bytes_list, mut price_bytes_list) = (vec![], vec![]);
+				let mut oid_bytes_list: Vec<[u8; 32]> = vec![];
+				let mut price_bytes_list: Vec<[u8; 32]> = vec![];
 				price_responses.iter().for_each(|price_response| {
 					oid_bytes_list
 						.push(self.asset_oid.get(&price_response.symbol).unwrap().to_fixed_bytes());
-					price_bytes_list.push(self.float_to_wei_bytes(&price_response.price));
+					price_bytes_list.push(price_response.price.into());
 				});
 
 				let request = self.build_transaction(oid_bytes_list, price_bytes_list).await;
@@ -105,10 +109,6 @@ impl<T: JsonRpcClient> OraclePriceFeeder<T> {
 
 			self.fetchers.push(fetcher);
 		}
-	}
-
-	fn float_to_wei_bytes(&self, value: &str) -> [u8; 32] {
-		U256::from((f64::from_str(value).unwrap() * 1_000_000_000_000_000_000f64) as u128).into()
 	}
 
 	/// Build price feed transaction.

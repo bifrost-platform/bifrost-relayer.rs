@@ -1,5 +1,19 @@
-use cccp_primitives::periodic::{PriceFetcher, PriceResponse};
+use ethers::utils::parse_ether;
 use reqwest::Url;
+use serde::Deserialize;
+
+use cccp_primitives::periodic::{PriceFetcher, PriceResponse};
+
+#[allow(non_snake_case)]
+#[derive(Clone, Debug, Deserialize)]
+pub struct BinanceResponse {
+	/// The token symbol.
+	pub symbol: String,
+	/// The current price of the token.
+	pub lastPrice: String,
+	/// Base currency trade volume in the last 24h (for secondary sources)
+	pub volume: String,
+}
 
 pub struct BinancePriceFetcher {
 	base_url: Url,
@@ -8,26 +22,42 @@ pub struct BinancePriceFetcher {
 
 #[async_trait::async_trait]
 impl PriceFetcher for BinancePriceFetcher {
-	async fn get_price_with_symbol(&self, symbol: String) -> String {
-		let mut url = self.base_url.join("ticker/price").unwrap();
-		url.query_pairs_mut().append_pair("symbol", symbol.replace('_', "").as_str());
+	async fn get_ticker_with_symbol(&self, symbol: String) -> PriceResponse {
+		let mut url = self.base_url.join("ticker/24hr").unwrap();
+		url.query_pairs_mut().append_pair("symbol", (symbol + "USDT").as_str());
 
-		self._send_request(url).await.price
+		let res = self._send_request(url).await;
+
+		PriceResponse {
+			symbol: res.symbol.clone().replace("USDT", ""),
+			price: parse_ether(&res.lastPrice).unwrap(),
+			volume: parse_ether(&res.volume).unwrap().into(),
+		}
 	}
 
-	async fn get_price(&self) -> Vec<PriceResponse> {
-		let mut url = self.base_url.join("ticker/price").unwrap();
+	async fn get_tickers(&self) -> Vec<PriceResponse> {
+		let mut url = self.base_url.join("ticker/24hr").unwrap();
 		url.query_pairs_mut().append_pair("symbols", self.symbols.as_str());
 
-		reqwest::get(url).await.unwrap().json::<Vec<PriceResponse>>().await.unwrap()
+		reqwest::get(url)
+			.await
+			.unwrap()
+			.json::<Vec<BinanceResponse>>()
+			.await
+			.unwrap()
+			.iter()
+			.map(|ticker| PriceResponse {
+				symbol: ticker.symbol.clone().replace("USDT", ""),
+				price: parse_ether(&ticker.lastPrice).unwrap(),
+				volume: parse_ether(&ticker.volume).unwrap().into(),
+			})
+			.collect()
 	}
 }
 
 impl BinancePriceFetcher {
 	pub async fn new(mut symbols: Vec<String>) -> Self {
-		for s in symbols.iter_mut() {
-			*s = s.replace('_', "");
-		}
+		symbols.iter_mut().for_each(|symbol| symbol.push_str("USDT"));
 
 		Self {
 			base_url: Url::parse("https://api.binance.com/api/v3/").unwrap(),
@@ -35,8 +65,8 @@ impl BinancePriceFetcher {
 		}
 	}
 
-	async fn _send_request(&self, url: Url) -> PriceResponse {
-		reqwest::get(url).await.unwrap().json::<PriceResponse>().await.unwrap()
+	async fn _send_request(&self, url: Url) -> BinanceResponse {
+		reqwest::get(url).await.unwrap().json::<BinanceResponse>().await.unwrap()
 	}
 }
 
@@ -46,8 +76,8 @@ mod tests {
 
 	#[tokio::test]
 	async fn fetch_price() {
-		let binance_fetcher = BinancePriceFetcher::new(vec!["BTC_USDT".to_string()]).await;
-		let res = binance_fetcher.get_price_with_symbol("BTC_USDT".to_string()).await;
+		let binance_fetcher = BinancePriceFetcher::new(vec!["BTC".to_string()]).await;
+		let res = binance_fetcher.get_ticker_with_symbol("BTC".to_string()).await;
 
 		println!("{:?}", res);
 	}
@@ -55,8 +85,8 @@ mod tests {
 	#[tokio::test]
 	async fn fetch_prices() {
 		let binance_fetcher =
-			BinancePriceFetcher::new(vec!["BTC_USDT".to_string(), "ETH_USDT".to_string()]).await;
-		let res = binance_fetcher.get_price().await;
+			BinancePriceFetcher::new(vec!["BTC".to_string(), "ETH".to_string()]).await;
+		let res = binance_fetcher.get_tickers().await;
 
 		println!("{:#?}", res);
 	}

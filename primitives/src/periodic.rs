@@ -1,4 +1,5 @@
 use async_trait::async_trait;
+use ethers::types::U256;
 use serde::Deserialize;
 
 #[async_trait]
@@ -14,7 +15,9 @@ pub struct PriceResponse {
 	/// The token symbol.
 	pub symbol: String,
 	/// The current price of the token.
-	pub price: String,
+	pub price: U256,
+	/// Base currency trade volume in the last 24h (for secondary sources)
+	pub volume: Option<U256>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -22,14 +25,15 @@ pub enum PriceSource {
 	Binance,
 	Coingecko,
 	Gateio,
+	Kucoin,
 	Upbit,
 }
 
 #[async_trait]
 pub trait PriceFetcher {
 	/// Get price with ticker symbol.
-	async fn get_price_with_symbol(&self, symbol: String) -> String;
+	async fn get_ticker_with_symbol(&self, symbol: String) -> PriceResponse;
 
 	/// Get all prices of support coin/token.
-	async fn get_price(&self) -> Vec<PriceResponse>;
+	async fn get_tickers(&self) -> Vec<PriceResponse>;
 }

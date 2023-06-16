@@ -1,11 +1,17 @@
-use cccp_primitives::periodic::{PriceFetcher, PriceResponse};
+use ethers::utils::parse_ether;
 use reqwest::Url;
 use serde::Deserialize;
 
-#[derive(Debug, Deserialize)]
+use cccp_primitives::periodic::{PriceFetcher, PriceResponse};
+
+#[derive(Debug, Clone, Deserialize)]
 pub struct GateioResponse {
+	/// Currency pair
 	pub currency_pair: String,
+	/// Last trading price
 	pub last: String,
+	/// Base currency trade volume in the last 24h
+	pub base_volume: String,
 }
 
 pub struct GateioPriceFetcher {
@@ -15,14 +21,21 @@ pub struct GateioPriceFetcher {
 
 #[async_trait::async_trait]
 impl PriceFetcher for GateioPriceFetcher {
-	async fn get_price_with_symbol(&self, symbol: String) -> String {
+	async fn get_ticker_with_symbol(&self, symbol: String) -> PriceResponse {
 		let mut url = self.base_url.join("spot/tickers").unwrap();
-		url.query_pairs_mut().append_pair("currency_pair", symbol.as_str());
+		url.query_pairs_mut()
+			.append_pair("currency_pair", (symbol.clone() + "_USDT").as_str());
 
-		self._send_request(url).await[0].last.clone()
+		let res = &self._send_request(url).await[0];
+
+		PriceResponse {
+			symbol,
+			price: parse_ether(&res.last).unwrap(),
+			volume: parse_ether(&res.base_volume).unwrap().into(),
+		}
 	}
 
-	async fn get_price(&self) -> Vec<PriceResponse> {
+	async fn get_tickers(&self) -> Vec<PriceResponse> {
 		let url = self.base_url.join("spot/tickers").unwrap();
 		self._send_request(url)
 			.await
@@ -30,8 +43,9 @@ impl PriceFetcher for GateioPriceFetcher {
 			.filter_map(|ticker| {
 				if self.symbols.contains(&ticker.currency_pair) {
 					Some(PriceResponse {
-						symbol: ticker.currency_pair.replace('_', ""),
-						price: ticker.last.clone(),
+						symbol: ticker.currency_pair.replace("_USDT", ""),
+						price: parse_ether(&ticker.last).unwrap(),
+						volume: parse_ether(&ticker.base_volume).unwrap().into(),
 					})
 				} else {
 					None
@@ -42,7 +56,15 @@ impl PriceFetcher for GateioPriceFetcher {
 }
 
 impl GateioPriceFetcher {
-	pub async fn new(symbols: Vec<String>) -> Self {
+	pub async fn new(mut symbols: Vec<String>) -> Self {
+		symbols.iter_mut().for_each(|symbol| {
+			if symbol.contains("BIFI") {
+				symbol.push_str("F_USDT");
+			} else {
+				symbol.push_str("_USDT");
+			}
+		});
+
 		Self {
 			base_url: Url::parse("https://api.gateio.ws/api/v4/")
 				.expect("Failed to parse GateIo URL"),
@@ -66,8 +88,8 @@ mod tests {
 
 	#[tokio::test]
 	async fn fetch_price() {
-		let gateio_fetcher = GateioPriceFetcher::new(vec!["BTC_USDT".to_string()]).await;
-		let res = gateio_fetcher.get_price_with_symbol("BTC_USDT".to_string()).await;
+		let gateio_fetcher = GateioPriceFetcher::new(vec!["BTC".to_string()]).await;
+		let res = gateio_fetcher.get_ticker_with_symbol("BTC".to_string()).await;
 
 		println!("{:?}", res);
 	}
@@ -75,8 +97,9 @@ mod tests {
 	#[tokio::test]
 	async fn fetch_prices() {
 		let gateio_fetcher =
-			GateioPriceFetcher::new(vec!["BTC_USDT".to_string(), "ETH_USDT".to_string()]).await;
-		let res = gateio_fetcher.get_price().await;
+			GateioPriceFetcher::new(vec!["BTC".to_string(), "BIFI".to_string(), "BFC".to_string()])
+				.await;
+		let res = gateio_fetcher.get_tickers().await;
 
 		println!("{:#?}", res);
 	}

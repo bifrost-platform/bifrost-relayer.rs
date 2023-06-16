@@ -1,11 +1,14 @@
+use std::collections::HashMap;
+
+use ethers::utils::parse_ether;
+use reqwest::{Response, Url};
+use serde::Deserialize;
+use tokio::time::{sleep, Duration};
+
 use cccp_primitives::{
 	periodic::{PriceFetcher, PriceResponse},
 	sub_display_format,
 };
-use reqwest::{Response, Url};
-use serde::Deserialize;
-use std::collections::HashMap;
-use tokio::time::{sleep, Duration};
 
 use crate::price_source::LOG_TARGET;
 
@@ -26,23 +29,26 @@ pub struct CoingeckoPriceFetcher {
 
 #[async_trait::async_trait]
 impl PriceFetcher for CoingeckoPriceFetcher {
-	async fn get_price_with_symbol(&self, symbol: String) -> String {
+	async fn get_ticker_with_symbol(&self, symbol: String) -> PriceResponse {
 		let id = self.get_id_from_symbol(&symbol);
 		let url = self
 			.base_url
 			.join(&format!("simple/price?ids={}&vs_currencies=usd", id))
 			.unwrap();
 
-		self._send_request(url)
+		let price = self
+			._send_request(url)
 			.await
 			.get(id)
 			.expect("Cannot find symbol in response")
 			.get("usd")
 			.expect("Cannot find usd price in response")
-			.to_string()
+			.clone();
+
+		PriceResponse { symbol, price: parse_ether(price).unwrap(), volume: None }
 	}
 
-	async fn get_price(&self) -> Vec<PriceResponse> {
+	async fn get_tickers(&self) -> Vec<PriceResponse> {
 		let url = self
 			.base_url
 			.join(&format!("simple/price?ids={}&vs_currencies=usd", self.ids.join(",")))
@@ -52,7 +58,7 @@ impl PriceFetcher for CoingeckoPriceFetcher {
 		self.ids
 			.iter()
 			.map(|id| {
-				let price = response.get(id).unwrap().get("usd").unwrap().to_string();
+				let price = response.get(id).unwrap().get("usd").unwrap();
 				let symbol = self
 					.supported_coins
 					.iter()
@@ -60,7 +66,7 @@ impl PriceFetcher for CoingeckoPriceFetcher {
 					.unwrap()
 					.symbol
 					.to_uppercase();
-				PriceResponse { symbol, price }
+				PriceResponse { symbol, price: parse_ether(price).unwrap(), volume: None }
 			})
 			.collect()
 	}
@@ -182,7 +188,7 @@ mod tests {
 	#[tokio::test]
 	async fn fetch_price() {
 		let coingecko_fetcher = CoingeckoPriceFetcher::new(vec!["BTC".to_string()]).await;
-		let res = coingecko_fetcher.get_price_with_symbol("BTC".to_string()).await;
+		let res = coingecko_fetcher.get_ticker_with_symbol("BTC".to_string()).await;
 
 		println!("{:?}", res);
 	}
@@ -191,7 +197,7 @@ mod tests {
 	async fn fetch_prices() {
 		let binance_fetcher =
 			CoingeckoPriceFetcher::new(vec!["BTC".to_string(), "ETH".to_string()]).await;
-		let res = binance_fetcher.get_price().await;
+		let res = binance_fetcher.get_tickers().await;
 
 		println!("{:#?}", res);
 	}
