@@ -2,6 +2,7 @@ use std::{collections::BTreeMap, ops::Mul};
 
 use async_trait::async_trait;
 use ethers::types::U256;
+use reqwest::Error;
 use serde::Deserialize;
 
 use cccp_primitives::periodic::{PriceFetcher, PriceResponse, PriceSource};
@@ -86,7 +87,7 @@ impl PriceFetcher for PriceFetchers {
 		}
 	}
 
-	async fn get_tickers(&self) -> BTreeMap<String, PriceResponse> {
+	async fn get_tickers(&self) -> Result<BTreeMap<String, PriceResponse>, Error> {
 		match self {
 			PriceFetchers::Binance(fetcher) => fetcher.get_tickers().await,
 			PriceFetchers::CoinGecko(fetcher) => fetcher.get_tickers().await,

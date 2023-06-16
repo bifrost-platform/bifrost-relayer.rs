@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 
 use ethers::utils::parse_ether;
-use reqwest::{Response, Url};
+use reqwest::{Error, Response, Url};
 use serde::Deserialize;
 use tokio::time::{sleep, Duration};
 
@@ -39,6 +39,7 @@ impl PriceFetcher for CoingeckoPriceFetcher {
 		let price = self
 			._send_request(url)
 			.await
+			.unwrap()
 			.get(id)
 			.expect("Cannot find symbol in response")
 			.get("usd")
@@ -48,27 +49,33 @@ impl PriceFetcher for CoingeckoPriceFetcher {
 		PriceResponse { price: parse_ether(price).unwrap(), volume: None }
 	}
 
-	async fn get_tickers(&self) -> BTreeMap<String, PriceResponse> {
+	async fn get_tickers(&self) -> Result<BTreeMap<String, PriceResponse>, Error> {
 		let url = self
 			.base_url
 			.join(&format!("simple/price?ids={}&vs_currencies=usd", self.ids.join(",")))
 			.unwrap();
-		let response = self._send_request(url).await;
 
-		let mut ret = BTreeMap::new();
-		self.ids.iter().for_each(|id| {
-			let price = response.get(id).unwrap().get("usd").unwrap();
-			let symbol = self
-				.supported_coins
-				.iter()
-				.find(|coin| coin.id == *id)
-				.unwrap()
-				.symbol
-				.to_uppercase();
-			ret.insert(symbol, PriceResponse { price: parse_ether(price).unwrap(), volume: None });
-		});
-
-		ret
+		return match self._send_request(url).await {
+			Ok(response) => {
+				let mut ret = BTreeMap::new();
+				self.ids.iter().for_each(|id| {
+					let price = response.get(id).unwrap().get("usd").unwrap();
+					let symbol = self
+						.supported_coins
+						.iter()
+						.find(|coin| coin.id == *id)
+						.unwrap()
+						.symbol
+						.to_uppercase();
+					ret.insert(
+						symbol,
+						PriceResponse { price: parse_ether(price).unwrap(), volume: None },
+					);
+				});
+				Ok(ret)
+			},
+			Err(e) => Err(e),
+		}
 	}
 }
 
@@ -145,24 +152,24 @@ impl CoingeckoPriceFetcher {
 		}
 	}
 
-	async fn _send_request(&self, url: Url) -> BTreeMap<String, BTreeMap<String, f64>> {
+	async fn _send_request(
+		&self,
+		url: Url,
+	) -> Result<BTreeMap<String, BTreeMap<String, f64>>, Error> {
 		let mut retry_interval = Duration::from_secs(30);
 		loop {
 			match reqwest::get(url.clone()).await.and_then(Response::error_for_status) {
 				Ok(response) =>
-					match response.json::<BTreeMap<String, BTreeMap<String, f64>>>().await {
-						Ok(result) => return result,
+					return match response.json::<BTreeMap<String, BTreeMap<String, f64>>>().await {
+						Ok(result) => Ok(result),
 						Err(e) => {
 							log::error!(
 								target: LOG_TARGET,
-								"-[{}] ❗️ Error decoding coingecko response. Maybe rate limit exceeds?: {}, Retry in {:?} secs...",
+								"-[{}] ❗️ Error decoding coingecko response: {}, retry in secondary sources",
 								sub_display_format(SUB_LOG_TARGET),
 								e.to_string(),
-								retry_interval
 							);
-							sentry::capture_error(&e);
-							sleep(retry_interval).await;
-							retry_interval *= 2;
+							Err(e)
 						},
 					},
 				Err(e) => {

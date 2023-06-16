@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 
 use ethers::utils::parse_ether;
-use reqwest::Url;
+use reqwest::{Error, Url};
 use serde::Deserialize;
 
 use cccp_primitives::periodic::{PriceFetcher, PriceResponse};
@@ -36,30 +36,28 @@ impl PriceFetcher for BinancePriceFetcher {
 		}
 	}
 
-	async fn get_tickers(&self) -> BTreeMap<String, PriceResponse> {
+	async fn get_tickers(&self) -> Result<BTreeMap<String, PriceResponse>, Error> {
 		let mut url = self.base_url.join("ticker/24hr").unwrap();
 		url.query_pairs_mut().append_pair("symbols", self.symbols.as_str());
 
 		let mut ret = BTreeMap::new();
+		match reqwest::get(url).await {
+			Ok(response) => match response.json::<Vec<BinanceResponse>>().await {
+				Ok(binance_response) => binance_response.iter().for_each(|ticker| {
+					ret.insert(
+						ticker.symbol.clone().replace("USDT", ""),
+						PriceResponse {
+							price: parse_ether(&ticker.lastPrice).unwrap(),
+							volume: parse_ether(&ticker.volume).unwrap().into(),
+						},
+					);
+				}),
+				Err(error) => return Err(error),
+			},
+			Err(error) => return Err(error),
+		};
 
-		reqwest::get(url)
-			.await
-			.unwrap()
-			.json::<Vec<BinanceResponse>>()
-			.await
-			.unwrap()
-			.iter()
-			.for_each(|ticker| {
-				ret.insert(
-					ticker.symbol.clone().replace("USDT", ""),
-					PriceResponse {
-						price: parse_ether(&ticker.lastPrice).unwrap(),
-						volume: parse_ether(&ticker.volume).unwrap().into(),
-					},
-				);
-			});
-
-		ret
+		Ok(ret)
 	}
 }
 

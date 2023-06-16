@@ -2,6 +2,7 @@ use std::collections::BTreeMap;
 
 use async_trait::async_trait;
 use ethers::types::U256;
+use reqwest::Error;
 use serde::Deserialize;
 
 #[async_trait]
@@ -35,5 +36,5 @@ pub trait PriceFetcher {
 	async fn get_ticker_with_symbol(&self, symbol: String) -> PriceResponse;
 
 	/// Get all prices of support coin/token.
-	async fn get_tickers(&self) -> BTreeMap<String, PriceResponse>;
+	async fn get_tickers(&self) -> Result<BTreeMap<String, PriceResponse>, Error>;
 }

@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 
 use ethers::{types::U256, utils::parse_ether};
-use reqwest::Url;
+use reqwest::{Error, Url};
 use serde::Deserialize;
 
 use cccp_primitives::periodic::{PriceFetcher, PriceResponse};
@@ -33,22 +33,24 @@ impl PriceFetcher for UpbitPriceFetcher {
 			url.query_pairs_mut().append_pair("markets", format!("KRW-{}", symbol).as_str());
 		}
 
-		self.format_response(self._send_request(url).await[0].clone()).await.1
+		self.format_response(self._send_request(url).await.unwrap()[0].clone()).await.1
 	}
 
-	async fn get_tickers(&self) -> BTreeMap<String, PriceResponse> {
+	async fn get_tickers(&self) -> Result<BTreeMap<String, PriceResponse>, Error> {
 		let mut url = self.base_url.join("ticker").unwrap();
 		url.query_pairs_mut().append_pair("markets", self.symbols.as_str());
 
-		let responses = self._send_request(url).await;
-
-		let mut ret = BTreeMap::new();
-		for response in responses {
-			let formatted_response = self.format_response(response).await;
-			ret.insert(formatted_response.0, formatted_response.1);
+		return match self._send_request(url).await {
+			Ok(responses) => {
+				let mut ret = BTreeMap::new();
+				for response in responses {
+					let formatted_response = self.format_response(response).await;
+					ret.insert(formatted_response.0, formatted_response.1);
+				}
+				Ok(ret)
+			},
+			Err(e) => Err(e),
 		}
-
-		ret
 	}
 }
 
@@ -99,20 +101,23 @@ impl UpbitPriceFetcher {
 	}
 
 	async fn btc_to_krw(&self, btc_amount: f64) -> U256 {
-		let btc_price =
-			self._send_request(self.base_url.join("ticker?markets=KRW-BTC").unwrap()).await[0]
-				.trade_price;
+		let btc_price = self
+			._send_request(self.base_url.join("ticker?markets=KRW-BTC").unwrap())
+			.await
+			.unwrap()[0]
+			.trade_price;
 
 		parse_ether(btc_price * btc_amount).unwrap()
 	}
 
-	async fn _send_request(&self, url: Url) -> Vec<UpbitResponse> {
-		reqwest::get(url)
-			.await
-			.expect("Failed to send request to upbit")
-			.json::<Vec<UpbitResponse>>()
-			.await
-			.expect("Failed to parse upbit response")
+	async fn _send_request(&self, url: Url) -> Result<Vec<UpbitResponse>, Error> {
+		return match reqwest::get(url).await {
+			Ok(response) => match response.json::<Vec<UpbitResponse>>().await {
+				Ok(response) => Ok(response),
+				Err(e) => Err(e),
+			},
+			Err(e) => Err(e),
+		}
 	}
 }
 

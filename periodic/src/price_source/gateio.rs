@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 
 use ethers::utils::parse_ether;
-use reqwest::Url;
+use reqwest::{Error, Url};
 use serde::Deserialize;
 
 use cccp_primitives::periodic::{PriceFetcher, PriceResponse};
@@ -28,7 +28,7 @@ impl PriceFetcher for GateioPriceFetcher {
 		url.query_pairs_mut()
 			.append_pair("currency_pair", (symbol.clone() + "_USDT").as_str());
 
-		let res = &self._send_request(url).await[0];
+		let res = self._send_request(url).await.unwrap()[0].clone();
 
 		PriceResponse {
 			price: parse_ether(&res.last).unwrap(),
@@ -36,23 +36,25 @@ impl PriceFetcher for GateioPriceFetcher {
 		}
 	}
 
-	async fn get_tickers(&self) -> BTreeMap<String, PriceResponse> {
-		let url = self.base_url.join("spot/tickers").unwrap();
-
-		let mut ret = BTreeMap::new();
-		self._send_request(url).await.iter().for_each(|ticker| {
-			if self.symbols.contains(&ticker.currency_pair) {
-				ret.insert(
-					ticker.currency_pair.replace("_USDT", ""),
-					PriceResponse {
-						price: parse_ether(&ticker.last).unwrap(),
-						volume: parse_ether(&ticker.base_volume).unwrap().into(),
-					},
-				);
-			}
-		});
-
-		ret
+	async fn get_tickers(&self) -> Result<BTreeMap<String, PriceResponse>, Error> {
+		return match self._send_request(self.base_url.join("spot/tickers").unwrap()).await {
+			Ok(response) => {
+				let mut ret = BTreeMap::new();
+				response.iter().for_each(|ticker| {
+					if self.symbols.contains(&ticker.currency_pair) {
+						ret.insert(
+							ticker.currency_pair.replace("_USDT", ""),
+							PriceResponse {
+								price: parse_ether(&ticker.last).unwrap(),
+								volume: parse_ether(&ticker.base_volume).unwrap().into(),
+							},
+						);
+					}
+				});
+				Ok(ret)
+			},
+			Err(e) => Err(e),
+		}
 	}
 }
 
@@ -76,13 +78,14 @@ impl GateioPriceFetcher {
 		}
 	}
 
-	async fn _send_request(&self, url: Url) -> Vec<GateioResponse> {
-		reqwest::get(url)
-			.await
-			.expect("Failed to send request to gateio")
-			.json::<Vec<GateioResponse>>()
-			.await
-			.expect("Failed to parse gateio response")
+	async fn _send_request(&self, url: Url) -> Result<Vec<GateioResponse>, Error> {
+		return match reqwest::get(url).await {
+			Ok(response) => match response.json::<Vec<GateioResponse>>().await {
+				Ok(ret) => Ok(ret),
+				Err(e) => Err(e),
+			},
+			Err(e) => Err(e),
+		}
 	}
 }
 

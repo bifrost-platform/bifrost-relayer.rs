@@ -6,6 +6,7 @@ use ethers::{
 	providers::JsonRpcClient,
 	types::{TransactionRequest, H256},
 };
+use reqwest::Error;
 use tokio::time::sleep;
 
 use cccp_client::eth::{
@@ -14,7 +15,8 @@ use cccp_client::eth::{
 use cccp_primitives::{
 	cli::PriceFeederConfig, errors::INVALID_PERIODIC_SCHEDULE, eth::GasCoefficient,
 	periodic::PeriodicWorker,
-	socket::get_asset_oids, sub_display_format, PriceFetcher, INVALID_BIFROST_NATIVENESS,
+	socket::get_asset_oids, sub_display_format, PriceFetcher, PriceResponse, PriceSource,
+	INVALID_BIFROST_NATIVENESS,
 };
 
 use crate::price_source::PriceFetchers;
@@ -48,18 +50,30 @@ impl<T: JsonRpcClient> PeriodicWorker for OraclePriceFeeder<T> {
 			self.wait_until_next_time().await;
 
 			if self.is_selected_relayer().await {
-				let price_responses = self.primary_source[0].get_tickers().await;
-
 				let mut oid_bytes_list: Vec<[u8; 32]> = vec![];
 				let mut price_bytes_list: Vec<[u8; 32]> = vec![];
-				price_responses.iter().for_each(|(symbol, price_response)| {
-					oid_bytes_list.push(self.asset_oid.get(symbol).unwrap().to_fixed_bytes());
-					price_bytes_list.push(price_response.price.into());
-				});
 
-				let request = self.build_transaction(oid_bytes_list, price_bytes_list).await;
-				self.request_send_transaction(request, PriceFeedMetadata::new(price_responses))
-					.await;
+				match self.primary_source[0].get_tickers().await {
+					// If coingecko works well.
+					Ok(price_responses) => {
+						price_responses.iter().for_each(|(symbol, price_response)| {
+							oid_bytes_list
+								.push(self.asset_oid.get(symbol).unwrap().to_fixed_bytes());
+							price_bytes_list.push(price_response.price.into());
+						});
+
+						self.build_and_send_transaction(
+							oid_bytes_list,
+							price_bytes_list,
+							price_responses,
+						)
+						.await;
+					},
+					// If coingecko works not well.
+					Err(_error) => {
+						todo!()
+					},
+				};
 			}
 		}
 	}
@@ -100,17 +114,33 @@ impl<T: JsonRpcClient> OraclePriceFeeder<T> {
 		}
 	}
 
+	/// If price data fetch failed with primary source, try with secondary sources.
+	async fn try_with_secondary(&self) -> Result<BTreeMap<String, PriceResponse>, Error> {
+		todo!()
+	}
+
 	/// Initialize price fetchers. Can't move into new().
 	async fn initialize_fetchers(&mut self) {
-		// for price_source in &self.config.price_sources {
-		// 	let fetcher =
-		// 		PriceFetchers::new(price_source.clone()).await;
-		// 		// PriceFetchers::new(price_source.clone(), self.config.symbols.clone()).await;
-		//
-		// 	self.fetchers.push(fetcher);
-		// }
+		self.primary_source.push(PriceFetchers::new(PriceSource::Coingecko).await);
 
-		todo!()
+		self.secondary_sources.push(PriceFetchers::new(PriceSource::Binance).await);
+		self.secondary_sources.push(PriceFetchers::new(PriceSource::Gateio).await);
+		self.secondary_sources.push(PriceFetchers::new(PriceSource::Kucoin).await);
+		self.secondary_sources.push(PriceFetchers::new(PriceSource::Upbit).await);
+	}
+
+	/// Build and send transaction.
+	async fn build_and_send_transaction(
+		&self,
+		oid_bytes_list: Vec<[u8; 32]>,
+		price_bytes_list: Vec<[u8; 32]>,
+		price_responses: BTreeMap<String, PriceResponse>,
+	) {
+		self.request_send_transaction(
+			self.build_transaction(oid_bytes_list, price_bytes_list).await,
+			PriceFeedMetadata::new(price_responses),
+		)
+		.await;
 	}
 
 	/// Build price feed transaction.

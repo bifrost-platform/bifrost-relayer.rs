@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 
 use ethers::utils::parse_ether;
-use reqwest::Url;
+use reqwest::{Error, Url};
 use serde::Deserialize;
 
 use cccp_primitives::{PriceFetcher, PriceResponse};
@@ -30,7 +30,7 @@ impl PriceFetcher for KucoinPriceFetcher {
 		let mut url = self.base_url.join("market/stats").unwrap();
 		url.query_pairs_mut().append_pair("symbol", (symbol.clone() + "-USDT").as_str());
 
-		let res = &self._send_request(url).await.data;
+		let res = &self._send_request(url).await.unwrap().data;
 
 		PriceResponse {
 			price: parse_ether(&res.last).unwrap(),
@@ -38,13 +38,13 @@ impl PriceFetcher for KucoinPriceFetcher {
 		}
 	}
 
-	async fn get_tickers(&self) -> BTreeMap<String, PriceResponse> {
+	async fn get_tickers(&self) -> Result<BTreeMap<String, PriceResponse>, Error> {
 		let mut ret = BTreeMap::new();
 		for symbol in &self.symbols {
 			ret.insert(symbol.clone(), self.get_ticker_with_symbol(symbol.clone()).await);
 		}
 
-		ret
+		Ok(ret)
 	}
 }
 
@@ -60,13 +60,14 @@ impl KucoinPriceFetcher {
 		}
 	}
 
-	async fn _send_request(&self, url: Url) -> KucoinResponse {
-		reqwest::get(url)
-			.await
-			.expect("Failed to send request to kucoin")
-			.json::<KucoinResponse>()
-			.await
-			.expect("Failed to parse kucoin response")
+	async fn _send_request(&self, url: Url) -> Result<KucoinResponse, Error> {
+		return match reqwest::get(url).await {
+			Ok(response) => match response.json::<KucoinResponse>().await {
+				Ok(response) => Ok(response),
+				Err(e) => Err(e),
+			},
+			Err(e) => Err(e),
+		}
 	}
 }
 
