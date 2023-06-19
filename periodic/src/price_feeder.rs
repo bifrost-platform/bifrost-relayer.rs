@@ -1,12 +1,11 @@
-use std::{collections::BTreeMap, str::FromStr, sync::Arc};
+use std::{collections::BTreeMap, fmt::Error, str::FromStr, sync::Arc};
 
 use async_trait::async_trait;
 use cron::Schedule;
 use ethers::{
 	providers::JsonRpcClient,
-	types::{TransactionRequest, H256},
+	types::{TransactionRequest, H256, U256},
 };
-use reqwest::Error;
 use tokio::time::sleep;
 
 use cccp_client::eth::{
@@ -50,28 +49,39 @@ impl<T: JsonRpcClient> PeriodicWorker for OraclePriceFeeder<T> {
 			self.wait_until_next_time().await;
 
 			if self.is_selected_relayer().await {
-				let mut oid_bytes_list: Vec<[u8; 32]> = vec![];
-				let mut price_bytes_list: Vec<[u8; 32]> = vec![];
-
 				match self.primary_source[0].get_tickers().await {
 					// If coingecko works well.
 					Ok(price_responses) => {
-						price_responses.iter().for_each(|(symbol, price_response)| {
-							oid_bytes_list
-								.push(self.asset_oid.get(symbol).unwrap().to_fixed_bytes());
-							price_bytes_list.push(price_response.price.into());
-						});
-
-						self.build_and_send_transaction(
-							oid_bytes_list,
-							price_bytes_list,
-							price_responses,
-						)
-						.await;
+						self.build_and_send_transaction(price_responses).await;
 					},
 					// If coingecko works not well.
-					Err(_error) => {
-						todo!()
+					Err(_) => {
+						log::warn!(
+							target: &self.client.get_chain_name(),
+							"-[{}] ❗️ Failed to fetch price feed data from primary source. Retry fetch with secondary sources.",
+							sub_display_format(SUB_LOG_TARGET),
+						);
+
+						match self.try_with_secondary().await {
+							Ok(price_responses) => {
+								self.build_and_send_transaction(price_responses).await;
+							},
+							Err(_) => {
+								log::error!(
+									target: &self.client.get_chain_name(),
+									"-[{}] ❗️ Failed to fetch price feed data from secondary sources. First off, skip this feeding.",
+									sub_display_format(SUB_LOG_TARGET),
+								);
+								sentry::capture_message(
+									format!(
+										"[{}] ❗️ Failed to fetch price feed data from secondary sources. First off, skip this feeding.",
+										SUB_LOG_TARGET,
+									)
+									.as_str(),
+									sentry::Level::Error,
+								);
+							},
+						}
 					},
 				};
 			}
@@ -116,7 +126,41 @@ impl<T: JsonRpcClient> OraclePriceFeeder<T> {
 
 	/// If price data fetch failed with primary source, try with secondary sources.
 	async fn try_with_secondary(&self) -> Result<BTreeMap<String, PriceResponse>, Error> {
-		todo!()
+		// (volume weighted price sum, total volume)
+		let mut volume_weighted: BTreeMap<String, (U256, U256)> = BTreeMap::new();
+
+		for fetcher in self.secondary_sources.clone() {
+			match fetcher.get_tickers().await {
+				Ok(tickers) => {
+					tickers.iter().for_each(|(symbol, price_response)| {
+						if let Some(value) = volume_weighted.get_mut(symbol) {
+							value.0 += price_response.price * price_response.volume.unwrap();
+							value.1 += price_response.volume.unwrap();
+						} else {
+							volume_weighted.insert(
+								symbol.clone(),
+								(
+									price_response.price * price_response.volume.unwrap(),
+									price_response.volume.unwrap(),
+								),
+							);
+						}
+					});
+				},
+				Err(_) => continue,
+			};
+		}
+
+		if volume_weighted.is_empty() {
+			return Err(Error::default())
+		}
+
+		Ok(volume_weighted
+			.into_iter()
+			.map(|(symbol, (volume_weighted_sum, total_volume))| {
+				(symbol, PriceResponse { price: volume_weighted_sum / total_volume, volume: None })
+			})
+			.collect())
 	}
 
 	/// Initialize price fetchers. Can't move into new().
@@ -130,12 +174,15 @@ impl<T: JsonRpcClient> OraclePriceFeeder<T> {
 	}
 
 	/// Build and send transaction.
-	async fn build_and_send_transaction(
-		&self,
-		oid_bytes_list: Vec<[u8; 32]>,
-		price_bytes_list: Vec<[u8; 32]>,
-		price_responses: BTreeMap<String, PriceResponse>,
-	) {
+	async fn build_and_send_transaction(&self, price_responses: BTreeMap<String, PriceResponse>) {
+		let mut oid_bytes_list: Vec<[u8; 32]> = vec![];
+		let mut price_bytes_list: Vec<[u8; 32]> = vec![];
+
+		price_responses.iter().for_each(|(symbol, price_response)| {
+			oid_bytes_list.push(self.asset_oid.get(symbol).unwrap().to_fixed_bytes());
+			price_bytes_list.push(price_response.price.into());
+		});
+
 		self.request_send_transaction(
 			self.build_transaction(oid_bytes_list, price_bytes_list).await,
 			PriceFeedMetadata::new(price_responses),

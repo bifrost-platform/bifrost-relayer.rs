@@ -19,6 +19,7 @@ struct KucoinResponse {
 	pub data: Inner,
 }
 
+#[derive(Clone)]
 pub struct KucoinPriceFetcher {
 	base_url: Url,
 	symbols: Vec<String>,

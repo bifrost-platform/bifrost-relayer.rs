@@ -17,6 +17,7 @@ pub struct BinanceResponse {
 	pub volume: String,
 }
 
+#[derive(Clone)]
 pub struct BinancePriceFetcher {
 	base_url: Url,
 	symbols: String,

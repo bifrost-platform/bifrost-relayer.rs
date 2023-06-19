@@ -16,6 +16,7 @@ pub struct GateioResponse {
 	pub base_volume: String,
 }
 
+#[derive(Clone)]
 pub struct GateioPriceFetcher {
 	base_url: Url,
 	symbols: Vec<String>,

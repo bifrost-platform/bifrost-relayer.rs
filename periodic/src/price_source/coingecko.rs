@@ -21,6 +21,7 @@ pub struct SupportedCoin {
 	pub name: String,
 }
 
+#[derive(Clone)]
 pub struct CoingeckoPriceFetcher {
 	pub base_url: Url,
 	pub ids: Vec<String>,

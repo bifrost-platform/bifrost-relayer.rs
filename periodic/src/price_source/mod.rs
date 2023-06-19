@@ -20,6 +20,7 @@ pub mod upbit;
 
 pub const LOG_TARGET: &str = "price-fetcher";
 
+#[derive(Clone)]
 pub enum PriceFetchers {
 	Binance(BinancePriceFetcher),
 	CoinGecko(CoingeckoPriceFetcher),

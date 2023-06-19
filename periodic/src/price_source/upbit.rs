@@ -18,6 +18,7 @@ pub struct UpbitResponse {
 	pub acc_trade_volume_24h: f64,
 }
 
+#[derive(Clone)]
 pub struct UpbitPriceFetcher {
 	base_url: Url,
 	symbols: String,
