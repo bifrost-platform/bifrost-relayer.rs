@@ -60,8 +60,6 @@ periodic_configs:
   oracle_price_feeder:
     - chain_id: 49088
       schedule: "0 */5 * * * * *" # Every 5th minute.
-      price_sources: [Coingecko]
-      symbols: ["ETH", "BFC", "BNB", "MATIC", "USDC", "BIFI", "USDT"]
   roundup_emitter: "*/15 * * * * * *" # Every 15th seconds.
   heartbeat: "0 * * * * * *" # Every minute.
 

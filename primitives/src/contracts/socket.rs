@@ -1,10 +1,12 @@
-use crate::eth::ChainID;
+use std::{collections::BTreeMap, str::FromStr};
+
 use ethers::{
 	abi::RawLog,
 	prelude::{abigen, H256},
 	types::{Bytes, Signature, TransactionRequest, U256},
 };
-use std::{collections::HashMap, str::FromStr};
+
+use crate::eth::ChainID;
 
 abigen!(
 	SocketContract,
@@ -88,8 +90,8 @@ pub struct SerializedRoundUp {
 	pub roundup: RoundUpSubmit,
 }
 
-pub fn get_asset_oids() -> HashMap<String, H256> {
-	HashMap::from([
+pub fn get_asset_oids() -> BTreeMap<String, H256> {
+	BTreeMap::from([
 		(
 			"BFC".to_string(),
 			H256::from_str("0100010000000000000000000000000000000000000000000000000000000001")
