@@ -169,6 +169,7 @@ pub struct EthClient<T> {
 		let mut error_msg = String::default();
 
 		while retries_remaining > 0 {
+			cccp_metrics::increase_rpc_calls(&self.get_chain_name());
 			match self.provider.request(method, params.clone()).await {
 				Ok(result) => return result,
 				Err(error) => {
@@ -200,6 +201,7 @@ pub struct EthClient<T> {
 		let mut error_msg = String::default();
 
 		while retries_remaining > 0 {
+			cccp_metrics::increase_rpc_calls(&self.get_chain_name());
 			match raw_call.call().await {
 				Ok(result) => return result,
 				Err(error) => {
@@ -217,6 +219,11 @@ pub struct EthClient<T> {
 			method,
 			error_msg
 		);
+	}
+
+	/// Retrieves the balance of the given address.
+	pub async fn get_balance(&self, who: Address) -> U256 {
+		self.rpc_call("eth_getBalance", (who, "latest")).await
 	}
 
 	/// Retrieves the latest mined block number of the connected chain.
@@ -466,6 +473,17 @@ impl<T: JsonRpcClient> Eip1559GasMiddleware for EthClient<T> {
 			self.address(),
 			PROVIDER_INTERNAL_ERROR,
 			last_error
+		);
+	}
+
+	/// Send prometheus metric of the current balance.
+	pub async fn sync_balance(&self) {
+		cccp_metrics::set_native_balance(
+			&self.get_chain_name(),
+			format_units(self.get_balance(self.address()).await, "ether")
+				.unwrap()
+				.parse::<f64>()
+				.unwrap(),
 		);
 	}
 }
