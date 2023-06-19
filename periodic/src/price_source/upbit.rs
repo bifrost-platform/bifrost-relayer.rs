@@ -34,7 +34,10 @@ impl PriceFetcher for UpbitPriceFetcher {
 			url.query_pairs_mut().append_pair("markets", format!("KRW-{}", symbol).as_str());
 		}
 
-		self.format_response(self._send_request(url).await.unwrap()[0].clone()).await.1
+		self.format_response(self._send_request(url).await.unwrap()[0].clone())
+			.await
+			.unwrap()
+			.1
 	}
 
 	async fn get_tickers(&self) -> Result<BTreeMap<String, PriceResponse>, Error> {
@@ -45,8 +48,12 @@ impl PriceFetcher for UpbitPriceFetcher {
 			Ok(responses) => {
 				let mut ret = BTreeMap::new();
 				for response in responses {
-					let formatted_response = self.format_response(response).await;
-					ret.insert(formatted_response.0, formatted_response.1);
+					match self.format_response(response).await {
+						Ok(formatted_response) => {
+							ret.insert(formatted_response.0, formatted_response.1);
+						},
+						Err(_) => continue,
+					}
 				}
 				Ok(ret)
 			},
@@ -76,39 +83,49 @@ impl UpbitPriceFetcher {
 		}
 	}
 
-	async fn format_response(&self, response: UpbitResponse) -> (String, PriceResponse) {
+	async fn format_response(
+		&self,
+		response: UpbitResponse,
+	) -> Result<(String, PriceResponse), Error> {
 		if response.market.contains("KRW-") {
-			let usd_price = krw_to_usd(parse_ether(response.trade_price).unwrap()).await;
-			(
-				response.market.replace("KRW-", ""),
-				PriceResponse {
-					price: usd_price,
-					volume: parse_ether(response.acc_trade_volume_24h).unwrap().into(),
-				},
-			)
+			return match krw_to_usd(parse_ether(response.trade_price).unwrap()).await {
+				Ok(usd_price) => Ok((
+					response.market.replace("KRW-", ""),
+					PriceResponse {
+						price: usd_price,
+						volume: parse_ether(response.acc_trade_volume_24h).unwrap().into(),
+					},
+				)),
+				Err(e) => Err(e),
+			}
 		} else if response.market.contains("BTC-") {
-			let krw_price = self.btc_to_krw(response.trade_price).await;
-			let usd_price = krw_to_usd(krw_price).await;
-			(
-				response.market.replace("BTC-", ""),
-				PriceResponse {
-					price: usd_price,
-					volume: parse_ether(response.acc_trade_volume_24h).unwrap().into(),
+			return match self.btc_to_krw(response.trade_price).await {
+				Ok(krw_price) => match krw_to_usd(krw_price).await {
+					Ok(usd_price) => Ok((
+						response.market.replace("BTC-", ""),
+						PriceResponse {
+							price: usd_price,
+							volume: parse_ether(response.acc_trade_volume_24h).unwrap().into(),
+						},
+					)),
+					Err(e) => Err(e),
 				},
-			)
+				Err(e) => Err(e),
+			}
 		} else {
 			todo!()
 		}
 	}
 
-	async fn btc_to_krw(&self, btc_amount: f64) -> U256 {
-		let btc_price = self
-			._send_request(self.base_url.join("ticker?markets=KRW-BTC").unwrap())
-			.await
-			.unwrap()[0]
-			.trade_price;
-
-		parse_ether(btc_price * btc_amount).unwrap()
+	async fn btc_to_krw(&self, btc_amount: f64) -> Result<U256, Error> {
+		return match self._send_request(self.base_url.join("ticker?markets=KRW-BTC").unwrap()).await
+		{
+			Ok(response) => {
+				let btc_price = response[0].trade_price;
+				Ok(parse_ether(btc_price * btc_amount).unwrap())
+			},
+			Err(e) => Err(e),
+		}
 	}
 
 	async fn _send_request(&self, url: Url) -> Result<Vec<UpbitResponse>, Error> {

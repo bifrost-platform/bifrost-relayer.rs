@@ -35,33 +35,36 @@ struct CurrencyResponse {
 }
 
 /// Outputs the `usd * 10**18 price` of the `krw * 10**18 price` entered.
-pub async fn krw_to_usd(krw_amount: U256) -> U256 {
-	let exchange_rate_float = reqwest::get(
+pub async fn krw_to_usd(krw_amount: U256) -> Result<U256, Error> {
+	return match reqwest::get(
 		"https://cdn.jsdelivr.net/gh/fawazahmed0/currency-api@1/latest/currencies/krw/usd.min.json",
 	)
 	.await
-	.expect("Failed to fetch krw/usd exchange rate")
-	.json::<CurrencyResponse>()
-	.await
-	.expect("Failed to parse krw/usd exchange rate JSON")
-	.usd;
+	{
+		Ok(response) => match response.json::<CurrencyResponse>().await {
+			Ok(exchange_rate_float) => {
+				let exchange_rate_decimal: u32 = {
+					let rate_str = exchange_rate_float.usd.to_string();
+					if let Some(decimal_index) = rate_str.find('.') {
+						(rate_str.len() - decimal_index - 1) as u32
+					} else {
+						0
+					}
+				};
 
-	let exchange_rate_decimal: u32 = {
-		let rate_str = exchange_rate_float.to_string();
-		if let Some(decimal_index) = rate_str.find('.') {
-			(rate_str.len() - decimal_index - 1) as u32
-		} else {
-			0
-		}
-	};
+				let exchange_rate = U256::from(
+					exchange_rate_float.usd.mul((10u64.pow(exchange_rate_decimal)) as f64) as u64,
+				);
 
-	let exchange_rate =
-		U256::from(exchange_rate_float.mul((10u64.pow(exchange_rate_decimal)) as f64) as u64);
-
-	krw_amount
-		.mul(exchange_rate)
-		.checked_div(U256::from(10u64.pow(exchange_rate_decimal)))
-		.unwrap()
+				Ok(krw_amount
+					.mul(exchange_rate)
+					.checked_div(U256::from(10u64.pow(exchange_rate_decimal)))
+					.unwrap())
+			},
+			Err(e) => Err(e),
+		},
+		Err(e) => Err(e),
+	}
 }
 
 impl PriceFetchers {
