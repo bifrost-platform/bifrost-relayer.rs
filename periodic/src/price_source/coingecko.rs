@@ -157,7 +157,9 @@ impl CoingeckoPriceFetcher {
 		&self,
 		url: Url,
 	) -> Result<BTreeMap<String, BTreeMap<String, f64>>, Error> {
-		let mut retry_interval = Duration::from_secs(30);
+		let retry_interval = Duration::from_secs(60);
+		let mut retries_remaining = 2u8;
+
 		loop {
 			match reqwest::get(url.clone()).await.and_then(Response::error_for_status) {
 				Ok(response) =>
@@ -174,16 +176,21 @@ impl CoingeckoPriceFetcher {
 						},
 					},
 				Err(e) => {
+					if retries_remaining == 0 {
+						return Err(e)
+					}
+
 					log::warn!(
 						target: LOG_TARGET,
-						"-[{}] ❗️ Error fetching from coingecko: {}, Retry in {:?} secs...",
+						"-[{}] ❗️ Error fetching from coingecko: {}, Retry in {:?} secs... Retries left: {:?}",
 						sub_display_format(SUB_LOG_TARGET),
 						e.to_string(),
 						retry_interval,
+						retries_remaining,
 					);
 					sentry::capture_error(&e);
 					sleep(retry_interval).await;
-					retry_interval *= 2;
+					retries_remaining -= 1;
 				},
 			}
 		}
