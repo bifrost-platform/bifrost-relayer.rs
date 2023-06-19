@@ -13,9 +13,8 @@ use cccp_client::eth::{
 };
 use cccp_primitives::{
 	cli::PriceFeederConfig, errors::INVALID_PERIODIC_SCHEDULE, eth::GasCoefficient,
-	periodic::PeriodicWorker,
-	socket::get_asset_oids, sub_display_format, PriceFetcher, PriceResponse, PriceSource,
-	INVALID_BIFROST_NATIVENESS,
+	periodic::PeriodicWorker, socket::get_asset_oids, sub_display_format, PriceFetcher,
+	PriceResponse, PriceSource, INVALID_BIFROST_NATIVENESS,
 };
 
 use crate::price_source::PriceFetchers;
@@ -158,7 +157,13 @@ impl<T: JsonRpcClient> OraclePriceFeeder<T> {
 		Ok(volume_weighted
 			.into_iter()
 			.map(|(symbol, (volume_weighted_sum, total_volume))| {
-				(symbol, PriceResponse { price: volume_weighted_sum / total_volume, volume: None })
+				(
+					symbol,
+					PriceResponse {
+						price: volume_weighted_sum / total_volume,
+						volume: total_volume.into(),
+					},
+				)
 			})
 			.collect())
 	}
@@ -260,5 +265,61 @@ impl<T: JsonRpcClient> OraclePriceFeeder<T> {
 				"relayer_manager.is_selected_relayer",
 			)
 			.await
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	#[tokio::test]
+	async fn secondary_fetch() {
+		let mut a = vec![];
+		a.push(PriceFetchers::new(PriceSource::Binance).await);
+		a.push(PriceFetchers::new(PriceSource::Gateio).await);
+		a.push(PriceFetchers::new(PriceSource::Kucoin).await);
+		a.push(PriceFetchers::new(PriceSource::Upbit).await);
+
+		let res: Result<BTreeMap<String, PriceResponse>, Error> = {
+			// (volume weighted price sum, total volume)
+			let mut volume_weighted: BTreeMap<String, (U256, U256)> = BTreeMap::new();
+
+			for fetcher in a.clone() {
+				match fetcher.get_tickers().await {
+					Ok(tickers) => {
+						tickers.iter().for_each(|(symbol, price_response)| {
+							if let Some(value) = volume_weighted.get_mut(symbol) {
+								value.0 += price_response.price * price_response.volume.unwrap();
+								value.1 += price_response.volume.unwrap();
+							} else {
+								volume_weighted.insert(
+									symbol.clone(),
+									(
+										price_response.price * price_response.volume.unwrap(),
+										price_response.volume.unwrap(),
+									),
+								);
+							}
+						});
+					},
+					Err(_) => continue,
+				};
+			}
+
+			Ok(volume_weighted
+				.into_iter()
+				.map(|(symbol, (volume_weighted_sum, total_volume))| {
+					(
+						symbol,
+						PriceResponse {
+							price: volume_weighted_sum / total_volume,
+							volume: total_volume.into(),
+						},
+					)
+				})
+				.collect())
+		};
+
+		println!("{:#?}", res);
 	}
 }
