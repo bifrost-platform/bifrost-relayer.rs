@@ -100,6 +100,8 @@ impl<T: JsonRpcClient> BlockManager<T> {
 				block.hash.unwrap(),
 			);
 		}
+
+		self.client.sync_balance().await;
 	}
 
 	/// Starts the block manager. Reads every new mined block of the connected chain and starts to
@@ -113,6 +115,8 @@ impl<T: JsonRpcClient> BlockManager<T> {
 				while self.is_block_confirmed(latest_block) {
 					self.process_confirmed_block().await;
 					self.increment_waiting_block();
+
+					self.client.sync_balance().await;
 				}
 			}
 
@@ -157,6 +161,7 @@ impl<T: JsonRpcClient> BlockManager<T> {
 	/// Increment the waiting block.
 	fn increment_waiting_block(&mut self) {
 		self.waiting_block = self.waiting_block.saturating_add(U64::from(1u64));
+		cccp_metrics::set_block_height(&self.client.get_chain_name(), self.waiting_block.as_u64());
 	}
 
 	/// Verifies if the transaction has interacted with the target contracts.
