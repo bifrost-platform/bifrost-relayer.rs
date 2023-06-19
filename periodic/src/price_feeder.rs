@@ -1,23 +1,23 @@
-use crate::price_source::PriceFetchers;
+use std::{collections::BTreeMap, fmt::Error, str::FromStr, sync::Arc};
+
 use async_trait::async_trait;
-use cccp_client::eth::{
-	EthClient, EventMessage, EventMetadata, EventSender, PriceFeedMetadata, TxRequest,
-};
-use cccp_primitives::{
-	cli::PriceFeederConfig,
-	errors::INVALID_PERIODIC_SCHEDULE,
-	eth::GasCoefficient,
-	periodic::{PeriodicWorker, PriceFetcher},
-	socket::get_asset_oids,
-	sub_display_format, INVALID_BIFROST_NATIVENESS,
-};
 use cron::Schedule;
 use ethers::{
 	providers::JsonRpcClient,
 	types::{TransactionRequest, H256, U256},
 };
-use std::{collections::HashMap, str::FromStr, sync::Arc};
 use tokio::time::sleep;
+
+use cccp_client::eth::{
+	EthClient, EventMessage, EventMetadata, EventSender, PriceFeedMetadata, TxRequest,
+};
+use cccp_primitives::{
+	cli::PriceFeederConfig, errors::INVALID_PERIODIC_SCHEDULE, eth::GasCoefficient,
+	periodic::PeriodicWorker, socket::get_asset_oids, sub_display_format, PriceFetcher,
+	PriceResponse, PriceSource, INVALID_BIFROST_NATIVENESS,
+};
+
+use crate::price_source::PriceFetchers;
 
 const SUB_LOG_TARGET: &str = "price-oracle";
 
@@ -25,14 +25,16 @@ const SUB_LOG_TARGET: &str = "price-oracle";
 pub struct OraclePriceFeeder<T> {
 	/// The time schedule that represents when to send price feeds.
 	pub schedule: Schedule,
-	/// The source for fetching prices.
-	pub fetchers: Vec<PriceFetchers>,
+	/// The primary source for fetching prices. (Coingecko)
+	pub primary_source: Vec<PriceFetchers>,
+	/// The secondary source for fetching prices. (aggregate from sources)
+	pub secondary_sources: Vec<PriceFetchers>,
 	/// The event sender that sends messages to the event channel.
 	pub event_sender: Arc<EventSender>,
 	/// The price feeder configurations.
 	pub config: PriceFeederConfig,
 	/// The pre-defined oracle ID's for each asset.
-	pub asset_oid: HashMap<String, H256>,
+	pub asset_oid: BTreeMap<String, H256>,
 	/// The `EthClient` to interact with the bifrost network.
 	pub client: Arc<EthClient<T>>,
 }
@@ -46,18 +48,41 @@ impl<T: JsonRpcClient> PeriodicWorker for OraclePriceFeeder<T> {
 			self.wait_until_next_time().await;
 
 			if self.is_selected_relayer().await {
-				let price_responses = self.fetchers[0].get_price().await;
+				match self.primary_source[0].get_tickers().await {
+					// If coingecko works well.
+					Ok(price_responses) => {
+						self.build_and_send_transaction(price_responses).await;
+					},
+					// If coingecko works not well.
+					Err(_) => {
+						log::warn!(
+							target: &self.client.get_chain_name(),
+							"-[{}] ❗️ Failed to fetch price feed data from primary source. Retry fetch with secondary sources.",
+							sub_display_format(SUB_LOG_TARGET),
+						);
 
-				let (mut oid_bytes_list, mut price_bytes_list) = (vec![], vec![]);
-				price_responses.iter().for_each(|price_response| {
-					oid_bytes_list
-						.push(self.asset_oid.get(&price_response.symbol).unwrap().to_fixed_bytes());
-					price_bytes_list.push(self.float_to_wei_bytes(&price_response.price));
-				});
-
-				let request = self.build_transaction(oid_bytes_list, price_bytes_list).await;
-				self.request_send_transaction(request, PriceFeedMetadata::new(price_responses))
-					.await;
+						match self.try_with_secondary().await {
+							Ok(price_responses) => {
+								self.build_and_send_transaction(price_responses).await;
+							},
+							Err(_) => {
+								log::error!(
+									target: &self.client.get_chain_name(),
+									"-[{}] ❗️ Failed to fetch price feed data from secondary sources. First off, skip this feeding.",
+									sub_display_format(SUB_LOG_TARGET),
+								);
+								sentry::capture_message(
+									format!(
+										"[{}] ❗️ Failed to fetch price feed data from secondary sources. First off, skip this feeding.",
+										SUB_LOG_TARGET,
+									)
+									.as_str(),
+									sentry::Level::Error,
+								);
+							},
+						}
+					},
+				};
 			}
 		}
 	}
@@ -81,7 +106,8 @@ impl<T: JsonRpcClient> OraclePriceFeeder<T> {
 
 		Self {
 			schedule: Schedule::from_str(&config.schedule).expect(INVALID_PERIODIC_SCHEDULE),
-			fetchers: vec![],
+			primary_source: vec![],
+			secondary_sources: vec![],
 			event_sender: event_senders
 				.iter()
 				.find(|event_sender| event_sender.is_native)
@@ -97,18 +123,76 @@ impl<T: JsonRpcClient> OraclePriceFeeder<T> {
 		}
 	}
 
-	/// Initialize price fetchers. Can't move into new().
-	async fn initialize_fetchers(&mut self) {
-		for price_source in &self.config.price_sources {
-			let fetcher =
-				PriceFetchers::new(price_source.clone(), self.config.symbols.clone()).await;
+	/// If price data fetch failed with primary source, try with secondary sources.
+	async fn try_with_secondary(&self) -> Result<BTreeMap<String, PriceResponse>, Error> {
+		// (volume weighted price sum, total volume)
+		let mut volume_weighted: BTreeMap<String, (U256, U256)> = BTreeMap::new();
 
-			self.fetchers.push(fetcher);
+		for fetcher in self.secondary_sources.clone() {
+			match fetcher.get_tickers().await {
+				Ok(tickers) => {
+					tickers.iter().for_each(|(symbol, price_response)| {
+						if let Some(value) = volume_weighted.get_mut(symbol) {
+							value.0 += price_response.price * price_response.volume.unwrap();
+							value.1 += price_response.volume.unwrap();
+						} else {
+							volume_weighted.insert(
+								symbol.clone(),
+								(
+									price_response.price * price_response.volume.unwrap(),
+									price_response.volume.unwrap(),
+								),
+							);
+						}
+					});
+				},
+				Err(_) => continue,
+			};
 		}
+
+		if volume_weighted.is_empty() {
+			return Err(Error::default())
+		}
+
+		Ok(volume_weighted
+			.into_iter()
+			.map(|(symbol, (volume_weighted_sum, total_volume))| {
+				(
+					symbol,
+					PriceResponse {
+						price: volume_weighted_sum / total_volume,
+						volume: total_volume.into(),
+					},
+				)
+			})
+			.collect())
 	}
 
-	fn float_to_wei_bytes(&self, value: &str) -> [u8; 32] {
-		U256::from((f64::from_str(value).unwrap() * 1_000_000_000_000_000_000f64) as u128).into()
+	/// Initialize price fetchers. Can't move into new().
+	async fn initialize_fetchers(&mut self) {
+		self.primary_source.push(PriceFetchers::new(PriceSource::Coingecko).await);
+
+		self.secondary_sources.push(PriceFetchers::new(PriceSource::Binance).await);
+		self.secondary_sources.push(PriceFetchers::new(PriceSource::Gateio).await);
+		self.secondary_sources.push(PriceFetchers::new(PriceSource::Kucoin).await);
+		self.secondary_sources.push(PriceFetchers::new(PriceSource::Upbit).await);
+	}
+
+	/// Build and send transaction.
+	async fn build_and_send_transaction(&self, price_responses: BTreeMap<String, PriceResponse>) {
+		let mut oid_bytes_list: Vec<[u8; 32]> = vec![];
+		let mut price_bytes_list: Vec<[u8; 32]> = vec![];
+
+		price_responses.iter().for_each(|(symbol, price_response)| {
+			oid_bytes_list.push(self.asset_oid.get(symbol).unwrap().to_fixed_bytes());
+			price_bytes_list.push(price_response.price.into());
+		});
+
+		self.request_send_transaction(
+			self.build_transaction(oid_bytes_list, price_bytes_list).await,
+			PriceFeedMetadata::new(price_responses),
+		)
+		.await;
 	}
 
 	/// Build price feed transaction.
@@ -181,5 +265,61 @@ impl<T: JsonRpcClient> OraclePriceFeeder<T> {
 				"relayer_manager.is_selected_relayer",
 			)
 			.await
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	#[tokio::test]
+	async fn secondary_fetch() {
+		let mut a = vec![];
+		a.push(PriceFetchers::new(PriceSource::Binance).await);
+		a.push(PriceFetchers::new(PriceSource::Gateio).await);
+		a.push(PriceFetchers::new(PriceSource::Kucoin).await);
+		a.push(PriceFetchers::new(PriceSource::Upbit).await);
+
+		let res: Result<BTreeMap<String, PriceResponse>, Error> = {
+			// (volume weighted price sum, total volume)
+			let mut volume_weighted: BTreeMap<String, (U256, U256)> = BTreeMap::new();
+
+			for fetcher in a.clone() {
+				match fetcher.get_tickers().await {
+					Ok(tickers) => {
+						tickers.iter().for_each(|(symbol, price_response)| {
+							if let Some(value) = volume_weighted.get_mut(symbol) {
+								value.0 += price_response.price * price_response.volume.unwrap();
+								value.1 += price_response.volume.unwrap();
+							} else {
+								volume_weighted.insert(
+									symbol.clone(),
+									(
+										price_response.price * price_response.volume.unwrap(),
+										price_response.volume.unwrap(),
+									),
+								);
+							}
+						});
+					},
+					Err(_) => continue,
+				};
+			}
+
+			Ok(volume_weighted
+				.into_iter()
+				.map(|(symbol, (volume_weighted_sum, total_volume))| {
+					(
+						symbol,
+						PriceResponse {
+							price: volume_weighted_sum / total_volume,
+							volume: total_volume.into(),
+						},
+					)
+				})
+				.collect())
+		};
+
+		println!("{:#?}", res);
 	}
 }

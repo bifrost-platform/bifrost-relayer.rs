@@ -1,6 +1,7 @@
-use crate::{eth::ChainID, periodic::PriceSource};
 use ethers::types::U64;
 use serde::Deserialize;
+
+use crate::eth::ChainID;
 
 pub type Result<T> = std::result::Result<T, Error>;
 
@@ -134,10 +135,6 @@ pub struct PriceFeederConfig {
 	pub chain_id: ChainID,
 	/// Periodic schedule in cron expression.
 	pub schedule: String,
-	/// Price source enum. (Coingecko is only available now.)
-	pub price_sources: Vec<PriceSource>,
-	/// Token/Coin symbols needs to get price
-	pub symbols: Vec<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
