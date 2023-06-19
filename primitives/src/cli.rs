@@ -1,4 +1,3 @@
-use crate::{eth::ChainID, periodic::PriceSource};
 use ethers::types::U64;
 use serde::Deserialize;
 use std::{borrow::Cow, fmt::Display};
