@@ -1,4 +1,4 @@
-use cccp_primitives::cli::{Configuration, Result as CliResult, SentryConfig};
+use cccp_primitives::cli::{Configuration, Result as CliResult};
 
 use sc_service::{Error as ServiceError, TaskManager};
 use sc_utils::metrics::{TOKIO_THREADS_ALIVE, TOKIO_THREADS_TOTAL};
@@ -47,25 +47,6 @@ pub fn build_runtime() -> Result<tokio::runtime::Runtime, std::io::Error> {
 		.build()
 }
 
-/// Builds a sentry client only when the sentry config exists.
-fn build_sentry_client(id: String, sentry_config: Option<SentryConfig>) -> Option<ClientInitGuard> {
-	if let Some(sentry_config) = sentry_config {
-		let dsn = sentry_config.dsn.unwrap();
-		if !dsn.is_empty() {
-			let sentry_client = sentry::init((
-				dsn,
-				sentry::ClientOptions {
-					release: sentry::release_name!(),
-					environment: Some(id.into()),
-					..Default::default()
-				},
-			));
-			return Some(sentry_client)
-		}
-	}
-	None
-}
-
 /// A CCCP-Relayer CLI runtime that can be used to run a relayer
 pub struct Runner {
 	config: Configuration,
@@ -78,7 +59,7 @@ impl Runner {
 		Ok(Runner {
 			config: config.clone(),
 			tokio_runtime,
-			sentry_client: build_sentry_client(
+			sentry_client: cccp_metrics::build_sentry_client(
 				config.relayer_config.system.id,
 				config.relayer_config.sentry_config,
 			),

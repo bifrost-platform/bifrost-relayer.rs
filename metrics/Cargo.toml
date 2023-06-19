@@ -1,0 +1,21 @@
+[package]
+name = "cccp-metrics"
+version = "0.1.0"
+description = "The monitoring & metric tools for BIFROST relayer"
+authors = { workspace = true }
+homepage = { workspace = true }
+edition = { workspace = true }
+license = { workspace = true }
+repository = { workspace = true }
+
+[dependencies]
+# General
+lazy_static = { workspace = true }
+sentry = { workspace = true }
+ethers = { workspace = true }
+
+# CCCP
+cccp-primitives = { path = "../primitives" }
+
+# Substrate
+prometheus-endpoint = { workspace = true }

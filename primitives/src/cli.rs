@@ -52,6 +52,8 @@ pub struct RelayerConfig {
 	pub bootstrap_config: BootstrapConfig,
 	/// Sentry config
 	pub sentry_config: Option<SentryConfig>,
+	/// Prometheus config
+	pub prometheus_config: PrometheusConfig,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -159,4 +161,18 @@ pub struct BootstrapConfig {
 pub struct SentryConfig {
 	/// The DSN that tells Sentry where to send the events to.
 	pub dsn: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct PrometheusConfig {
+	/// Expose a Prometheus exporter endpoint.
+	///
+	/// Prometheus metric endpoint is enabled by default.
+	pub is_enabled: bool,
+	/// Expose Prometheus exporter on all interfaces.
+	///
+	/// Default is local.
+	pub is_external: bool,
+	/// Prometheus exporter TCP Port.
+	pub port: u16,
 }
