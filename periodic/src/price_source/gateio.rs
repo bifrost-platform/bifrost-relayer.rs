@@ -44,7 +44,7 @@ impl PriceFetcher for GateioPriceFetcher {
 				response.iter().for_each(|ticker| {
 					if self.symbols.contains(&ticker.currency_pair) {
 						ret.insert(
-							ticker.currency_pair.replace("_USDT", ""),
+							ticker.currency_pair.replace("BIFIF_USDT", "BIFI").replace("_USDT", ""),
 							PriceResponse {
 								price: parse_ether(&ticker.last).unwrap(),
 								volume: parse_ether(&ticker.base_volume).unwrap().into(),
