@@ -66,6 +66,11 @@ periodic_configs:
 sentry_config:
   dsn: ""
 
+prometheus_config:
+  is_enabled: false
+  is_external: false
+  port: 8000
+
 bootstrap_config:
   is_enabled: true
   round_offset: 6

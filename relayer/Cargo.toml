@@ -16,6 +16,7 @@ env_logger = { workspace = true }
 chrono = { workspace = true }
 serde_yaml = { workspace = true }
 ethers = { workspace = true }
+futures = { workspace = true }
 clap = { workspace = true, features = ["derive"] }
 tokio = { workspace = true, features = ["signal", "rt-multi-thread", "parking_lot"] }
 
@@ -24,10 +25,12 @@ cc-cli = { path = "../client/cli" }
 cccp-client = { path = "../client" }
 cccp-periodic = { path = "../periodic" }
 cccp-primitives = { path = "../primitives" }
+cccp-metrics = { path = "../metrics" }
 
 # Substrate
 sc-cli = { workspace = true }
 sc-service = { workspace = true }
+prometheus-endpoint = { workspace = true }
 
 [build-dependencies]
 substrate-build-script-utils = { workspace = true }

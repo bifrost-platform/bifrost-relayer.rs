@@ -25,6 +25,7 @@ sha3 = { workspace = true }
 
 # CCCP
 cccp-primitives = { path = "../primitives" }
+cccp-metrics = { path = "../metrics" }
 
 [dev-dependencies]
 serde_json = { workspace = true }

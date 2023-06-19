@@ -19,8 +19,9 @@ use ethers::{
 	providers::{JsonRpcClient, Middleware, Provider},
 	types::{
 		Address, Block, BlockId, Filter, Log, SyncingStatus, Transaction, TransactionReceipt,
-		TxpoolContent, H160, H256, U64,
+		TxpoolContent, H160, H256, U256, U64,
 	},
+	utils::format_units,
 };
 use serde::{de::DeserializeOwned, Serialize};
 use std::{fmt::Debug, str::FromStr, sync::Arc};
@@ -146,6 +147,7 @@ impl<T: JsonRpcClient> EthClient<T> {
 		let mut error_msg = String::default();
 
 		while retries_remaining > 0 {
+			cccp_metrics::increase_rpc_calls(&self.get_chain_name());
 			match self.provider.request(method, params.clone()).await {
 				Ok(result) => return result,
 				Err(error) => {
@@ -177,6 +179,7 @@ impl<T: JsonRpcClient> EthClient<T> {
 		let mut error_msg = String::default();
 
 		while retries_remaining > 0 {
+			cccp_metrics::increase_rpc_calls(&self.get_chain_name());
 			match raw_call.call().await {
 				Ok(result) => return result,
 				Err(error) => {
@@ -194,6 +197,11 @@ impl<T: JsonRpcClient> EthClient<T> {
 			method,
 			error_msg
 		);
+	}
+
+	/// Retrieves the balance of the given address.
+	pub async fn get_balance(&self, who: Address) -> U256 {
+		self.rpc_call("eth_getBalance", (who, "latest")).await
 	}
 
 	/// Retrieves the latest mined block number of the connected chain.
@@ -265,5 +273,16 @@ impl<T: JsonRpcClient> EthClient<T> {
 			.checked_div(diff.as_u32())
 			.unwrap()
 			.into()
+	}
+
+	/// Send prometheus metric of the current balance.
+	pub async fn sync_balance(&self) {
+		cccp_metrics::set_native_balance(
+			&self.get_chain_name(),
+			format_units(self.get_balance(self.address()).await, "ether")
+				.unwrap()
+				.parse::<f64>()
+				.unwrap(),
+		);
 	}
 }
