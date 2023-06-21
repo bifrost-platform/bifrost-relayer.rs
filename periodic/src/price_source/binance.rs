@@ -63,14 +63,14 @@ impl PriceFetcher for BinancePriceFetcher {
 }
 
 impl BinancePriceFetcher {
-	pub async fn new() -> Self {
+	pub async fn new() -> Result<Self, Error> {
 		let mut symbols: Vec<String> = vec!["ETH".into(), "BNB".into(), "MATIC".into()];
 		symbols.iter_mut().for_each(|symbol| symbol.push_str("USDT"));
 
-		Self {
+		Ok(Self {
 			base_url: Url::parse("https://api.binance.com/api/v3/").unwrap(),
 			symbols: serde_json::to_string(&symbols).unwrap(),
-		}
+		})
 	}
 
 	async fn _send_request(&self, url: Url) -> BinanceResponse {

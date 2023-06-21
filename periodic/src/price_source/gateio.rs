@@ -60,7 +60,7 @@ impl PriceFetcher for GateioPriceFetcher {
 }
 
 impl GateioPriceFetcher {
-	pub async fn new() -> Self {
+	pub async fn new() -> Result<Self, Error> {
 		let mut symbols: Vec<String> =
 			vec!["ETH".into(), "BFC".into(), "BNB".into(), "MATIC".into(), "BIFI".into()];
 
@@ -72,11 +72,11 @@ impl GateioPriceFetcher {
 			}
 		});
 
-		Self {
+		Ok(Self {
 			base_url: Url::parse("https://api.gateio.ws/api/v4/")
 				.expect("Failed to parse GateIo URL"),
 			symbols,
-		}
+		})
 	}
 
 	async fn _send_request(&self, url: Url) -> Result<Vec<GateioResponse>, Error> {

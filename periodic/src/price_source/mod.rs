@@ -68,13 +68,14 @@ pub async fn krw_to_usd(krw_amount: U256) -> Result<U256, Error> {
 }
 
 impl PriceFetchers {
-	pub async fn new(exchange: PriceSource) -> Self {
+	pub async fn new(exchange: PriceSource) -> Result<Self, Error> {
 		match exchange {
-			PriceSource::Binance => PriceFetchers::Binance(BinancePriceFetcher::new().await),
-			PriceSource::Coingecko => PriceFetchers::CoinGecko(CoingeckoPriceFetcher::new().await),
-			PriceSource::Gateio => PriceFetchers::Gateio(GateioPriceFetcher::new().await),
-			PriceSource::Kucoin => PriceFetchers::Kucoin(KucoinPriceFetcher::new().await),
-			PriceSource::Upbit => PriceFetchers::Upbit(UpbitPriceFetcher::new().await),
+			PriceSource::Binance => Ok(PriceFetchers::Binance(BinancePriceFetcher::new().await?)),
+			PriceSource::Coingecko =>
+				Ok(PriceFetchers::CoinGecko(CoingeckoPriceFetcher::new().await?)),
+			PriceSource::Gateio => Ok(PriceFetchers::Gateio(GateioPriceFetcher::new().await?)),
+			PriceSource::Kucoin => Ok(PriceFetchers::Kucoin(KucoinPriceFetcher::new().await?)),
+			PriceSource::Upbit => Ok(PriceFetchers::Upbit(UpbitPriceFetcher::new().await?)),
 		}
 	}
 }

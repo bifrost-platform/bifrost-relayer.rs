@@ -63,7 +63,7 @@ impl PriceFetcher for UpbitPriceFetcher {
 }
 
 impl UpbitPriceFetcher {
-	pub async fn new() -> Self {
+	pub async fn new() -> Result<Self, Error> {
 		let symbols: Vec<String> = vec!["ETH".into(), "BFC".into(), "MATIC".into()];
 
 		let formatted_symbols: Vec<String> = symbols
@@ -77,10 +77,10 @@ impl UpbitPriceFetcher {
 			})
 			.collect();
 
-		Self {
+		Ok(Self {
 			base_url: Url::parse("https://api.upbit.com/v1/").unwrap(),
 			symbols: formatted_symbols.join(","),
-		}
+		})
 	}
 
 	async fn format_response(

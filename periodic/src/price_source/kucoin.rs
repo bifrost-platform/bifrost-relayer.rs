@@ -50,15 +50,15 @@ impl PriceFetcher for KucoinPriceFetcher {
 }
 
 impl KucoinPriceFetcher {
-	pub async fn new() -> Self {
+	pub async fn new() -> Result<Self, Error> {
 		let symbols: Vec<String> =
 			vec!["ETH".into(), "BFC".into(), "BNB".into(), "MATIC".into(), "BIFI".into()];
 
-		Self {
+		Ok(Self {
 			base_url: Url::parse("https://api.kucoin.com/api/v1/")
 				.expect("Failed to parse KuCoin URL"),
 			symbols,
-		}
+		})
 	}
 
 	async fn _send_request(&self, url: Url) -> Result<KucoinResponse, Error> {

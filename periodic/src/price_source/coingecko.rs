@@ -81,7 +81,7 @@ impl PriceFetcher for CoingeckoPriceFetcher {
 }
 
 impl CoingeckoPriceFetcher {
-	pub async fn new() -> Self {
+	pub async fn new() -> Result<Self, Error> {
 		let symbols: Vec<String> = vec![
 			"ETH".into(),
 			"BFC".into(),
@@ -93,7 +93,7 @@ impl CoingeckoPriceFetcher {
 		];
 
 		let support_coin_list: Vec<SupportedCoin> =
-			CoingeckoPriceFetcher::get_all_coin_list().await;
+			CoingeckoPriceFetcher::get_all_coin_list().await?;
 
 		let ids: Vec<String> = symbols
 			.iter()
@@ -105,49 +105,51 @@ impl CoingeckoPriceFetcher {
 			})
 			.collect();
 
-		Self {
+		Ok(Self {
 			base_url: Url::parse("https://api.coingecko.com/api/v3/").unwrap(),
 			ids,
 			supported_coins: support_coin_list,
-		}
+		})
 	}
 
-	async fn get_all_coin_list() -> Vec<SupportedCoin> {
-		let mut retry_interval = Duration::from_secs(30);
+	async fn get_all_coin_list() -> Result<Vec<SupportedCoin>, Error> {
+		let retry_interval = Duration::from_secs(60);
+		let mut retries_remaining = 2u8;
+
 		loop {
 			match reqwest::get("https://api.coingecko.com/api/v3/coins/list")
 				.await
 				.and_then(Response::error_for_status)
 			{
-				Ok(response) => match response.json::<Vec<SupportedCoin>>().await {
-					Ok(mut coins) => {
-						coins.retain(|x| &x.name != "Beefy.Finance");
-						return coins
-					},
-					Err(e) => {
-						log::error!(
+				Ok(response) =>
+					return match response.json::<Vec<SupportedCoin>>().await {
+						Ok(mut coins) => {
+							coins.retain(|x| &x.name != "Beefy.Finance");
+							Ok(coins)
+						},
+						Err(e) => {
+							log::error!(
 							target: LOG_TARGET,
 							"-[{}] ❗️ Error decoding support coin list: {}, Retry in {:?} secs...",
 							sub_display_format(SUB_LOG_TARGET),
 							e.to_string(),
 							retry_interval
 						);
-						sentry::capture_error(&e);
-						sleep(retry_interval).await;
-						retry_interval *= 2;
+							Err(e)
+						},
 					},
-				},
 				Err(e) => {
 					log::warn!(
 						target: LOG_TARGET,
-						"-[{}] ❗️ Error fetching support coin list: {}, Retry in {:?} secs...",
+						"-[{}] ❗️ Error fetching support coin list: {}, Retry in {:?} secs... Retries left: {:?}",
 						sub_display_format(SUB_LOG_TARGET),
 						e.to_string(),
-						retry_interval
+						retry_interval,
+						retries_remaining,
 					);
 					sentry::capture_error(&e);
 					sleep(retry_interval).await;
-					retry_interval *= 2;
+					retries_remaining -= 1;
 				},
 			}
 		}

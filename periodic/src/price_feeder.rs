@@ -48,41 +48,16 @@ impl<T: JsonRpcClient> PeriodicWorker for OraclePriceFeeder<T> {
 			self.wait_until_next_time().await;
 
 			if self.is_selected_relayer().await {
-				match self.primary_source[0].get_tickers().await {
-					// If coingecko works well.
-					Ok(price_responses) => {
-						self.build_and_send_transaction(price_responses).await;
-					},
-					// If coingecko works not well.
-					Err(_) => {
-						log::warn!(
-							target: &self.client.get_chain_name(),
-							"-[{}] ❗️ Failed to fetch price feed data from primary source. Retry fetch with secondary sources.",
-							sub_display_format(SUB_LOG_TARGET),
-						);
-
-						match self.try_with_secondary().await {
-							Ok(price_responses) => {
-								self.build_and_send_transaction(price_responses).await;
-							},
-							Err(_) => {
-								log::error!(
-									target: &self.client.get_chain_name(),
-									"-[{}] ❗️ Failed to fetch price feed data from secondary sources. First off, skip this feeding.",
-									sub_display_format(SUB_LOG_TARGET),
-								);
-								sentry::capture_message(
-									format!(
-										"[{}] ❗️ Failed to fetch price feed data from secondary sources. First off, skip this feeding.",
-										SUB_LOG_TARGET,
-									)
-									.as_str(),
-									sentry::Level::Error,
-								);
-							},
-						}
-					},
-				};
+				if self.primary_source.len() == 0 {
+					log::warn!(
+						target: &self.client.get_chain_name(),
+						"-[{}] ❗️ Failed to initialize primary fetcher. Try fetch with secondary sources.",
+						sub_display_format(SUB_LOG_TARGET),
+					);
+					self.try_with_secondary().await;
+				} else {
+					self.try_with_primary().await;
+				}
 			}
 		}
 	}
@@ -123,8 +98,50 @@ impl<T: JsonRpcClient> OraclePriceFeeder<T> {
 		}
 	}
 
+	async fn try_with_primary(&self) {
+		match self.primary_source[0].get_tickers().await {
+			// If coingecko works well.
+			Ok(price_responses) => {
+				self.build_and_send_transaction(price_responses).await;
+			},
+			// If coingecko works not well.
+			Err(_) => {
+				log::warn!(
+					target: &self.client.get_chain_name(),
+					"-[{}] ❗️ Failed to fetch price feed data from primary source. Retry fetch with secondary sources.",
+					sub_display_format(SUB_LOG_TARGET),
+				);
+
+				self.try_with_secondary().await;
+			},
+		};
+	}
+
+	async fn try_with_secondary(&self) {
+		match self.fetch_from_secondary().await {
+			Ok(price_responses) => {
+				self.build_and_send_transaction(price_responses).await;
+			},
+			Err(_) => {
+				log::error!(
+					target: &self.client.get_chain_name(),
+					"-[{}] ❗️ Failed to fetch price feed data from secondary sources. First off, skip this feeding.",
+					sub_display_format(SUB_LOG_TARGET),
+				);
+				sentry::capture_message(
+					format!(
+						"[{}] ❗️ Failed to fetch price feed data from secondary sources. First off, skip this feeding.",
+						SUB_LOG_TARGET,
+					)
+					.as_str(),
+					sentry::Level::Error,
+				);
+			},
+		}
+	}
+
 	/// If price data fetch failed with primary source, try with secondary sources.
-	async fn try_with_secondary(&self) -> Result<BTreeMap<String, PriceResponse>, Error> {
+	async fn fetch_from_secondary(&self) -> Result<BTreeMap<String, PriceResponse>, Error> {
 		// (volume weighted price sum, total volume)
 		let mut volume_weighted: BTreeMap<String, (U256, U256)> = BTreeMap::new();
 
@@ -170,12 +187,27 @@ impl<T: JsonRpcClient> OraclePriceFeeder<T> {
 
 	/// Initialize price fetchers. Can't move into new().
 	async fn initialize_fetchers(&mut self) {
-		self.primary_source.push(PriceFetchers::new(PriceSource::Coingecko).await);
+		match PriceFetchers::new(PriceSource::Coingecko).await {
+			Ok(primary) => {
+				self.primary_source.push(primary);
+			},
+			Err(_) => {},
+		}
 
-		self.secondary_sources.push(PriceFetchers::new(PriceSource::Binance).await);
-		self.secondary_sources.push(PriceFetchers::new(PriceSource::Gateio).await);
-		self.secondary_sources.push(PriceFetchers::new(PriceSource::Kucoin).await);
-		self.secondary_sources.push(PriceFetchers::new(PriceSource::Upbit).await);
+		let secondary_sources = vec![
+			PriceSource::Binance,
+			PriceSource::Gateio,
+			PriceSource::Kucoin,
+			PriceSource::Upbit,
+		];
+		for source in secondary_sources {
+			match PriceFetchers::new(source).await {
+				Ok(fetcher) => {
+					self.secondary_sources.push(fetcher);
+				},
+				Err(_) => continue,
+			}
+		}
 	}
 
 	/// Build and send transaction.
