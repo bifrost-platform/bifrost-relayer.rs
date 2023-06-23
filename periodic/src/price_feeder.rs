@@ -5,6 +5,7 @@ use cron::Schedule;
 use ethers::{
 	providers::JsonRpcClient,
 	types::{TransactionRequest, H256, U256},
+	utils::parse_ether,
 };
 use tokio::time::sleep;
 
@@ -171,7 +172,7 @@ impl<T: JsonRpcClient> OraclePriceFeeder<T> {
 			return Err(Error::default())
 		}
 
-		Ok(volume_weighted
+		let mut res: BTreeMap<String, PriceResponse> = volume_weighted
 			.into_iter()
 			.map(|(symbol, (volume_weighted_sum, total_volume))| {
 				(
@@ -182,7 +183,11 @@ impl<T: JsonRpcClient> OraclePriceFeeder<T> {
 					},
 				)
 			})
-			.collect())
+			.collect();
+		res.insert("USDT".into(), PriceResponse { price: parse_ether(1).unwrap(), volume: None });
+		res.insert("USDC".into(), PriceResponse { price: parse_ether(1).unwrap(), volume: None });
+
+		Ok(res)
 	}
 
 	/// Initialize price fetchers. Can't move into new().
@@ -307,10 +312,10 @@ mod tests {
 	#[tokio::test]
 	async fn secondary_fetch() {
 		let mut a = vec![];
-		a.push(PriceFetchers::new(PriceSource::Binance).await);
-		a.push(PriceFetchers::new(PriceSource::Gateio).await);
-		a.push(PriceFetchers::new(PriceSource::Kucoin).await);
-		a.push(PriceFetchers::new(PriceSource::Upbit).await);
+		a.push(PriceFetchers::new(PriceSource::Binance).await.unwrap());
+		a.push(PriceFetchers::new(PriceSource::Gateio).await.unwrap());
+		a.push(PriceFetchers::new(PriceSource::Kucoin).await.unwrap());
+		a.push(PriceFetchers::new(PriceSource::Upbit).await.unwrap());
 
 		let res: Result<BTreeMap<String, PriceResponse>, Error> = {
 			// (volume weighted price sum, total volume)
