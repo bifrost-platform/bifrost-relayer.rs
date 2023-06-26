@@ -140,7 +140,7 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> {
 
 	/// Flush all transaction from mempool.
 	async fn flush_stuck_transaction(&self) {
-		if self.is_txpool_enabled {
+		if self.is_txpool_enabled && !self.client.is_native {
 			let mempool = self.client.get_txpool_content().await;
 			cccp_metrics::increase_rpc_calls(&self.client.get_chain_name());
 
