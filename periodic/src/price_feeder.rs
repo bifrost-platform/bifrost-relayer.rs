@@ -5,7 +5,6 @@ use cron::Schedule;
 use ethers::{
 	providers::JsonRpcClient,
 	types::{TransactionRequest, H256, U256},
-	utils::parse_ether,
 };
 use tokio::time::sleep;
 
@@ -27,9 +26,9 @@ pub struct OraclePriceFeeder<T> {
 	/// The time schedule that represents when to send price feeds.
 	pub schedule: Schedule,
 	/// The primary source for fetching prices. (Coingecko)
-	pub primary_source: Vec<PriceFetchers>,
+	pub primary_source: Vec<PriceFetchers<T>>,
 	/// The secondary source for fetching prices. (aggregate from sources)
-	pub secondary_sources: Vec<PriceFetchers>,
+	pub secondary_sources: Vec<PriceFetchers<T>>,
 	/// The event sender that sends messages to the event channel.
 	pub event_sender: Arc<EventSender>,
 	/// The price feeder configurations.
@@ -38,10 +37,12 @@ pub struct OraclePriceFeeder<T> {
 	pub asset_oid: BTreeMap<String, H256>,
 	/// The `EthClient` to interact with the bifrost network.
 	pub client: Arc<EthClient<T>>,
+	/// `EthClient`s.
+	clients: Vec<Arc<EthClient<T>>>,
 }
 
 #[async_trait]
-impl<T: JsonRpcClient> PeriodicWorker for OraclePriceFeeder<T> {
+impl<T: JsonRpcClient + 'static> PeriodicWorker for OraclePriceFeeder<T> {
 	async fn run(&mut self) {
 		self.initialize_fetchers().await;
 
@@ -72,7 +73,7 @@ impl<T: JsonRpcClient> PeriodicWorker for OraclePriceFeeder<T> {
 	}
 }
 
-impl<T: JsonRpcClient> OraclePriceFeeder<T> {
+impl<T: JsonRpcClient + 'static> OraclePriceFeeder<T> {
 	pub fn new(
 		event_senders: Vec<Arc<EventSender>>,
 		config: PriceFeederConfig,
@@ -96,6 +97,7 @@ impl<T: JsonRpcClient> OraclePriceFeeder<T> {
 				.find(|client| client.is_native)
 				.expect(INVALID_BIFROST_NATIVENESS)
 				.clone(),
+			clients,
 		}
 	}
 
@@ -146,7 +148,7 @@ impl<T: JsonRpcClient> OraclePriceFeeder<T> {
 		// (volume weighted price sum, total volume)
 		let mut volume_weighted: BTreeMap<String, (U256, U256)> = BTreeMap::new();
 
-		for fetcher in self.secondary_sources.clone() {
+		for fetcher in &self.secondary_sources {
 			match fetcher.get_tickers().await {
 				Ok(tickers) => {
 					tickers.iter().for_each(|(symbol, price_response)| {
@@ -172,7 +174,7 @@ impl<T: JsonRpcClient> OraclePriceFeeder<T> {
 			return Err(Error::default())
 		}
 
-		let mut res: BTreeMap<String, PriceResponse> = volume_weighted
+		Ok(volume_weighted
 			.into_iter()
 			.map(|(symbol, (volume_weighted_sum, total_volume))| {
 				(
@@ -183,11 +185,7 @@ impl<T: JsonRpcClient> OraclePriceFeeder<T> {
 					},
 				)
 			})
-			.collect();
-		res.insert("USDT".into(), PriceResponse { price: parse_ether(1).unwrap(), volume: None });
-		res.insert("USDC".into(), PriceResponse { price: parse_ether(1).unwrap(), volume: None });
-
-		Ok(res)
+			.collect())
 	}
 
 	/// Initialize price fetchers. Can't move into new().
@@ -206,11 +204,21 @@ impl<T: JsonRpcClient> OraclePriceFeeder<T> {
 			PriceSource::Upbit,
 		];
 		for source in secondary_sources {
-			match PriceFetchers::new(source).await {
+			match PriceFetchers::new(source, None).await {
 				Ok(fetcher) => {
 					self.secondary_sources.push(fetcher);
 				},
 				Err(_) => continue,
+			}
+		}
+		for client in &self.clients {
+			if !client.chainlink_usdc_usd.is_none() || !client.chainlink_usdt_usd.is_none() {
+				match PriceFetchers::new(PriceSource::Chainlink, client.clone().into()).await {
+					Ok(fetcher) => {
+						self.secondary_sources.push(fetcher);
+					},
+					Err(_) => continue,
+				}
 			}
 		}
 	}
@@ -302,61 +310,5 @@ impl<T: JsonRpcClient> OraclePriceFeeder<T> {
 				"relayer_manager.is_selected_relayer",
 			)
 			.await
-	}
-}
-
-#[cfg(test)]
-mod tests {
-	use super::*;
-
-	#[tokio::test]
-	async fn secondary_fetch() {
-		let mut a = vec![];
-		a.push(PriceFetchers::new(PriceSource::Binance).await.unwrap());
-		a.push(PriceFetchers::new(PriceSource::Gateio).await.unwrap());
-		a.push(PriceFetchers::new(PriceSource::Kucoin).await.unwrap());
-		a.push(PriceFetchers::new(PriceSource::Upbit).await.unwrap());
-
-		let res: Result<BTreeMap<String, PriceResponse>, Error> = {
-			// (volume weighted price sum, total volume)
-			let mut volume_weighted: BTreeMap<String, (U256, U256)> = BTreeMap::new();
-
-			for fetcher in a.clone() {
-				match fetcher.get_tickers().await {
-					Ok(tickers) => {
-						tickers.iter().for_each(|(symbol, price_response)| {
-							if let Some(value) = volume_weighted.get_mut(symbol) {
-								value.0 += price_response.price * price_response.volume.unwrap();
-								value.1 += price_response.volume.unwrap();
-							} else {
-								volume_weighted.insert(
-									symbol.clone(),
-									(
-										price_response.price * price_response.volume.unwrap(),
-										price_response.volume.unwrap(),
-									),
-								);
-							}
-						});
-					},
-					Err(_) => continue,
-				};
-			}
-
-			Ok(volume_weighted
-				.into_iter()
-				.map(|(symbol, (volume_weighted_sum, total_volume))| {
-					(
-						symbol,
-						PriceResponse {
-							price: volume_weighted_sum / total_volume,
-							volume: total_volume.into(),
-						},
-					)
-				})
-				.collect())
-		};
-
-		println!("{:#?}", res);
 	}
 }

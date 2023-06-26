@@ -1,6 +1,6 @@
-use std::collections::BTreeMap;
+use std::{collections::BTreeMap, marker::PhantomData};
 
-use ethers::utils::parse_ether;
+use ethers::{providers::JsonRpcClient, utils::parse_ether};
 use reqwest::{Error, Response, Url};
 use serde::Deserialize;
 use tokio::time::{sleep, Duration};
@@ -22,14 +22,15 @@ pub struct SupportedCoin {
 }
 
 #[derive(Clone)]
-pub struct CoingeckoPriceFetcher {
+pub struct CoingeckoPriceFetcher<T> {
 	pub base_url: Url,
 	pub ids: Vec<String>,
 	pub supported_coins: Vec<SupportedCoin>,
+	_phantom: PhantomData<T>,
 }
 
 #[async_trait::async_trait]
-impl PriceFetcher for CoingeckoPriceFetcher {
+impl<T: JsonRpcClient> PriceFetcher for CoingeckoPriceFetcher<T> {
 	async fn get_ticker_with_symbol(&self, symbol: String) -> PriceResponse {
 		let id = self.get_id_from_symbol(&symbol);
 		let url = self
@@ -80,7 +81,7 @@ impl PriceFetcher for CoingeckoPriceFetcher {
 	}
 }
 
-impl CoingeckoPriceFetcher {
+impl<T: JsonRpcClient> CoingeckoPriceFetcher<T> {
 	pub async fn new() -> Result<Self, Error> {
 		let symbols: Vec<String> = vec![
 			"ETH".into(),
@@ -92,8 +93,7 @@ impl CoingeckoPriceFetcher {
 			"USDT".into(),
 		];
 
-		let support_coin_list: Vec<SupportedCoin> =
-			CoingeckoPriceFetcher::get_all_coin_list().await?;
+		let support_coin_list: Vec<SupportedCoin> = Self::get_all_coin_list().await?;
 
 		let ids: Vec<String> = symbols
 			.iter()
@@ -109,6 +109,7 @@ impl CoingeckoPriceFetcher {
 			base_url: Url::parse("https://api.coingecko.com/api/v3/").unwrap(),
 			ids,
 			supported_coins: support_coin_list,
+			_phantom: PhantomData,
 		})
 	}
 
@@ -210,11 +211,14 @@ impl CoingeckoPriceFetcher {
 
 #[cfg(test)]
 mod tests {
+	use ethers::providers::Http;
+
 	use super::*;
 
 	#[tokio::test]
 	async fn fetch_price() {
-		let coingecko_fetcher = CoingeckoPriceFetcher::new().await.unwrap();
+		let coingecko_fetcher: CoingeckoPriceFetcher<Http> =
+			CoingeckoPriceFetcher::new().await.unwrap();
 		let res = coingecko_fetcher.get_ticker_with_symbol("BTC".to_string()).await;
 
 		println!("{:?}", res);
@@ -222,7 +226,8 @@ mod tests {
 
 	#[tokio::test]
 	async fn fetch_prices() {
-		let binance_fetcher = CoingeckoPriceFetcher::new().await.unwrap();
+		let binance_fetcher: CoingeckoPriceFetcher<Http> =
+			CoingeckoPriceFetcher::new().await.unwrap();
 		let res = binance_fetcher.get_tickers().await;
 
 		println!("{:#?}", res);

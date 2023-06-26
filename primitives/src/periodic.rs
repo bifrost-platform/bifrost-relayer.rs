@@ -24,6 +24,7 @@ pub struct PriceResponse {
 #[derive(Debug, Clone, Deserialize)]
 pub enum PriceSource {
 	Binance,
+	Chainlink,
 	Coingecko,
 	Gateio,
 	Kucoin,

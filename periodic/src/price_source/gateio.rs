@@ -1,6 +1,6 @@
-use std::collections::BTreeMap;
+use std::{collections::BTreeMap, marker::PhantomData};
 
-use ethers::utils::parse_ether;
+use ethers::{providers::JsonRpcClient, utils::parse_ether};
 use reqwest::{Error, Url};
 use serde::Deserialize;
 
@@ -17,13 +17,14 @@ pub struct GateioResponse {
 }
 
 #[derive(Clone)]
-pub struct GateioPriceFetcher {
+pub struct GateioPriceFetcher<T> {
 	base_url: Url,
 	symbols: Vec<String>,
+	_phantom: PhantomData<T>,
 }
 
 #[async_trait::async_trait]
-impl PriceFetcher for GateioPriceFetcher {
+impl<T: JsonRpcClient> PriceFetcher for GateioPriceFetcher<T> {
 	async fn get_ticker_with_symbol(&self, symbol: String) -> PriceResponse {
 		let mut url = self.base_url.join("spot/tickers").unwrap();
 		url.query_pairs_mut()
@@ -59,7 +60,7 @@ impl PriceFetcher for GateioPriceFetcher {
 	}
 }
 
-impl GateioPriceFetcher {
+impl<T: JsonRpcClient> GateioPriceFetcher<T> {
 	pub async fn new() -> Result<Self, Error> {
 		let mut symbols: Vec<String> =
 			vec!["ETH".into(), "BFC".into(), "BNB".into(), "MATIC".into(), "BIFI".into()];
@@ -76,6 +77,7 @@ impl GateioPriceFetcher {
 			base_url: Url::parse("https://api.gateio.ws/api/v4/")
 				.expect("Failed to parse GateIo URL"),
 			symbols,
+			_phantom: PhantomData,
 		})
 	}
 
@@ -92,11 +94,13 @@ impl GateioPriceFetcher {
 
 #[cfg(test)]
 mod tests {
+	use ethers::providers::Http;
+
 	use super::*;
 
 	#[tokio::test]
 	async fn fetch_price() {
-		let gateio_fetcher = GateioPriceFetcher::new().await.unwrap();
+		let gateio_fetcher: GateioPriceFetcher<Http> = GateioPriceFetcher::new().await.unwrap();
 		let res = gateio_fetcher.get_ticker_with_symbol("BTC".to_string()).await;
 
 		println!("{:?}", res);
@@ -104,7 +108,7 @@ mod tests {
 
 	#[tokio::test]
 	async fn fetch_prices() {
-		let gateio_fetcher = GateioPriceFetcher::new().await.unwrap();
+		let gateio_fetcher: GateioPriceFetcher<Http> = GateioPriceFetcher::new().await.unwrap();
 		let res = gateio_fetcher.get_tickers().await;
 
 		println!("{:#?}", res);

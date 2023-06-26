@@ -1,6 +1,6 @@
-use std::collections::BTreeMap;
+use std::{collections::BTreeMap, marker::PhantomData};
 
-use ethers::utils::parse_ether;
+use ethers::{providers::JsonRpcClient, utils::parse_ether};
 use reqwest::{Error, Url};
 use serde::Deserialize;
 
@@ -18,13 +18,14 @@ pub struct BinanceResponse {
 }
 
 #[derive(Clone)]
-pub struct BinancePriceFetcher {
+pub struct BinancePriceFetcher<T> {
 	base_url: Url,
 	symbols: String,
+	_phantom: PhantomData<T>,
 }
 
 #[async_trait::async_trait]
-impl PriceFetcher for BinancePriceFetcher {
+impl<T: JsonRpcClient> PriceFetcher for BinancePriceFetcher<T> {
 	async fn get_ticker_with_symbol(&self, symbol: String) -> PriceResponse {
 		let mut url = self.base_url.join("ticker/24hr").unwrap();
 		url.query_pairs_mut().append_pair("symbol", (symbol + "USDT").as_str());
@@ -62,14 +63,15 @@ impl PriceFetcher for BinancePriceFetcher {
 	}
 }
 
-impl BinancePriceFetcher {
-	pub async fn new() -> Result<Self, Error> {
+impl<T: JsonRpcClient> BinancePriceFetcher<T> {
+	pub async fn new() -> Result<BinancePriceFetcher<T>, Error> {
 		let mut symbols: Vec<String> = vec!["ETH".into(), "BNB".into(), "MATIC".into()];
 		symbols.iter_mut().for_each(|symbol| symbol.push_str("USDT"));
 
 		Ok(Self {
 			base_url: Url::parse("https://api.binance.com/api/v3/").unwrap(),
 			symbols: serde_json::to_string(&symbols).unwrap(),
+			_phantom: PhantomData,
 		})
 	}
 
@@ -80,11 +82,13 @@ impl BinancePriceFetcher {
 
 #[cfg(test)]
 mod tests {
+	use ethers::providers::Http;
+
 	use super::*;
 
 	#[tokio::test]
 	async fn fetch_price() {
-		let binance_fetcher = BinancePriceFetcher::new().await.unwrap();
+		let binance_fetcher: BinancePriceFetcher<Http> = BinancePriceFetcher::new().await.unwrap();
 		let res = binance_fetcher.get_ticker_with_symbol("BTC".to_string()).await;
 
 		println!("{:?}", res);
@@ -92,7 +96,7 @@ mod tests {
 
 	#[tokio::test]
 	async fn fetch_prices() {
-		let binance_fetcher = BinancePriceFetcher::new().await.unwrap();
+		let binance_fetcher: BinancePriceFetcher<Http> = BinancePriceFetcher::new().await.unwrap();
 		let res = binance_fetcher.get_tickers().await;
 
 		println!("{:#?}", res);

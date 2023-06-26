@@ -1,6 +1,6 @@
-use std::collections::BTreeMap;
+use std::{collections::BTreeMap, marker::PhantomData};
 
-use ethers::utils::parse_ether;
+use ethers::{providers::JsonRpcClient, utils::parse_ether};
 use reqwest::{Error, Url};
 use serde::Deserialize;
 
@@ -20,13 +20,14 @@ struct KucoinResponse {
 }
 
 #[derive(Clone)]
-pub struct KucoinPriceFetcher {
+pub struct KucoinPriceFetcher<T> {
 	base_url: Url,
 	symbols: Vec<String>,
+	_phantom: PhantomData<T>,
 }
 
 #[async_trait::async_trait]
-impl PriceFetcher for KucoinPriceFetcher {
+impl<T: JsonRpcClient> PriceFetcher for KucoinPriceFetcher<T> {
 	async fn get_ticker_with_symbol(&self, symbol: String) -> PriceResponse {
 		let mut url = self.base_url.join("market/stats").unwrap();
 		url.query_pairs_mut().append_pair("symbol", (symbol.clone() + "-USDT").as_str());
@@ -49,7 +50,7 @@ impl PriceFetcher for KucoinPriceFetcher {
 	}
 }
 
-impl KucoinPriceFetcher {
+impl<T: JsonRpcClient> KucoinPriceFetcher<T> {
 	pub async fn new() -> Result<Self, Error> {
 		let symbols: Vec<String> =
 			vec!["ETH".into(), "BFC".into(), "BNB".into(), "MATIC".into(), "BIFI".into()];
@@ -58,6 +59,7 @@ impl KucoinPriceFetcher {
 			base_url: Url::parse("https://api.kucoin.com/api/v1/")
 				.expect("Failed to parse KuCoin URL"),
 			symbols,
+			_phantom: PhantomData,
 		})
 	}
 
@@ -74,11 +76,13 @@ impl KucoinPriceFetcher {
 
 #[cfg(test)]
 mod tests {
+	use ethers::providers::Http;
+
 	use super::*;
 
 	#[tokio::test]
 	async fn fetch_price() {
-		let kucoin_fetcher = KucoinPriceFetcher::new().await.unwrap();
+		let kucoin_fetcher: KucoinPriceFetcher<Http> = KucoinPriceFetcher::new().await.unwrap();
 		let res = kucoin_fetcher.get_ticker_with_symbol("BFC".to_string()).await;
 
 		println!("{:#?}", res);
@@ -86,7 +90,7 @@ mod tests {
 
 	#[tokio::test]
 	async fn fetch_prices() {
-		let kucoin_fetcher = KucoinPriceFetcher::new().await.unwrap();
+		let kucoin_fetcher: KucoinPriceFetcher<Http> = KucoinPriceFetcher::new().await.unwrap();
 		let res = kucoin_fetcher.get_tickers().await;
 
 		println!("{:#?}", res);
