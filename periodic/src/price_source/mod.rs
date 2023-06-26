@@ -112,16 +112,15 @@ mod tests {
 	#[tokio::test]
 	async fn fetcher_enum_matching() {
 		let fetchers = vec![
-			PriceFetchers::new(PriceSource::Gateio).await,
-			PriceFetchers::new(PriceSource::Binance).await,
+			PriceFetchers::new(PriceSource::Binance).await.unwrap(),
+			PriceFetchers::new(PriceSource::Coingecko).await.unwrap(),
+			PriceFetchers::new(PriceSource::Gateio).await.unwrap(),
+			PriceFetchers::new(PriceSource::Kucoin).await.unwrap(),
+			PriceFetchers::new(PriceSource::Upbit).await.unwrap(),
 		];
 
 		for fetcher in fetchers {
-			println!(
-				"{:?} {:?}",
-				fetcher.get_ticker_with_symbol("BTC".to_string()).await,
-				fetcher.get_tickers().await
-			);
+			println!("{:?}", fetcher.get_tickers().await);
 		}
 	}
 

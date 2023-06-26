@@ -145,7 +145,7 @@ mod tests {
 
 	#[tokio::test]
 	async fn fetch_price() {
-		let upbit_fetcher = UpbitPriceFetcher::new().await;
+		let upbit_fetcher = UpbitPriceFetcher::new().await.unwrap();
 		let res = upbit_fetcher.get_ticker_with_symbol("BFC".to_string()).await;
 
 		println!("{:?}", res);
@@ -153,7 +153,7 @@ mod tests {
 
 	#[tokio::test]
 	async fn fetch_prices() {
-		let upbit_fetcher = UpbitPriceFetcher::new().await;
+		let upbit_fetcher = UpbitPriceFetcher::new().await.unwrap();
 		let res = upbit_fetcher.get_tickers().await;
 
 		println!("{:#?}", res);
@@ -161,7 +161,7 @@ mod tests {
 
 	#[tokio::test]
 	async fn btc_krw_conversion() {
-		let upbit_fetcher = UpbitPriceFetcher::new().await;
+		let upbit_fetcher = UpbitPriceFetcher::new().await.unwrap();
 		let res = upbit_fetcher.btc_to_krw(0.00000175f64).await;
 
 		println!("{:?}", res);

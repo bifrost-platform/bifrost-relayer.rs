@@ -84,7 +84,7 @@ mod tests {
 
 	#[tokio::test]
 	async fn fetch_price() {
-		let binance_fetcher = BinancePriceFetcher::new().await;
+		let binance_fetcher = BinancePriceFetcher::new().await.unwrap();
 		let res = binance_fetcher.get_ticker_with_symbol("BTC".to_string()).await;
 
 		println!("{:?}", res);
@@ -92,7 +92,7 @@ mod tests {
 
 	#[tokio::test]
 	async fn fetch_prices() {
-		let binance_fetcher = BinancePriceFetcher::new().await;
+		let binance_fetcher = BinancePriceFetcher::new().await.unwrap();
 		let res = binance_fetcher.get_tickers().await;
 
 		println!("{:#?}", res);

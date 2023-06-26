@@ -78,7 +78,7 @@ mod tests {
 
 	#[tokio::test]
 	async fn fetch_price() {
-		let kucoin_fetcher = KucoinPriceFetcher::new().await;
+		let kucoin_fetcher = KucoinPriceFetcher::new().await.unwrap();
 		let res = kucoin_fetcher.get_ticker_with_symbol("BFC".to_string()).await;
 
 		println!("{:#?}", res);
@@ -86,7 +86,7 @@ mod tests {
 
 	#[tokio::test]
 	async fn fetch_prices() {
-		let kucoin_fetcher = KucoinPriceFetcher::new().await;
+		let kucoin_fetcher = KucoinPriceFetcher::new().await.unwrap();
 		let res = kucoin_fetcher.get_tickers().await;
 
 		println!("{:#?}", res);

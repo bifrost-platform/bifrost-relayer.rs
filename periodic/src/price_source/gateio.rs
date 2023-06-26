@@ -96,7 +96,7 @@ mod tests {
 
 	#[tokio::test]
 	async fn fetch_price() {
-		let gateio_fetcher = GateioPriceFetcher::new().await;
+		let gateio_fetcher = GateioPriceFetcher::new().await.unwrap();
 		let res = gateio_fetcher.get_ticker_with_symbol("BTC".to_string()).await;
 
 		println!("{:?}", res);
@@ -104,7 +104,7 @@ mod tests {
 
 	#[tokio::test]
 	async fn fetch_prices() {
-		let gateio_fetcher = GateioPriceFetcher::new().await;
+		let gateio_fetcher = GateioPriceFetcher::new().await.unwrap();
 		let res = gateio_fetcher.get_tickers().await;
 
 		println!("{:#?}", res);
