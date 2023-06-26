@@ -104,6 +104,10 @@ pub struct EVMProvider {
 	pub authority_address: String,
 	/// Relayer manager contract address (Only for Bifrost network)
 	pub relayer_manager_address: Option<String>,
+	/// Chainlink usdc/usd aggregator (Ethereum only)
+	pub chainlink_usdc_usd_address: Option<String>,
+	/// Chainlink usdt/usd aggregator (Ethereum only)
+	pub chainlink_usdt_usd_address: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize, PartialEq)]
