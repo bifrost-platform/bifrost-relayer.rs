@@ -198,7 +198,7 @@ impl<T: JsonRpcClient + 'static> OraclePriceFeeder<T> {
 
 	/// Initialize price fetchers. Can't move into new().
 	async fn initialize_fetchers(&mut self) {
-		match PriceFetchers::new(PriceSource::Coingecko).await {
+		match PriceFetchers::new(PriceSource::Coingecko, None).await {
 			Ok(primary) => {
 				self.primary_source.push(primary);
 			},
