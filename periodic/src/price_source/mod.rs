@@ -1,8 +1,7 @@
-use std::{collections::BTreeMap, ops::Mul, sync::Arc};
+use std::{collections::BTreeMap, fmt::Error, ops::Mul, sync::Arc};
 
 use async_trait::async_trait;
 use ethers::{providers::JsonRpcClient, types::U256};
-use reqwest::Error;
 use serde::Deserialize;
 
 use cccp_client::eth::EthClient;
@@ -65,9 +64,9 @@ pub async fn krw_to_usd(krw_amount: U256) -> Result<U256, Error> {
 					.checked_div(U256::from(10u64.pow(exchange_rate_decimal)))
 					.unwrap())
 			},
-			Err(e) => Err(e),
+			Err(_) => Err(Error::default()),
 		},
-		Err(e) => Err(e),
+		Err(_) => Err(Error::default()),
 	}
 }
 
@@ -91,7 +90,7 @@ impl<T: JsonRpcClient> PriceFetchers<T> {
 
 #[async_trait]
 impl<T: JsonRpcClient + 'static> PriceFetcher for PriceFetchers<T> {
-	async fn get_ticker_with_symbol(&self, symbol: String) -> PriceResponse {
+	async fn get_ticker_with_symbol(&self, symbol: String) -> Result<PriceResponse, Error> {
 		match self {
 			PriceFetchers::Binance(fetcher) => fetcher.get_ticker_with_symbol(symbol).await,
 			PriceFetchers::Chainlink(fetcher) => fetcher.get_ticker_with_symbol(symbol).await,

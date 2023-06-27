@@ -1,7 +1,7 @@
-use std::{collections::BTreeMap, marker::PhantomData};
+use std::{collections::BTreeMap, fmt::Error, marker::PhantomData};
 
 use ethers::{providers::JsonRpcClient, utils::parse_ether};
-use reqwest::{Error, Url};
+use reqwest::Url;
 use serde::Deserialize;
 
 use cccp_primitives::periodic::{PriceFetcher, PriceResponse};
@@ -25,17 +25,17 @@ pub struct GateioPriceFetcher<T> {
 
 #[async_trait::async_trait]
 impl<T: JsonRpcClient> PriceFetcher for GateioPriceFetcher<T> {
-	async fn get_ticker_with_symbol(&self, symbol: String) -> PriceResponse {
+	async fn get_ticker_with_symbol(&self, symbol: String) -> Result<PriceResponse, Error> {
 		let mut url = self.base_url.join("spot/tickers").unwrap();
 		url.query_pairs_mut()
 			.append_pair("currency_pair", (symbol.clone() + "_USDT").as_str());
 
-		let res = self._send_request(url).await.unwrap()[0].clone();
+		let res = self._send_request(url).await?[0].clone();
 
-		PriceResponse {
+		Ok(PriceResponse {
 			price: parse_ether(&res.last).unwrap(),
 			volume: parse_ether(&res.base_volume).unwrap().into(),
-		}
+		})
 	}
 
 	async fn get_tickers(&self) -> Result<BTreeMap<String, PriceResponse>, Error> {
@@ -55,7 +55,7 @@ impl<T: JsonRpcClient> PriceFetcher for GateioPriceFetcher<T> {
 				});
 				Ok(ret)
 			},
-			Err(e) => Err(e),
+			Err(_) => Err(Error::default()),
 		}
 	}
 }
@@ -85,9 +85,9 @@ impl<T: JsonRpcClient> GateioPriceFetcher<T> {
 		return match reqwest::get(url).await {
 			Ok(response) => match response.json::<Vec<GateioResponse>>().await {
 				Ok(ret) => Ok(ret),
-				Err(e) => Err(e),
+				Err(_) => Err(Error::default()),
 			},
-			Err(e) => Err(e),
+			Err(_) => Err(Error::default()),
 		}
 	}
 }

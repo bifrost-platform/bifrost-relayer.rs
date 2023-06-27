@@ -1,7 +1,7 @@
-use std::{collections::BTreeMap, marker::PhantomData};
+use std::{collections::BTreeMap, fmt::Error, marker::PhantomData};
 
 use ethers::{providers::JsonRpcClient, utils::parse_ether};
-use reqwest::{Error, Response, Url};
+use reqwest::{Response, Url};
 use serde::Deserialize;
 use tokio::time::{sleep, Duration};
 
@@ -31,7 +31,7 @@ pub struct CoingeckoPriceFetcher<T> {
 
 #[async_trait::async_trait]
 impl<T: JsonRpcClient> PriceFetcher for CoingeckoPriceFetcher<T> {
-	async fn get_ticker_with_symbol(&self, symbol: String) -> PriceResponse {
+	async fn get_ticker_with_symbol(&self, symbol: String) -> Result<PriceResponse, Error> {
 		let id = self.get_id_from_symbol(&symbol);
 		let url = self
 			.base_url
@@ -48,7 +48,7 @@ impl<T: JsonRpcClient> PriceFetcher for CoingeckoPriceFetcher<T> {
 			.expect("Cannot find usd price in response")
 			.clone();
 
-		PriceResponse { price: parse_ether(price).unwrap(), volume: None }
+		Ok(PriceResponse { price: parse_ether(price).unwrap(), volume: None })
 	}
 
 	async fn get_tickers(&self) -> Result<BTreeMap<String, PriceResponse>, Error> {
@@ -136,7 +136,7 @@ impl<T: JsonRpcClient> CoingeckoPriceFetcher<T> {
 							e.to_string(),
 							retry_interval
 						);
-							Err(e)
+							Err(Error::default())
 						},
 					},
 				Err(e) => {
@@ -175,12 +175,12 @@ impl<T: JsonRpcClient> CoingeckoPriceFetcher<T> {
 								sub_display_format(SUB_LOG_TARGET),
 								e.to_string(),
 							);
-							Err(e)
+							Err(Error::default())
 						},
 					},
 				Err(e) => {
 					if retries_remaining == 0 {
-						return Err(e)
+						return Err(Error::default())
 					}
 
 					log::warn!(

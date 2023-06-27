@@ -1,7 +1,7 @@
-use std::{collections::BTreeMap, marker::PhantomData};
+use std::{collections::BTreeMap, fmt::Error, marker::PhantomData};
 
 use ethers::{providers::JsonRpcClient, utils::parse_ether};
-use reqwest::{Error, Url};
+use reqwest::Url;
 use serde::Deserialize;
 
 use cccp_primitives::{PriceFetcher, PriceResponse};
@@ -28,22 +28,22 @@ pub struct KucoinPriceFetcher<T> {
 
 #[async_trait::async_trait]
 impl<T: JsonRpcClient> PriceFetcher for KucoinPriceFetcher<T> {
-	async fn get_ticker_with_symbol(&self, symbol: String) -> PriceResponse {
+	async fn get_ticker_with_symbol(&self, symbol: String) -> Result<PriceResponse, Error> {
 		let mut url = self.base_url.join("market/stats").unwrap();
 		url.query_pairs_mut().append_pair("symbol", (symbol.clone() + "-USDT").as_str());
 
 		let res = &self._send_request(url).await.unwrap().data;
 
-		PriceResponse {
+		Ok(PriceResponse {
 			price: parse_ether(&res.last).unwrap(),
 			volume: parse_ether(&res.vol).unwrap().into(),
-		}
+		})
 	}
 
 	async fn get_tickers(&self) -> Result<BTreeMap<String, PriceResponse>, Error> {
 		let mut ret = BTreeMap::new();
 		for symbol in &self.symbols {
-			ret.insert(symbol.clone(), self.get_ticker_with_symbol(symbol.clone()).await);
+			ret.insert(symbol.clone(), self.get_ticker_with_symbol(symbol.clone()).await?);
 		}
 
 		Ok(ret)
@@ -67,9 +67,9 @@ impl<T: JsonRpcClient> KucoinPriceFetcher<T> {
 		return match reqwest::get(url).await {
 			Ok(response) => match response.json::<KucoinResponse>().await {
 				Ok(response) => Ok(response),
-				Err(e) => Err(e),
+				Err(_) => Err(Error::default()),
 			},
-			Err(e) => Err(e),
+			Err(_) => Err(Error::default()),
 		}
 	}
 }

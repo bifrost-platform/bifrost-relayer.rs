@@ -1,7 +1,7 @@
-use std::{collections::BTreeMap, marker::PhantomData};
+use std::{collections::BTreeMap, fmt::Error, marker::PhantomData};
 
 use ethers::{providers::JsonRpcClient, utils::parse_ether};
-use reqwest::{Error, Url};
+use reqwest::Url;
 use serde::Deserialize;
 
 use cccp_primitives::periodic::{PriceFetcher, PriceResponse};
@@ -26,16 +26,16 @@ pub struct BinancePriceFetcher<T> {
 
 #[async_trait::async_trait]
 impl<T: JsonRpcClient> PriceFetcher for BinancePriceFetcher<T> {
-	async fn get_ticker_with_symbol(&self, symbol: String) -> PriceResponse {
+	async fn get_ticker_with_symbol(&self, symbol: String) -> Result<PriceResponse, Error> {
 		let mut url = self.base_url.join("ticker/24hr").unwrap();
 		url.query_pairs_mut().append_pair("symbol", (symbol + "USDT").as_str());
 
 		let res = self._send_request(url).await;
 
-		PriceResponse {
+		Ok(PriceResponse {
 			price: parse_ether(&res.lastPrice).unwrap(),
 			volume: parse_ether(&res.volume).unwrap().into(),
-		}
+		})
 	}
 
 	async fn get_tickers(&self) -> Result<BTreeMap<String, PriceResponse>, Error> {
@@ -54,9 +54,9 @@ impl<T: JsonRpcClient> PriceFetcher for BinancePriceFetcher<T> {
 						},
 					);
 				}),
-				Err(error) => return Err(error),
+				Err(_) => return Err(Error::default()),
 			},
-			Err(error) => return Err(error),
+			Err(_) => return Err(Error::default()),
 		};
 
 		Ok(ret)
