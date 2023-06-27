@@ -5,6 +5,7 @@ use cron::Schedule;
 use ethers::{
 	providers::JsonRpcClient,
 	types::{TransactionRequest, H256, U256},
+	utils::parse_ether,
 };
 use tokio::time::sleep;
 
@@ -172,6 +173,13 @@ impl<T: JsonRpcClient + 'static> OraclePriceFeeder<T> {
 
 		if volume_weighted.is_empty() {
 			return Err(Error::default())
+		}
+
+		if !volume_weighted.contains_key("USDC") {
+			volume_weighted.insert("USDC".into(), (parse_ether(1).unwrap(), U256::from(1)));
+		}
+		if !volume_weighted.contains_key("USDT") {
+			volume_weighted.insert("USDT".into(), (parse_ether(1).unwrap(), U256::from(1)));
 		}
 
 		Ok(volume_weighted
