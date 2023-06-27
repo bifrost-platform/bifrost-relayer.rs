@@ -245,23 +245,6 @@ impl<T: JsonRpcClient + 'static> OraclePriceFeeder<T> {
 				}
 			}
 		}
-
-		if volume_weighted.is_empty() {
-			return Err(Error::default());
-		}
-
-		Ok(volume_weighted
-			.into_iter()
-			.map(|(symbol, (volume_weighted_sum, total_volume))| {
-				(
-					symbol,
-					PriceResponse {
-						price: volume_weighted_sum / total_volume,
-						volume: total_volume.into(),
-					},
-				)
-			})
-			.collect())
 	}
 
 	/// Build and send transaction.
@@ -313,7 +296,6 @@ impl<T: JsonRpcClient + 'static> OraclePriceFeeder<T> {
 			GasCoefficient::Mid,
 			false,
 			false,
-			GasCoefficient::Mid,
 		)) {
 			Ok(()) => log::info!(
 				target: &self.client.get_chain_name(),
@@ -349,61 +331,5 @@ impl<T: JsonRpcClient + 'static> OraclePriceFeeder<T> {
 				"relayer_manager.is_selected_relayer",
 			)
 			.await
-	}
-}
-
-#[cfg(test)]
-mod tests {
-	use super::*;
-
-	#[tokio::test]
-	async fn secondary_fetch() {
-		let mut a = vec![];
-		a.push(PriceFetchers::new(PriceSource::Binance).await);
-		a.push(PriceFetchers::new(PriceSource::Gateio).await);
-		a.push(PriceFetchers::new(PriceSource::Kucoin).await);
-		a.push(PriceFetchers::new(PriceSource::Upbit).await);
-
-		let res: Result<BTreeMap<String, PriceResponse>, Error> = {
-			// (volume weighted price sum, total volume)
-			let mut volume_weighted: BTreeMap<String, (U256, U256)> = BTreeMap::new();
-
-			for fetcher in a.clone() {
-				match fetcher.get_tickers().await {
-					Ok(tickers) => {
-						tickers.iter().for_each(|(symbol, price_response)| {
-							if let Some(value) = volume_weighted.get_mut(symbol) {
-								value.0 += price_response.price * price_response.volume.unwrap();
-								value.1 += price_response.volume.unwrap();
-							} else {
-								volume_weighted.insert(
-									symbol.clone(),
-									(
-										price_response.price * price_response.volume.unwrap(),
-										price_response.volume.unwrap(),
-									),
-								);
-							}
-						});
-					},
-					Err(_) => continue,
-				};
-			}
-
-			Ok(volume_weighted
-				.into_iter()
-				.map(|(symbol, (volume_weighted_sum, total_volume))| {
-					(
-						symbol,
-						PriceResponse {
-							price: volume_weighted_sum / total_volume,
-							volume: total_volume.into(),
-						},
-					)
-				})
-				.collect())
-		};
-
-		println!("{:#?}", res);
 	}
 }

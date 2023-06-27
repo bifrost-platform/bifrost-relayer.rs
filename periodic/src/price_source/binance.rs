@@ -80,13 +80,8 @@ impl<T: JsonRpcClient> BinancePriceFetcher<T> {
 	pub async fn new() -> Result<BinancePriceFetcher<T>, Error> {
 		let mut symbols: Vec<String> =
 			vec!["ETH".into(), "BNB".into(), "MATIC".into(), "BTC".into()];
-		symbols.iter_mut().for_each(|symbol| symbol.push_str("USDT"));
 
-		Ok(Self {
-			base_url: Url::parse("https://api.binance.com/api/v3/").unwrap(),
-			symbols: serde_json::to_string(&symbols).unwrap(),
-			_phantom: PhantomData,
-		})
+		Ok(Self {})
 	}
 
 	async fn _send_request(&self, url: Url) -> BinanceResponse {
