@@ -1,7 +1,7 @@
-use std::collections::BTreeMap;
+use std::{collections::BTreeMap, fmt::Error, marker::PhantomData};
 
-use ethers::utils::parse_ether;
-use reqwest::{Error, Url};
+use ethers::{providers::JsonRpcClient, utils::parse_ether};
+use reqwest::Url;
 use serde::Deserialize;
 
 use cccp_primitives::periodic::{PriceFetcher, PriceResponse};
@@ -18,23 +18,24 @@ pub struct BinanceResponse {
 }
 
 #[derive(Clone)]
-pub struct BinancePriceFetcher {
+pub struct BinancePriceFetcher<T> {
 	base_url: Url,
 	symbols: String,
+	_phantom: PhantomData<T>,
 }
 
 #[async_trait::async_trait]
-impl PriceFetcher for BinancePriceFetcher {
-	async fn get_ticker_with_symbol(&self, symbol: String) -> PriceResponse {
+impl<T: JsonRpcClient> PriceFetcher for BinancePriceFetcher<T> {
+	async fn get_ticker_with_symbol(&self, symbol: String) -> Result<PriceResponse, Error> {
 		let mut url = self.base_url.join("ticker/24hr").unwrap();
 		url.query_pairs_mut().append_pair("symbol", (symbol + "USDT").as_str());
 
 		let res = self._send_request(url).await;
 
-		PriceResponse {
+		Ok(PriceResponse {
 			price: parse_ether(&res.lastPrice).unwrap(),
 			volume: parse_ether(&res.volume).unwrap().into(),
-		}
+		})
 	}
 
 	async fn get_tickers(&self) -> Result<BTreeMap<String, PriceResponse>, Error> {
@@ -53,24 +54,25 @@ impl PriceFetcher for BinancePriceFetcher {
 						},
 					);
 				}),
-				Err(error) => return Err(error),
+				Err(_) => return Err(Error::default()),
 			},
-			Err(error) => return Err(error),
+			Err(_) => return Err(Error::default()),
 		};
 
 		Ok(ret)
 	}
 }
 
-impl BinancePriceFetcher {
-	pub async fn new() -> Self {
+impl<T: JsonRpcClient> BinancePriceFetcher<T> {
+	pub async fn new() -> Result<BinancePriceFetcher<T>, Error> {
 		let mut symbols: Vec<String> = vec!["ETH".into(), "BNB".into(), "MATIC".into()];
 		symbols.iter_mut().for_each(|symbol| symbol.push_str("USDT"));
 
-		Self {
+		Ok(Self {
 			base_url: Url::parse("https://api.binance.com/api/v3/").unwrap(),
 			symbols: serde_json::to_string(&symbols).unwrap(),
-		}
+			_phantom: PhantomData,
+		})
 	}
 
 	async fn _send_request(&self, url: Url) -> BinanceResponse {
@@ -80,11 +82,13 @@ impl BinancePriceFetcher {
 
 #[cfg(test)]
 mod tests {
+	use ethers::providers::Http;
+
 	use super::*;
 
 	#[tokio::test]
 	async fn fetch_price() {
-		let binance_fetcher = BinancePriceFetcher::new().await;
+		let binance_fetcher: BinancePriceFetcher<Http> = BinancePriceFetcher::new().await.unwrap();
 		let res = binance_fetcher.get_ticker_with_symbol("BTC".to_string()).await;
 
 		println!("{:?}", res);
@@ -92,7 +96,7 @@ mod tests {
 
 	#[tokio::test]
 	async fn fetch_prices() {
-		let binance_fetcher = BinancePriceFetcher::new().await;
+		let binance_fetcher: BinancePriceFetcher<Http> = BinancePriceFetcher::new().await.unwrap();
 		let res = binance_fetcher.get_tickers().await;
 
 		println!("{:#?}", res);

@@ -1,4 +1,18 @@
-use crate::cli::{LOG_TARGET, SUB_LOG_TARGET};
+use std::{
+	collections::BTreeMap,
+	net::{Ipv4Addr, SocketAddr},
+	str::FromStr,
+	sync::Arc,
+};
+
+use ethers::{
+	providers::{Http, Provider},
+	types::H160,
+};
+use futures::FutureExt;
+use sc_service::{config::PrometheusConfig, Error as ServiceError, TaskManager};
+use tokio::sync::{Barrier, Mutex, RwLock};
+
 use cccp_client::eth::{
 	BlockManager, BridgeRelayHandler, EthClient, EventSender, Handler, RoundupRelayHandler,
 	TransactionManager, WalletManager,
@@ -16,19 +30,8 @@ use cccp_primitives::{
 	periodic::PeriodicWorker,
 	sub_display_format,
 };
-use ethers::{
-	providers::{Http, Provider},
-	types::H160,
-};
-use futures::FutureExt;
-use sc_service::{config::PrometheusConfig, Error as ServiceError, TaskManager};
-use std::{
-	collections::BTreeMap,
-	net::{Ipv4Addr, SocketAddr},
-	str::FromStr,
-	sync::Arc,
-};
-use tokio::sync::{Barrier, Mutex, RwLock};
+
+use crate::cli::{LOG_TARGET, SUB_LOG_TARGET};
 
 pub fn relay(config: Configuration) -> Result<TaskManager, ServiceError> {
 	new_relay_base(config).map(|RelayBase { task_manager, .. }| task_manager)
@@ -83,6 +86,8 @@ pub fn new_relay_base(config: Configuration) -> Result<RelayBase, ServiceError> 
 				evm_provider.vault_address.clone(),
 				evm_provider.authority_address.clone(),
 				evm_provider.relayer_manager_address.clone(),
+				evm_provider.chainlink_usdc_usd_address.clone(),
+				evm_provider.chainlink_usdt_usd_address.clone(),
 			));
 
 			if evm_provider.is_relay_target {
