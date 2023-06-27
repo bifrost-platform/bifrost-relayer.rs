@@ -32,6 +32,16 @@ use self::{
 	traits::{Eip1559GasMiddleware, LegacyGasMiddleware},
 	wallet::WalletManager,
 };
+pub use events::*;
+pub use handlers::*;
+pub use tx::*;
+pub use wallet::*;
+
+mod blocks;
+mod events;
+mod handlers;
+mod tx;
+mod wallet;
 
 pub mod events;
 pub mod handlers;
