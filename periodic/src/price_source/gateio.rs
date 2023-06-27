@@ -1,7 +1,7 @@
-use std::collections::BTreeMap;
+use std::{collections::BTreeMap, fmt::Error, marker::PhantomData};
 
-use ethers::utils::parse_ether;
-use reqwest::{Error, Url};
+use ethers::{providers::JsonRpcClient, utils::parse_ether};
+use reqwest::Url;
 use serde::Deserialize;
 
 use cccp_primitives::periodic::{PriceFetcher, PriceResponse};
@@ -17,24 +17,25 @@ pub struct GateioResponse {
 }
 
 #[derive(Clone)]
-pub struct GateioPriceFetcher {
+pub struct GateioPriceFetcher<T> {
 	base_url: Url,
 	symbols: Vec<String>,
+	_phantom: PhantomData<T>,
 }
 
 #[async_trait::async_trait]
-impl PriceFetcher for GateioPriceFetcher {
-	async fn get_ticker_with_symbol(&self, symbol: String) -> PriceResponse {
+impl<T: JsonRpcClient> PriceFetcher for GateioPriceFetcher<T> {
+	async fn get_ticker_with_symbol(&self, symbol: String) -> Result<PriceResponse, Error> {
 		let mut url = self.base_url.join("spot/tickers").unwrap();
 		url.query_pairs_mut()
 			.append_pair("currency_pair", (symbol.clone() + "_USDT").as_str());
 
-		let res = self._send_request(url).await.unwrap()[0].clone();
+		let res = self._send_request(url).await?[0].clone();
 
-		PriceResponse {
+		Ok(PriceResponse {
 			price: parse_ether(&res.last).unwrap(),
 			volume: parse_ether(&res.base_volume).unwrap().into(),
-		}
+		})
 	}
 
 	async fn get_tickers(&self) -> Result<BTreeMap<String, PriceResponse>, Error> {
@@ -54,13 +55,13 @@ impl PriceFetcher for GateioPriceFetcher {
 				});
 				Ok(ret)
 			},
-			Err(e) => Err(e),
+			Err(_) => Err(Error::default()),
 		}
 	}
 }
 
-impl GateioPriceFetcher {
-	pub async fn new() -> Self {
+impl<T: JsonRpcClient> GateioPriceFetcher<T> {
+	pub async fn new() -> Result<Self, Error> {
 		let mut symbols: Vec<String> =
 			vec!["ETH".into(), "BFC".into(), "BNB".into(), "MATIC".into(), "BIFI".into()];
 
@@ -72,31 +73,34 @@ impl GateioPriceFetcher {
 			}
 		});
 
-		Self {
+		Ok(Self {
 			base_url: Url::parse("https://api.gateio.ws/api/v4/")
 				.expect("Failed to parse GateIo URL"),
 			symbols,
-		}
+			_phantom: PhantomData,
+		})
 	}
 
 	async fn _send_request(&self, url: Url) -> Result<Vec<GateioResponse>, Error> {
 		return match reqwest::get(url).await {
 			Ok(response) => match response.json::<Vec<GateioResponse>>().await {
 				Ok(ret) => Ok(ret),
-				Err(e) => Err(e),
+				Err(_) => Err(Error::default()),
 			},
-			Err(e) => Err(e),
+			Err(_) => Err(Error::default()),
 		}
 	}
 }
 
 #[cfg(test)]
 mod tests {
+	use ethers::providers::Http;
+
 	use super::*;
 
 	#[tokio::test]
 	async fn fetch_price() {
-		let gateio_fetcher = GateioPriceFetcher::new().await;
+		let gateio_fetcher: GateioPriceFetcher<Http> = GateioPriceFetcher::new().await.unwrap();
 		let res = gateio_fetcher.get_ticker_with_symbol("BTC".to_string()).await;
 
 		println!("{:?}", res);
@@ -104,7 +108,7 @@ mod tests {
 
 	#[tokio::test]
 	async fn fetch_prices() {
-		let gateio_fetcher = GateioPriceFetcher::new().await;
+		let gateio_fetcher: GateioPriceFetcher<Http> = GateioPriceFetcher::new().await.unwrap();
 		let res = gateio_fetcher.get_tickers().await;
 
 		println!("{:#?}", res);

@@ -1,18 +1,20 @@
-use std::{collections::BTreeMap, ops::Mul};
+use std::{collections::BTreeMap, fmt::Error, ops::Mul, sync::Arc};
 
 use async_trait::async_trait;
-use ethers::types::U256;
-use reqwest::Error;
+use ethers::{providers::JsonRpcClient, types::U256};
 use serde::Deserialize;
 
+use cccp_client::eth::EthClient;
 use cccp_primitives::periodic::{PriceFetcher, PriceResponse, PriceSource};
 
 use crate::price_source::{
-	binance::BinancePriceFetcher, coingecko::CoingeckoPriceFetcher, gateio::GateioPriceFetcher,
-	kucoin::KucoinPriceFetcher, upbit::UpbitPriceFetcher,
+	binance::BinancePriceFetcher, chainlink::ChainlinkPriceFetcher,
+	coingecko::CoingeckoPriceFetcher, gateio::GateioPriceFetcher, kucoin::KucoinPriceFetcher,
+	upbit::UpbitPriceFetcher,
 };
 
 pub mod binance;
+pub mod chainlink;
 pub mod coingecko;
 pub mod gateio;
 pub mod kucoin;
@@ -21,12 +23,13 @@ pub mod upbit;
 pub const LOG_TARGET: &str = "price-fetcher";
 
 #[derive(Clone)]
-pub enum PriceFetchers {
-	Binance(BinancePriceFetcher),
-	CoinGecko(CoingeckoPriceFetcher),
-	Gateio(GateioPriceFetcher),
-	Kucoin(KucoinPriceFetcher),
-	Upbit(UpbitPriceFetcher),
+pub enum PriceFetchers<T> {
+	Binance(BinancePriceFetcher<T>),
+	Chainlink(ChainlinkPriceFetcher<T>),
+	CoinGecko(CoingeckoPriceFetcher<T>),
+	Gateio(GateioPriceFetcher<T>),
+	Kucoin(KucoinPriceFetcher<T>),
+	Upbit(UpbitPriceFetcher<T>),
 }
 
 #[derive(Deserialize)]
@@ -61,29 +64,36 @@ pub async fn krw_to_usd(krw_amount: U256) -> Result<U256, Error> {
 					.checked_div(U256::from(10u64.pow(exchange_rate_decimal)))
 					.unwrap())
 			},
-			Err(e) => Err(e),
+			Err(_) => Err(Error::default()),
 		},
-		Err(e) => Err(e),
+		Err(_) => Err(Error::default()),
 	}
 }
 
-impl PriceFetchers {
-	pub async fn new(exchange: PriceSource) -> Self {
+impl<T: JsonRpcClient> PriceFetchers<T> {
+	pub async fn new(
+		exchange: PriceSource,
+		client: Option<Arc<EthClient<T>>>,
+	) -> Result<Self, Error> {
 		match exchange {
-			PriceSource::Binance => PriceFetchers::Binance(BinancePriceFetcher::new().await),
-			PriceSource::Coingecko => PriceFetchers::CoinGecko(CoingeckoPriceFetcher::new().await),
-			PriceSource::Gateio => PriceFetchers::Gateio(GateioPriceFetcher::new().await),
-			PriceSource::Kucoin => PriceFetchers::Kucoin(KucoinPriceFetcher::new().await),
-			PriceSource::Upbit => PriceFetchers::Upbit(UpbitPriceFetcher::new().await),
+			PriceSource::Binance => Ok(PriceFetchers::Binance(BinancePriceFetcher::new().await?)),
+			PriceSource::Chainlink =>
+				Ok(PriceFetchers::Chainlink(ChainlinkPriceFetcher::new(client).await.into())),
+			PriceSource::Coingecko =>
+				Ok(PriceFetchers::CoinGecko(CoingeckoPriceFetcher::new().await?)),
+			PriceSource::Gateio => Ok(PriceFetchers::Gateio(GateioPriceFetcher::new().await?)),
+			PriceSource::Kucoin => Ok(PriceFetchers::Kucoin(KucoinPriceFetcher::new().await?)),
+			PriceSource::Upbit => Ok(PriceFetchers::Upbit(UpbitPriceFetcher::new().await?)),
 		}
 	}
 }
 
 #[async_trait]
-impl PriceFetcher for PriceFetchers {
-	async fn get_ticker_with_symbol(&self, symbol: String) -> PriceResponse {
+impl<T: JsonRpcClient + 'static> PriceFetcher for PriceFetchers<T> {
+	async fn get_ticker_with_symbol(&self, symbol: String) -> Result<PriceResponse, Error> {
 		match self {
 			PriceFetchers::Binance(fetcher) => fetcher.get_ticker_with_symbol(symbol).await,
+			PriceFetchers::Chainlink(fetcher) => fetcher.get_ticker_with_symbol(symbol).await,
 			PriceFetchers::CoinGecko(fetcher) => fetcher.get_ticker_with_symbol(symbol).await,
 			PriceFetchers::Gateio(fetcher) => fetcher.get_ticker_with_symbol(symbol).await,
 			PriceFetchers::Kucoin(fetcher) => fetcher.get_ticker_with_symbol(symbol).await,
@@ -94,6 +104,7 @@ impl PriceFetcher for PriceFetchers {
 	async fn get_tickers(&self) -> Result<BTreeMap<String, PriceResponse>, Error> {
 		match self {
 			PriceFetchers::Binance(fetcher) => fetcher.get_tickers().await,
+			PriceFetchers::Chainlink(fetcher) => fetcher.get_tickers().await,
 			PriceFetchers::CoinGecko(fetcher) => fetcher.get_tickers().await,
 			PriceFetchers::Gateio(fetcher) => fetcher.get_tickers().await,
 			PriceFetchers::Kucoin(fetcher) => fetcher.get_tickers().await,
@@ -104,23 +115,22 @@ impl PriceFetcher for PriceFetchers {
 
 #[cfg(test)]
 mod tests {
-	use ethers::utils::parse_ether;
+	use ethers::{providers::Http, utils::parse_ether};
 
 	use super::*;
 
 	#[tokio::test]
 	async fn fetcher_enum_matching() {
-		let fetchers = vec![
-			PriceFetchers::new(PriceSource::Gateio).await,
-			PriceFetchers::new(PriceSource::Binance).await,
+		let fetchers: Vec<PriceFetchers<Http>> = vec![
+			PriceFetchers::new(PriceSource::Binance, None).await.unwrap(),
+			PriceFetchers::new(PriceSource::Coingecko, None).await.unwrap(),
+			PriceFetchers::new(PriceSource::Gateio, None).await.unwrap(),
+			PriceFetchers::new(PriceSource::Kucoin, None).await.unwrap(),
+			PriceFetchers::new(PriceSource::Upbit, None).await.unwrap(),
 		];
 
 		for fetcher in fetchers {
-			println!(
-				"{:?} {:?}",
-				fetcher.get_ticker_with_symbol("BTC".to_string()).await,
-				fetcher.get_tickers().await
-			);
+			println!("{:?}", fetcher.get_tickers().await);
 		}
 	}
 

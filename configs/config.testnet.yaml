@@ -39,6 +39,8 @@ evm_providers:
     socket_address: "0x8039c3AD8ED55509fD3f6Daa78867923fDe6E61c"
     vault_address: "0x27C66cb5caa07C9B332939c357c789C606f5054C"
     authority_address: "0xCf9f6428A309b6652a1dfaA4d8aB8B61C9c7E8CF"
+    chainlink_usdc_usd_address: "0x90c069C4538adAc136E051052E14c1cD799C41B7"
+    chainlink_usdt_usd_address: "0xEca2605f0BCF2BA5966372C99837b1F182d3D620"
   - name: "mumbai"
     id: 80001
     provider: ""
@@ -49,12 +51,14 @@ evm_providers:
     socket_address: "0xA25357F3C313Bd13885678f935178211f0dF6722"
     vault_address: "0xB2ba0020560cF6c164DC48D1E29559AbA8472208"
     authority_address: "0x2FD5232fDFa6e1c127e7821CC48108Ca79281a38"
+    chainlink_usdc_usd_address: "0x572dDec9087154dC5dfBB1546Bb62713147e0Ab0"
+    chainlink_usdt_usd_address: "0x92C09849638959196E976289418e5973CC96d645"
 
 handler_configs:
   - handler_type: BridgeRelay
-    watch_list: [49088, 5, 97, 80001]
+    watch_list: [ 49088, 5, 97, 80001 ]
   - handler_type: Roundup
-    watch_list: [49088]
+    watch_list: [ 49088 ]
 
 periodic_configs:
   oracle_price_feeder:

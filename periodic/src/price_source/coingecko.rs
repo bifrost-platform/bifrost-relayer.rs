@@ -1,7 +1,7 @@
-use std::collections::BTreeMap;
+use std::{collections::BTreeMap, fmt::Error, marker::PhantomData};
 
-use ethers::utils::parse_ether;
-use reqwest::{Error, Response, Url};
+use ethers::{providers::JsonRpcClient, utils::parse_ether};
+use reqwest::{Response, Url};
 use serde::Deserialize;
 use tokio::time::{sleep, Duration};
 
@@ -22,15 +22,16 @@ pub struct SupportedCoin {
 }
 
 #[derive(Clone)]
-pub struct CoingeckoPriceFetcher {
+pub struct CoingeckoPriceFetcher<T> {
 	pub base_url: Url,
 	pub ids: Vec<String>,
 	pub supported_coins: Vec<SupportedCoin>,
+	_phantom: PhantomData<T>,
 }
 
 #[async_trait::async_trait]
-impl PriceFetcher for CoingeckoPriceFetcher {
-	async fn get_ticker_with_symbol(&self, symbol: String) -> PriceResponse {
+impl<T: JsonRpcClient> PriceFetcher for CoingeckoPriceFetcher<T> {
+	async fn get_ticker_with_symbol(&self, symbol: String) -> Result<PriceResponse, Error> {
 		let id = self.get_id_from_symbol(&symbol);
 		let url = self
 			.base_url
@@ -47,7 +48,7 @@ impl PriceFetcher for CoingeckoPriceFetcher {
 			.expect("Cannot find usd price in response")
 			.clone();
 
-		PriceResponse { price: parse_ether(price).unwrap(), volume: None }
+		Ok(PriceResponse { price: parse_ether(price).unwrap(), volume: None })
 	}
 
 	async fn get_tickers(&self) -> Result<BTreeMap<String, PriceResponse>, Error> {
@@ -80,8 +81,8 @@ impl PriceFetcher for CoingeckoPriceFetcher {
 	}
 }
 
-impl CoingeckoPriceFetcher {
-	pub async fn new() -> Self {
+impl<T: JsonRpcClient> CoingeckoPriceFetcher<T> {
+	pub async fn new() -> Result<Self, Error> {
 		let symbols: Vec<String> = vec![
 			"ETH".into(),
 			"BFC".into(),
@@ -92,8 +93,7 @@ impl CoingeckoPriceFetcher {
 			"USDT".into(),
 		];
 
-		let support_coin_list: Vec<SupportedCoin> =
-			CoingeckoPriceFetcher::get_all_coin_list().await;
+		let support_coin_list: Vec<SupportedCoin> = Self::get_all_coin_list().await?;
 
 		let ids: Vec<String> = symbols
 			.iter()
@@ -105,49 +105,52 @@ impl CoingeckoPriceFetcher {
 			})
 			.collect();
 
-		Self {
+		Ok(Self {
 			base_url: Url::parse("https://api.coingecko.com/api/v3/").unwrap(),
 			ids,
 			supported_coins: support_coin_list,
-		}
+			_phantom: PhantomData,
+		})
 	}
 
-	async fn get_all_coin_list() -> Vec<SupportedCoin> {
-		let mut retry_interval = Duration::from_secs(30);
+	async fn get_all_coin_list() -> Result<Vec<SupportedCoin>, Error> {
+		let retry_interval = Duration::from_secs(60);
+		let mut retries_remaining = 2u8;
+
 		loop {
 			match reqwest::get("https://api.coingecko.com/api/v3/coins/list")
 				.await
 				.and_then(Response::error_for_status)
 			{
-				Ok(response) => match response.json::<Vec<SupportedCoin>>().await {
-					Ok(mut coins) => {
-						coins.retain(|x| &x.name != "Beefy.Finance");
-						return coins
-					},
-					Err(e) => {
-						log::error!(
+				Ok(response) =>
+					return match response.json::<Vec<SupportedCoin>>().await {
+						Ok(mut coins) => {
+							coins.retain(|x| &x.name != "Beefy.Finance");
+							Ok(coins)
+						},
+						Err(e) => {
+							log::error!(
 							target: LOG_TARGET,
 							"-[{}] ❗️ Error decoding support coin list: {}, Retry in {:?} secs...",
 							sub_display_format(SUB_LOG_TARGET),
 							e.to_string(),
 							retry_interval
 						);
-						sentry::capture_error(&e);
-						sleep(retry_interval).await;
-						retry_interval *= 2;
+							Err(Error::default())
+						},
 					},
-				},
 				Err(e) => {
 					log::warn!(
 						target: LOG_TARGET,
-						"-[{}] ❗️ Error fetching support coin list: {}, Retry in {:?} secs...",
+						"-[{}] ❗️ Error fetching support coin list: {}, Retry in {:?} secs... Retries left: {:?}",
 						sub_display_format(SUB_LOG_TARGET),
 						e.to_string(),
-						retry_interval
+						retry_interval,
+						retries_remaining,
 					);
 					sentry::capture_error(&e);
 					sleep(retry_interval).await;
-					retry_interval *= 2;
+					retries_remaining -= 1;
 				},
 			}
 		}
@@ -172,12 +175,12 @@ impl CoingeckoPriceFetcher {
 								sub_display_format(SUB_LOG_TARGET),
 								e.to_string(),
 							);
-							Err(e)
+							Err(Error::default())
 						},
 					},
 				Err(e) => {
 					if retries_remaining == 0 {
-						return Err(e)
+						return Err(Error::default())
 					}
 
 					log::warn!(
@@ -208,11 +211,14 @@ impl CoingeckoPriceFetcher {
 
 #[cfg(test)]
 mod tests {
+	use ethers::providers::Http;
+
 	use super::*;
 
 	#[tokio::test]
 	async fn fetch_price() {
-		let coingecko_fetcher = CoingeckoPriceFetcher::new().await;
+		let coingecko_fetcher: CoingeckoPriceFetcher<Http> =
+			CoingeckoPriceFetcher::new().await.unwrap();
 		let res = coingecko_fetcher.get_ticker_with_symbol("BTC".to_string()).await;
 
 		println!("{:?}", res);
@@ -220,7 +226,8 @@ mod tests {
 
 	#[tokio::test]
 	async fn fetch_prices() {
-		let binance_fetcher = CoingeckoPriceFetcher::new().await;
+		let binance_fetcher: CoingeckoPriceFetcher<Http> =
+			CoingeckoPriceFetcher::new().await.unwrap();
 		let res = binance_fetcher.get_tickers().await;
 
 		println!("{:#?}", res);

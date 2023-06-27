@@ -1,17 +1,4 @@
-mod events;
-pub use events::*;
-
-mod handlers;
-pub use handlers::*;
-
-mod tx;
-pub use tx::*;
-
-mod blocks;
-pub use blocks::*;
-
-mod wallet;
-pub use wallet::*;
+use std::{fmt::Debug, str::FromStr, sync::Arc};
 
 use ethers::{
 	abi::Detokenize,
@@ -24,18 +11,29 @@ use ethers::{
 	utils::format_units,
 };
 use serde::{de::DeserializeOwned, Serialize};
-use std::{fmt::Debug, str::FromStr, sync::Arc};
 use tokio::time::{sleep, Duration};
 
+pub use blocks::*;
 pub use cccp_primitives::contracts::*;
 use cccp_primitives::{
 	authority::{AuthorityContract, RoundMetaData},
+	chainlink_aggregator::ChainlinkContract,
 	eth::{BridgeDirection, ChainID, BOOTSTRAP_BLOCK_OFFSET, NATIVE_BLOCK_TIME},
 	relayer_manager::RelayerManagerContract,
 	socket::SocketContract,
 	vault::VaultContract,
 	INVALID_CONTRACT_ADDRESS,
 };
+pub use events::*;
+pub use handlers::*;
+pub use tx::*;
+pub use wallet::*;
+
+mod blocks;
+mod events;
+mod handlers;
+mod tx;
+mod wallet;
 
 const SUB_LOG_TARGET: &str = "eth-client";
 
@@ -65,6 +63,10 @@ pub struct EthClient<T> {
 	pub authority: AuthorityContract<Provider<T>>,
 	/// RelayerManagerContract (only available on BIFROST)
 	pub relayer_manager: Option<RelayerManagerContract<Provider<T>>>,
+	/// Chainlink usdc/usd aggregator (Ethereum only)
+	pub chainlink_usdc_usd: Option<ChainlinkContract<Provider<T>>>,
+	/// Chainlink usdt/usd aggregator (Ethereum only)
+	pub chainlink_usdt_usd: Option<ChainlinkContract<Provider<T>>>,
 }
 
 impl<T: JsonRpcClient> EthClient<T> {
@@ -81,6 +83,8 @@ impl<T: JsonRpcClient> EthClient<T> {
 		vault_address: String,
 		authority_address: String,
 		relayer_manager_address: Option<String>,
+		chainlink_usdc_usd_address: Option<String>,
+		chainlink_usdt_usd_address: Option<String>,
 	) -> Self {
 		Self {
 			wallet,
@@ -98,6 +102,18 @@ impl<T: JsonRpcClient> EthClient<T> {
 			),
 			relayer_manager: relayer_manager_address.map(|address| {
 				RelayerManagerContract::new(
+					H160::from_str(&address).expect(INVALID_CONTRACT_ADDRESS),
+					provider.clone(),
+				)
+			}),
+			chainlink_usdc_usd: chainlink_usdc_usd_address.map(|address| {
+				ChainlinkContract::new(
+					H160::from_str(&address).expect(INVALID_CONTRACT_ADDRESS),
+					provider.clone(),
+				)
+			}),
+			chainlink_usdt_usd: chainlink_usdt_usd_address.map(|address| {
+				ChainlinkContract::new(
 					H160::from_str(&address).expect(INVALID_CONTRACT_ADDRESS),
 					provider.clone(),
 				)
