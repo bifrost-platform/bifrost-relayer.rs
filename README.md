@@ -1,9 +1,7 @@
 # ![BIFROST Network](media/bifrost_header.jpeg)
 
-### Designed to be the successor of https://github.com/bifrost-platform/bifrost-relayer.
-
-The BIFROST Network is a fast and scalable EVM-compatible blockchain that
-provides an all-in-one environment for developers to build multichain DApps.
+# CCCP Relayer
+The CCCP Relayer is the core implementation that facilitates the Cross-Chain Communication Protocol (CCCP) for the BIFROST Network. It processes corss-chain transactions and propagates data transfer (e.g. feeding price information) from one blockchain to another.
 
 ## Getting Started
 
@@ -25,44 +23,74 @@ Learn to use the BIFROST network with our [technical docs](https://docs.bifrostn
 |wss://public-01.mainnet.bifrostnetwork.com/wss|
 |wss://public-02.mainnet.bifrostnetwork.com/wss|
 
-### Requirements
+### Install Requirements
+To initiate the CCCP Relayer, certain dependencies must be manually installed. Both the executable binary file and the configuration YAML file are essential for all environments and operators. For Linux instances only, OpenSSL 1.1.1 should be installed additionally.
 
-The following items are the essential requirements that must be prepared to be able to launch the relayer.
+First, install the latest CCCP Relayer released binary.
+```sh
+wget "https://github.com/bifrost-platform/cccp-relayer/releases/latest/download/cccp-relayer"
+```
 
-**1. RPC Endpoints for each supporting network. The node must be archive-mode enabled.**
+In order to execute the binary, the permission of the file has to be updated.
+```sh
+chmod +x cccp-relayer
+```
 
-**2. An EVM account for cross-chain action participation. It should have enough balance for transaction fees used in operations.**
+Then, install the configuration YAML file. This file serves as an example for a quick start. Given the minor differences between Testnet and Mainnet environments, it's crucial to use the appropriate file for the corresponding network.
+```sh
+# For testnet only
+wget "https://github.com/bifrost-platform/cccp-relayer/releases/latest/download/config.testnet.yaml"
 
+# For mainnet only
+wget "https://github.com/bifrost-platform/cccp-relayer/releases/latest/download/config.mainnet.yaml"
+```
 
-### Build
+For Linux instances, OpenSSL 1.1.1 should be installed. You can install it using the following command.
+```sh
+wget http://nz2.archive.ubuntu.com/ubuntu/pool/main/o/openssl/libssl1.1_1.1.1f-1ubuntu2_amd64.deb
+sudo dpkg -i libssl1.1_1.1.1f-1ubuntu2_amd64.deb
+```
 
-Use the following command to build the relayer
-without launching it:
+### Configuration Setup
+Next, the configuration YAML file contains certain parameters that the operator has to set. For instance, variables such as the relayer private key and each EVM provider's RPC endpoints depend on the operator, thus these values should be manuall input.
 
+You should prepare RPC endpoints for the following blockchain networks. There are two options for this: 1) operating your own nodes for the blockchains, or 2) utilizing services that offer RPC endpoints, such as Infura or NodeReal. It’s crucial that each node must be archive-mode enabled.
+
+- BIFROST (**Must be priorly self-operating and fully synced**)
+- Ethereum
+- Binance Smart Chain
+- Polygon
+
+You should also prepare an EVM account that will act as your relayer account. This account should have enough balance for transaction fees used in operations.
+
+### Run the Relayer
+Use the following command to execute the CCCP Relayer. The `<PATH_TO_CONFIG_FILE>` should be set to the absolute path of the installed configuration YAML file.
+```sh
+cccp-relayer --chain <PATH_TO_CONFIG_FILE>
+```
+
+## Development
+To build and develop CCCP Relayer, you will need a proper development environment. If you've never worked with a Rust-based project before, your should probably try to first install `rustup`.
+```sh
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+```
+
+Then, fetch the project's code by using git.
+```sh
+git clone https://github.com/bifrost-platform/cccp-relayer
+cd cccp-relayer
+```
+
+And now build the project to generate the executable binary file. (The first build will take some time to end)
 ```sh
 cargo build --release
 ```
 
-We can also use docker to build the relayer. Follow the command below:
-
+You can now run your relayer after if you have finished configuration setup. The configuration YAML files exists in the `configs/` directory. Execute the relayer using the following command.
 ```sh
-TODO
+# For testnet only
+./target/release/cccp-relayer --chain testnet
+
+# For mainnet only
+./target/release/cccp-relayer --chain mainnet
 ```
-
-### Run Relayer
-
-Use the following command to launch the relayer:
-
-```sh
-./target/release/cccp-relayer
-```
-
-We can also use docker to launch the relayer. Follow the command below:
-
-```sh
-TODO
-```
-
-## Project Structure
-
-TODO
