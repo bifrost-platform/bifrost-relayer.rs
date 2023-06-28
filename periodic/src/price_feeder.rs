@@ -51,7 +51,7 @@ impl<T: JsonRpcClient + 'static> PeriodicWorker for OraclePriceFeeder<T> {
 			self.wait_until_next_time().await;
 
 			if self.is_selected_relayer().await {
-				if self.primary_source.len() == 0 {
+				if self.primary_source.is_empty() {
 					log::warn!(
 						target: &self.client.get_chain_name(),
 						"-[{}] ⚠️  Failed to initialize primary fetcher. Trying to fetch with secondary sources.",
@@ -198,11 +198,8 @@ impl<T: JsonRpcClient + 'static> OraclePriceFeeder<T> {
 
 	/// Initialize price fetchers. Can't move into new().
 	async fn initialize_fetchers(&mut self) {
-		match PriceFetchers::new(PriceSource::Coingecko, None).await {
-			Ok(primary) => {
-				self.primary_source.push(primary);
-			},
-			Err(_) => {},
+		if let Ok(primary) = PriceFetchers::new(PriceSource::Coingecko, None).await {
+			self.primary_source.push(primary);
 		}
 
 		let secondary_sources = vec![
@@ -212,20 +209,16 @@ impl<T: JsonRpcClient + 'static> OraclePriceFeeder<T> {
 			PriceSource::Upbit,
 		];
 		for source in secondary_sources {
-			match PriceFetchers::new(source, None).await {
-				Ok(fetcher) => {
-					self.secondary_sources.push(fetcher);
-				},
-				Err(_) => continue,
+			if let Ok(fetcher) = PriceFetchers::new(source, None).await {
+				self.secondary_sources.push(fetcher);
 			}
 		}
 		for client in &self.clients {
-			if !client.chainlink_usdc_usd.is_none() || !client.chainlink_usdt_usd.is_none() {
-				match PriceFetchers::new(PriceSource::Chainlink, client.clone().into()).await {
-					Ok(fetcher) => {
-						self.secondary_sources.push(fetcher);
-					},
-					Err(_) => continue,
+			if client.chainlink_usdc_usd.is_some() || client.chainlink_usdt_usd.is_some() {
+				if let Ok(fetcher) =
+					PriceFetchers::new(PriceSource::Chainlink, client.clone().into()).await
+				{
+					self.secondary_sources.push(fetcher);
 				}
 			}
 		}

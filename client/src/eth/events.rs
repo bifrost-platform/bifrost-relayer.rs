@@ -170,6 +170,12 @@ impl FlushMetadata {
 	}
 }
 
+impl Default for FlushMetadata {
+	fn default() -> Self {
+		Self::new()
+	}
+}
+
 impl Display for FlushMetadata {
 	fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
 		write!(f, "Flush mempool")

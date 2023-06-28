@@ -82,7 +82,7 @@ impl<T: JsonRpcClient> GateioPriceFetcher<T> {
 	}
 
 	async fn _send_request(&self, url: Url) -> Result<Vec<GateioResponse>, Error> {
-		return match reqwest::get(url).await {
+		match reqwest::get(url).await {
 			Ok(response) => match response.json::<Vec<GateioResponse>>().await {
 				Ok(ret) => Ok(ret),
 				Err(_) => Err(Error::default()),
