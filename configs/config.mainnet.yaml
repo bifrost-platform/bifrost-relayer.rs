@@ -3,11 +3,6 @@ system:
   private_key: "<YOUR_RELAYER_PRIVATE_KEY>"
   debug_mode: false
 
-bitcoin:
-  provider: ""
-  username: ""
-  password: ""
-
 evm_providers:
   - name: "bifrost"
     id: 3068
