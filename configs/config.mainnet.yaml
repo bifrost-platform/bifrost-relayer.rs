@@ -1,6 +1,6 @@
 system:
   id: "mainnet"
-  private_key: ""
+  private_key: "<YOUR_RELAYER_PRIVATE_KEY>"
   debug_mode: false
 
 bitcoin:
@@ -11,7 +11,7 @@ bitcoin:
 evm_providers:
   - name: "bifrost"
     id: 3068
-    provider: ""
+    provider: "<YOUR_BIFROST_RPC_ENDPOINT>"
     call_interval: 1500
     block_confirmations: 5
     is_native: true
@@ -22,7 +22,7 @@ evm_providers:
     relayer_manager_address: "0x0000000000000000000000000000000000002000"
   - name: "ethereum"
     id: 1
-    provider: ""
+    provider: "<YOUR_ETHEREUM_RPC_ENDPOINT>"
     call_interval: 6000
     block_confirmations: 1
     is_relay_target: false
@@ -30,11 +30,11 @@ evm_providers:
     socket_address: "0x4A31FfeAc276CC5e508cAC0568d932d398C4DD84"
     vault_address: "0x2F95C102Cc26875406BC689Fb01aE382B82AA535"
     authority_address: "0xAdcaa90cabDc730855064d5b0f5242c16A9B7E10"
-    chainlink_usdc_usd_address: "0x8fFfFfd4AfB6115b954Bd326cbe7B4BA576818f6",
-    chainlink_usdt_usd_address: "0x3E7d1eAB13ad0104d2750B8863b489D65364e32D",
+    chainlink_usdc_usd_address: "0x8fFfFfd4AfB6115b954Bd326cbe7B4BA576818f6"
+    chainlink_usdt_usd_address: "0x3E7d1eAB13ad0104d2750B8863b489D65364e32D"
   - name: "bsc"
     id: 56
-    provider: ""
+    provider: "<YOUR_BSC_RPC_ENDPOINT>"
     call_interval: 1500
     block_confirmations: 5
     is_relay_target: false
@@ -43,7 +43,7 @@ evm_providers:
     authority_address: "0xF0500d77d5446665314722b963ab1F71872063E9"
   - name: "polygon"
     id: 137
-    provider: ""
+    provider: "<YOUR_POLYGON_RPC_ENDPOINT>"
     call_interval: 1000
     block_confirmations: 7
     is_relay_target: false
@@ -55,9 +55,9 @@ evm_providers:
 
 handler_configs:
   - handler_type: BridgeRelay
-    watch_list: [ 3068, 1, 56, 137 ]
+    watch_list: [3068, 1, 56, 137]
   - handler_type: Roundup
-    watch_list: [ 3068 ]
+    watch_list: [3068]
 
 periodic_configs:
   oracle_price_feeder:
@@ -67,7 +67,8 @@ periodic_configs:
   heartbeat: "0 * * * * * *" # Every minute.
 
 sentry_config:
-  dsn: ""
+  is_enabled: false
+  dsn: "<YOUR_SENTRY_DSN>"
 
 prometheus_config:
   is_enabled: false

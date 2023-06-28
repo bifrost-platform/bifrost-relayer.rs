@@ -28,7 +28,7 @@ pub struct OraclePriceFeeder<T> {
 	pub schedule: Schedule,
 	/// The primary source for fetching prices. (Coingecko)
 	pub primary_source: Vec<PriceFetchers<T>>,
-	/// The secondary source for fetching prices. (aggregate from sources)
+	/// The secondary source for fetching prices. (aggregated from external sources)
 	pub secondary_sources: Vec<PriceFetchers<T>>,
 	/// The event sender that sends messages to the event channel.
 	pub event_sender: Arc<EventSender>,
@@ -38,7 +38,7 @@ pub struct OraclePriceFeeder<T> {
 	pub asset_oid: BTreeMap<String, H256>,
 	/// The `EthClient` to interact with the bifrost network.
 	pub client: Arc<EthClient<T>>,
-	/// `EthClient`s.
+	/// The vector that contains each `EthClient`.
 	clients: Vec<Arc<EthClient<T>>>,
 }
 
@@ -54,7 +54,7 @@ impl<T: JsonRpcClient + 'static> PeriodicWorker for OraclePriceFeeder<T> {
 				if self.primary_source.len() == 0 {
 					log::warn!(
 						target: &self.client.get_chain_name(),
-						"-[{}] ❗️ Failed to initialize primary fetcher. Try fetch with secondary sources.",
+						"-[{}] ⚠️  Failed to initialize primary fetcher. Trying to fetch with secondary sources.",
 						sub_display_format(SUB_LOG_TARGET),
 					);
 					self.try_with_secondary().await;
@@ -104,15 +104,15 @@ impl<T: JsonRpcClient + 'static> OraclePriceFeeder<T> {
 
 	async fn try_with_primary(&self) {
 		match self.primary_source[0].get_tickers().await {
-			// If coingecko works well.
+			// If primary source works well.
 			Ok(price_responses) => {
 				self.build_and_send_transaction(price_responses).await;
 			},
-			// If coingecko works not well.
+			// If primary source fails.
 			Err(_) => {
 				log::warn!(
 					target: &self.client.get_chain_name(),
-					"-[{}] ❗️ Failed to fetch price feed data from primary source. Retry fetch with secondary sources.",
+					"-[{}] ⚠️  Failed to fetch price feed data from the primary source. Retrying to fetch with secondary sources.",
 					sub_display_format(SUB_LOG_TARGET),
 				);
 

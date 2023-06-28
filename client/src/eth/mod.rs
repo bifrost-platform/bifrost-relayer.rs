@@ -61,11 +61,11 @@ pub struct EthClient<T> {
 	pub vault: VaultContract<Provider<T>>,
 	/// AuthorityContract
 	pub authority: AuthorityContract<Provider<T>>,
-	/// RelayerManagerContract (only available on BIFROST)
+	/// RelayerManagerContract (BIFROST only)
 	pub relayer_manager: Option<RelayerManagerContract<Provider<T>>>,
-	/// Chainlink usdc/usd aggregator (Ethereum only)
+	/// Chainlink usdc/usd aggregator
 	pub chainlink_usdc_usd: Option<ChainlinkContract<Provider<T>>>,
-	/// Chainlink usdt/usd aggregator (Ethereum only)
+	/// Chainlink usdt/usd aggregator
 	pub chainlink_usdt_usd: Option<ChainlinkContract<Provider<T>>>,
 }
 

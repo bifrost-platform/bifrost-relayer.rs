@@ -13,7 +13,6 @@ repository = { workspace = true }
 log = { workspace = true }
 sentry = { workspace = true }
 async-trait = { workspace = true }
-
 chrono = { workspace = true }
 cron = { workspace = true }
 ethers = { workspace = true }
