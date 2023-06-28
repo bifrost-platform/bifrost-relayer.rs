@@ -51,6 +51,7 @@ tokio-stream = "0.1"
 sc-cli = { git = "https://github.com/bifrost-platform/bifrost-substrate", branch = "bifrost-polkadot-v0.9.39" }
 sc-utils = { git = "https://github.com/bifrost-platform/bifrost-substrate", branch = "bifrost-polkadot-v0.9.39" }
 sc-service = { git = "https://github.com/bifrost-platform/bifrost-substrate", branch = "bifrost-polkadot-v0.9.39" }
+sc-sysinfo = { git = "https://github.com/bifrost-platform/bifrost-substrate", branch = "bifrost-polkadot-v0.9.39" }
 prometheus-endpoint = { package = "substrate-prometheus-endpoint", git = "https://github.com/bifrost-platform/bifrost-substrate", branch = "bifrost-polkadot-v0.9.39" }
 
 # Substrate Builds
