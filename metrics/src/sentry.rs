@@ -7,10 +7,9 @@ pub fn build_sentry_client(
 	sentry_config: Option<SentryConfig>,
 ) -> Option<ClientInitGuard> {
 	if let Some(sentry_config) = sentry_config {
-		let dsn = sentry_config.dsn.unwrap();
-		if !dsn.is_empty() {
+		if sentry_config.is_enabled && !sentry_config.dsn.is_empty() {
 			let sentry_client = sentry::init((
-				dsn,
+				sentry_config.dsn,
 				sentry::ClientOptions {
 					release: sentry::release_name!(),
 					environment: Some(id.into()),
