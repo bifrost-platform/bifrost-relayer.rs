@@ -153,7 +153,7 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> {
 			for (_nonce, transaction) in transactions {
 				self.try_send_transaction(EventMessage::new(
 					self.stuck_transaction_to_transaction_request(&transaction).await,
-					EventMetadata::Flush(FlushMetadata::new()),
+					EventMetadata::Flush(FlushMetadata::default()),
 					false,
 					false,
 					GasCoefficient::Low,
