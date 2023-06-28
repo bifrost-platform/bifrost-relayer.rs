@@ -961,6 +961,7 @@ dependencies = [
  "log",
  "sc-cli",
  "sc-service",
+ "sc-sysinfo",
  "serde_yaml",
  "substrate-build-script-utils",
  "substrate-prometheus-endpoint",

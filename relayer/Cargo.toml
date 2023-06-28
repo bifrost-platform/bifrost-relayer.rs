@@ -30,6 +30,7 @@ cccp-metrics = { path = "../metrics" }
 # Substrate
 sc-cli = { workspace = true }
 sc-service = { workspace = true }
+sc-sysinfo = { workspace = true }
 prometheus-endpoint = { workspace = true }
 
 [build-dependencies]
