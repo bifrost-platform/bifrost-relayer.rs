@@ -1,0 +1,7 @@
+Dockerfile
+.editorconfig
+.gitignore
+target
+media
+.idea
+.github
