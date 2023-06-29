@@ -20,9 +20,9 @@ serde = { workspace = true, features = ["derive"] }
 tokio = { workspace = true, features = ["signal", "rt-multi-thread", "parking_lot"] }
 
 # CCCP
-cccp-client = { path = "../../client" }
-cccp-primitives = { path = "../../primitives" }
-cccp-metrics = { path = "../../metrics" }
+cccp-client = { path = "../../client", default-features = false }
+cccp-primitives = { path = "../../primitives", default-features = false }
+cccp-metrics = { path = "../../metrics", default-features = false }
 
 # Substrate
 sc-service = { workspace = true }
