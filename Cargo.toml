@@ -22,7 +22,7 @@ repository = "https://github.com/bifrost-platform/cccp-relayer"
 # General
 log = "0.4.17"
 env_logger = "0.10.0"
-sentry = "0.30.0"
+sentry = "0.31.5"
 
 async-trait = "0.1.57"
 async-recursion = "1.0.4"
