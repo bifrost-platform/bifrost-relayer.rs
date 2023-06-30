@@ -1,0 +1,8 @@
+Dockerfile
+Cargo.lock
+.editorconfig
+.gitignore
+target
+media
+.idea
+.github
