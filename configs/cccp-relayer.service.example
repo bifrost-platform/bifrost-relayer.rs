@@ -9,7 +9,7 @@ Restart=on-failure
 SyslogIdentifier=cccp-relayer
 SyslogFacility=local7
 WorkingDirectory=<PATH_TO_CCCP_RELAYER>
-ExecStart=<PATH_TO_CCCP_RELAYER> --chain <Mainnet|Testnet|<PATH_TO_CONFIG_FILE>>
+ExecStart=<PATH_TO_CCCP_RELAYER> --chain <mainnet|testnet|<PATH_TO_CONFIG_FILE>>
 KillSignal=SIGHUP
 
 [Install]

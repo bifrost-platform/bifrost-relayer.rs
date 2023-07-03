@@ -102,11 +102,11 @@ pub struct EVMProvider {
 	pub vault_address: String,
 	/// Authority contract address
 	pub authority_address: String,
-	/// Relayer manager contract address (Only for Bifrost network)
+	/// Relayer manager contract address (BIFROST only)
 	pub relayer_manager_address: Option<String>,
-	/// Chainlink usdc/usd aggregator (Ethereum only)
+	/// Chainlink usdc/usd aggregator
 	pub chainlink_usdc_usd_address: Option<String>,
-	/// Chainlink usdt/usd aggregator (Ethereum only)
+	/// Chainlink usdt/usd aggregator
 	pub chainlink_usdt_usd_address: Option<String>,
 }
 
@@ -163,15 +163,17 @@ pub struct BootstrapConfig {
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct SentryConfig {
+	/// Builds a Sentry client.
+	pub is_enabled: bool,
 	/// The DSN that tells Sentry where to send the events to.
-	pub dsn: Option<String>,
+	pub dsn: String,
 }
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct PrometheusConfig {
 	/// Expose a Prometheus exporter endpoint.
 	///
-	/// Prometheus metric endpoint is enabled by default.
+	/// Prometheus metric endpoint is disabled by default.
 	pub is_enabled: bool,
 	/// Expose Prometheus exporter on all interfaces.
 	///

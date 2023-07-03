@@ -21,15 +21,16 @@ clap = { workspace = true, features = ["derive"] }
 tokio = { workspace = true, features = ["signal", "rt-multi-thread", "parking_lot"] }
 
 # CCCP
-cc-cli = { path = "../client/cli" }
-cccp-client = { path = "../client" }
-cccp-periodic = { path = "../periodic" }
-cccp-primitives = { path = "../primitives" }
-cccp-metrics = { path = "../metrics" }
+cc-cli = { path = "../client/cli", default-features = false }
+cccp-client = { path = "../client", default-features = false }
+cccp-periodic = { path = "../periodic", default-features = false }
+cccp-primitives = { path = "../primitives", default-features = false }
+cccp-metrics = { path = "../metrics", default-features = false }
 
 # Substrate
 sc-cli = { workspace = true }
 sc-service = { workspace = true }
+sc-sysinfo = { workspace = true }
 prometheus-endpoint = { workspace = true }
 
 [build-dependencies]

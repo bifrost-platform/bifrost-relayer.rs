@@ -24,8 +24,8 @@ k256 = { workspace = true, features = ["ecdsa"] }
 sha3 = { workspace = true }
 
 # CCCP
-cccp-primitives = { path = "../primitives" }
-cccp-metrics = { path = "../metrics" }
+cccp-primitives = { path = "../primitives", default-features = false }
+cccp-metrics = { path = "../metrics", default-features = false }
 
 [dev-dependencies]
 serde_json = { workspace = true }

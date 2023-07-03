@@ -72,9 +72,9 @@ impl<T: JsonRpcClient> UpbitPriceFetcher<T> {
 			.into_iter()
 			.map(|symbol| {
 				if symbol.contains("BFC") {
-					format!("BTC-{}", symbol).to_string()
+					format!("BTC-{}", symbol)
 				} else {
-					format!("KRW-{}", symbol).to_string()
+					format!("KRW-{}", symbol)
 				}
 			})
 			.collect();
@@ -91,7 +91,7 @@ impl<T: JsonRpcClient> UpbitPriceFetcher<T> {
 		response: UpbitResponse,
 	) -> Result<(String, PriceResponse), Error> {
 		if response.market.contains("KRW-") {
-			return match krw_to_usd(parse_ether(response.trade_price).unwrap()).await {
+			match krw_to_usd(parse_ether(response.trade_price).unwrap()).await {
 				Ok(usd_price) => Ok((
 					response.market.replace("KRW-", ""),
 					PriceResponse {
@@ -102,7 +102,7 @@ impl<T: JsonRpcClient> UpbitPriceFetcher<T> {
 				Err(_) => Err(Error::default()),
 			}
 		} else if response.market.contains("BTC-") {
-			return match self.btc_to_krw(response.trade_price).await {
+			match self.btc_to_krw(response.trade_price).await {
 				Ok(krw_price) => match krw_to_usd(krw_price).await {
 					Ok(usd_price) => Ok((
 						response.market.replace("BTC-", ""),
@@ -121,8 +121,7 @@ impl<T: JsonRpcClient> UpbitPriceFetcher<T> {
 	}
 
 	async fn btc_to_krw(&self, btc_amount: f64) -> Result<U256, Error> {
-		return match self._send_request(self.base_url.join("ticker?markets=KRW-BTC").unwrap()).await
-		{
+		match self._send_request(self.base_url.join("ticker?markets=KRW-BTC").unwrap()).await {
 			Ok(response) => {
 				let btc_price = response[0].trade_price;
 				Ok(parse_ether(btc_price * btc_amount).unwrap())
@@ -132,7 +131,7 @@ impl<T: JsonRpcClient> UpbitPriceFetcher<T> {
 	}
 
 	async fn _send_request(&self, url: Url) -> Result<Vec<UpbitResponse>, Error> {
-		return match reqwest::get(url).await {
+		match reqwest::get(url).await {
 			Ok(response) => match response.json::<Vec<UpbitResponse>>().await {
 				Ok(response) => Ok(response),
 				Err(_) => Err(Error::default()),

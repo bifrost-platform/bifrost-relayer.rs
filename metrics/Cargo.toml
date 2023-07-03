@@ -15,7 +15,7 @@ sentry = { workspace = true }
 ethers = { workspace = true }
 
 # CCCP
-cccp-primitives = { path = "../primitives" }
+cccp-primitives = { path = "../primitives", default-features = false }
 
 # Substrate
 prometheus-endpoint = { workspace = true }

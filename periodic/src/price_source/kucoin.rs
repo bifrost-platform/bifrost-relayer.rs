@@ -64,7 +64,7 @@ impl<T: JsonRpcClient> KucoinPriceFetcher<T> {
 	}
 
 	async fn _send_request(&self, url: Url) -> Result<KucoinResponse, Error> {
-		return match reqwest::get(url).await {
+		match reqwest::get(url).await {
 			Ok(response) => match response.json::<KucoinResponse>().await {
 				Ok(response) => Ok(response),
 				Err(_) => Err(Error::default()),
