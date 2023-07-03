@@ -1,4 +1,4 @@
-use cccp_primitives::sub_display_format;
+use br_primitives::sub_display_format;
 use chrono::{Datelike, Local};
 use clap::{CommandFactory, FromArgMatches, Parser};
 
@@ -68,7 +68,7 @@ impl Cli {
 
 	/// Implementation name.
 	fn impl_name() -> String {
-		"BIFROST Relayer".into()
+		"Bifrost Relayer".into()
 	}
 
 	/// Implementation version.
@@ -153,7 +153,7 @@ impl Cli {
 	}
 }
 
-pub const LOG_TARGET: &str = "cccp-relayer";
+pub const LOG_TARGET: &str = "bifrost-relayer";
 pub const SUB_LOG_TARGET: &str = "main";
 
 const TESTNET_CONFIG_FILE_PATH: &str = "configs/config.testnet.yaml";

@@ -3,7 +3,7 @@ mod service;
 
 use std::io::Write;
 
-use cc_cli::{
+use br_cli::{
 	create_configuration,
 	runner::{build_runtime, Runner},
 };

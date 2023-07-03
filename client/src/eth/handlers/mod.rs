@@ -1,8 +1,8 @@
 mod bridge_relay_handler;
 mod roundup_relay_handler;
 
+use br_primitives::eth::BootstrapState;
 pub use bridge_relay_handler::*;
-use cccp_primitives::eth::BootstrapState;
 pub use roundup_relay_handler::*;
 
 use ethers::types::{Log, TransactionReceipt, H256};

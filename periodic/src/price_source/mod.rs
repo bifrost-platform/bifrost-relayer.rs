@@ -4,8 +4,8 @@ use async_trait::async_trait;
 use ethers::{providers::JsonRpcClient, types::U256};
 use serde::Deserialize;
 
-use cccp_client::eth::EthClient;
-use cccp_primitives::periodic::{PriceFetcher, PriceResponse, PriceSource};
+use br_client::eth::EthClient;
+use br_primitives::periodic::{PriceFetcher, PriceResponse, PriceSource};
 
 use crate::price_source::{
 	binance::BinancePriceFetcher, chainlink::ChainlinkPriceFetcher,

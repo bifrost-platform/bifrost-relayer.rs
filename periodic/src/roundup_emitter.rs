@@ -1,8 +1,8 @@
-use cccp_client::eth::{
+use br_client::eth::{
 	BootstrapHandler, EthClient, EventMessage, EventMetadata, EventSender, TxRequest,
 	VSPPhase1Metadata,
 };
-use cccp_primitives::{
+use br_primitives::{
 	authority::RoundMetaData,
 	cli::BootstrapConfig,
 	errors::INVALID_PERIODIC_SCHEDULE,

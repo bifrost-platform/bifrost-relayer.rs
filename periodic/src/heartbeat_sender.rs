@@ -1,7 +1,7 @@
-use cccp_client::eth::{
+use br_client::eth::{
 	EthClient, EventMessage, EventMetadata, EventSender, HeartbeatMetadata, TxRequest,
 };
-use cccp_primitives::{
+use br_primitives::{
 	errors::{INVALID_BIFROST_NATIVENESS, INVALID_PERIODIC_SCHEDULE},
 	eth::GasCoefficient,
 	sub_display_format, PeriodicWorker,
