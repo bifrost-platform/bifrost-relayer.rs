@@ -267,15 +267,17 @@ pub struct BootstrapConfig {
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct SentryConfig {
+	/// Builds a Sentry client.
+	pub is_enabled: bool,
 	/// The DSN that tells Sentry where to send the events to.
-	pub dsn: Option<String>,
+	pub dsn: String,
 }
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct PrometheusConfig {
 	/// Expose a Prometheus exporter endpoint.
 	///
-	/// Prometheus metric endpoint is enabled by default.
+	/// Prometheus metric endpoint is disabled by default.
 	pub is_enabled: bool,
 	/// Expose Prometheus exporter on all interfaces.
 	///
