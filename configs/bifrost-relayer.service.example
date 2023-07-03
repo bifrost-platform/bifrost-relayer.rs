@@ -8,7 +8,7 @@ Type=simple
 Restart=on-failure
 SyslogIdentifier=bifrost-relayer
 SyslogFacility=local7
-WorkingDirectory=<PATH_TO_BIFROST_RELAYER>
+WorkingDirectory=<DIRECTORY_WHERE_BIFROST_RELAYER_LOCATES>
 ExecStart=<PATH_TO_BIFROST_RELAYER> --chain <mainnet|testnet|<PATH_TO_CONFIG_FILE>>
 KillSignal=SIGHUP
 
