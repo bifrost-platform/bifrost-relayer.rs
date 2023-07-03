@@ -12,8 +12,8 @@ Learn to use the BIFROST network with our [technical docs](https://docs.bifrostn
 |------|
 |https://public-01.testnet.bifrostnetwork.com/rpc|
 |https://public-02.testnet.bifrostnetwork.com/rpc|
-|wss://public-01.testnet.bifrostnetwork.com/ws|
-|wss://public-02.testnet.bifrostnetwork.com/ws|
+|wss://public-01.testnet.bifrostnetwork.com/wss|
+|wss://public-02.testnet.bifrostnetwork.com/wss|
 
 ### BIFROST Network Mainnet (ChainID: 3068)
 |Public Endpoints (rpc/ws)|
@@ -24,7 +24,7 @@ Learn to use the BIFROST network with our [technical docs](https://docs.bifrostn
 |wss://public-02.mainnet.bifrostnetwork.com/wss|
 
 ### Install Requirements
-To initiate the CCCP Relayer, certain dependencies must be manually installed. Both the executable binary file and the configuration YAML file are essential for all environments and operators. For Linux instances only, OpenSSL 1.1.1 should be installed additionally.
+To initiate the CCCP Relayer, certain dependencies must be manually installed. Both the executable binary file and the configuration YAML file are essential for all environments and operators.
 
 First, install the latest CCCP Relayer released binary.
 ```sh
@@ -43,12 +43,6 @@ wget "https://github.com/bifrost-platform/cccp-relayer/releases/latest/download/
 
 # For mainnet only
 wget "https://github.com/bifrost-platform/cccp-relayer/releases/latest/download/config.mainnet.yaml"
-```
-
-For Linux instances, OpenSSL 1.1.1 should be installed. You can install it using the following command.
-```sh
-wget http://nz2.archive.ubuntu.com/ubuntu/pool/main/o/openssl/libssl1.1_1.1.1f-1ubuntu2_amd64.deb
-sudo dpkg -i libssl1.1_1.1.1f-1ubuntu2_amd64.deb
 ```
 
 ### Configuration Setup
