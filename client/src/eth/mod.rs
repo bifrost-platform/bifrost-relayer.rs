@@ -314,7 +314,7 @@ pub struct EthClient<T> {
 		let mut error_msg = String::default();
 
 		while retries_remaining > 0 {
-			cccp_metrics::increase_rpc_calls(&self.get_chain_name());
+			br_metrics::increase_rpc_calls(&self.get_chain_name());
 			match self.provider.request(method, params.clone()).await {
 				Ok(result) => return result,
 				Err(error) => {
@@ -346,7 +346,7 @@ pub struct EthClient<T> {
 		let mut error_msg = String::default();
 
 		while retries_remaining > 0 {
-			cccp_metrics::increase_rpc_calls(&self.get_chain_name());
+			br_metrics::increase_rpc_calls(&self.get_chain_name());
 			match raw_call.call().await {
 				Ok(result) => return result,
 				Err(error) => {

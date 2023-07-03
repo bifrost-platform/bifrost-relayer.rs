@@ -1,7 +1,7 @@
 use async_recursion::async_recursion;
 
 use crate::eth::{FlushMetadata, TxRequest, DEFAULT_CALL_RETRIES, DEFAULT_CALL_RETRY_INTERVAL_MS};
-use cccp_primitives::{
+use br_primitives::{
 	eth::{GasCoefficient, ETHEREUM_BLOCK_TIME},
 	sub_display_format,
 };
@@ -142,7 +142,7 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> {
 	async fn flush_stuck_transaction(&self) {
 		if self.is_txpool_enabled && !self.client.is_native {
 			let mempool = self.client.get_txpool_content().await;
-			cccp_metrics::increase_rpc_calls(&self.client.get_chain_name());
+			br_metrics::increase_rpc_calls(&self.client.get_chain_name());
 
 			let mut transactions = Vec::new();
 			transactions
@@ -240,7 +240,7 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> {
 				.unwrap(),
 			false => match self.middleware.get_gas_price().await {
 				Ok(gas_price) => {
-					cccp_metrics::increase_rpc_calls(&self.client.get_chain_name());
+					br_metrics::increase_rpc_calls(&self.client.get_chain_name());
 					gas_price
 				},
 				Err(error) =>
@@ -254,7 +254,7 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> {
 	async fn get_estimated_eip1559_fees(&self) -> (U256, U256) {
 		match self.middleware.estimate_eip1559_fees(None).await {
 			Ok(fees) => {
-				cccp_metrics::increase_rpc_calls(&self.client.get_chain_name());
+				br_metrics::increase_rpc_calls(&self.client.get_chain_name());
 				fees
 			},
 			Err(error) =>
@@ -297,7 +297,7 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> {
 		let estimated_gas =
 			match self.middleware.estimate_gas(&msg.tx_request.to_typed(), None).await {
 				Ok(estimated_gas) => {
-					cccp_metrics::increase_rpc_calls(&self.client.get_chain_name());
+					br_metrics::increase_rpc_calls(&self.client.get_chain_name());
 					U256::from(
 						(estimated_gas.as_u64() as f64 * msg.gas_coefficient.into_f64()).ceil()
 							as u64,
@@ -329,7 +329,7 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> {
 			} else {
 				self.middleware.send_transaction(msg.tx_request.to_legacy(), None).await
 			};
-			cccp_metrics::increase_rpc_calls(&self.client.get_chain_name());
+			br_metrics::increase_rpc_calls(&self.client.get_chain_name());
 
 			match result {
 				Ok(pending_tx) => match pending_tx.await {
@@ -375,7 +375,7 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> {
 		};
 
 		let mempool = self.client.get_txpool_content().await;
-		cccp_metrics::increase_rpc_calls(&self.client.get_chain_name());
+		br_metrics::increase_rpc_calls(&self.client.get_chain_name());
 
 		for (_address, tx_map) in mempool.pending.iter().chain(mempool.queued.iter()) {
 			for (_nonce, mempool_tx) in tx_map.iter() {
@@ -429,7 +429,7 @@ impl<T: 'static + JsonRpcClient> OnSuccessHandler for TransactionManager<T> {
 					sentry::Level::Warning,
 				);
 		}
-		cccp_metrics::set_payed_fees(&self.client.get_chain_name(), &receipt);
+		br_metrics::set_payed_fees(&self.client.get_chain_name(), &receipt);
 	}
 }
 
@@ -525,7 +525,7 @@ impl<T: 'static + JsonRpcClient> OnFailHandler for TransactionManager<T> {
 		let mut last_error = error;
 
 		while retries > 0 {
-			cccp_metrics::increase_rpc_calls(&self.client.get_chain_name());
+			br_metrics::increase_rpc_calls(&self.client.get_chain_name());
 
 			if self.debug_mode {
 				log::warn!(
@@ -572,7 +572,7 @@ impl<T: 'static + JsonRpcClient> OnFailHandler for TransactionManager<T> {
 		let mut last_error = error;
 
 		while retries > 0 {
-			cccp_metrics::increase_rpc_calls(&self.client.get_chain_name());
+			br_metrics::increase_rpc_calls(&self.client.get_chain_name());
 
 			if self.debug_mode {
 				log::warn!(
