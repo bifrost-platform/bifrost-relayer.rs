@@ -21,10 +21,11 @@ use super::{BootstrapHandler, EthClient};
 #[derive(Clone, Debug)]
 /// The message format passed through the block channel.
 pub struct BlockMessage {
-	/// The information of the processed block.
+	/// The processed block number.
 	pub block_number: U64,
+	/// The processed block hash.
 	pub block_hash: H256,
-	/// The transaction receipts from the target contracts.
+	/// The detected transaction receipts from the target contracts.
 	pub target_receipts: Vec<TransactionReceipt>,
 }
 

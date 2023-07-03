@@ -38,15 +38,14 @@ impl<T: JsonRpcClient> PriceFetcher for CoingeckoPriceFetcher<T> {
 			.join(&format!("simple/price?ids={}&vs_currencies=usd", id))
 			.unwrap();
 
-		let price = self
+		let price = *self
 			._send_request(url)
 			.await
 			.unwrap()
 			.get(id)
 			.expect("Cannot find symbol in response")
 			.get("usd")
-			.expect("Cannot find usd price in response")
-			.clone();
+			.expect("Cannot find usd price in response");
 
 		Ok(PriceResponse { price: parse_ether(price).unwrap(), volume: None })
 	}

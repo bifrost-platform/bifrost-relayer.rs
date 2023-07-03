@@ -13,17 +13,16 @@ repository = { workspace = true }
 log = { workspace = true }
 sentry = { workspace = true }
 async-trait = { workspace = true }
-
 chrono = { workspace = true }
 cron = { workspace = true }
 ethers = { workspace = true }
 serde_json = { workspace = true }
 serde_yaml = { workspace = true }
-reqwest = { workspace = true, features = ["json"] }
+reqwest = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 tokio = { workspace = true, features = ["macros"] }
 
 # CCCP
-cc-cli = { path = "../client/cli" }
-cccp-client = { path = "../client" }
-cccp-primitives = { path = "../primitives" }
+cc-cli = { path = "../client/cli", default-features = false }
+cccp-client = { path = "../client", default-features = false }
+cccp-primitives = { path = "../primitives", default-features = false }

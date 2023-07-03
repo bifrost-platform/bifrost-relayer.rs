@@ -15,7 +15,7 @@ cron = { workspace = true }
 ethers = { workspace = true }
 thiserror = { workspace = true }
 async-trait = { workspace = true }
-reqwest = { workspace = true, features = ["json"] }
+reqwest = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true, features = ["alloc"] }
 tokio = { workspace = true, features = ["signal", "rt-multi-thread", "parking_lot", "macros"] }

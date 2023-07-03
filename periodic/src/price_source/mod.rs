@@ -39,7 +39,7 @@ struct CurrencyResponse {
 
 /// Outputs the `usd * 10**18 price` of the `krw * 10**18 price` entered.
 pub async fn krw_to_usd(krw_amount: U256) -> Result<U256, Error> {
-	return match reqwest::get(
+	match reqwest::get(
 		"https://cdn.jsdelivr.net/gh/fawazahmed0/currency-api@1/latest/currencies/krw/usd.min.json",
 	)
 	.await
@@ -78,7 +78,7 @@ impl<T: JsonRpcClient> PriceFetchers<T> {
 		match exchange {
 			PriceSource::Binance => Ok(PriceFetchers::Binance(BinancePriceFetcher::new().await?)),
 			PriceSource::Chainlink =>
-				Ok(PriceFetchers::Chainlink(ChainlinkPriceFetcher::new(client).await.into())),
+				Ok(PriceFetchers::Chainlink(ChainlinkPriceFetcher::new(client).await)),
 			PriceSource::Coingecko =>
 				Ok(PriceFetchers::CoinGecko(CoingeckoPriceFetcher::new().await?)),
 			PriceSource::Gateio => Ok(PriceFetchers::Gateio(GateioPriceFetcher::new().await?)),

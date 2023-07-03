@@ -1,8 +1,8 @@
 use cccp_primitives::{errors::INVALID_PRIVATE_KEY, eth::ChainID};
 use ethers::{
-	prelude::{k256::ecdsa::SigningKey, rand},
-	signers::{coins_bip39::English, LocalWallet, MnemonicBuilder, Signer},
-	types::{Address, PathOrString, Signature, U256},
+	prelude::k256::ecdsa::SigningKey,
+	signers::{LocalWallet, Signer},
+	types::{Address, Signature, U256},
 	utils::{hex::FromHex, keccak256},
 };
 use k256::{
@@ -11,7 +11,6 @@ use k256::{
 	PublicKey as K256PublicKey,
 };
 use sha3::{Digest, Keccak256};
-use std::{fs, path::PathBuf};
 
 type WalletResult<T = ()> = Result<T, Box<dyn std::error::Error + Send + Sync>>;
 
@@ -22,27 +21,6 @@ pub struct WalletManager {
 }
 
 impl WalletManager {
-	pub fn new(output_path: PathBuf, chain_id: ChainID) -> WalletResult<Self> {
-		let mut rng = rand::thread_rng();
-
-		fs::create_dir_all(&output_path)?;
-
-		let wallet = MnemonicBuilder::<English>::default()
-			.write_to(output_path)
-			.build_random(&mut rng)?;
-
-		Ok(Self { signer: wallet.with_chain_id(chain_id), secret_key: None })
-	}
-
-	pub fn from_phrase_or_file<P: Into<PathOrString>>(
-		input_path: P,
-		chain_id: ChainID,
-	) -> WalletResult<Self> {
-		let wallet = MnemonicBuilder::<English>::default().phrase(input_path).build()?;
-
-		Ok(Self { signer: wallet.with_chain_id(chain_id), secret_key: None })
-	}
-
 	/// Initialize `WalletManager` by the given private key.
 	pub fn from_private_key(private_key: &str, chain_id: ChainID) -> WalletResult<Self> {
 		assert_eq!(private_key.len(), 66, "{}", INVALID_PRIVATE_KEY);
