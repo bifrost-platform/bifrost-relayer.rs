@@ -80,7 +80,7 @@ handler_configs:
   - handler_type: Socket
     watch_list: [3068, 1, 56, 137, 8453, 42161]
   - handler_type: Roundup
-    watch_list: [ 3068 ]
+    watch_list: [3068]
 
 ###  The items below are optional. ###
 
