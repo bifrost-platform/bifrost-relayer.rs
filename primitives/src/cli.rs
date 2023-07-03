@@ -40,8 +40,6 @@ pub struct Configuration {
 pub struct RelayerConfig {
 	/// System config
 	pub system: SystemConfig,
-	/// BTC config
-	pub bitcoin: BitcoinConfig,
 	/// EVM configs
 	pub evm_providers: Vec<EVMProvider>,
 	/// Handler configs
@@ -64,16 +62,6 @@ pub struct SystemConfig {
 	pub private_key: String,
 	/// Debug mode enabled if set to `true`.
 	pub debug_mode: bool,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-pub struct BitcoinConfig {
-	/// BTC rpc provider url with port.
-	pub provider: String,
-	/// Username for BTC rpc authentication.
-	pub username: String,
-	/// Password for BTC rpc authentication.
-	pub password: String,
 }
 
 #[derive(Debug, Clone, Deserialize)]

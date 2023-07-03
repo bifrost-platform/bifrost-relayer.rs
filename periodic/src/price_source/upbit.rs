@@ -4,7 +4,7 @@ use ethers::{providers::JsonRpcClient, types::U256, utils::parse_ether};
 use reqwest::Url;
 use serde::Deserialize;
 
-use cccp_primitives::periodic::{PriceFetcher, PriceResponse};
+use br_primitives::periodic::{PriceFetcher, PriceResponse};
 
 use crate::price_source::krw_to_usd;
 

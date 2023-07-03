@@ -9,7 +9,7 @@ use ethers::types::{
 };
 use tokio::sync::mpsc::{error::SendError, UnboundedSender};
 
-use cccp_primitives::{
+use br_primitives::{
 	eth::{ChainID, GasCoefficient, SocketEventStatus},
 	PriceResponse,
 };

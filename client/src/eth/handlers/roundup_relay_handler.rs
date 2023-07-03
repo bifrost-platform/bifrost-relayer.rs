@@ -3,7 +3,7 @@ use crate::eth::{
 	VSPPhase2Metadata,
 };
 use async_trait::async_trait;
-use cccp_primitives::{
+use br_primitives::{
 	authority::RoundMetaData,
 	cli::BootstrapConfig,
 	eth::{

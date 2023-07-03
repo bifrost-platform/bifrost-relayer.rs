@@ -5,7 +5,7 @@ use reqwest::{Response, Url};
 use serde::Deserialize;
 use tokio::time::{sleep, Duration};
 
-use cccp_primitives::{
+use br_primitives::{
 	periodic::{PriceFetcher, PriceResponse},
 	sub_display_format,
 };
@@ -129,12 +129,12 @@ impl<T: JsonRpcClient> CoingeckoPriceFetcher<T> {
 						},
 						Err(e) => {
 							log::error!(
-							target: LOG_TARGET,
-							"-[{}] ❗️ Error decoding support coin list: {}, Retry in {:?} secs...",
-							sub_display_format(SUB_LOG_TARGET),
-							e.to_string(),
-							retry_interval
-						);
+								target: LOG_TARGET,
+								"-[{}] ❗️ Error decoding support coin list: {}, Retry in {:?} secs...",
+								sub_display_format(SUB_LOG_TARGET),
+								e.to_string(),
+								retry_interval
+							);
 							Err(Error::default())
 						},
 					},
