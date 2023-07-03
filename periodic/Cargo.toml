@@ -1,7 +1,7 @@
 [package]
-name = "cccp-periodic"
+name = "br-periodic"
 version = "0.1.0"
-description = "The offchain implementation for BIFROST relayer"
+description = "The offchain implementation for Bifrost relayer"
 authors = { workspace = true }
 homepage = { workspace = true }
 edition = { workspace = true }
@@ -22,7 +22,7 @@ reqwest = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 tokio = { workspace = true, features = ["macros"] }
 
-# CCCP
-cc-cli = { path = "../client/cli", default-features = false }
-cccp-client = { path = "../client", default-features = false }
-cccp-primitives = { path = "../primitives", default-features = false }
+# Bifrost Relayer
+br-cli = { path = "../client/cli", default-features = false }
+br-client = { path = "../client", default-features = false }
+br-primitives = { path = "../primitives", default-features = false }

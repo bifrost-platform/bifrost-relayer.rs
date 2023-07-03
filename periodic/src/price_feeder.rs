@@ -9,10 +9,10 @@ use ethers::{
 };
 use tokio::time::sleep;
 
-use cccp_client::eth::{
+use br_client::eth::{
 	EthClient, EventMessage, EventMetadata, EventSender, PriceFeedMetadata, TxRequest,
 };
-use cccp_primitives::{
+use br_primitives::{
 	cli::PriceFeederConfig, errors::INVALID_PERIODIC_SCHEDULE, eth::GasCoefficient,
 	periodic::PeriodicWorker, socket::get_asset_oids, sub_display_format, PriceFetcher,
 	PriceResponse, PriceSource, INVALID_BIFROST_NATIVENESS,

@@ -1,4 +1,4 @@
-use cccp_primitives::cli::{Configuration, Result as CliResult};
+use br_primitives::cli::{Configuration, Result as CliResult};
 
 use sc_service::{Error as ServiceError, TaskManager};
 use sc_utils::metrics::{TOKIO_THREADS_ALIVE, TOKIO_THREADS_TOTAL};
@@ -47,7 +47,7 @@ pub fn build_runtime() -> Result<tokio::runtime::Runtime, std::io::Error> {
 		.build()
 }
 
-/// A CCCP-Relayer CLI runtime that can be used to run a relayer
+/// A Bifrost-Relayer CLI runtime that can be used to run a relayer
 pub struct Runner {
 	config: Configuration,
 	tokio_runtime: tokio::runtime::Runtime,
@@ -59,7 +59,7 @@ impl Runner {
 		Ok(Runner {
 			config: config.clone(),
 			tokio_runtime,
-			sentry_client: cccp_metrics::build_sentry_client(
+			sentry_client: br_metrics::build_sentry_client(
 				config.relayer_config.system.id,
 				config.relayer_config.sentry_config,
 			),

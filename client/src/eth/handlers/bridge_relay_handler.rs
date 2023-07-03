@@ -1,6 +1,6 @@
 use std::{collections::BTreeMap, str::FromStr, sync::Arc, time::Duration};
 
-use cccp_primitives::{
+use br_primitives::{
 	authority::RoundMetaData,
 	cli::BootstrapConfig,
 	eth::{
@@ -690,7 +690,7 @@ impl<T: JsonRpcClient> BootstrapHandler for BridgeRelayHandler<T> {
 			}
 
 			log::info!(
-				target: "cccp-relayer",
+				target: "bifrost-relayer",
 				"-[{}] ⚙️  [Bootstrap mode] Bootstrap process successfully ended.",
 				sub_display_format(SUB_LOG_TARGET),
 			);
@@ -766,7 +766,7 @@ impl<T: JsonRpcClient> BootstrapHandler for BridgeRelayHandler<T> {
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use cccp_primitives::socket::SocketContract;
+	use br_primitives::socket::SocketContract;
 	use ethers::{
 		providers::{Http, Provider},
 		types::H160,

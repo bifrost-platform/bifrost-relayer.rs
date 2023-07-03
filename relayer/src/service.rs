@@ -13,14 +13,14 @@ use futures::FutureExt;
 use sc_service::{config::PrometheusConfig, Error as ServiceError, TaskManager};
 use tokio::sync::{Barrier, Mutex, RwLock};
 
-use cccp_client::eth::{
+use br_client::eth::{
 	BlockManager, BridgeRelayHandler, EthClient, EventSender, Handler, RoundupRelayHandler,
 	TransactionManager, WalletManager,
 };
-use cccp_periodic::{
+use br_periodic::{
 	heartbeat_sender::HeartbeatSender, roundup_emitter::RoundupEmitter, OraclePriceFeeder,
 };
-use cccp_primitives::{
+use br_primitives::{
 	cli::{Configuration, HandlerType},
 	errors::{
 		INVALID_BIFROST_NATIVENESS, INVALID_CHAIN_ID, INVALID_CONTRACT_ADDRESS,
@@ -291,7 +291,7 @@ pub fn new_relay_base(config: Configuration) -> Result<RelayBase, ServiceError> 
 			system.id,
 		);
 
-		cccp_metrics::setup(&prometheus.registry);
+		br_metrics::setup(&prometheus.registry);
 
 		// spawn prometheus
 		task_manager.spawn_handle().spawn(

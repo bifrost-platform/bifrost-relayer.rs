@@ -4,7 +4,7 @@ use ethers::{providers::JsonRpcClient, utils::parse_ether};
 use reqwest::Url;
 use serde::Deserialize;
 
-use cccp_primitives::{PriceFetcher, PriceResponse};
+use br_primitives::{PriceFetcher, PriceResponse};
 
 #[derive(Debug, Clone, Deserialize)]
 struct Inner {

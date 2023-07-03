@@ -1,7 +1,7 @@
 [package]
-name = "cc-cli"
+name = "br-cli"
 version = "0.1.0"
-description = "The client CLI module for BIFROST relayer"
+description = "The client CLI module for Bifrost relayer"
 authors = { workspace = true }
 homepage = { workspace = true }
 edition = { workspace = true }
@@ -19,10 +19,10 @@ serde_yaml = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 tokio = { workspace = true, features = ["signal", "rt-multi-thread", "parking_lot"] }
 
-# CCCP
-cccp-client = { path = "../../client", default-features = false }
-cccp-primitives = { path = "../../primitives", default-features = false }
-cccp-metrics = { path = "../../metrics", default-features = false }
+# Bifrost Relayer
+br-client = { path = "../../client", default-features = false }
+br-primitives = { path = "../../primitives", default-features = false }
+br-metrics = { path = "../../metrics", default-features = false }
 
 # Substrate
 sc-service = { workspace = true }

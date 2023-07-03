@@ -1,4 +1,4 @@
-use cccp_primitives::cli::SentryConfig;
+use br_primitives::cli::SentryConfig;
 use sentry::ClientInitGuard;
 
 /// Builds a sentry client only when the sentry config exists.

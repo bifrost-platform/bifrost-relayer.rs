@@ -1,7 +1,7 @@
 [package]
-name = "cccp-client"
+name = "br-client"
 version = "0.1.0"
-description = "The client implementation for BIFROST relayer"
+description = "The client implementation for Bifrost relayer"
 authors = { workspace = true }
 homepage = { workspace = true }
 edition = { workspace = true }
@@ -23,9 +23,9 @@ tokio = { workspace = true, features = ["signal", "rt-multi-thread", "parking_lo
 k256 = { workspace = true, features = ["ecdsa"] }
 sha3 = { workspace = true }
 
-# CCCP
-cccp-primitives = { path = "../primitives", default-features = false }
-cccp-metrics = { path = "../metrics", default-features = false }
+# Bifrost Relayer
+br-primitives = { path = "../primitives", default-features = false }
+br-metrics = { path = "../metrics", default-features = false }
 
 [dev-dependencies]
 serde_json = { workspace = true }
