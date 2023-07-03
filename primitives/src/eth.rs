@@ -225,6 +225,7 @@ impl From<&GasCoefficient> for f64 {
 }
 
 #[derive(Clone, Debug)]
+/// Coefficients to multiply the estimated gas amount.
 pub enum GasCoefficient {
 	Low,
 	Mid,

@@ -101,6 +101,38 @@ cd bifrost-relayer.rs
 
 And now build the project to generate the executable binary file. (The first build will take some time to end)
 
+- BIFROST (**Must be priorly self-operating and fully synced**)
+- Ethereum
+- Binance Smart Chain
+- Polygon
+
+You should also prepare an EVM account that will act as your relayer account. This account should have enough balance for transaction fees used in operations.
+
+### Run the Relayer
+
+Use the following command to execute the CCCP Relayer. The `<PATH_TO_CONFIG_FILE>` should be set to the absolute path of the installed configuration YAML file.
+
+```sh
+cccp-relayer --chain <PATH_TO_CONFIG_FILE>
+```
+
+## Development
+
+To build and develop CCCP Relayer, you will need a proper development environment. If you've never worked with a Rust-based project before, your should probably try to first install `rustup`.
+
+```sh
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+```
+
+Then, fetch the project's code by using git.
+
+```sh
+git clone https://github.com/bifrost-platform/cccp-relayer
+cd cccp-relayer
+```
+
+And now build the project to generate the executable binary file. (The first build will take some time to end)
+
 ```sh
 cargo build --release
 ```
