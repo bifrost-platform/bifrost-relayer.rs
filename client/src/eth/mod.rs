@@ -270,34 +270,31 @@ impl<T: JsonRpcClient> EthClient<T> {
 	) -> U64 {
 		let block_number = self.get_latest_block_number().await;
 
-		let (current_block, prev_block) = (
+		if let (Some(current_block), Some(prev_block)) = (
 			self.get_block(block_number.into()).await,
 			self.get_block((block_number - BOOTSTRAP_BLOCK_OFFSET).into()).await,
-		);
+		) {
+			let diff = current_block
+				.timestamp
+				.checked_sub(prev_block.timestamp)
+				.unwrap()
+				.checked_div(BOOTSTRAP_BLOCK_OFFSET.into())
+				.unwrap();
 
-		if current_block.is_none() || prev_block.is_none() {
+			return round_offset
+				.checked_mul(round_info.round_length.as_u32())
+				.unwrap()
+				.checked_mul(NATIVE_BLOCK_TIME)
+				.unwrap()
+				.checked_div(diff.as_u32())
+				.unwrap()
+				.into()
+		} else {
 			panic!(
 				"[{}] Seems to be a problem with the provider's health. Please check and restart.",
 				&self.get_chain_name()
 			)
 		}
-
-		let diff = current_block
-			.unwrap()
-			.timestamp
-			.checked_sub(prev_block.unwrap().timestamp)
-			.unwrap()
-			.checked_div(BOOTSTRAP_BLOCK_OFFSET.into())
-			.unwrap();
-
-		round_offset
-			.checked_mul(round_info.round_length.as_u32())
-			.unwrap()
-			.checked_mul(NATIVE_BLOCK_TIME)
-			.unwrap()
-			.checked_div(diff.as_u32())
-			.unwrap()
-			.into()
 	}
 
 	/// Send prometheus metric of the current balance.
