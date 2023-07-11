@@ -182,14 +182,11 @@ impl<T: JsonRpcClient> BlockManager<T> {
 
 	/// Verifies if the connected provider is in block sync mode.
 	pub async fn wait_provider_sync(&self) {
-		match self.client.provider.client_version().await {
-			Ok(_) => {},
-			Err(_) => {
-				panic!(
-					"[{}] Provider connection failed. Please check provider's URL",
-					self.client.get_chain_name()
-				)
-			},
+		if self.client.provider.client_version().await.is_err() {
+			panic!(
+				"[{}] Provider connection failed. Please check provider's URL",
+				self.client.get_chain_name()
+			)
 		}
 
 		loop {
