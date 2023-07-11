@@ -270,13 +270,22 @@ impl<T: JsonRpcClient> EthClient<T> {
 	) -> U64 {
 		let block_number = self.get_latest_block_number().await;
 
-		let current_block = self.get_block((block_number).into()).await.unwrap();
-		let prev_block =
-			self.get_block((block_number - BOOTSTRAP_BLOCK_OFFSET).into()).await.unwrap();
+		let (current_block, prev_block) = (
+			self.get_block(block_number.into()).await,
+			self.get_block((block_number - BOOTSTRAP_BLOCK_OFFSET).into()).await,
+		);
+
+		if current_block.is_none() || prev_block.is_none() {
+			panic!(
+				"[{}] Seems to be a problem with the provider's health. Please check and restart.",
+				&self.get_chain_name()
+			)
+		}
 
 		let diff = current_block
+			.unwrap()
 			.timestamp
-			.checked_sub(prev_block.timestamp)
+			.checked_sub(prev_block.unwrap().timestamp)
 			.unwrap()
 			.checked_div(BOOTSTRAP_BLOCK_OFFSET.into())
 			.unwrap();
