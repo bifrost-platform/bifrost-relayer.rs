@@ -1,12 +1,9 @@
-use br_primitives::{
-	eth::{BootstrapState, ChainID},
-	sub_display_format,
-};
+use std::sync::Arc;
+
 use ethers::{
-	providers::JsonRpcClient,
+	providers::{JsonRpcClient, Middleware},
 	types::{Log, SyncingStatus, TransactionReceipt, H160, H256, U64},
 };
-use std::sync::Arc;
 use tokio::{
 	sync::{
 		broadcast::{self, Receiver, Sender},
@@ -15,6 +12,11 @@ use tokio::{
 	time::{sleep, Duration},
 };
 use tokio_stream::StreamExt;
+
+use br_primitives::{
+	eth::{BootstrapState, ChainID},
+	sub_display_format,
+};
 
 use super::{BootstrapHandler, EthClient};
 
@@ -180,6 +182,16 @@ impl<T: JsonRpcClient> BlockManager<T> {
 
 	/// Verifies if the connected provider is in block sync mode.
 	pub async fn wait_provider_sync(&self) {
+		match self.client.provider.client_version().await {
+			Ok(_) => {},
+			Err(_) => {
+				panic!(
+					"[{}] Provider connection failed. Please check provider's URL",
+					self.client.get_chain_name()
+				)
+			},
+		}
+
 		loop {
 			if let SyncingStatus::IsSyncing(status) = self.client.is_syncing().await {
 				log::info!(
