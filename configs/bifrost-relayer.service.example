@@ -6,7 +6,7 @@ StartLimitIntervalSec=5
 [Service]
 Type=simple
 Restart=always
-RestartSec=5
+RestartSec=30
 SyslogIdentifier=bifrost-relayer
 SyslogFacility=local7
 WorkingDirectory=<DIRECTORY_WHERE_BIFROST_RELAYER_LOCATES>
