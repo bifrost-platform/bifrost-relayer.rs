@@ -321,10 +321,11 @@ impl<T: JsonRpcClient> BootstrapHandler for RoundupEmitter<T> {
 
 		if round_up_events.is_empty() {
 			panic!(
-					"[{}]-[{}] ❗️ Failed to find the latest RoundUp event. Please use a higher bootstrap offset. Current offset: {:?}",
+					"[{}]-[{}]-[{}] ❗️ Failed to find the latest RoundUp event. Please use a higher bootstrap offset. Current offset: {:?}",
 					self.client.get_chain_name(),
 					SUB_LOG_TARGET,
-					self.bootstrap_config.round_offset,
+					self.client.address(),
+					self.bootstrap_config.round_offset
 				);
 		}
 
