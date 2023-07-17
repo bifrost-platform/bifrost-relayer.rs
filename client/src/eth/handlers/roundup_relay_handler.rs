@@ -1,8 +1,18 @@
-use crate::eth::{
-	BlockMessage, EthClient, EventMessage, EventMetadata, EventSender, Handler, TxRequest,
-	VSPPhase2Metadata,
-};
+use std::{collections::BTreeMap, str::FromStr, sync::Arc, time::Duration};
+
 use async_trait::async_trait;
+use ethers::{
+	abi::{encode, Detokenize, Token, Tokenize},
+	contract::EthLogDecode,
+	providers::{JsonRpcClient, Provider},
+	types::{Address, Bytes, Filter, Log, Signature, TransactionRequest, H256, U256},
+};
+use tokio::{
+	sync::{broadcast::Receiver, Barrier, Mutex, RwLock},
+	time::sleep,
+};
+use tokio_stream::StreamExt;
+
 use br_primitives::{
 	authority::RoundMetaData,
 	cli::BootstrapConfig,
@@ -13,19 +23,11 @@ use br_primitives::{
 	socket::{RoundUpSubmit, SerializedRoundUp, Signatures, SocketContract, SocketContractEvents},
 	sub_display_format, INVALID_BIFROST_NATIVENESS, INVALID_CONTRACT_ABI,
 };
-use ethers::{
-	abi::{encode, Detokenize, Token, Tokenize},
-	contract::EthLogDecode,
-	prelude::{TransactionReceipt, H256},
-	providers::{JsonRpcClient, Provider},
-	types::{Address, Bytes, Filter, Log, Signature, TransactionRequest, U256},
+
+use crate::eth::{
+	BlockMessage, EthClient, EventMessage, EventMetadata, EventSender, Handler, TxRequest,
+	VSPPhase2Metadata,
 };
-use std::{collections::BTreeMap, str::FromStr, sync::Arc, time::Duration};
-use tokio::{
-	sync::{broadcast::Receiver, Barrier, Mutex, RwLock},
-	time::sleep,
-};
-use tokio_stream::StreamExt;
 
 use super::BootstrapHandler;
 
@@ -68,94 +70,96 @@ impl<T: JsonRpcClient> Handler for RoundupRelayHandler<T> {
 
 				log::info!(
 					target: &self.client.get_chain_name(),
-					"-[{}] 📦 Imported #{:?} ({}) with target transactions({:?})",
+					"-[{}] 📦 Imported #{:?} ({}) with target logs({:?})",
 					sub_display_format(SUB_LOG_TARGET),
 					block_msg.block_number,
 					block_msg.block_hash,
-					block_msg.target_receipts.len(),
+					block_msg.target_logs.len(),
 				);
 
-				let mut stream = tokio_stream::iter(block_msg.target_receipts);
-				while let Some(receipt) = stream.next().await {
-					self.process_confirmed_transaction(receipt, false).await;
+				let mut stream = tokio_stream::iter(block_msg.target_logs);
+				while let Some(log) = stream.next().await {
+					self.process_confirmed_transaction(&log, false).await;
 				}
 			}
 		}
 	}
 
-	async fn process_confirmed_transaction(&self, receipt: TransactionReceipt, is_bootstrap: bool) {
-		// Pass if interacted contract was not socket contract
-		if !self.is_target_contract(&receipt) {
+	async fn process_confirmed_transaction(&self, log: &Log, is_bootstrap: bool) {
+		// Pass if interacted contract was not socket contract || not roundup event
+		if !self.is_target_contract(log) || !self.is_target_event(log.topics[0]) {
 			return
 		}
 
-		let mut stream = tokio_stream::iter(receipt.logs);
-		while let Some(log) = stream.next().await {
-			// Pass if emitted event is not `RoundUp`
-			if !self.is_target_event(log.topics[0]) {
-				continue
-			}
+		// Check receipt status
+		if self
+			.client
+			.get_transaction_receipt(log.transaction_hash.unwrap())
+			.await
+			.unwrap()
+			.status
+			.unwrap()
+			.is_zero()
+		{
+			return
+		}
 
-			match self.decode_log(log).await {
-				Ok(serialized_log) => {
-					if !is_bootstrap {
-						log::info!(
-							target: &self.client.get_chain_name(),
-							"-[{}] 👤 RoundUp event detected. ({:?}-{:?})",
-							sub_display_format(SUB_LOG_TARGET),
-							serialized_log.status,
-							receipt.transaction_hash,
-						);
-					}
-					match RoundUpEventStatus::from_u8(serialized_log.status) {
-						RoundUpEventStatus::NextAuthorityCommitted => {
-							if !self.is_selected_relayer(serialized_log.roundup.round - 1).await {
-								// do nothing if not verified
-								continue
-							}
-
-							let roundup_submit = self
-								.build_roundup_submit(
-									serialized_log.roundup.round,
-									serialized_log.roundup.new_relayers,
-								)
-								.await;
-							self.broadcast_roundup(&roundup_submit).await;
-						},
-						RoundUpEventStatus::NextAuthorityRelayed => continue,
-					}
-				},
-				Err(e) => {
-					log::error!(
+		match self.decode_log(log.clone()).await {
+			Ok(serialized_log) => {
+				if !is_bootstrap {
+					log::info!(
 						target: &self.client.get_chain_name(),
-						"-[{}] Error on decoding RoundUp event ({:?}):{}",
+						"-[{}] 👤 RoundUp event detected. ({:?}-{:?})",
 						sub_display_format(SUB_LOG_TARGET),
-						receipt.transaction_hash,
-						e.to_string(),
+						serialized_log.status,
+						log.transaction_hash,
 					);
-					sentry::capture_message(
-						format!(
-							"[{}]-[{}]-[{}] Error on decoding RoundUp event ({:?}):{}",
-							&self.client.get_chain_name(),
-							SUB_LOG_TARGET,
-							self.client.address(),
-							receipt.transaction_hash,
-							e
-						)
-						.as_str(),
-						sentry::Level::Error,
-					);
-					continue
-				},
-			}
+				}
+				match RoundUpEventStatus::from_u8(serialized_log.status) {
+					RoundUpEventStatus::NextAuthorityCommitted => {
+						if !self.is_selected_relayer(serialized_log.roundup.round - 1).await {
+							// do nothing if not verified
+							return
+						}
+
+						let roundup_submit = self
+							.build_roundup_submit(
+								serialized_log.roundup.round,
+								serialized_log.roundup.new_relayers,
+							)
+							.await;
+						self.broadcast_roundup(&roundup_submit).await;
+					},
+					RoundUpEventStatus::NextAuthorityRelayed => return,
+				}
+			},
+			Err(e) => {
+				log::error!(
+					target: &self.client.get_chain_name(),
+					"-[{}] Error on decoding RoundUp event ({:?}):{}",
+					sub_display_format(SUB_LOG_TARGET),
+					log.transaction_hash,
+					e.to_string(),
+				);
+				sentry::capture_message(
+					format!(
+						"[{}]-[{}]-[{}] Error on decoding RoundUp event ({:?}):{}",
+						&self.client.get_chain_name(),
+						SUB_LOG_TARGET,
+						self.client.address(),
+						log.transaction_hash,
+						e
+					)
+					.as_str(),
+					sentry::Level::Error,
+				);
+				return
+			},
 		}
 	}
 
-	fn is_target_contract(&self, receipt: &TransactionReceipt) -> bool {
-		if let Some(to) = receipt.to {
-			return to == self.client.socket.address()
-		}
-		false
+	fn is_target_contract(&self, log: &Log) -> bool {
+		return log.address == self.client.socket.address()
 	}
 
 	fn is_target_event(&self, topic: H256) -> bool {
@@ -393,11 +397,7 @@ impl<T: JsonRpcClient> BootstrapHandler for RoundupRelayHandler<T> {
 
 			let mut stream = tokio_stream::iter(logs);
 			while let Some(log) = stream.next().await {
-				if let Some(receipt) =
-					self.client.get_transaction_receipt(log.transaction_hash.unwrap()).await
-				{
-					self.process_confirmed_transaction(receipt, true).await;
-				}
+				self.process_confirmed_transaction(&log, true).await;
 			}
 		}
 
@@ -439,7 +439,7 @@ impl<T: JsonRpcClient> BootstrapHandler for RoundupRelayHandler<T> {
 				.from_block(from_block)
 				.to_block(chunk_to_block);
 
-			let chunk_logs = self.client.get_logs(filter).await;
+			let chunk_logs = self.client.get_logs(&filter).await;
 			logs.extend(chunk_logs);
 
 			from_block = chunk_to_block + 1;

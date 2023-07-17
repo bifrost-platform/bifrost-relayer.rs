@@ -1,18 +1,5 @@
 use std::{collections::BTreeMap, str::FromStr, sync::Arc, time::Duration};
 
-use br_primitives::{
-	authority::RoundMetaData,
-	cli::BootstrapConfig,
-	eth::{
-		BootstrapState, BridgeDirection, ChainID, GasCoefficient, RecoveredSignature,
-		SocketEventStatus, BOOTSTRAP_BLOCK_CHUNK_SIZE,
-	},
-	socket::{
-		BridgeRelayBuilder, PollSubmit, RequestID, SerializedPoll, Signatures, SocketEvents,
-		SocketMessage,
-	},
-	sub_display_format, INVALID_BIFROST_NATIVENESS, INVALID_CHAIN_ID, INVALID_CONTRACT_ABI,
-};
 use ethers::{
 	abi::{RawLog, Token},
 	prelude::decode_logs,
@@ -24,6 +11,20 @@ use tokio::{
 	time::sleep,
 };
 use tokio_stream::StreamExt;
+
+use br_primitives::{
+	authority::RoundMetaData,
+	cli::BootstrapConfig,
+	eth::{
+		BootstrapState, ChainID, GasCoefficient, RecoveredSignature, SocketEventStatus,
+		BOOTSTRAP_BLOCK_CHUNK_SIZE,
+	},
+	socket::{
+		BridgeRelayBuilder, PollSubmit, RequestID, SerializedPoll, Signatures, SocketEvents,
+		SocketMessage,
+	},
+	sub_display_format, INVALID_BIFROST_NATIVENESS, INVALID_CHAIN_ID, INVALID_CONTRACT_ABI,
+};
 
 use crate::eth::{
 	BlockMessage, BridgeRelayMetadata, EthClient, EventMessage, EventMetadata, EventSender,
@@ -108,102 +109,96 @@ impl<T: JsonRpcClient> Handler for BridgeRelayHandler<T> {
 
 				log::info!(
 					target: &self.client.get_chain_name(),
-					"-[{}] 📦 Imported #{:?} ({}) with target transactions({:?})",
+					"-[{}] 📦 Imported #{:?} ({}) with target logs({:?})",
 					sub_display_format(SUB_LOG_TARGET),
 					block_msg.block_number,
 					block_msg.block_hash,
-					block_msg.target_receipts.len(),
+					block_msg.target_logs.len(),
 				);
 
-				let mut stream = tokio_stream::iter(block_msg.target_receipts);
-				while let Some(receipt) = stream.next().await {
-					self.process_confirmed_transaction(receipt, false).await;
+				let mut stream = tokio_stream::iter(block_msg.target_logs);
+				while let Some(log) = stream.next().await {
+					self.process_confirmed_transaction(&log, false).await;
 				}
 			}
 		}
 	}
 
-	async fn process_confirmed_transaction(&self, receipt: TransactionReceipt, is_bootstrap: bool) {
-		if self.is_target_contract(&receipt) {
-			let status = receipt.status.unwrap();
-			if status.is_zero() {
+	async fn process_confirmed_transaction(&self, log: &Log, is_bootstrap: bool) {
+		if self.is_target_contract(log) {
+			let receipt = self
+				.client
+				.get_transaction_receipt(log.transaction_hash.unwrap())
+				.await
+				.unwrap();
+			if receipt.status.unwrap().is_zero() {
 				self.process_reverted_transaction(receipt).await;
-				return
 			}
 
-			let mut stream = tokio_stream::iter(receipt.logs);
+			if self.is_target_event(log.topics[0]) {
+				let raw_log = RawLog::from(log.clone());
+				match decode_logs::<SocketEvents>(&[raw_log]) {
+					Ok(decoded) => match &decoded[0] {
+						SocketEvents::Socket(socket) => {
+							let status = SocketEventStatus::from_u8(socket.msg.status);
+							let src_chain_id = ChainID::from_be_bytes(socket.msg.req_id.chain);
+							let dst_chain_id = ChainID::from_be_bytes(socket.msg.ins_code.chain);
+							let is_inbound = self.is_inbound_sequence(dst_chain_id);
 
-			while let Some(log) = stream.next().await {
-				if self.is_target_event(log.topics[0]) {
-					let raw_log = RawLog::from(log);
-					match decode_logs::<SocketEvents>(&[raw_log]) {
-						Ok(decoded) => match &decoded[0] {
-							SocketEvents::Socket(socket) => {
-								let status = SocketEventStatus::from_u8(socket.msg.status);
-								let src_chain_id = ChainID::from_be_bytes(socket.msg.req_id.chain);
-								let dst_chain_id =
-									ChainID::from_be_bytes(socket.msg.ins_code.chain);
-								let is_inbound = self.is_inbound_sequence(dst_chain_id);
+							let metadata = BridgeRelayMetadata::new(
+								is_inbound,
+								status,
+								socket.msg.req_id.sequence,
+								src_chain_id,
+								dst_chain_id,
+							);
 
-								let metadata = BridgeRelayMetadata::new(
-									is_inbound,
-									status,
-									socket.msg.req_id.sequence,
-									src_chain_id,
-									dst_chain_id,
-								);
-
-								if !is_bootstrap {
-									log::info!(
-										target: &self.client.get_chain_name(),
-										"-[{}] 🔖 Detected socket event: {}, {:?}-{:?}",
-										sub_display_format(SUB_LOG_TARGET),
-										metadata,
-										receipt.block_number.unwrap(),
-										receipt.transaction_hash,
-									);
-								}
-
-								if Self::is_sequence_ended(status) ||
-									self.is_already_done(&socket.msg.req_id, src_chain_id).await
-								{
-									// do nothing if protocol sequence ended
-									return
-								}
-								if !self
-									.is_selected_relayer(socket.msg.req_id.round_id.into())
-									.await
-								{
-									// do nothing if not verified
-									return
-								}
-
-								self.send_socket_message(
-									socket.msg.clone(),
-									socket.msg.clone(),
+							if !is_bootstrap {
+								log::info!(
+									target: &self.client.get_chain_name(),
+									"-[{}] 🔖 Detected socket event: {}, {:?}-{:?}",
+									sub_display_format(SUB_LOG_TARGET),
 									metadata,
-									is_inbound,
-								)
-								.await;
-							},
+									log.block_number.unwrap(),
+									log.transaction_hash,
+								);
+							}
+
+							if Self::is_sequence_ended(status) ||
+								self.is_already_done(&socket.msg.req_id, src_chain_id).await
+							{
+								// do nothing if protocol sequence ended
+								return
+							}
+							if !self.is_selected_relayer(socket.msg.req_id.round_id.into()).await {
+								// do nothing if not verified
+								return
+							}
+
+							self.send_socket_message(
+								socket.msg.clone(),
+								socket.msg.clone(),
+								metadata,
+								is_inbound,
+							)
+							.await;
 						},
-						Err(error) => panic!(
-							"[{}]-[{}] Unknown error while decoding socket event: {:?}",
-							self.client.get_chain_name(),
-							SUB_LOG_TARGET,
-							error,
-						),
-					}
+					},
+					Err(error) => panic!(
+						"[{}]-[{}] Unknown error while decoding socket event: {:?}",
+						self.client.get_chain_name(),
+						SUB_LOG_TARGET,
+						error,
+					),
 				}
 			}
 		}
 	}
 
-	fn is_target_contract(&self, receipt: &TransactionReceipt) -> bool {
-		if let Some(to) = receipt.to {
-			if to == self.client.socket.address() || to == self.client.vault.address() {
-				return true
-			}
+	fn is_target_contract(&self, log: &Log) -> bool {
+		if log.address == self.client.socket.address() || log.address == self.client.vault.address()
+		{
+			return true
 		}
 		false
 	}
@@ -671,11 +666,7 @@ impl<T: JsonRpcClient> BootstrapHandler for BridgeRelayHandler<T> {
 
 		let mut stream = tokio_stream::iter(logs);
 		while let Some(log) = stream.next().await {
-			if let Some(receipt) =
-				self.client.get_transaction_receipt(log.transaction_hash.unwrap()).await
-			{
-				self.process_confirmed_transaction(receipt, true).await;
-			}
+			self.process_confirmed_transaction(&log, true).await;
 		}
 
 		let mut bootstrap_count = self.bootstrapping_count.lock().await;
@@ -736,21 +727,13 @@ impl<T: JsonRpcClient> BootstrapHandler for BridgeRelayHandler<T> {
 			let chunk_to_block =
 				std::cmp::min(from_block + BOOTSTRAP_BLOCK_CHUNK_SIZE - 1, to_block);
 
-			let socket_filter = Filter::new()
-				.address(self.client.socket.address())
+			let filter = Filter::new()
+				.address(vec![self.client.vault.address(), self.client.socket.address()])
 				.topic0(self.socket_signature)
 				.from_block(from_block)
 				.to_block(chunk_to_block);
-			let socket_logs_chunk = self.client.get_logs(socket_filter).await;
-			logs.extend(socket_logs_chunk);
-
-			let vault_filter = Filter::new()
-				.address(self.client.vault.address())
-				.topic0(self.socket_signature)
-				.from_block(from_block)
-				.to_block(chunk_to_block);
-			let vault_logs_chunk = self.client.get_logs(vault_filter).await;
-			logs.extend(vault_logs_chunk);
+			let target_logs_chunk = self.client.get_logs(&filter).await;
+			logs.extend(target_logs_chunk);
 
 			from_block = chunk_to_block + 1;
 		}
@@ -765,13 +748,16 @@ impl<T: JsonRpcClient> BootstrapHandler for BridgeRelayHandler<T> {
 
 #[cfg(test)]
 mod tests {
-	use super::*;
-	use br_primitives::socket::SocketContract;
+	use std::{str::FromStr, sync::Arc};
+
 	use ethers::{
 		providers::{Http, Provider},
 		types::H160,
 	};
-	use std::{str::FromStr, sync::Arc};
+
+	use br_primitives::socket::SocketContract;
+
+	use super::*;
 
 	#[tokio::test]
 	async fn test_is_already_done() {
