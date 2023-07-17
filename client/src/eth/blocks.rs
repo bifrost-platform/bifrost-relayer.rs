@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use ethers::{
 	providers::{JsonRpcClient, Middleware},
-	types::{Log, SyncingStatus, TransactionReceipt, H160, H256, U64},
+	types::{BlockNumber, Filter, Log, SyncingStatus, H160, H256, U64},
 };
 use tokio::{
 	sync::{
@@ -11,7 +11,6 @@ use tokio::{
 	},
 	time::{sleep, Duration},
 };
-use tokio_stream::StreamExt;
 
 use br_primitives::{
 	eth::{BootstrapState, ChainID},
@@ -28,16 +27,12 @@ pub struct BlockMessage {
 	/// The processed block hash.
 	pub block_hash: H256,
 	/// The detected transaction receipts from the target contracts.
-	pub target_receipts: Vec<TransactionReceipt>,
+	pub target_logs: Vec<Log>,
 }
 
 impl BlockMessage {
-	pub fn new(
-		block_number: U64,
-		block_hash: H256,
-		target_receipts: Vec<TransactionReceipt>,
-	) -> Self {
-		Self { block_number, block_hash, target_receipts }
+	pub fn new(block_number: U64, block_hash: H256, target_logs: Vec<Log>) -> Self {
+		Self { block_number, block_hash, target_logs }
 	}
 }
 
@@ -130,23 +125,19 @@ impl<T: JsonRpcClient> BlockManager<T> {
 	/// Process the confirmed block and verifies if any transaction interacted with the target
 	/// contracts.
 	async fn process_confirmed_block(&self) {
-		if let Some(block) = self.client.get_block_with_txs(self.waiting_block.into()).await {
-			let mut target_receipts = vec![];
-			let mut stream = tokio_stream::iter(block.clone().transactions);
+		if let Some(block) = self.client.get_block(self.waiting_block.into()).await {
+			let filter = Filter::new()
+				.from_block(BlockNumber::from(self.waiting_block))
+				.to_block(BlockNumber::from(self.waiting_block))
+				.address(vec![self.client.vault.address(), self.client.socket.address()]);
 
-			while let Some(tx) = stream.next().await {
-				if self.is_relay_target(tx.to) {
-					if let Some(receipt) = self.client.get_transaction_receipt(tx.hash).await {
-						target_receipts.push(receipt);
-					}
-				}
-			}
-			if !target_receipts.is_empty() {
+			let target_logs = self.client.get_logs(&filter).await;
+			if !target_logs.is_empty() {
 				self.sender
 					.send(BlockMessage::new(
 						block.number.unwrap(),
 						block.hash.unwrap(),
-						target_receipts,
+						target_logs,
 					))
 					.unwrap();
 			}
@@ -165,14 +156,6 @@ impl<T: JsonRpcClient> BlockManager<T> {
 	fn increment_waiting_block(&mut self) {
 		self.waiting_block = self.waiting_block.saturating_add(U64::from(1u64));
 		br_metrics::set_block_height(&self.client.get_chain_name(), self.waiting_block.as_u64());
-	}
-
-	/// Verifies if the transaction has interacted with the target contracts.
-	fn is_relay_target(&self, to: Option<H160>) -> bool {
-		if let Some(to) = to {
-			return self.target_contracts.iter().any(|c| *c == to)
-		}
-		false
 	}
 
 	/// Verifies if the stored waiting block has waited enough.
