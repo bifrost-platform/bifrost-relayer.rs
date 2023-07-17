@@ -252,8 +252,8 @@ impl<T: JsonRpcClient> EthClient<T> {
 	}
 
 	/// Returns an array of all logs matching the given filter.
-	pub async fn get_logs(&self, filter: Filter) -> Vec<Log> {
-		self.rpc_call("eth_getLogs", vec![&filter]).await
+	pub async fn get_logs(&self, filter: &Filter) -> Vec<Log> {
+		self.rpc_call("eth_getLogs", vec![filter]).await
 	}
 
 	/// Returns an object with data about the sync status or false.
