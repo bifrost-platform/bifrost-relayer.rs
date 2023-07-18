@@ -187,9 +187,10 @@ impl<T: JsonRpcClient> Handler for BridgeRelayHandler<T> {
 							},
 						},
 						Err(error) => panic!(
-							"[{}]-[{}] Unknown error while decoding socket event: {:?}",
+							"[{}]-[{}]-[{}] Unknown error while decoding socket event: {:?}",
 							self.client.get_chain_name(),
 							SUB_LOG_TARGET,
+							self.client.address(),
 							error,
 						),
 					}
@@ -266,9 +267,10 @@ impl<T: JsonRpcClient> BridgeRelayBuilder for BridgeRelayHandler<T> {
 					self.get_sorted_signatures(msg).await
 				},
 				_ => panic!(
-					"[{}]-[{}] Unknown socket event status received: {:?}",
+					"[{}]-[{}]-[{}] Unknown socket event status received: {:?}",
 					&self.client.get_chain_name(),
 					SUB_LOG_TARGET,
+					self.client.address(),
 					status
 				),
 			}
@@ -285,9 +287,10 @@ impl<T: JsonRpcClient> BridgeRelayBuilder for BridgeRelayHandler<T> {
 				},
 				SocketEventStatus::Executed | SocketEventStatus::Reverted => Signatures::default(),
 				_ => panic!(
-					"[{}]-[{}] Unknown socket event status received: {:?}",
+					"[{}]-[{}]-[{}] Unknown socket event status received: {:?}",
 					&self.client.get_chain_name(),
 					SUB_LOG_TARGET,
+					self.client.address(),
 					status
 				),
 			}

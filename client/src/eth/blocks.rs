@@ -167,9 +167,11 @@ impl<T: JsonRpcClient> BlockManager<T> {
 	pub async fn wait_provider_sync(&self) {
 		if self.client.provider.client_version().await.is_err() {
 			panic!(
-				"[{}] Provider connection failed. Please check provider's URL",
-				self.client.get_chain_name()
-			)
+				"[{}]-[{}]-[{}] An internal error thrown when making a call to the provider. Please check your provider's status [method: client_version]",
+				&self.client.get_chain_name(),
+				SUB_LOG_TARGET,
+				self.client.address()
+			);
 		}
 
 		loop {
