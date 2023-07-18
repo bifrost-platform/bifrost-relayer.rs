@@ -92,15 +92,13 @@ impl<T: JsonRpcClient> Handler for RoundupRelayHandler<T> {
 		}
 
 		// Check receipt status
-		if self
-			.client
-			.get_transaction_receipt(log.transaction_hash.unwrap())
-			.await
-			.unwrap()
-			.status
-			.unwrap()
-			.is_zero()
+		if let Some(receipt) =
+			self.client.get_transaction_receipt(log.transaction_hash.unwrap()).await
 		{
+			if receipt.status.unwrap().is_zero() {
+				return
+			}
+		} else {
 			return
 		}
 

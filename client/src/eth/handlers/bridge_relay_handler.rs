@@ -126,70 +126,73 @@ impl<T: JsonRpcClient> Handler for BridgeRelayHandler<T> {
 
 	async fn process_confirmed_log(&self, log: &Log, is_bootstrap: bool) {
 		if self.is_target_contract(log) {
-			let receipt = self
-				.client
-				.get_transaction_receipt(log.transaction_hash.unwrap())
-				.await
-				.unwrap();
-			if receipt.status.unwrap().is_zero() {
-				self.process_reverted_transaction(receipt).await;
-			}
+			if let Some(receipt) =
+				self.client.get_transaction_receipt(log.transaction_hash.unwrap()).await
+			{
+				if receipt.status.unwrap().is_zero() {
+					self.process_reverted_transaction(receipt).await;
+				}
 
-			if self.is_target_event(log.topics[0]) {
-				let raw_log = RawLog::from(log.clone());
-				match decode_logs::<SocketEvents>(&[raw_log]) {
-					Ok(decoded) => match &decoded[0] {
-						SocketEvents::Socket(socket) => {
-							let status = SocketEventStatus::from_u8(socket.msg.status);
-							let src_chain_id = ChainID::from_be_bytes(socket.msg.req_id.chain);
-							let dst_chain_id = ChainID::from_be_bytes(socket.msg.ins_code.chain);
-							let is_inbound = self.is_inbound_sequence(dst_chain_id);
+				if self.is_target_event(log.topics[0]) {
+					let raw_log = RawLog::from(log.clone());
+					match decode_logs::<SocketEvents>(&[raw_log]) {
+						Ok(decoded) => match &decoded[0] {
+							SocketEvents::Socket(socket) => {
+								let status = SocketEventStatus::from_u8(socket.msg.status);
+								let src_chain_id = ChainID::from_be_bytes(socket.msg.req_id.chain);
+								let dst_chain_id =
+									ChainID::from_be_bytes(socket.msg.ins_code.chain);
+								let is_inbound = self.is_inbound_sequence(dst_chain_id);
 
-							let metadata = BridgeRelayMetadata::new(
-								is_inbound,
-								status,
-								socket.msg.req_id.sequence,
-								src_chain_id,
-								dst_chain_id,
-							);
-
-							if !is_bootstrap {
-								log::info!(
-									target: &self.client.get_chain_name(),
-									"-[{}] 🔖 Detected socket event: {}, {:?}-{:?}",
-									sub_display_format(SUB_LOG_TARGET),
-									metadata,
-									log.block_number.unwrap(),
-									log.transaction_hash,
+								let metadata = BridgeRelayMetadata::new(
+									is_inbound,
+									status,
+									socket.msg.req_id.sequence,
+									src_chain_id,
+									dst_chain_id,
 								);
-							}
 
-							if Self::is_sequence_ended(status) ||
-								self.is_already_done(&socket.msg.req_id, src_chain_id).await
-							{
-								// do nothing if protocol sequence ended
-								return
-							}
-							if !self.is_selected_relayer(socket.msg.req_id.round_id.into()).await {
-								// do nothing if not verified
-								return
-							}
+								if !is_bootstrap {
+									log::info!(
+										target: &self.client.get_chain_name(),
+										"-[{}] 🔖 Detected socket event: {}, {:?}-{:?}",
+										sub_display_format(SUB_LOG_TARGET),
+										metadata,
+										log.block_number.unwrap(),
+										log.transaction_hash,
+									);
+								}
 
-							self.send_socket_message(
-								socket.msg.clone(),
-								socket.msg.clone(),
-								metadata,
-								is_inbound,
-							)
-							.await;
+								if Self::is_sequence_ended(status) ||
+									self.is_already_done(&socket.msg.req_id, src_chain_id).await
+								{
+									// do nothing if protocol sequence ended
+									return
+								}
+								if !self
+									.is_selected_relayer(socket.msg.req_id.round_id.into())
+									.await
+								{
+									// do nothing if not verified
+									return
+								}
+
+								self.send_socket_message(
+									socket.msg.clone(),
+									socket.msg.clone(),
+									metadata,
+									is_inbound,
+								)
+								.await;
+							},
 						},
-					},
-					Err(error) => panic!(
-						"[{}]-[{}] Unknown error while decoding socket event: {:?}",
-						self.client.get_chain_name(),
-						SUB_LOG_TARGET,
-						error,
-					),
+						Err(error) => panic!(
+							"[{}]-[{}] Unknown error while decoding socket event: {:?}",
+							self.client.get_chain_name(),
+							SUB_LOG_TARGET,
+							error,
+						),
+					}
 				}
 			}
 		}
