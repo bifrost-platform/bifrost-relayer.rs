@@ -1,3 +1,14 @@
+use std::{str::FromStr, sync::Arc, time::Duration};
+
+use cron::Schedule;
+use ethers::{
+	abi::{encode, Detokenize, Token, Tokenize},
+	contract::EthLogDecode,
+	providers::JsonRpcClient,
+	types::{Address, Filter, Log, TransactionRequest, U256},
+};
+use tokio::{sync::RwLock, time::sleep};
+
 use br_client::eth::{
 	BootstrapHandler, EthClient, EventMessage, EventMetadata, EventSender, TxRequest,
 	VSPPhase1Metadata,
@@ -10,15 +21,6 @@ use br_primitives::{
 	socket::{RoundUpSubmit, SerializedRoundUp, Signatures, SocketContractEvents},
 	sub_display_format, PeriodicWorker, INVALID_BIFROST_NATIVENESS, INVALID_CONTRACT_ABI,
 };
-use cron::Schedule;
-use ethers::{
-	abi::{encode, Detokenize, Token, Tokenize},
-	contract::EthLogDecode,
-	providers::JsonRpcClient,
-	types::{Address, Filter, Log, TransactionRequest, U256},
-};
-use std::{str::FromStr, sync::Arc, time::Duration};
-use tokio::{sync::RwLock, time::sleep};
 
 const SUB_LOG_TARGET: &str = "roundup-emitter";
 
@@ -313,7 +315,7 @@ impl<T: JsonRpcClient> BootstrapHandler for RoundupEmitter<T> {
 				.from_block(from_block)
 				.to_block(chunk_to_block);
 
-			let chunk_logs = self.client.get_logs(filter).await;
+			let chunk_logs = self.client.get_logs(&filter).await;
 			round_up_events.extend(chunk_logs);
 
 			from_block = chunk_to_block + 1;

@@ -1,5 +1,17 @@
 use std::{collections::BTreeMap, str::FromStr, sync::Arc, time::Duration};
 
+use ethers::{
+	abi::{RawLog, Token},
+	prelude::decode_logs,
+	providers::JsonRpcClient,
+	types::{Bytes, Filter, Log, Signature, TransactionReceipt, TransactionRequest, H256, U256},
+};
+use tokio::{
+	sync::{broadcast::Receiver, Mutex, RwLock},
+	time::sleep,
+};
+use tokio_stream::StreamExt;
+
 use br_primitives::{
 	authority::RoundMetaData,
 	cli::BootstrapConfig,
@@ -13,17 +25,6 @@ use br_primitives::{
 	},
 	sub_display_format, INVALID_BIFROST_NATIVENESS, INVALID_CHAIN_ID, INVALID_CONTRACT_ABI,
 };
-use ethers::{
-	abi::{RawLog, Token},
-	prelude::decode_logs,
-	providers::JsonRpcClient,
-	types::{Bytes, Filter, Log, Signature, TransactionReceipt, TransactionRequest, H256, U256},
-};
-use tokio::{
-	sync::{broadcast::Receiver, Mutex, RwLock},
-	time::sleep,
-};
-use tokio_stream::StreamExt;
 
 use crate::eth::{
 	BlockMessage, BridgeRelayMetadata, EthClient, EventMessage, EventMetadata, EventSender,
@@ -108,34 +109,32 @@ impl<T: JsonRpcClient> Handler for BridgeRelayHandler<T> {
 
 				log::info!(
 					target: &self.client.get_chain_name(),
-					"-[{}] 📦 Imported #{:?} ({}) with target transactions({:?})",
+					"-[{}] 📦 Imported #{:?} ({}) with target logs({:?})",
 					sub_display_format(SUB_LOG_TARGET),
 					block_msg.block_number,
 					block_msg.block_hash,
-					block_msg.target_receipts.len(),
+					block_msg.target_logs.len(),
 				);
 
-				let mut stream = tokio_stream::iter(block_msg.target_receipts);
-				while let Some(receipt) = stream.next().await {
-					self.process_confirmed_transaction(receipt, false).await;
+				let mut stream = tokio_stream::iter(block_msg.target_logs);
+				while let Some(log) = stream.next().await {
+					self.process_confirmed_log(&log, false).await;
 				}
 			}
 		}
 	}
 
-	async fn process_confirmed_transaction(&self, receipt: TransactionReceipt, is_bootstrap: bool) {
-		if self.is_target_contract(&receipt) {
-			let status = receipt.status.unwrap();
-			if status.is_zero() {
-				self.process_reverted_transaction(receipt).await;
-				return
-			}
+	async fn process_confirmed_log(&self, log: &Log, is_bootstrap: bool) {
+		if self.is_target_contract(log) {
+			if let Some(receipt) =
+				self.client.get_transaction_receipt(log.transaction_hash.unwrap()).await
+			{
+				if receipt.status.unwrap().is_zero() {
+					self.process_reverted_transaction(receipt).await;
+				}
 
-			let mut stream = tokio_stream::iter(receipt.logs);
-
-			while let Some(log) = stream.next().await {
 				if self.is_target_event(log.topics[0]) {
-					let raw_log = RawLog::from(log);
+					let raw_log = RawLog::from(log.clone());
 					match decode_logs::<SocketEvents>(&[raw_log]) {
 						Ok(decoded) => match &decoded[0] {
 							SocketEvents::Socket(socket) => {
@@ -159,8 +158,8 @@ impl<T: JsonRpcClient> Handler for BridgeRelayHandler<T> {
 										"-[{}] 🔖 Detected socket event: {}, {:?}-{:?}",
 										sub_display_format(SUB_LOG_TARGET),
 										metadata,
-										receipt.block_number.unwrap(),
-										receipt.transaction_hash,
+										log.block_number.unwrap(),
+										log.transaction_hash,
 									);
 								}
 
@@ -199,11 +198,10 @@ impl<T: JsonRpcClient> Handler for BridgeRelayHandler<T> {
 		}
 	}
 
-	fn is_target_contract(&self, receipt: &TransactionReceipt) -> bool {
-		if let Some(to) = receipt.to {
-			if to == self.client.socket.address() || to == self.client.vault.address() {
-				return true
-			}
+	fn is_target_contract(&self, log: &Log) -> bool {
+		if log.address == self.client.socket.address() || log.address == self.client.vault.address()
+		{
+			return true
 		}
 		false
 	}
@@ -671,11 +669,7 @@ impl<T: JsonRpcClient> BootstrapHandler for BridgeRelayHandler<T> {
 
 		let mut stream = tokio_stream::iter(logs);
 		while let Some(log) = stream.next().await {
-			if let Some(receipt) =
-				self.client.get_transaction_receipt(log.transaction_hash.unwrap()).await
-			{
-				self.process_confirmed_transaction(receipt, true).await;
-			}
+			self.process_confirmed_log(&log, true).await;
 		}
 
 		let mut bootstrap_count = self.bootstrapping_count.lock().await;
@@ -736,21 +730,13 @@ impl<T: JsonRpcClient> BootstrapHandler for BridgeRelayHandler<T> {
 			let chunk_to_block =
 				std::cmp::min(from_block + BOOTSTRAP_BLOCK_CHUNK_SIZE - 1, to_block);
 
-			let socket_filter = Filter::new()
+			let filter = Filter::new()
 				.address(self.client.socket.address())
 				.topic0(self.socket_signature)
 				.from_block(from_block)
 				.to_block(chunk_to_block);
-			let socket_logs_chunk = self.client.get_logs(socket_filter).await;
-			logs.extend(socket_logs_chunk);
-
-			let vault_filter = Filter::new()
-				.address(self.client.vault.address())
-				.topic0(self.socket_signature)
-				.from_block(from_block)
-				.to_block(chunk_to_block);
-			let vault_logs_chunk = self.client.get_logs(vault_filter).await;
-			logs.extend(vault_logs_chunk);
+			let target_logs_chunk = self.client.get_logs(&filter).await;
+			logs.extend(target_logs_chunk);
 
 			from_block = chunk_to_block + 1;
 		}
@@ -765,13 +751,16 @@ impl<T: JsonRpcClient> BootstrapHandler for BridgeRelayHandler<T> {
 
 #[cfg(test)]
 mod tests {
-	use super::*;
-	use br_primitives::socket::SocketContract;
+	use std::{str::FromStr, sync::Arc};
+
 	use ethers::{
 		providers::{Http, Provider},
 		types::H160,
 	};
-	use std::{str::FromStr, sync::Arc};
+
+	use br_primitives::socket::SocketContract;
+
+	use super::*;
 
 	#[tokio::test]
 	async fn test_is_already_done() {
