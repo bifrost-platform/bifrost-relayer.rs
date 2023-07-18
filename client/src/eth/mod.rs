@@ -175,9 +175,10 @@ impl<T: JsonRpcClient> EthClient<T> {
 			sleep(Duration::from_millis(DEFAULT_CALL_RETRY_INTERVAL_MS)).await;
 		}
 		panic!(
-			"[{}]-[{}] An internal error thrown when making a call to the provider. Please check your provider's status [method: {}]: {}",
+			"[{}]-[{}]-[{}] An internal error thrown when making a call to the provider. Please check your provider's status [method: {}]: {}",
 			&self.get_chain_name(),
 			SUB_LOG_TARGET,
+			self.address(),
 			method,
 			error_msg
 		);
@@ -207,9 +208,10 @@ impl<T: JsonRpcClient> EthClient<T> {
 			sleep(Duration::from_millis(DEFAULT_CALL_RETRY_INTERVAL_MS)).await;
 		}
 		panic!(
-			"[{}]-[{}] An internal error thrown when making a call to the provider. Please check your provider's status [method: {}]: {}",
+			"[{}]-[{}]-[{}] An internal error thrown when making a call to the provider. Please check your provider's status [method: {}]: {}",
 			&self.get_chain_name(),
 			SUB_LOG_TARGET,
+			self.address(),
 			method,
 			error_msg
 		);
@@ -291,9 +293,11 @@ impl<T: JsonRpcClient> EthClient<T> {
 				.into()
 		} else {
 			panic!(
-				"[{}] Seems to be a problem with the provider's health. Please check and restart.",
-				&self.get_chain_name()
-			)
+				"[{}]-[{}]-[{}] An internal error thrown when making a call to the provider. Please check your provider's status [method: bootstrap]",
+				&self.get_chain_name(),
+				SUB_LOG_TARGET,
+				self.address()
+			);
 		}
 	}
 

@@ -134,8 +134,9 @@ impl<T: JsonRpcClient + 'static> OraclePriceFeeder<T> {
 				);
 				sentry::capture_message(
 					format!(
-						"[{}] ❗️ Failed to fetch price feed data from secondary sources. First off, skip this feeding.",
+						"[{}]-[{}] ❗️ Failed to fetch price feed data from secondary sources. First off, skip this feeding.",
 						SUB_LOG_TARGET,
+						self.client.address()
 					)
 					.as_str(),
 					sentry::Level::Error,
