@@ -16,8 +16,8 @@ use br_primitives::{
 	authority::RoundMetaData,
 	cli::BootstrapConfig,
 	eth::{
-		BootstrapState, ChainID, GasCoefficient, RecoveredSignature, SocketEventStatus,
-		BOOTSTRAP_BLOCK_CHUNK_SIZE,
+		BootstrapState, BridgeDirection, ChainID, GasCoefficient, RecoveredSignature,
+		SocketEventStatus, BOOTSTRAP_BLOCK_CHUNK_SIZE,
 	},
 	socket::{
 		BridgeRelayBuilder, PollSubmit, RequestID, SerializedPoll, Signatures, SocketEvents,
@@ -118,13 +118,13 @@ impl<T: JsonRpcClient> Handler for BridgeRelayHandler<T> {
 
 				let mut stream = tokio_stream::iter(block_msg.target_logs);
 				while let Some(log) = stream.next().await {
-					self.process_confirmed_transaction(&log, false).await;
+					self.process_confirmed_log(&log, false).await;
 				}
 			}
 		}
 	}
 
-	async fn process_confirmed_transaction(&self, log: &Log, is_bootstrap: bool) {
+	async fn process_confirmed_log(&self, log: &Log, is_bootstrap: bool) {
 		if self.is_target_contract(log) {
 			let receipt = self
 				.client
@@ -666,7 +666,7 @@ impl<T: JsonRpcClient> BootstrapHandler for BridgeRelayHandler<T> {
 
 		let mut stream = tokio_stream::iter(logs);
 		while let Some(log) = stream.next().await {
-			self.process_confirmed_transaction(&log, true).await;
+			self.process_confirmed_log(&log, true).await;
 		}
 
 		let mut bootstrap_count = self.bootstrapping_count.lock().await;
@@ -728,7 +728,7 @@ impl<T: JsonRpcClient> BootstrapHandler for BridgeRelayHandler<T> {
 				std::cmp::min(from_block + BOOTSTRAP_BLOCK_CHUNK_SIZE - 1, to_block);
 
 			let filter = Filter::new()
-				.address(vec![self.client.vault.address(), self.client.socket.address()])
+				.address(self.client.socket.address())
 				.topic0(self.socket_signature)
 				.from_block(from_block)
 				.to_block(chunk_to_block);

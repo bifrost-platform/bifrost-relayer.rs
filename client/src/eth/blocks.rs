@@ -26,7 +26,7 @@ pub struct BlockMessage {
 	pub block_number: U64,
 	/// The processed block hash.
 	pub block_hash: H256,
-	/// The detected transaction receipts from the target contracts.
+	/// The detected transaction logs from the target contracts.
 	pub target_logs: Vec<Log>,
 }
 
@@ -129,7 +129,7 @@ impl<T: JsonRpcClient> BlockManager<T> {
 			let filter = Filter::new()
 				.from_block(BlockNumber::from(self.waiting_block))
 				.to_block(BlockNumber::from(self.waiting_block))
-				.address(vec![self.client.vault.address(), self.client.socket.address()]);
+				.address(self.client.socket.address());
 
 			let target_logs = self.client.get_logs(&filter).await;
 			if !target_logs.is_empty() {

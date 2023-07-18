@@ -79,13 +79,13 @@ impl<T: JsonRpcClient> Handler for RoundupRelayHandler<T> {
 
 				let mut stream = tokio_stream::iter(block_msg.target_logs);
 				while let Some(log) = stream.next().await {
-					self.process_confirmed_transaction(&log, false).await;
+					self.process_confirmed_log(&log, false).await;
 				}
 			}
 		}
 	}
 
-	async fn process_confirmed_transaction(&self, log: &Log, is_bootstrap: bool) {
+	async fn process_confirmed_log(&self, log: &Log, is_bootstrap: bool) {
 		// Pass if interacted contract was not socket contract || not roundup event
 		if !self.is_target_contract(log) || !self.is_target_event(log.topics[0]) {
 			return
@@ -397,7 +397,7 @@ impl<T: JsonRpcClient> BootstrapHandler for RoundupRelayHandler<T> {
 
 			let mut stream = tokio_stream::iter(logs);
 			while let Some(log) = stream.next().await {
-				self.process_confirmed_transaction(&log, true).await;
+				self.process_confirmed_log(&log, true).await;
 			}
 		}
 
