@@ -21,7 +21,7 @@ use br_periodic::{
 	heartbeat_sender::HeartbeatSender, roundup_emitter::RoundupEmitter, OraclePriceFeeder,
 };
 use br_primitives::{
-	cli::{Configuration, HandlerType},
+	cli::{Configuration, HandlerType, PROMETHEUS_DEFAULT_PORT},
 	errors::{
 		INVALID_BIFROST_NATIVENESS, INVALID_CHAIN_ID, INVALID_CONTRACT_ADDRESS,
 		INVALID_PRIVATE_KEY, INVALID_PROVIDER_URL,
@@ -45,10 +45,14 @@ pub fn new_relay_base(config: Configuration) -> Result<RelayBase, ServiceError> 
 	let evm_providers = config.relayer_config.evm_providers;
 	let system = config.relayer_config.system;
 
-	let (bootstrap_states, socket_barrier_len) = if bootstrap_config.is_enabled {
-		(BootstrapState::NodeSyncing, evm_providers.len() + 1)
-	} else {
-		(BootstrapState::NormalStart, 1)
+	let (bootstrap_states, socket_barrier_len): (BootstrapState, usize) = {
+		let mut ret: (BootstrapState, usize) = (BootstrapState::NormalStart, 1);
+		if let Some(bootstrap_config) = bootstrap_config.clone() {
+			if bootstrap_config.is_enabled {
+				ret = (BootstrapState::NodeSyncing, evm_providers.len() + 1);
+			}
+		}
+		ret
 	};
 
 	// Wait until each chain of vault/socket contract and bootstrapping is completed
@@ -93,7 +97,7 @@ pub fn new_relay_base(config: Configuration) -> Result<RelayBase, ServiceError> 
 			if evm_provider.is_relay_target {
 				let (tx_manager, event_sender) = TransactionManager::new(
 					client.clone(),
-					system.debug_mode,
+					system.debug_mode.unwrap_or(false),
 					evm_provider.eip1559.unwrap_or(false),
 					evm_provider.min_priority_fee.unwrap_or(u64::default()).into(),
 				);
@@ -280,25 +284,31 @@ pub fn new_relay_base(config: Configuration) -> Result<RelayBase, ServiceError> 
 		)
 	});
 
-	if prometheus_config.is_enabled {
-		let interface = match prometheus_config.is_external {
-			true => Ipv4Addr::UNSPECIFIED,
-			false => Ipv4Addr::LOCALHOST,
-		};
+	if let Some(prometheus_config) = prometheus_config {
+		if prometheus_config.is_enabled {
+			let interface = match prometheus_config.is_external.unwrap_or(false) {
+				true => Ipv4Addr::UNSPECIFIED,
+				false => Ipv4Addr::LOCALHOST,
+			};
 
-		let prometheus = PrometheusConfig::new_with_default_registry(
-			SocketAddr::new(interface.into(), prometheus_config.port),
-			system.id,
-		);
+			let prometheus = PrometheusConfig::new_with_default_registry(
+				SocketAddr::new(
+					interface.into(),
+					prometheus_config.port.unwrap_or(PROMETHEUS_DEFAULT_PORT),
+				),
+				String::default(),
+			);
 
-		br_metrics::setup(&prometheus.registry);
+			br_metrics::setup(&prometheus.registry);
 
-		// spawn prometheus
-		task_manager.spawn_handle().spawn(
-			"prometheus-endpoint",
-			None,
-			prometheus_endpoint::init_prometheus(prometheus.port, prometheus.registry).map(drop),
-		);
+			// spawn prometheus
+			task_manager.spawn_handle().spawn(
+				"prometheus-endpoint",
+				None,
+				prometheus_endpoint::init_prometheus(prometheus.port, prometheus.registry)
+					.map(drop),
+			);
+		}
 	}
 
 	Ok(RelayBase { task_manager })

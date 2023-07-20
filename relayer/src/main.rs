@@ -43,7 +43,7 @@ fn main() {
 		create_configuration(tokio_runtime.handle().clone(), cli.load_spec()).unwrap();
 
 	sc_sysinfo::print_sysinfo(&sc_sysinfo::gather_sysinfo());
-	cli.print_relayer_infos(&configuration.relayer_config.system.id);
+	cli.print_relayer_infos();
 
 	let runner = Runner::new(configuration, tokio_runtime).unwrap();
 	runner

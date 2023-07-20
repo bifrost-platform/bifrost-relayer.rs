@@ -15,7 +15,7 @@ use br_client::eth::{
 };
 use br_primitives::{
 	authority::RoundMetaData,
-	cli::BootstrapConfig,
+	cli::{BootstrapConfig, BOOTSTRAP_DEFAULT_ROUND_OFFSET},
 	errors::INVALID_PERIODIC_SCHEDULE,
 	eth::{BootstrapState, GasCoefficient, RoundUpEventStatus, BOOTSTRAP_BLOCK_CHUNK_SIZE},
 	socket::{RoundUpSubmit, SerializedRoundUp, Signatures, SocketContractEvents},
@@ -36,7 +36,7 @@ pub struct RoundupEmitter<T> {
 	/// State of bootstrapping
 	pub bootstrap_states: Arc<RwLock<Vec<BootstrapState>>>,
 	/// Bootstrap config
-	pub bootstrap_config: BootstrapConfig,
+	pub bootstrap_config: Option<BootstrapConfig>,
 }
 
 #[async_trait::async_trait]
@@ -99,7 +99,7 @@ impl<T: JsonRpcClient> RoundupEmitter<T> {
 		clients: Vec<Arc<EthClient<T>>>,
 		schedule: String,
 		bootstrap_states: Arc<RwLock<Vec<BootstrapState>>>,
-		bootstrap_config: BootstrapConfig,
+		bootstrap_config: Option<BootstrapConfig>,
 	) -> Self {
 		let client = clients
 			.iter()
@@ -279,56 +279,58 @@ impl<T: JsonRpcClient> BootstrapHandler for RoundupEmitter<T> {
 	}
 
 	async fn get_bootstrap_events(&self) -> Vec<Log> {
-		let round_info: RoundMetaData = self
-			.client
-			.contract_call(self.client.authority.round_info(), "authority.round_info")
-			.await;
-		let bootstrap_offset_height = self
-			.client
-			.get_bootstrap_offset_height_based_on_block_time(
-				self.bootstrap_config.round_offset,
-				round_info,
-			)
-			.await;
-
-		let latest_block_number = self.client.get_latest_block_number().await;
-		let mut from_block = latest_block_number.saturating_sub(bootstrap_offset_height);
-		let to_block = latest_block_number;
-
 		let mut round_up_events = vec![];
 
-		// Split from_block into smaller chunks
-		while from_block <= to_block {
-			let chunk_to_block =
-				std::cmp::min(from_block + BOOTSTRAP_BLOCK_CHUNK_SIZE - 1, to_block);
-
-			let filter = Filter::new()
-				.address(self.client.socket.address())
-				.topic0(
-					self.client
-						.socket
-						.abi()
-						.event("RoundUp")
-						.expect(INVALID_CONTRACT_ABI)
-						.signature(),
+		if let Some(bootstrap_config) = &self.bootstrap_config {
+			let round_info: RoundMetaData = self
+				.client
+				.contract_call(self.client.authority.round_info(), "authority.round_info")
+				.await;
+			let bootstrap_offset_height = self
+				.client
+				.get_bootstrap_offset_height_based_on_block_time(
+					bootstrap_config.round_offset.unwrap_or(BOOTSTRAP_DEFAULT_ROUND_OFFSET),
+					round_info,
 				)
-				.from_block(from_block)
-				.to_block(chunk_to_block);
+				.await;
 
-			let chunk_logs = self.client.get_logs(&filter).await;
-			round_up_events.extend(chunk_logs);
+			let latest_block_number = self.client.get_latest_block_number().await;
+			let mut from_block = latest_block_number.saturating_sub(bootstrap_offset_height);
+			let to_block = latest_block_number;
 
-			from_block = chunk_to_block + 1;
-		}
+			// Split from_block into smaller chunks
+			while from_block <= to_block {
+				let chunk_to_block =
+					std::cmp::min(from_block + BOOTSTRAP_BLOCK_CHUNK_SIZE - 1, to_block);
 
-		if round_up_events.is_empty() {
-			panic!(
+				let filter = Filter::new()
+					.address(self.client.socket.address())
+					.topic0(
+						self.client
+							.socket
+							.abi()
+							.event("RoundUp")
+							.expect(INVALID_CONTRACT_ABI)
+							.signature(),
+					)
+					.from_block(from_block)
+					.to_block(chunk_to_block);
+
+				let chunk_logs = self.client.get_logs(&filter).await;
+				round_up_events.extend(chunk_logs);
+
+				from_block = chunk_to_block + 1;
+			}
+
+			if round_up_events.is_empty() {
+				panic!(
 					"[{}]-[{}]-[{}] ❗️ Failed to find the latest RoundUp event. Please use a higher bootstrap offset. Current offset: {:?}",
 					self.client.get_chain_name(),
 					SUB_LOG_TARGET,
 					self.client.address(),
-					self.bootstrap_config.round_offset
+					bootstrap_config.round_offset.unwrap_or(BOOTSTRAP_DEFAULT_ROUND_OFFSET)
 				);
+			}
 		}
 
 		round_up_events
