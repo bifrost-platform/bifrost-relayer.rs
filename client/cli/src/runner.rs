@@ -59,10 +59,7 @@ impl Runner {
 		Ok(Runner {
 			config: config.clone(),
 			tokio_runtime,
-			sentry_client: br_metrics::build_sentry_client(
-				config.relayer_config.system.id,
-				config.relayer_config.sentry_config,
-			),
+			sentry_client: br_metrics::build_sentry_client(config.relayer_config.sentry_config),
 		})
 	}
 

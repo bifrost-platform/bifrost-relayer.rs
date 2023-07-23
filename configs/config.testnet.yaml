@@ -15,7 +15,7 @@ evm_providers:
     vault_address: "0x90381bB369D4F8069fdA9246b23637a78c5d1c83"
     authority_address: "0x0000000000000000000000000000000000000400"
     relayer_manager_address: "0x0000000000000000000000000000000000002000"
-  - name: "goerli"
+  - name: "ethereum"
     id: 5
     provider: "<YOUR_GOERLI_RPC_ENDPOINT>"
     call_interval: 6000
@@ -36,7 +36,7 @@ evm_providers:
     authority_address: "0xCf9f6428A309b6652a1dfaA4d8aB8B61C9c7E8CF"
     chainlink_usdc_usd_address: "0x90c069C4538adAc136E051052E14c1cD799C41B7"
     chainlink_usdt_usd_address: "0xEca2605f0BCF2BA5966372C99837b1F182d3D620"
-  - name: "mumbai"
+  - name: "polygon"
     id: 80001
     provider: "<YOUR_MUMBAI_RPC_ENDPOINT>"
     call_interval: 1000
@@ -51,9 +51,9 @@ evm_providers:
 
 handler_configs:
   - handler_type: BridgeRelay
-    watch_list: [49088, 5, 97, 80001]
+    watch_list: [ 49088, 5, 97, 80001 ]
   - handler_type: Roundup
-    watch_list: [49088]
+    watch_list: [ 49088 ]
 
 periodic_configs:
   oracle_price_feeder:
