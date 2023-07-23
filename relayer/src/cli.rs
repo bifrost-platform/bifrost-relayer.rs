@@ -119,7 +119,7 @@ impl Cli {
 	}
 
 	/// Log information about the relayer itself.
-	pub fn print_relayer_infos(&self, id: &String) {
+	pub fn print_relayer_infos(&self) {
 		log::info!(
 			target: LOG_TARGET,
 			"-[{}] {}",

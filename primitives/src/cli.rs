@@ -8,6 +8,9 @@ use crate::eth::ChainID;
 
 pub type Result<T> = std::result::Result<T, Error>;
 
+pub const BOOTSTRAP_DEFAULT_ROUND_OFFSET: u32 = 6;
+pub const PROMETHEUS_DEFAULT_PORT: u16 = 8000;
+
 /// Error type for the CLI.
 #[derive(Debug, thiserror::Error)]
 #[allow(missing_docs)]
@@ -59,8 +62,6 @@ pub struct RelayerConfig {
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct SystemConfig {
-	/// The identifier of the environment.
-	pub id: String,
 	/// The private key of the relayer.
 	pub private_key: String,
 	/// Path of the keystore. (default: `./keys`)
@@ -262,11 +263,13 @@ pub struct BootstrapConfig {
 	/// Bootstrapping flag
 	pub is_enabled: bool,
 	/// Round for bootstrap
-	pub round_offset: u32,
+	pub round_offset: Option<u32>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct SentryConfig {
+	/// Identifier for Sentry client
+	pub environment: Option<Cow<'static, str>>,
 	/// Builds a Sentry client.
 	pub is_enabled: bool,
 	/// The DSN that tells Sentry where to send the events to.
@@ -282,7 +285,7 @@ pub struct PrometheusConfig {
 	/// Expose Prometheus exporter on all interfaces.
 	///
 	/// Default is local.
-	pub is_external: bool,
+	pub is_external: Option<bool>,
 	/// Prometheus exporter TCP Port.
-	pub port: u16,
+	pub port: Option<u16>,
 }
