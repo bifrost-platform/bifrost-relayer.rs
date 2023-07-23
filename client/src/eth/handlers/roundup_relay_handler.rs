@@ -15,7 +15,7 @@ use tokio_stream::StreamExt;
 
 use br_primitives::{
 	authority::RoundMetaData,
-	cli::BootstrapConfig,
+	cli::{BootstrapConfig, BOOTSTRAP_DEFAULT_ROUND_OFFSET},
 	eth::{
 		BootstrapState, ChainID, GasCoefficient, RecoveredSignature, RoundUpEventStatus,
 		BOOTSTRAP_BLOCK_CHUNK_SIZE,
@@ -54,7 +54,7 @@ pub struct RoundupRelayHandler<T> {
 	/// Completion of bootstrapping count
 	pub bootstrapping_count: Arc<Mutex<u8>>,
 	/// Bootstrap config
-	pub bootstrap_config: BootstrapConfig,
+	pub bootstrap_config: Option<BootstrapConfig>,
 }
 
 #[async_trait]
@@ -173,7 +173,7 @@ impl<T: JsonRpcClient> RoundupRelayHandler<T> {
 		clients: Vec<Arc<EthClient<T>>>,
 		socket_barrier: Arc<Barrier>,
 		bootstrap_states: Arc<RwLock<Vec<BootstrapState>>>,
-		bootstrap_config: BootstrapConfig,
+		bootstrap_config: Option<BootstrapConfig>,
 		number_of_relay_targets: usize,
 	) -> Self {
 		// Only broadcast to external chains
@@ -408,39 +408,41 @@ impl<T: JsonRpcClient> BootstrapHandler for RoundupRelayHandler<T> {
 	}
 
 	async fn get_bootstrap_events(&self) -> Vec<Log> {
-		let round_info: RoundMetaData = self
-			.client
-			.contract_call(self.client.authority.round_info(), "authority.round_info")
-			.await;
-		let bootstrap_offset_height = self
-			.client
-			.get_bootstrap_offset_height_based_on_block_time(
-				self.bootstrap_config.round_offset,
-				round_info,
-			)
-			.await;
-
-		let latest_block_number = self.client.get_latest_block_number().await;
-		let mut from_block = latest_block_number.saturating_sub(bootstrap_offset_height);
-		let to_block = latest_block_number;
-
 		let mut logs = vec![];
 
-		// Split from_block into smaller chunks
-		while from_block <= to_block {
-			let chunk_to_block =
-				std::cmp::min(from_block + BOOTSTRAP_BLOCK_CHUNK_SIZE - 1, to_block);
+		if let Some(bootstrap_config) = &self.bootstrap_config {
+			let round_info: RoundMetaData = self
+				.client
+				.contract_call(self.client.authority.round_info(), "authority.round_info")
+				.await;
+			let bootstrap_offset_height = self
+				.client
+				.get_bootstrap_offset_height_based_on_block_time(
+					bootstrap_config.round_offset.unwrap_or(BOOTSTRAP_DEFAULT_ROUND_OFFSET),
+					round_info,
+				)
+				.await;
 
-			let filter = Filter::new()
-				.address(self.client.socket.address())
-				.topic0(self.roundup_signature)
-				.from_block(from_block)
-				.to_block(chunk_to_block);
+			let latest_block_number = self.client.get_latest_block_number().await;
+			let mut from_block = latest_block_number.saturating_sub(bootstrap_offset_height);
+			let to_block = latest_block_number;
 
-			let chunk_logs = self.client.get_logs(&filter).await;
-			logs.extend(chunk_logs);
+			// Split from_block into smaller chunks
+			while from_block <= to_block {
+				let chunk_to_block =
+					std::cmp::min(from_block + BOOTSTRAP_BLOCK_CHUNK_SIZE - 1, to_block);
 
-			from_block = chunk_to_block + 1;
+				let filter = Filter::new()
+					.address(self.client.socket.address())
+					.topic0(self.roundup_signature)
+					.from_block(from_block)
+					.to_block(chunk_to_block);
+
+				let chunk_logs = self.client.get_logs(&filter).await;
+				logs.extend(chunk_logs);
+
+				from_block = chunk_to_block + 1;
+			}
 		}
 
 		logs
