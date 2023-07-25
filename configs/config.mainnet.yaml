@@ -1,5 +1,4 @@
 system:
-  id: "mainnet"
   private_key: "<YOUR_RELAYER_PRIVATE_KEY>"
   debug_mode: false
 
@@ -7,7 +6,7 @@ evm_providers:
   - name: "bifrost"
     id: 3068
     provider: "<YOUR_BIFROST_RPC_ENDPOINT>"
-    call_interval: 1500
+    call_interval: 3000
     block_confirmations: 5
     is_native: true
     is_relay_target: true
@@ -18,7 +17,7 @@ evm_providers:
   - name: "ethereum"
     id: 1
     provider: "<YOUR_ETHEREUM_RPC_ENDPOINT>"
-    call_interval: 6000
+    call_interval: 12000
     block_confirmations: 1
     is_relay_target: false
     eip1559: true
@@ -30,7 +29,7 @@ evm_providers:
   - name: "bsc"
     id: 56
     provider: "<YOUR_BSC_RPC_ENDPOINT>"
-    call_interval: 1500
+    call_interval: 3000
     block_confirmations: 5
     is_relay_target: false
     socket_address: "0xb5Fa48E8B9b89760a9f9176388D1B64A8D4968dF"
@@ -39,7 +38,7 @@ evm_providers:
   - name: "polygon"
     id: 137
     provider: "<YOUR_POLYGON_RPC_ENDPOINT>"
-    call_interval: 1000
+    call_interval: 2000
     block_confirmations: 7
     is_relay_target: false
     eip1559: true
@@ -50,9 +49,9 @@ evm_providers:
 
 handler_configs:
   - handler_type: BridgeRelay
-    watch_list: [3068, 1, 56, 137]
+    watch_list: [ 3068, 1, 56, 137 ]
   - handler_type: Roundup
-    watch_list: [3068]
+    watch_list: [ 3068 ]
 
 periodic_configs:
   oracle_price_feeder:
@@ -61,7 +60,15 @@ periodic_configs:
   roundup_emitter: "*/15 * * * * * *" # Every 15th seconds.
   heartbeat: "0 * * * * * *" # Every minute.
 
+
+###  The items below are optional. ###
+
+bootstrap_config:
+  is_enabled: true
+  round_offset: 6
+
 sentry_config:
+  environment: "<YOUR_SENTRY_ENVIRONMENT>"
   is_enabled: false
   dsn: "<YOUR_SENTRY_DSN>"
 
@@ -69,7 +76,3 @@ prometheus_config:
   is_enabled: false
   is_external: false
   port: 8000
-
-bootstrap_config:
-  is_enabled: true
-  round_offset: 6
