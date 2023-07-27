@@ -124,7 +124,7 @@ impl<T: JsonRpcClient> CoingeckoPriceFetcher<T> {
 				Ok(response) =>
 					return match response.json::<Vec<SupportedCoin>>().await {
 						Ok(mut coins) => {
-							coins.retain(|x| &x.name != "Beefy.Finance");
+							coins.retain(|x| !x.name.to_lowercase().contains("beefy"));
 							Ok(coins)
 						},
 						Err(e) => {
