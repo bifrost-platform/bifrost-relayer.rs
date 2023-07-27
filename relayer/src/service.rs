@@ -105,7 +105,14 @@ pub fn new_relay_base(config: Configuration) -> Result<RelayBase, ServiceError> 
 
 				number_of_relay_targets += 1;
 			}
-			let block_manager = BlockManager::new(client.clone(), bootstrap_states.clone());
+			let block_manager = BlockManager::new(
+				client.clone(),
+				bootstrap_states.clone(),
+				match &prometheus_config {
+					Some(config) => config.is_enabled,
+					None => false,
+				},
+			);
 
 			clients.push(client);
 			block_managers.insert(block_manager.client.get_chain_id(), block_manager);

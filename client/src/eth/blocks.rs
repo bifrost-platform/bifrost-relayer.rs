@@ -60,6 +60,9 @@ pub struct BlockManager<T> {
 	pub waiting_block: U64,
 	/// State of bootstrapping
 	pub bootstrap_states: Arc<RwLock<Vec<BootstrapState>>>,
+	/// The flag whether the relayer has enabled self balance synchronization. This field will be
+	/// enabled when prometheus exporter is enabled.
+	is_balance_sync_enabled: bool,
 }
 
 impl<T: JsonRpcClient> BlockManager<T> {
@@ -67,27 +70,33 @@ impl<T: JsonRpcClient> BlockManager<T> {
 	pub fn new(
 		client: Arc<EthClient<T>>,
 		bootstrap_states: Arc<RwLock<Vec<BootstrapState>>>,
+		is_balance_sync_enabled: bool,
 	) -> Self {
 		let (sender, _receiver) = broadcast::channel(512);
 
-		Self { client, sender, waiting_block: U64::default(), bootstrap_states }
+		Self {
+			client,
+			sender,
+			waiting_block: U64::default(),
+			bootstrap_states,
+			is_balance_sync_enabled,
+		}
 	}
 
 	/// Initialize block manager.
 	async fn initialize(&mut self) {
 		// initialize waiting block to the latest block
 		self.waiting_block = self.client.get_latest_block_number().await;
-		if let Some(block) = self.client.get_block(self.waiting_block.into()).await {
-			log::info!(
-				target: &self.client.get_chain_name(),
-				"-[{}] 💤 Idle, best: #{:?} ({})",
-				sub_display_format(SUB_LOG_TARGET),
-				block.number.unwrap(),
-				block.hash.unwrap(),
-			);
-		}
+		log::info!(
+			target: &self.client.get_chain_name(),
+			"-[{}] 💤 Idle, best: #{:?}",
+			sub_display_format(SUB_LOG_TARGET),
+			self.waiting_block
+		);
 
-		self.client.sync_balance().await;
+		if self.is_balance_sync_enabled {
+			self.client.sync_balance().await;
+		}
 	}
 
 	/// Starts the block manager. Reads every new mined block of the connected chain and starts to
@@ -102,7 +111,9 @@ impl<T: JsonRpcClient> BlockManager<T> {
 					self.process_confirmed_block().await;
 					self.increment_waiting_block();
 
-					self.client.sync_balance().await;
+					if self.is_balance_sync_enabled {
+						self.client.sync_balance().await;
+					}
 				}
 			}
 
