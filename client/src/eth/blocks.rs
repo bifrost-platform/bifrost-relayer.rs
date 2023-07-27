@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use ethers::{
 	providers::{JsonRpcClient, Middleware},
-	types::{BlockNumber, Filter, Log, SyncingStatus, H256, U64},
+	types::{BlockNumber, Filter, Log, SyncingStatus, U64},
 };
 use tokio::{
 	sync::{
@@ -24,15 +24,13 @@ use super::{BootstrapHandler, EthClient};
 pub struct BlockMessage {
 	/// The processed block number.
 	pub block_number: U64,
-	/// The processed block hash.
-	pub block_hash: H256,
 	/// The detected transaction logs from the target contracts.
 	pub target_logs: Vec<Log>,
 }
 
 impl BlockMessage {
-	pub fn new(block_number: U64, block_hash: H256, target_logs: Vec<Log>) -> Self {
-		Self { block_number, block_hash, target_logs }
+	pub fn new(block_number: U64, target_logs: Vec<Log>) -> Self {
+		Self { block_number, target_logs }
 	}
 }
 
@@ -115,31 +113,22 @@ impl<T: JsonRpcClient> BlockManager<T> {
 	/// Process the confirmed block and verifies if any transaction interacted with the target
 	/// contracts.
 	async fn process_confirmed_block(&self) {
-		if let Some(block) = self.client.get_block(self.waiting_block.into()).await {
-			let filter = Filter::new()
-				.from_block(BlockNumber::from(self.waiting_block))
-				.to_block(BlockNumber::from(self.waiting_block))
-				.address(self.client.socket.address());
+		let filter = Filter::new()
+			.from_block(BlockNumber::from(self.waiting_block))
+			.to_block(BlockNumber::from(self.waiting_block))
+			.address(self.client.socket.address());
 
-			let target_logs = self.client.get_logs(&filter).await;
-			if !target_logs.is_empty() {
-				self.sender
-					.send(BlockMessage::new(
-						block.number.unwrap(),
-						block.hash.unwrap(),
-						target_logs,
-					))
-					.unwrap();
-			}
-
-			log::info!(
-				target: &self.client.get_chain_name(),
-				"-[{}] ✨ Imported #{:?} ({})",
-				sub_display_format(SUB_LOG_TARGET),
-				block.number.unwrap(),
-				block.hash.unwrap(),
-			);
+		let target_logs = self.client.get_logs(&filter).await;
+		if !target_logs.is_empty() {
+			self.sender.send(BlockMessage::new(self.waiting_block, target_logs)).unwrap();
 		}
+
+		log::info!(
+			target: &self.client.get_chain_name(),
+			"-[{}] ✨ Imported #{:?}",
+			sub_display_format(SUB_LOG_TARGET),
+			self.waiting_block
+		);
 	}
 
 	/// Increment the waiting block.
