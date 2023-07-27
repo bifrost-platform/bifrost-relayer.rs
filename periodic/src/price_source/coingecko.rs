@@ -82,26 +82,20 @@ impl<T: JsonRpcClient> PriceFetcher for CoingeckoPriceFetcher<T> {
 
 impl<T: JsonRpcClient> CoingeckoPriceFetcher<T> {
 	pub async fn new() -> Result<Self, Error> {
-		let symbols: Vec<String> = vec![
-			"ETH".into(),
-			"BFC".into(),
-			"BNB".into(),
-			"MATIC".into(),
-			"USDC".into(),
-			"BIFI".into(),
-			"USDT".into(),
+		let ids: Vec<String> = vec![
+			"ethereum".into(),
+			"bifrost".into(),
+			"binancecoin".into(),
+			"matic-network".into(),
+			"usd-coin".into(),
+			"bifi".into(),
+			"tether".into(),
 		];
 
-		let support_coin_list: Vec<SupportedCoin> = Self::get_all_coin_list().await?;
-
-		let ids: Vec<String> = symbols
-			.iter()
-			.filter_map(|symbol| {
-				support_coin_list
-					.iter()
-					.find(|coin| coin.symbol == symbol.to_lowercase())
-					.map(|coin| coin.id.clone())
-			})
+		let support_coin_list: Vec<SupportedCoin> = Self::get_all_coin_list()
+			.await?
+			.into_iter()
+			.filter(|coin| ids.contains(&coin.id))
 			.collect();
 
 		Ok(Self {
@@ -123,10 +117,7 @@ impl<T: JsonRpcClient> CoingeckoPriceFetcher<T> {
 			{
 				Ok(response) =>
 					return match response.json::<Vec<SupportedCoin>>().await {
-						Ok(mut coins) => {
-							coins.retain(|x| !x.name.to_lowercase().contains("beefy"));
-							Ok(coins)
-						},
+						Ok(coins) => Ok(coins),
 						Err(e) => {
 							log::error!(
 								target: LOG_TARGET,
@@ -205,30 +196,5 @@ impl<T: JsonRpcClient> CoingeckoPriceFetcher<T> {
 			.expect("Cannot find symbol in support coin list")
 			.id
 			.as_str()
-	}
-}
-
-#[cfg(test)]
-mod tests {
-	use ethers::providers::Http;
-
-	use super::*;
-
-	#[tokio::test]
-	async fn fetch_price() {
-		let coingecko_fetcher: CoingeckoPriceFetcher<Http> =
-			CoingeckoPriceFetcher::new().await.unwrap();
-		let res = coingecko_fetcher.get_ticker_with_symbol("BTC".to_string()).await;
-
-		println!("{:?}", res);
-	}
-
-	#[tokio::test]
-	async fn fetch_prices() {
-		let binance_fetcher: CoingeckoPriceFetcher<Http> =
-			CoingeckoPriceFetcher::new().await.unwrap();
-		let res = binance_fetcher.get_tickers().await;
-
-		println!("{:#?}", res);
 	}
 }
