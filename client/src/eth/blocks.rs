@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use ethers::{
 	providers::{JsonRpcClient, Middleware},
-	types::{BlockNumber, Filter, Log, SyncingStatus, H160, H256, U64},
+	types::{BlockNumber, Filter, Log, SyncingStatus, H256, U64},
 };
 use tokio::{
 	sync::{
@@ -58,8 +58,6 @@ pub struct BlockManager<T> {
 	pub client: Arc<EthClient<T>>,
 	/// The channel sending block messages.
 	pub sender: Sender<BlockMessage>,
-	/// The target contracts this chain is watching.
-	pub target_contracts: Vec<H160>,
 	/// The block waiting for enough confirmations.
 	pub waiting_block: U64,
 	/// State of bootstrapping
@@ -70,23 +68,15 @@ impl<T: JsonRpcClient> BlockManager<T> {
 	/// Instantiates a new `BlockManager` instance.
 	pub fn new(
 		client: Arc<EthClient<T>>,
-		target_contracts: Vec<H160>,
 		bootstrap_states: Arc<RwLock<Vec<BootstrapState>>>,
 	) -> Self {
 		let (sender, _receiver) = broadcast::channel(512);
 
-		Self { client, sender, target_contracts, waiting_block: U64::default(), bootstrap_states }
+		Self { client, sender, waiting_block: U64::default(), bootstrap_states }
 	}
 
 	/// Initialize block manager.
 	async fn initialize(&mut self) {
-		log::info!(
-			target: &self.client.get_chain_name(),
-			"-[{}] 📃 Target contracts: {:?}",
-			sub_display_format(SUB_LOG_TARGET),
-			self.target_contracts
-		);
-
 		// initialize waiting block to the latest block
 		self.waiting_block = self.client.get_latest_block_number().await;
 		if let Some(block) = self.client.get_block(self.waiting_block.into()).await {
