@@ -70,10 +70,9 @@ impl<T: JsonRpcClient> Handler for RoundupRelayHandler<T> {
 
 				log::info!(
 					target: &self.client.get_chain_name(),
-					"-[{}] 📦 Imported #{:?} ({}) with target logs({:?})",
+					"-[{}] 📦 Imported #{:?} with target logs({:?})",
 					sub_display_format(SUB_LOG_TARGET),
 					block_msg.block_number,
-					block_msg.block_hash,
 					block_msg.target_logs.len(),
 				);
 
