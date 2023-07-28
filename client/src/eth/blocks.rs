@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use ethers::{
 	providers::{JsonRpcClient, Middleware},
-	types::{BlockNumber, Filter, Log, SyncingStatus, H160, H256, U64},
+	types::{BlockNumber, Filter, Log, SyncingStatus, U64},
 };
 use tokio::{
 	sync::{
@@ -24,15 +24,13 @@ use super::{BootstrapHandler, EthClient};
 pub struct BlockMessage {
 	/// The processed block number.
 	pub block_number: U64,
-	/// The processed block hash.
-	pub block_hash: H256,
 	/// The detected transaction logs from the target contracts.
 	pub target_logs: Vec<Log>,
 }
 
 impl BlockMessage {
-	pub fn new(block_number: U64, block_hash: H256, target_logs: Vec<Log>) -> Self {
-		Self { block_number, block_hash, target_logs }
+	pub fn new(block_number: U64, target_logs: Vec<Log>) -> Self {
+		Self { block_number, target_logs }
 	}
 }
 
@@ -58,48 +56,47 @@ pub struct BlockManager<T> {
 	pub client: Arc<EthClient<T>>,
 	/// The channel sending block messages.
 	pub sender: Sender<BlockMessage>,
-	/// The target contracts this chain is watching.
-	pub target_contracts: Vec<H160>,
 	/// The block waiting for enough confirmations.
 	pub waiting_block: U64,
 	/// State of bootstrapping
 	pub bootstrap_states: Arc<RwLock<Vec<BootstrapState>>>,
+	/// The flag whether the relayer has enabled self balance synchronization. This field will be
+	/// enabled when prometheus exporter is enabled.
+	is_balance_sync_enabled: bool,
 }
 
 impl<T: JsonRpcClient> BlockManager<T> {
 	/// Instantiates a new `BlockManager` instance.
 	pub fn new(
 		client: Arc<EthClient<T>>,
-		target_contracts: Vec<H160>,
 		bootstrap_states: Arc<RwLock<Vec<BootstrapState>>>,
+		is_balance_sync_enabled: bool,
 	) -> Self {
 		let (sender, _receiver) = broadcast::channel(512);
 
-		Self { client, sender, target_contracts, waiting_block: U64::default(), bootstrap_states }
+		Self {
+			client,
+			sender,
+			waiting_block: U64::default(),
+			bootstrap_states,
+			is_balance_sync_enabled,
+		}
 	}
 
 	/// Initialize block manager.
 	async fn initialize(&mut self) {
-		log::info!(
-			target: &self.client.get_chain_name(),
-			"-[{}] 📃 Target contracts: {:?}",
-			sub_display_format(SUB_LOG_TARGET),
-			self.target_contracts
-		);
-
 		// initialize waiting block to the latest block
 		self.waiting_block = self.client.get_latest_block_number().await;
-		if let Some(block) = self.client.get_block(self.waiting_block.into()).await {
-			log::info!(
-				target: &self.client.get_chain_name(),
-				"-[{}] 💤 Idle, best: #{:?} ({})",
-				sub_display_format(SUB_LOG_TARGET),
-				block.number.unwrap(),
-				block.hash.unwrap(),
-			);
-		}
+		log::info!(
+			target: &self.client.get_chain_name(),
+			"-[{}] 💤 Idle, best: #{:?}",
+			sub_display_format(SUB_LOG_TARGET),
+			self.waiting_block
+		);
 
-		self.client.sync_balance().await;
+		if self.is_balance_sync_enabled {
+			self.client.sync_balance().await;
+		}
 	}
 
 	/// Starts the block manager. Reads every new mined block of the connected chain and starts to
@@ -114,7 +111,9 @@ impl<T: JsonRpcClient> BlockManager<T> {
 					self.process_confirmed_block().await;
 					self.increment_waiting_block();
 
-					self.client.sync_balance().await;
+					if self.is_balance_sync_enabled {
+						self.client.sync_balance().await;
+					}
 				}
 			}
 
@@ -125,31 +124,22 @@ impl<T: JsonRpcClient> BlockManager<T> {
 	/// Process the confirmed block and verifies if any transaction interacted with the target
 	/// contracts.
 	async fn process_confirmed_block(&self) {
-		if let Some(block) = self.client.get_block(self.waiting_block.into()).await {
-			let filter = Filter::new()
-				.from_block(BlockNumber::from(self.waiting_block))
-				.to_block(BlockNumber::from(self.waiting_block))
-				.address(self.client.socket.address());
+		let filter = Filter::new()
+			.from_block(BlockNumber::from(self.waiting_block))
+			.to_block(BlockNumber::from(self.waiting_block))
+			.address(self.client.socket.address());
 
-			let target_logs = self.client.get_logs(&filter).await;
-			if !target_logs.is_empty() {
-				self.sender
-					.send(BlockMessage::new(
-						block.number.unwrap(),
-						block.hash.unwrap(),
-						target_logs,
-					))
-					.unwrap();
-			}
-
-			log::info!(
-				target: &self.client.get_chain_name(),
-				"-[{}] ✨ Imported #{:?} ({})",
-				sub_display_format(SUB_LOG_TARGET),
-				block.number.unwrap(),
-				block.hash.unwrap(),
-			);
+		let target_logs = self.client.get_logs(&filter).await;
+		if !target_logs.is_empty() {
+			self.sender.send(BlockMessage::new(self.waiting_block, target_logs)).unwrap();
 		}
+
+		log::info!(
+			target: &self.client.get_chain_name(),
+			"-[{}] ✨ Imported #{:?}",
+			sub_display_format(SUB_LOG_TARGET),
+			self.waiting_block
+		);
 	}
 
 	/// Increment the waiting block.
