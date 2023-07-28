@@ -1,14 +1,10 @@
 use std::{
 	collections::BTreeMap,
 	net::{Ipv4Addr, SocketAddr},
-	str::FromStr,
 	sync::Arc,
 };
 
-use ethers::{
-	providers::{Http, Provider},
-	types::H160,
-};
+use ethers::providers::{Http, Provider};
 use futures::FutureExt;
 use sc_service::{config::PrometheusConfig, Error as ServiceError, TaskManager};
 use tokio::sync::{Barrier, Mutex, RwLock};
@@ -23,8 +19,7 @@ use br_periodic::{
 use br_primitives::{
 	cli::{Configuration, HandlerType, PROMETHEUS_DEFAULT_PORT},
 	errors::{
-		INVALID_BIFROST_NATIVENESS, INVALID_CHAIN_ID, INVALID_CONTRACT_ADDRESS,
-		INVALID_PRIVATE_KEY, INVALID_PROVIDER_URL,
+		INVALID_BIFROST_NATIVENESS, INVALID_CHAIN_ID, INVALID_PRIVATE_KEY, INVALID_PROVIDER_URL,
 	},
 	eth::BootstrapState,
 	periodic::PeriodicWorker,
@@ -112,11 +107,11 @@ pub fn new_relay_base(config: Configuration) -> Result<RelayBase, ServiceError> 
 			}
 			let block_manager = BlockManager::new(
 				client.clone(),
-				vec![
-					H160::from_str(&evm_provider.vault_address).expect(INVALID_CONTRACT_ADDRESS),
-					H160::from_str(&evm_provider.socket_address).expect(INVALID_CONTRACT_ADDRESS),
-				],
 				bootstrap_states.clone(),
+				match &prometheus_config {
+					Some(config) => config.is_enabled,
+					None => false,
+				},
 			);
 
 			clients.push(client);
