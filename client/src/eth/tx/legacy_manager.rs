@@ -3,7 +3,7 @@ use crate::eth::{
 	DEFAULT_CALL_RETRY_INTERVAL_MS, DEFAULT_TX_RETRIES, RETRY_GAS_PRICE_COEFFICIENT,
 };
 use async_trait::async_trait;
-use br_primitives::sub_display_format;
+use br_primitives::{eth::ETHEREUM_BLOCK_TIME, sub_display_format};
 use ethers::{
 	middleware::{
 		gas_escalator::{Frequency, GasEscalatorMiddleware, GeometricGasPrice},
@@ -45,10 +45,21 @@ impl<T: 'static + JsonRpcClient> LegacyTransactionManager<T> {
 	pub fn new(
 		client: Arc<EthClient<T>>,
 		debug_mode: bool,
+		escalate_interval: Option<u64>,
+		escalate_percentage: Option<f64>,
 	) -> (Self, UnboundedSender<EventMessage>) {
 		let (sender, receiver) = mpsc::unbounded_channel::<EventMessage>();
 
-		let escalator = GeometricGasPrice::new(1.2, client.call_interval * 5, None::<u64>);
+		let mut coefficient = 1.15;
+		if let Some(escalate_percentage) = escalate_percentage {
+			coefficient = 1.0 + (escalate_percentage / 100.0);
+		}
+
+		let escalator = GeometricGasPrice::new(
+			coefficient,
+			escalate_interval.unwrap_or(ETHEREUM_BLOCK_TIME),
+			None::<u64>,
+		);
 		let middleware = client
 			.get_provider()
 			.wrap_into(|p| SignerMiddleware::new(p, client.wallet.signer.clone()))

@@ -102,6 +102,8 @@ pub fn new_relay_base(config: Configuration) -> Result<RelayBase, ServiceError> 
 						let (tx_manager, sender) = LegacyTransactionManager::new(
 							client.clone(),
 							system.debug_mode.unwrap_or(false),
+							evm_provider.escalate_interval,
+							evm_provider.escalate_percentage,
 						);
 						tx_managers.0.push(tx_manager);
 						event_senders.push(Arc::new(EventSender::new(
