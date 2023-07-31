@@ -4,8 +4,8 @@ use std::{
 };
 
 use ethers::types::{
-	transaction::eip2718::TypedTransaction, Address, Eip1559TransactionRequest, TransactionRequest,
-	U256,
+	transaction::eip2718::TypedTransaction, Address, Bytes, Eip1559TransactionRequest,
+	NameOrAddress, TransactionRequest, U256,
 };
 use tokio::sync::mpsc::{error::SendError, UnboundedSender};
 
@@ -218,6 +218,25 @@ pub enum TxRequest {
 }
 
 impl TxRequest {
+	pub fn get_data(&self) -> &Bytes {
+		match self {
+			TxRequest::Legacy(tx_request) => tx_request.data.as_ref().unwrap(),
+			TxRequest::Eip1559(tx_request) => tx_request.data.as_ref().unwrap(),
+		}
+	}
+	pub fn get_to(&self) -> &NameOrAddress {
+		match self {
+			TxRequest::Legacy(tx_request) => tx_request.to.as_ref().unwrap(),
+			TxRequest::Eip1559(tx_request) => tx_request.to.as_ref().unwrap(),
+		}
+	}
+	pub fn get_from(&self) -> &Address {
+		match self {
+			TxRequest::Legacy(tx_request) => tx_request.from.as_ref().unwrap(),
+			TxRequest::Eip1559(tx_request) => tx_request.from.as_ref().unwrap(),
+		}
+	}
+
 	/// Sets the `from` field in the transaction to the provided value
 	pub fn from(&self, address: Address) -> Self {
 		match self {

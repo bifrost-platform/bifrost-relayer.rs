@@ -3,6 +3,7 @@ use std::{
 	net::{Ipv4Addr, SocketAddr},
 	str::FromStr,
 	sync::Arc,
+	time::Duration,
 };
 
 use ethers::{
@@ -14,8 +15,8 @@ use sc_service::{config::PrometheusConfig, Error as ServiceError, TaskManager};
 use tokio::sync::{Barrier, Mutex, RwLock};
 
 use br_client::eth::{
-	BlockManager, BridgeRelayHandler, EthClient, EventSender, Handler, RoundupRelayHandler,
-	TransactionManager, WalletManager,
+	BlockManager, BridgeRelayHandler, Eip1559TransactionManager, EthClient, EventSender, Handler,
+	LegacyTransactionManager, RoundupRelayHandler, TransactionManager, WalletManager,
 };
 use br_periodic::{
 	heartbeat_sender::HeartbeatSender, roundup_emitter::RoundupEmitter, OraclePriceFeeder,
@@ -65,7 +66,7 @@ pub fn new_relay_base(config: Configuration) -> Result<RelayBase, ServiceError> 
 	// initialize `EthClient`, `TransactionManager`, `BlockManager`
 	let (clients, tx_managers, block_managers, event_channels) = {
 		let mut clients = vec![];
-		let mut tx_managers = vec![];
+		let mut tx_managers = (vec![], vec![]);
 		let mut block_managers = BTreeMap::new();
 		let mut event_senders = vec![];
 
@@ -79,7 +80,8 @@ pub fn new_relay_base(config: Configuration) -> Result<RelayBase, ServiceError> 
 				wallet,
 				Arc::new(
 					Provider::<Http>::try_from(evm_provider.provider.clone())
-						.expect(INVALID_PROVIDER_URL),
+						.expect(INVALID_PROVIDER_URL)
+						.interval(Duration::from_millis(evm_provider.call_interval)),
 				),
 				evm_provider.name.clone(),
 				evm_provider.id,
@@ -95,18 +97,33 @@ pub fn new_relay_base(config: Configuration) -> Result<RelayBase, ServiceError> 
 			));
 
 			if evm_provider.is_relay_target {
-				let (tx_manager, event_sender) = TransactionManager::new(
-					client.clone(),
-					system.debug_mode.unwrap_or(false),
-					evm_provider.eip1559.unwrap_or(false),
-					evm_provider.min_priority_fee.unwrap_or(u64::default()).into(),
-				);
-				tx_managers.push((tx_manager, client.get_chain_name()));
-				event_senders.push(Arc::new(EventSender::new(
-					evm_provider.id,
-					event_sender,
-					is_native,
-				)));
+				match evm_provider.eip1559.unwrap_or(false) {
+					false => {
+						let (tx_manager, sender) = LegacyTransactionManager::new(
+							client.clone(),
+							system.debug_mode.unwrap_or(false),
+						);
+						tx_managers.0.push(tx_manager);
+						event_senders.push(Arc::new(EventSender::new(
+							evm_provider.id,
+							sender,
+							is_native,
+						)))
+					},
+					true => {
+						let (tx_manager, sender) = Eip1559TransactionManager::new(
+							client.clone(),
+							system.debug_mode.unwrap_or(false),
+							evm_provider.min_priority_fee.unwrap_or(u64::default()).into(),
+						);
+						tx_managers.1.push(tx_manager);
+						event_senders.push(Arc::new(EventSender::new(
+							evm_provider.id,
+							sender,
+							is_native,
+						)))
+					},
+				};
 
 				number_of_relay_targets += 1;
 			}
@@ -134,11 +151,21 @@ pub fn new_relay_base(config: Configuration) -> Result<RelayBase, ServiceError> 
 	);
 	log::info!(
 		target: LOG_TARGET,
-		"-[{}] 🔨 Relay Targets: {}",
+		"-[{}] 🔨 Relay Targets (Legacy): {}",
 		sub_display_format(SUB_LOG_TARGET),
-		tx_managers
+		tx_managers.0
 			.iter()
-			.map(|tx_manager| tx_manager.0.client.get_chain_name())
+			.map(|tx_manager| tx_manager.client.get_chain_name())
+			.collect::<Vec<String>>()
+			.join(", ")
+	);
+	log::info!(
+		target: LOG_TARGET,
+		"-[{}] 🔨 Relay Targets (EIP1559): {}",
+		sub_display_format(SUB_LOG_TARGET),
+		tx_managers.1
+			.iter()
+			.map(|tx_manager| tx_manager.client.get_chain_name())
 			.collect::<Vec<String>>()
 			.join(", ")
 	);
@@ -147,9 +174,22 @@ pub fn new_relay_base(config: Configuration) -> Result<RelayBase, ServiceError> 
 	let task_manager = TaskManager::new(config.tokio_handle, None)?;
 
 	// Spawn transaction managers' tasks
-	tx_managers.into_iter().for_each(|(mut tx_manager, chain_name)| {
+	tx_managers.0.into_iter().for_each(|mut tx_manager| {
 		task_manager.spawn_essential_handle().spawn(
-			Box::leak(format!("{}-transaction-manager", chain_name).into_boxed_str()),
+			Box::leak(
+				format!("{}-transaction-manager", tx_manager.client.get_chain_name())
+					.into_boxed_str(),
+			),
+			Some("transaction-managers"),
+			async move { tx_manager.run().await },
+		)
+	});
+	tx_managers.1.into_iter().for_each(|mut tx_manager| {
+		task_manager.spawn_essential_handle().spawn(
+			Box::leak(
+				format!("{}-transaction-manager", tx_manager.client.get_chain_name())
+					.into_boxed_str(),
+			),
 			Some("transaction-managers"),
 			async move { tx_manager.run().await },
 		)
