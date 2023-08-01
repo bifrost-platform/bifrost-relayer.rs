@@ -66,7 +66,7 @@ periodic_configs:
 
 bootstrap_config:
   is_enabled: true
-  round_offset: 6
+  round_offset: 3
 
 sentry_config:
   environment: "<YOUR_SENTRY_ENVIRONMENT>"
