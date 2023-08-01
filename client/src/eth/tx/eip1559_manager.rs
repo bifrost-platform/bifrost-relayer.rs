@@ -21,7 +21,7 @@ use tokio::{
 	time::sleep,
 };
 
-const SUB_LOG_TARGET: &str = "eip1559-transaction-manager";
+const SUB_LOG_TARGET: &str = "eip1559-tx-manager";
 
 /// The essential task that sends eip1559 transactions asynchronously.
 pub struct Eip1559TransactionManager<T> {
