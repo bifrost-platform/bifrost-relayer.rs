@@ -8,7 +8,7 @@ use crate::eth::ChainID;
 
 pub type Result<T> = std::result::Result<T, Error>;
 
-pub const BOOTSTRAP_DEFAULT_ROUND_OFFSET: u32 = 6;
+pub const BOOTSTRAP_DEFAULT_ROUND_OFFSET: u32 = 3;
 pub const PROMETHEUS_DEFAULT_PORT: u16 = 8000;
 
 /// Error type for the CLI.
