@@ -22,7 +22,7 @@ use tokio::{
 	time::sleep,
 };
 
-const SUB_LOG_TARGET: &str = "legacy-transaction-manager";
+const SUB_LOG_TARGET: &str = "legacy-tx-manager";
 
 /// The essential task that sends legacy transactions asynchronously.
 pub struct LegacyTransactionManager<T> {
