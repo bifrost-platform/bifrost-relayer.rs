@@ -151,26 +151,31 @@ pub fn new_relay_base(config: Configuration) -> Result<RelayBase, ServiceError> 
 		sub_display_format(SUB_LOG_TARGET),
 		clients[0].address()
 	);
-	log::info!(
-		target: LOG_TARGET,
-		"-[{}] 🔨 Relay Targets (Legacy): {}",
-		sub_display_format(SUB_LOG_TARGET),
-		tx_managers.0
-			.iter()
-			.map(|tx_manager| tx_manager.client.get_chain_name())
-			.collect::<Vec<String>>()
-			.join(", ")
-	);
-	log::info!(
-		target: LOG_TARGET,
-		"-[{}] 🔨 Relay Targets (EIP1559): {}",
-		sub_display_format(SUB_LOG_TARGET),
-		tx_managers.1
-			.iter()
-			.map(|tx_manager| tx_manager.client.get_chain_name())
-			.collect::<Vec<String>>()
-			.join(", ")
-	);
+
+	if !tx_managers.0.is_empty() {
+		log::info!(
+			target: LOG_TARGET,
+			"-[{}] 🔨 Relay Targets (Legacy): {}",
+			sub_display_format(SUB_LOG_TARGET),
+			tx_managers.0
+				.iter()
+				.map(|tx_manager| tx_manager.client.get_chain_name())
+				.collect::<Vec<String>>()
+				.join(", ")
+		);
+	}
+	if !tx_managers.1.is_empty() {
+		log::info!(
+			target: LOG_TARGET,
+			"-[{}] 🔨 Relay Targets (EIP1559): {}",
+			sub_display_format(SUB_LOG_TARGET),
+			tx_managers.1
+				.iter()
+				.map(|tx_manager| tx_manager.client.get_chain_name())
+				.collect::<Vec<String>>()
+				.join(", ")
+		);
+	}
 
 	// Initialize `TaskManager`
 	let task_manager = TaskManager::new(config.tokio_handle, None)?;
