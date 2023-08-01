@@ -90,6 +90,9 @@ pub struct EVMProvider {
 	pub escalate_interval: Option<u64>,
 	/// Gas price increase percentage on retry when transaction stuck in mempool. (default: 15.0)
 	pub escalate_percentage: Option<f64>,
+	/// If first relay transaction is stuck in mempool after waiting for this amount of time(ms),
+	/// ignore duplicate prevent logic. (default: {call_interval * 10})
+	pub duplicate_confirm_delay: Option<u64>,
 	/// Socket contract address
 	pub socket_address: String,
 	/// Vault contract address

@@ -38,6 +38,9 @@ pub struct LegacyTransactionManager<T> {
 	is_txpool_enabled: bool,
 	/// The flag whether debug mode is enabled. If enabled, certain errors will be logged.
 	debug_mode: bool,
+	/// If first relay transaction is stuck in mempool after waiting for this amount of time(ms),
+	/// ignore duplicate prevent logic. (default: {call_interval * 10})
+	duplicate_confirm_delay: Option<u64>,
 }
 
 impl<T: 'static + JsonRpcClient> LegacyTransactionManager<T> {
@@ -47,6 +50,7 @@ impl<T: 'static + JsonRpcClient> LegacyTransactionManager<T> {
 		debug_mode: bool,
 		escalate_interval: Option<u64>,
 		escalate_percentage: Option<f64>,
+		duplicate_confirm_delay: Option<u64>,
 	) -> (Self, UnboundedSender<EventMessage>) {
 		let (sender, receiver) = mpsc::unbounded_channel::<EventMessage>();
 
@@ -66,7 +70,17 @@ impl<T: 'static + JsonRpcClient> LegacyTransactionManager<T> {
 			.wrap_into(|p| Arc::new(GasEscalatorMiddleware::new(p, escalator, Frequency::PerBlock)))
 			.wrap_into(|p| NonceManagerMiddleware::new(p, client.address()));
 
-		(Self { client, middleware, receiver, is_txpool_enabled: false, debug_mode }, sender)
+		(
+			Self {
+				client,
+				middleware,
+				receiver,
+				is_txpool_enabled: false,
+				debug_mode,
+				duplicate_confirm_delay,
+			},
+			sender,
+		)
 	}
 
 	/// Get gas_price for legacy retry transaction request.
@@ -146,6 +160,10 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> for LegacyTransactionMana
 	}
 	fn get_client(&self) -> Arc<EthClient<T>> {
 		self.client.clone()
+	}
+
+	fn duplicate_confirm_delay(&self) -> Duration {
+		Duration::from_millis(self.duplicate_confirm_delay.unwrap_or(ETHEREUM_BLOCK_TIME * 1000))
 	}
 
 	async fn initialize(&mut self) {

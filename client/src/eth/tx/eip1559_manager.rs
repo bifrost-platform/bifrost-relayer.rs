@@ -4,7 +4,7 @@ use crate::eth::{
 	MAX_PRIORITY_FEE_COEFFICIENT,
 };
 use async_trait::async_trait;
-use br_primitives::sub_display_format;
+use br_primitives::{eth::ETHEREUM_BLOCK_TIME, sub_display_format};
 use ethers::{
 	middleware::{MiddlewareBuilder, NonceManagerMiddleware, SignerMiddleware},
 	prelude::Transaction,
@@ -37,6 +37,9 @@ pub struct Eip1559TransactionManager<T> {
 	debug_mode: bool,
 	/// The minimum priority fee required.
 	min_priority_fee: U256,
+	/// If first relay transaction is stuck in mempool after waiting for this amount of time(ms),
+	/// ignore duplicate prevent logic. (default: {call_interval * 10})
+	duplicate_confirm_delay: Option<u64>,
 }
 
 impl<T: 'static + JsonRpcClient> Eip1559TransactionManager<T> {
@@ -45,6 +48,7 @@ impl<T: 'static + JsonRpcClient> Eip1559TransactionManager<T> {
 		client: Arc<EthClient<T>>,
 		debug_mode: bool,
 		min_priority_fee: U256,
+		duplicate_confirm_delay: Option<u64>,
 	) -> (Self, UnboundedSender<EventMessage>) {
 		let (sender, receiver) = mpsc::unbounded_channel::<EventMessage>();
 
@@ -61,6 +65,7 @@ impl<T: 'static + JsonRpcClient> Eip1559TransactionManager<T> {
 				is_txpool_enabled: false,
 				debug_mode,
 				min_priority_fee,
+				duplicate_confirm_delay,
 			},
 			sender,
 		)
@@ -140,13 +145,15 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> for Eip1559TransactionMan
 	fn is_txpool_enabled(&self) -> bool {
 		self.is_txpool_enabled
 	}
-
 	fn debug_mode(&self) -> bool {
 		self.debug_mode
 	}
-
 	fn get_client(&self) -> Arc<EthClient<T>> {
 		self.client.clone()
+	}
+
+	fn duplicate_confirm_delay(&self) -> Duration {
+		Duration::from_millis(self.duplicate_confirm_delay.unwrap_or(ETHEREUM_BLOCK_TIME * 1000))
 	}
 
 	async fn initialize(&mut self) {

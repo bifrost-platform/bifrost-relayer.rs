@@ -28,6 +28,7 @@ where
 	fn is_txpool_enabled(&self) -> bool;
 	fn debug_mode(&self) -> bool;
 	fn get_client(&self) -> Arc<EthClient<T>>;
+	fn duplicate_confirm_delay(&self) -> Duration;
 
 	/// Initialize transaction manager.
 	async fn initialize(&mut self);
@@ -108,7 +109,17 @@ where
 					if mempool_tx.from == *from {
 						return false
 					}
-					return true
+
+					sleep(self.duplicate_confirm_delay()).await;
+					return if let Some(_) =
+						self.get_client().get_transaction_receipt(mempool_tx.hash).await
+					{
+						br_metrics::increase_rpc_calls(&client.get_chain_name());
+						true
+					} else {
+						br_metrics::increase_rpc_calls(&client.get_chain_name());
+						false
+					}
 				}
 			}
 		}
