@@ -161,9 +161,9 @@ where
 			}
 			br_metrics::set_payed_fees(&client.get_chain_name(), &receipt);
 		} else {
-			log::warn!(
+			log::info!(
 				target: &client.get_chain_name(),
-				"-[{}] ⚠️  Warning! transaction send was definitely successful. However, due to the phenomenon of transaction stuck in txpool, we used replacement function, it is not possible to track the receipt: {}",
+				"-[{}] 🎁 The pending transaction has been successfully replaced and gas-escalated: {}",
 				sub_display_format(sub_target),
 				metadata,
 			);
