@@ -41,6 +41,10 @@ pub struct RoundupEmitter<T> {
 
 #[async_trait::async_trait]
 impl<T: JsonRpcClient> PeriodicWorker for RoundupEmitter<T> {
+	fn schedule(&self) -> Schedule {
+		self.schedule.clone()
+	}
+
 	async fn run(&mut self) {
 		self.current_round = self.get_latest_round().await;
 
@@ -82,13 +86,6 @@ impl<T: JsonRpcClient> PeriodicWorker for RoundupEmitter<T> {
 				self.current_round = latest_round;
 			}
 		}
-	}
-
-	async fn wait_until_next_time(&self) {
-		let sleep_duration =
-			self.schedule.upcoming(chrono::Utc).next().unwrap() - chrono::Utc::now();
-
-		sleep(sleep_duration.to_std().unwrap()).await;
 	}
 }
 

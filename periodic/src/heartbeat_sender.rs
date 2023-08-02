@@ -25,6 +25,10 @@ pub struct HeartbeatSender<T> {
 
 #[async_trait::async_trait]
 impl<T: JsonRpcClient> PeriodicWorker for HeartbeatSender<T> {
+	fn schedule(&self) -> Schedule {
+		self.schedule.clone()
+	}
+
 	async fn run(&mut self) {
 		loop {
 			let address = self.client.address();
@@ -62,14 +66,6 @@ impl<T: JsonRpcClient> PeriodicWorker for HeartbeatSender<T> {
 
 			self.wait_until_next_time().await;
 		}
-	}
-
-	async fn wait_until_next_time(&self) {
-		// calculate sleep duration for next schedule
-		let sleep_duration =
-			self.schedule.upcoming(chrono::Utc).next().unwrap() - chrono::Utc::now();
-
-		sleep(sleep_duration.to_std().unwrap()).await;
 	}
 }
 
