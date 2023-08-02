@@ -1,12 +1,14 @@
 use std::{collections::BTreeMap, fmt::Error, str::FromStr, sync::Arc};
 
 use async_trait::async_trait;
+use chrono::{DateTime, Utc};
 use cron::Schedule;
 use ethers::{
 	providers::JsonRpcClient,
 	types::{TransactionRequest, H256, U256},
 	utils::parse_ether,
 };
+use rand::Rng;
 use tokio::time::sleep;
 
 use br_client::eth::{
@@ -42,11 +44,16 @@ pub struct OraclePriceFeeder<T> {
 
 #[async_trait]
 impl<T: JsonRpcClient + 'static> PeriodicWorker for OraclePriceFeeder<T> {
+	fn schedule(&self) -> Schedule {
+		self.schedule.clone()
+	}
+
 	async fn run(&mut self) {
 		self.initialize_fetchers().await;
 
 		loop {
-			self.wait_until_next_time().await;
+			let upcoming = self.schedule.upcoming(Utc).next().unwrap();
+			self.feed_period_spreader(upcoming, true).await;
 
 			if self.is_selected_relayer().await {
 				if self.primary_source.is_empty() {
@@ -60,15 +67,9 @@ impl<T: JsonRpcClient + 'static> PeriodicWorker for OraclePriceFeeder<T> {
 					self.try_with_primary().await;
 				}
 			}
+
+			self.feed_period_spreader(upcoming, false).await;
 		}
-	}
-
-	async fn wait_until_next_time(&self) {
-		// calculate sleep duration for next schedule
-		let sleep_duration =
-			self.schedule.upcoming(chrono::Utc).next().unwrap() - chrono::Utc::now();
-
-		sleep(sleep_duration.to_std().unwrap()).await;
 	}
 }
 
@@ -96,6 +97,27 @@ impl<T: JsonRpcClient + 'static> OraclePriceFeeder<T> {
 				.expect(INVALID_BIFROST_NATIVENESS)
 				.clone(),
 			clients,
+		}
+	}
+
+	async fn feed_period_spreader(&self, until: DateTime<Utc>, in_between: bool) {
+		let should_be_done_in = until - Utc::now();
+
+		if in_between {
+			let sleep_duration = should_be_done_in -
+				chrono::Duration::seconds(
+					rand::thread_rng().gen_range(0..=should_be_done_in.num_seconds()),
+				);
+
+			match sleep_duration.to_std() {
+				Ok(sleep_duration) => sleep(sleep_duration).await,
+				Err(_) => return,
+			}
+		} else {
+			match should_be_done_in.to_std() {
+				Ok(sleep_duration) => sleep(sleep_duration).await,
+				Err(_) => return,
+			}
 		}
 	}
 
