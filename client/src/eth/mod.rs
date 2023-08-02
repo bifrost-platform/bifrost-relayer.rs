@@ -283,7 +283,7 @@ impl<T: JsonRpcClient> EthClient<T> {
 				.checked_div(BOOTSTRAP_BLOCK_OFFSET.into())
 				.unwrap();
 
-			return round_offset
+			round_offset
 				.checked_mul(round_info.round_length.as_u32())
 				.unwrap()
 				.checked_mul(NATIVE_BLOCK_TIME)
