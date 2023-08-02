@@ -9,7 +9,6 @@ use br_primitives::{
 use cron::Schedule;
 use ethers::{providers::JsonRpcClient, types::TransactionRequest};
 use std::{str::FromStr, sync::Arc};
-use tokio::time::sleep;
 
 const SUB_LOG_TARGET: &str = "heartbeat";
 
