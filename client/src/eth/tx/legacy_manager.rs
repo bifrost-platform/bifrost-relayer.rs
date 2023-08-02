@@ -24,14 +24,16 @@ use tokio::{
 
 const SUB_LOG_TARGET: &str = "legacy-tx-manager";
 
+type LegacyMiddleware<T> = NonceManagerMiddleware<
+	Arc<GasEscalatorMiddleware<SignerMiddleware<Arc<Provider<T>>, LocalWallet>>>,
+>;
+
 /// The essential task that sends legacy transactions asynchronously.
 pub struct LegacyTransactionManager<T> {
 	/// The ethereum client for the connected chain.
 	pub client: Arc<EthClient<T>>,
 	/// The client signs transaction for the connected chain with local nonce manager.
-	middleware: NonceManagerMiddleware<
-		Arc<GasEscalatorMiddleware<SignerMiddleware<Arc<Provider<T>>, LocalWallet>>>,
-	>,
+	middleware: LegacyMiddleware<T>,
 	/// The receiver connected to the event channel.
 	receiver: UnboundedReceiver<EventMessage>,
 	/// The flag whether the client has enabled txpool namespace.
