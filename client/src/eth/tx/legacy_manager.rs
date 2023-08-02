@@ -38,10 +38,11 @@ pub struct LegacyTransactionManager<T> {
 	receiver: UnboundedReceiver<EventMessage>,
 	/// The flag whether the client has enabled txpool namespace.
 	is_txpool_enabled: bool,
-	/// The flag whether debug mode is enabled. If enabled, certain errors will be logged.
+	/// The flag whether debug mode is enabled. If enabled, certain errors will be logged such as
+	/// gas estimation failures.
 	debug_mode: bool,
 	/// If first relay transaction is stuck in mempool after waiting for this amount of time(ms),
-	/// ignore duplicate prevent logic. (default: {call_interval * 10})
+	/// ignore duplicate prevent logic. (default: 12s)
 	duplicate_confirm_delay: Option<u64>,
 }
 
@@ -104,6 +105,7 @@ impl<T: 'static + JsonRpcClient> LegacyTransactionManager<T> {
 		max(current_network_gas_price, escalated_gas_price)
 	}
 
+	/// Handles the failed gas price rpc request.
 	async fn handle_failed_get_gas_price(&self, retries_remaining: u8, error: String) -> U256 {
 		let mut retries = retries_remaining;
 		let mut last_error = error;

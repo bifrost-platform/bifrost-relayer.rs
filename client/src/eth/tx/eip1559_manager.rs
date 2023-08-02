@@ -90,6 +90,7 @@ impl<T: 'static + JsonRpcClient> Eip1559TransactionManager<T> {
 		}
 	}
 
+	/// Handles the failed eip1559 fees rpc request.
 	async fn handle_failed_get_estimated_eip1559_fees(
 		&self,
 		retries_remaining: u8,

@@ -203,6 +203,7 @@ impl<T: JsonRpcClient> RoundupEmitter<T> {
 		}
 	}
 
+	/// Get the latest round index.
 	async fn get_latest_round(&self) -> U256 {
 		self.client
 			.contract_call(self.client.contracts.authority.latest_round(), "authority.latest_round")

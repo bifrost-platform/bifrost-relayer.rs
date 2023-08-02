@@ -6,7 +6,10 @@ use crate::eth::ChainID;
 
 pub type Result<T> = std::result::Result<T, Error>;
 
+/// The default round offset used on bootstrap.
 pub const BOOTSTRAP_DEFAULT_ROUND_OFFSET: u32 = 3;
+
+/// The default port used for prometheus.
 pub const PROMETHEUS_DEFAULT_PORT: u16 = 8000;
 
 /// Error type for the CLI.

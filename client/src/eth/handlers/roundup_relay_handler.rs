@@ -347,6 +347,7 @@ impl<T: JsonRpcClient> RoundupRelayHandler<T> {
 		}
 	}
 
+	/// Check if external clients are in the latest round.
 	async fn wait_if_latest_round(&self) {
 		let barrier_clone = self.roundup_barrier.clone();
 		let external_clients = &self.external_clients;

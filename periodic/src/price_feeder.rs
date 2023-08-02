@@ -39,7 +39,7 @@ pub struct OraclePriceFeeder<T> {
 	/// The `EthClient` to interact with the bifrost network.
 	pub client: Arc<EthClient<T>>,
 	/// The vector that contains each `EthClient`.
-	clients: Vec<Arc<EthClient<T>>>,
+	system_clients: Vec<Arc<EthClient<T>>>,
 }
 
 #[async_trait]
@@ -77,7 +77,7 @@ impl<T: JsonRpcClient + 'static> OraclePriceFeeder<T> {
 	pub fn new(
 		event_senders: Vec<Arc<EventSender>>,
 		schedule: String,
-		clients: Vec<Arc<EthClient<T>>>,
+		system_clients: Vec<Arc<EthClient<T>>>,
 	) -> Self {
 		let asset_oid = get_asset_oids();
 
@@ -91,12 +91,12 @@ impl<T: JsonRpcClient + 'static> OraclePriceFeeder<T> {
 				.expect(INVALID_BIFROST_NATIVENESS)
 				.clone(),
 			asset_oid,
-			client: clients
+			client: system_clients
 				.iter()
 				.find(|client| client.metadata.is_native)
 				.expect(INVALID_BIFROST_NATIVENESS)
 				.clone(),
-			clients,
+			system_clients,
 		}
 	}
 
@@ -233,7 +233,7 @@ impl<T: JsonRpcClient + 'static> OraclePriceFeeder<T> {
 				self.secondary_sources.push(fetcher);
 			}
 		}
-		for client in &self.clients {
+		for client in &self.system_clients {
 			if client.contracts.chainlink_usdc_usd.is_some() ||
 				client.contracts.chainlink_usdt_usd.is_some()
 			{
