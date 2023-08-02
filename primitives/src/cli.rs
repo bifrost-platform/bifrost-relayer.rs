@@ -133,17 +133,9 @@ pub struct HandlerConfig {
 }
 
 #[derive(Debug, Clone, Deserialize)]
-pub struct PriceFeederConfig {
-	/// Chain id where oracle contract deployed on
-	pub chain_id: ChainID,
-	/// Periodic schedule in cron expression.
-	pub schedule: String,
-}
-
-#[derive(Debug, Clone, Deserialize)]
 pub struct PeriodicWorkerConfig {
 	/// Oracle price feeder
-	pub oracle_price_feeder: Option<Vec<PriceFeederConfig>>,
+	pub oracle_price_feeder: String,
 	/// Roundup Phase1 feeder
 	pub roundup_emitter: String,
 	/// Heartbeat sender

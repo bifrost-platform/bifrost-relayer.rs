@@ -49,17 +49,14 @@ evm_providers:
 
 handler_configs:
   - handler_type: BridgeRelay
-    watch_list: [ 3068, 1, 56, 137 ]
+    watch_list: [3068, 1, 56, 137]
   - handler_type: Roundup
-    watch_list: [ 3068 ]
+    watch_list: [3068]
 
 periodic_configs:
-  oracle_price_feeder:
-    - chain_id: 3068
-      schedule: "0 */5 * * * * *" # Every 5th minute.
+  oracle_price_feeder: "0 */5 * * * * *" # Every 5th minute.
   roundup_emitter: "*/15 * * * * * *" # Every 15th seconds.
   heartbeat: "0 * * * * * *" # Every minute.
-
 
 ###  The items below are optional. ###
 

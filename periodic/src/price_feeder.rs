@@ -1,21 +1,23 @@
 use std::{collections::BTreeMap, fmt::Error, str::FromStr, sync::Arc};
 
 use async_trait::async_trait;
+use chrono::{DateTime, Utc};
 use cron::Schedule;
 use ethers::{
 	providers::JsonRpcClient,
 	types::{TransactionRequest, H256, U256},
 	utils::parse_ether,
 };
+use rand::Rng;
 use tokio::time::sleep;
 
 use br_client::eth::{
 	EthClient, EventMessage, EventMetadata, EventSender, PriceFeedMetadata, TxRequest,
 };
 use br_primitives::{
-	cli::PriceFeederConfig, errors::INVALID_PERIODIC_SCHEDULE, eth::GasCoefficient,
-	periodic::PeriodicWorker, socket::get_asset_oids, sub_display_format, PriceFetcher,
-	PriceResponse, PriceSource, INVALID_BIFROST_NATIVENESS,
+	errors::INVALID_PERIODIC_SCHEDULE, eth::GasCoefficient, periodic::PeriodicWorker,
+	socket::get_asset_oids, sub_display_format, PriceFetcher, PriceResponse, PriceSource,
+	INVALID_BIFROST_NATIVENESS,
 };
 
 use crate::price_source::PriceFetchers;
@@ -32,8 +34,6 @@ pub struct OraclePriceFeeder<T> {
 	pub secondary_sources: Vec<PriceFetchers<T>>,
 	/// The event sender that sends messages to the event channel.
 	pub event_sender: Arc<EventSender>,
-	/// The price feeder configurations.
-	pub config: PriceFeederConfig,
 	/// The pre-defined oracle ID's for each asset.
 	pub asset_oid: BTreeMap<String, H256>,
 	/// The `EthClient` to interact with the bifrost network.
@@ -44,11 +44,16 @@ pub struct OraclePriceFeeder<T> {
 
 #[async_trait]
 impl<T: JsonRpcClient + 'static> PeriodicWorker for OraclePriceFeeder<T> {
+	fn schedule(&self) -> Schedule {
+		self.schedule.clone()
+	}
+
 	async fn run(&mut self) {
 		self.initialize_fetchers().await;
 
 		loop {
-			self.wait_until_next_time().await;
+			let upcoming = self.schedule.upcoming(Utc).next().unwrap();
+			self.feed_period_spreader(upcoming, true).await;
 
 			if self.is_selected_relayer().await {
 				if self.primary_source.is_empty() {
@@ -62,28 +67,22 @@ impl<T: JsonRpcClient + 'static> PeriodicWorker for OraclePriceFeeder<T> {
 					self.try_with_primary().await;
 				}
 			}
+
+			self.feed_period_spreader(upcoming, false).await;
 		}
-	}
-
-	async fn wait_until_next_time(&self) {
-		// calculate sleep duration for next schedule
-		let sleep_duration =
-			self.schedule.upcoming(chrono::Utc).next().unwrap() - chrono::Utc::now();
-
-		sleep(sleep_duration.to_std().unwrap()).await;
 	}
 }
 
 impl<T: JsonRpcClient + 'static> OraclePriceFeeder<T> {
 	pub fn new(
 		event_senders: Vec<Arc<EventSender>>,
-		config: PriceFeederConfig,
+		schedule: String,
 		clients: Vec<Arc<EthClient<T>>>,
 	) -> Self {
 		let asset_oid = get_asset_oids();
 
 		Self {
-			schedule: Schedule::from_str(&config.schedule).expect(INVALID_PERIODIC_SCHEDULE),
+			schedule: Schedule::from_str(&schedule).expect(INVALID_PERIODIC_SCHEDULE),
 			primary_source: vec![],
 			secondary_sources: vec![],
 			event_sender: event_senders
@@ -91,7 +90,6 @@ impl<T: JsonRpcClient + 'static> OraclePriceFeeder<T> {
 				.find(|event_sender| event_sender.is_native)
 				.expect(INVALID_BIFROST_NATIVENESS)
 				.clone(),
-			config,
 			asset_oid,
 			client: clients
 				.iter()
@@ -99,6 +97,27 @@ impl<T: JsonRpcClient + 'static> OraclePriceFeeder<T> {
 				.expect(INVALID_BIFROST_NATIVENESS)
 				.clone(),
 			clients,
+		}
+	}
+
+	async fn feed_period_spreader(&self, until: DateTime<Utc>, in_between: bool) {
+		let should_be_done_in = until - Utc::now();
+
+		if in_between {
+			let sleep_duration = should_be_done_in -
+				chrono::Duration::seconds(
+					rand::thread_rng().gen_range(0..=should_be_done_in.num_seconds()),
+				);
+
+			match sleep_duration.to_std() {
+				Ok(sleep_duration) => sleep(sleep_duration).await,
+				Err(_) => return,
+			}
+		} else {
+			match should_be_done_in.to_std() {
+				Ok(sleep_duration) => sleep(sleep_duration).await,
+				Err(_) => return,
+			}
 		}
 	}
 
@@ -274,7 +293,7 @@ impl<T: JsonRpcClient + 'static> OraclePriceFeeder<T> {
 				target: &self.client.get_chain_name(),
 				"-[{}] 💵 Request price feed transaction to chain({:?}): {}",
 				sub_display_format(SUB_LOG_TARGET),
-				self.config.chain_id,
+				self.client.get_chain_id(),
 				metadata
 			),
 			Err(error) => {
@@ -282,7 +301,7 @@ impl<T: JsonRpcClient + 'static> OraclePriceFeeder<T> {
 					target: &self.client.get_chain_name(),
 					"-[{}] ❗️ Failed to request price feed transaction to chain({:?}): {}, Error: {}",
 					sub_display_format(SUB_LOG_TARGET),
-					self.config.chain_id,
+					self.client.get_chain_id(),
 					metadata,
 					error.to_string()
 				);
@@ -292,7 +311,7 @@ impl<T: JsonRpcClient + 'static> OraclePriceFeeder<T> {
 						&self.client.get_chain_name(),
 						SUB_LOG_TARGET,
 						self.client.address(),
-						self.config.chain_id,
+						self.client.get_chain_id(),
 						metadata,
 						error
 					)

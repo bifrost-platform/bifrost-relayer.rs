@@ -214,22 +214,18 @@ pub fn new_relay_base(config: Configuration) -> Result<RelayBase, ServiceError> 
 		.spawn("heartbeat", Some("heartbeat"), async move { heartbeat_sender.run().await });
 
 	// initialize oracle price feeder & spawn tasks
-	periodic_configs.clone().unwrap().oracle_price_feeder.unwrap().iter().for_each(
-		|price_feeder_config| {
-			let mut oracle_price_feeder = OraclePriceFeeder::new(
-				event_channels.clone(),
-				price_feeder_config.clone(),
-				clients.clone(),
-			);
-			task_manager.spawn_essential_handle().spawn(
-				Box::leak(
-					format!("{}-oracle-price-feeder", oracle_price_feeder.client.get_chain_name())
-						.into_boxed_str(),
-				),
-				Some("periodic"),
-				async move { oracle_price_feeder.run().await },
-			);
-		},
+	let mut oracle_price_feeder = OraclePriceFeeder::new(
+		event_channels.clone(),
+		periodic_configs.clone().unwrap().oracle_price_feeder,
+		clients.clone(),
+	);
+	task_manager.spawn_essential_handle().spawn(
+		Box::leak(
+			format!("{}-oracle-price-feeder", oracle_price_feeder.client.get_chain_name())
+				.into_boxed_str(),
+		),
+		Some("periodic"),
+		async move { oracle_price_feeder.run().await },
 	);
 
 	// Initialize handlers & spawn tasks

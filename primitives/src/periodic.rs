@@ -1,15 +1,28 @@
 use std::{collections::BTreeMap, fmt::Error};
 
 use async_trait::async_trait;
+use cron::Schedule;
 use ethers::types::U256;
 use serde::Deserialize;
+use tokio::time::sleep;
 
 #[async_trait]
 pub trait PeriodicWorker {
+	fn schedule(&self) -> Schedule;
+
 	/// Starts the periodic worker.
 	async fn run(&mut self);
+
 	/// Wait until it reaches the next schedule.
-	async fn wait_until_next_time(&self);
+	async fn wait_until_next_time(&self) {
+		let sleep_duration =
+			self.schedule().upcoming(chrono::Utc).next().unwrap() - chrono::Utc::now();
+
+		match sleep_duration.to_std() {
+			Ok(sleep_duration) => sleep(sleep_duration).await,
+			Err(_) => return,
+		}
+	}
 }
 
 #[derive(Clone, Debug, Deserialize)]

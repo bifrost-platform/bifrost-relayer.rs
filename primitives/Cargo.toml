@@ -11,6 +11,7 @@ repository = { workspace = true }
 [dependencies]
 # General
 hex = { workspace = true }
+chrono = { workspace = true }
 cron = { workspace = true }
 ethers = { workspace = true }
 thiserror = { workspace = true }
