@@ -33,7 +33,7 @@ impl<T: JsonRpcClient> PeriodicWorker for HeartbeatSender<T> {
 		loop {
 			let address = self.client.address();
 
-			let relayer_manager = self.client.relayer_manager.as_ref().unwrap();
+			let relayer_manager = self.client.contracts.relayer_manager.as_ref().unwrap();
 			let is_selected = self
 				.client
 				.contract_call(
@@ -52,7 +52,10 @@ impl<T: JsonRpcClient> PeriodicWorker for HeartbeatSender<T> {
 			if is_selected && !is_heartbeat_pulsed {
 				let round_info = self
 					.client
-					.contract_call(self.client.authority.round_info(), "authority.round_info")
+					.contract_call(
+						self.client.contracts.authority.round_info(),
+						"authority.round_info",
+					)
 					.await;
 				self.request_send_transaction(
 					self.build_transaction(),
@@ -89,7 +92,7 @@ impl<T: JsonRpcClient> HeartbeatSender<T> {
 
 	/// Build `heartbeat` transaction.
 	fn build_transaction(&self) -> TransactionRequest {
-		let relayer_manager = self.client.relayer_manager.as_ref().unwrap();
+		let relayer_manager = self.client.contracts.relayer_manager.as_ref().unwrap();
 		TransactionRequest::default()
 			.to(relayer_manager.address())
 			.data(relayer_manager.heartbeat().calldata().unwrap())

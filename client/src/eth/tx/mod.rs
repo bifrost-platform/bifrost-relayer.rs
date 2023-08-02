@@ -35,7 +35,7 @@ where
 
 	/// Flush all transaction from mempool.
 	async fn flush_stuck_transaction(&self) {
-		if self.is_txpool_enabled() && !self.get_client().is_native {
+		if self.is_txpool_enabled() && !self.get_client().metadata.is_native {
 			let mempool = self.get_client().get_txpool_content().await;
 			br_metrics::increase_rpc_calls(&self.get_client().get_chain_name());
 
@@ -89,7 +89,7 @@ where
 		// 1. the txpool namespace is disabled for the client
 		// 2. the txpool check flag is false
 		// 3. the client is BIFROST (native)
-		if !self.is_txpool_enabled() || !check_mempool || client.is_native {
+		if !self.is_txpool_enabled() || !check_mempool || client.metadata.is_native {
 			return false
 		}
 

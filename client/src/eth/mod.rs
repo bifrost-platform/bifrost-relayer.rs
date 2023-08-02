@@ -1,4 +1,4 @@
-use std::{fmt::Debug, str::FromStr, sync::Arc};
+use std::{fmt::Debug, sync::Arc};
 
 use ethers::{
 	abi::Detokenize,
@@ -6,7 +6,7 @@ use ethers::{
 	providers::{JsonRpcClient, Middleware, Provider},
 	types::{
 		Address, Block, BlockId, Filter, Log, SyncingStatus, Transaction, TransactionReceipt,
-		TxpoolContent, H160, H256, U256, U64,
+		TxpoolContent, H256, U256, U64,
 	},
 	utils::format_units,
 };
@@ -16,13 +16,10 @@ use tokio::time::{sleep, Duration};
 pub use blocks::*;
 pub use br_primitives::contracts::*;
 use br_primitives::{
-	authority::{AuthorityContract, RoundMetaData},
-	chainlink_aggregator::ChainlinkContract,
-	eth::{BridgeDirection, ChainID, BOOTSTRAP_BLOCK_OFFSET, NATIVE_BLOCK_TIME},
-	relayer_manager::RelayerManagerContract,
-	socket::SocketContract,
-	vault::VaultContract,
-	INVALID_CONTRACT_ADDRESS,
+	authority::RoundMetaData,
+	eth::{
+		ChainID, ProviderContracts, ProviderMetadata, BOOTSTRAP_BLOCK_OFFSET, NATIVE_BLOCK_TIME,
+	},
 };
 pub use events::*;
 pub use handlers::*;
@@ -43,30 +40,10 @@ pub struct EthClient<T> {
 	pub wallet: WalletManager,
 	/// The ethers.rs wrapper for the connected chain.
 	provider: Arc<Provider<T>>,
-	/// The name of chain which this client interact with.
-	name: String,
-	/// Id of chain which this client interact with.
-	id: ChainID,
-	/// The number of confirmations required for a block to be processed.
-	pub block_confirmations: U64,
-	/// The `get_block` request interval in milliseconds.
-	pub call_interval: u64,
-	/// Bridge direction when bridge event points this chain as destination.
-	pub if_destination_chain: BridgeDirection,
-	/// The flag whether the chain is BIFROST(native) or an external chain.
-	pub is_native: bool,
-	/// SocketContract
-	pub socket: SocketContract<Provider<T>>,
-	/// VaultContract
-	pub vault: VaultContract<Provider<T>>,
-	/// AuthorityContract
-	pub authority: AuthorityContract<Provider<T>>,
-	/// RelayerManagerContract (BIFROST only)
-	pub relayer_manager: Option<RelayerManagerContract<Provider<T>>>,
-	/// Chainlink usdc/usd aggregator
-	pub chainlink_usdc_usd: Option<ChainlinkContract<Provider<T>>>,
-	/// Chainlink usdt/usd aggregator
-	pub chainlink_usdt_usd: Option<ChainlinkContract<Provider<T>>>,
+	/// The metadata of the provider.
+	pub metadata: ProviderMetadata,
+	/// the contract instances of the provider.
+	pub contracts: ProviderContracts<T>,
 }
 
 impl<T: JsonRpcClient> EthClient<T> {
@@ -74,61 +51,10 @@ impl<T: JsonRpcClient> EthClient<T> {
 	pub fn new(
 		wallet: WalletManager,
 		provider: Arc<Provider<T>>,
-		name: String,
-		id: ChainID,
-		block_confirmations: U64,
-		call_interval: u64,
-		is_native: bool,
-		socket_address: String,
-		vault_address: String,
-		authority_address: String,
-		relayer_manager_address: Option<String>,
-		chainlink_usdc_usd_address: Option<String>,
-		chainlink_usdt_usd_address: Option<String>,
+		metadata: ProviderMetadata,
+		contracts: ProviderContracts<T>,
 	) -> Self {
-		Self {
-			wallet,
-			socket: SocketContract::new(
-				H160::from_str(&socket_address).expect(INVALID_CONTRACT_ADDRESS),
-				provider.clone(),
-			),
-			vault: VaultContract::new(
-				H160::from_str(&vault_address).expect(INVALID_CONTRACT_ADDRESS),
-				provider.clone(),
-			),
-			authority: AuthorityContract::new(
-				H160::from_str(&authority_address).expect(INVALID_CONTRACT_ADDRESS),
-				provider.clone(),
-			),
-			relayer_manager: relayer_manager_address.map(|address| {
-				RelayerManagerContract::new(
-					H160::from_str(&address).expect(INVALID_CONTRACT_ADDRESS),
-					provider.clone(),
-				)
-			}),
-			chainlink_usdc_usd: chainlink_usdc_usd_address.map(|address| {
-				ChainlinkContract::new(
-					H160::from_str(&address).expect(INVALID_CONTRACT_ADDRESS),
-					provider.clone(),
-				)
-			}),
-			chainlink_usdt_usd: chainlink_usdt_usd_address.map(|address| {
-				ChainlinkContract::new(
-					H160::from_str(&address).expect(INVALID_CONTRACT_ADDRESS),
-					provider.clone(),
-				)
-			}),
-			provider,
-			name,
-			id,
-			block_confirmations,
-			call_interval,
-			if_destination_chain: match is_native {
-				true => BridgeDirection::Inbound,
-				false => BridgeDirection::Outbound,
-			},
-			is_native,
-		}
+		Self { wallet, provider, metadata, contracts }
 	}
 
 	/// Returns the relayer address.
@@ -138,12 +64,12 @@ impl<T: JsonRpcClient> EthClient<T> {
 
 	/// Returns name which chain this client interacts with.
 	pub fn get_chain_name(&self) -> String {
-		self.name.clone()
+		self.metadata.name.clone()
 	}
 
 	/// Returns id which chain this client interacts with.
 	pub fn get_chain_id(&self) -> ChainID {
-		self.id
+		self.metadata.id
 	}
 
 	/// Returns `Arc<Provider>`.

@@ -93,7 +93,7 @@ impl<T: JsonRpcClient + 'static> OraclePriceFeeder<T> {
 			asset_oid,
 			client: clients
 				.iter()
-				.find(|client| client.is_native)
+				.find(|client| client.metadata.is_native)
 				.expect(INVALID_BIFROST_NATIVENESS)
 				.clone(),
 			clients,
@@ -234,7 +234,9 @@ impl<T: JsonRpcClient + 'static> OraclePriceFeeder<T> {
 			}
 		}
 		for client in &self.clients {
-			if client.chainlink_usdc_usd.is_some() || client.chainlink_usdt_usd.is_some() {
+			if client.contracts.chainlink_usdc_usd.is_some() ||
+				client.contracts.chainlink_usdt_usd.is_some()
+			{
 				if let Ok(fetcher) =
 					PriceFetchers::new(PriceSource::Chainlink, client.clone().into()).await
 				{
@@ -267,8 +269,9 @@ impl<T: JsonRpcClient + 'static> OraclePriceFeeder<T> {
 		oid_bytes_list: Vec<[u8; 32]>,
 		price_bytes_list: Vec<[u8; 32]>,
 	) -> TransactionRequest {
-		TransactionRequest::default().to(self.client.socket.address()).data(
+		TransactionRequest::default().to(self.client.contracts.socket.address()).data(
 			self.client
+				.contracts
 				.socket
 				.oracle_aggregate_feeding(oid_bytes_list, price_bytes_list)
 				.calldata()
@@ -324,7 +327,7 @@ impl<T: JsonRpcClient + 'static> OraclePriceFeeder<T> {
 
 	/// Verifies whether the current relayer was selected at the current round.
 	async fn is_selected_relayer(&self) -> bool {
-		let relayer_manager = self.client.relayer_manager.as_ref().unwrap();
+		let relayer_manager = self.client.contracts.relayer_manager.as_ref().unwrap();
 		self.client
 			.contract_call(
 				relayer_manager.is_selected_relayer(self.client.address(), false),

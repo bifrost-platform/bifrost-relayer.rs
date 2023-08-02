@@ -82,6 +82,7 @@ impl<T: JsonRpcClient> BridgeRelayHandler<T> {
 			event_senders,
 			block_receiver,
 			socket_signature: client
+				.contracts
 				.socket
 				.abi()
 				.event("Socket")
@@ -103,7 +104,7 @@ impl<T: JsonRpcClient> Handler for BridgeRelayHandler<T> {
 			if self.is_bootstrap_state_synced_as(BootstrapState::BootstrapBridgeRelay).await {
 				self.bootstrap().await;
 
-				sleep(Duration::from_millis(self.client.call_interval)).await;
+				sleep(Duration::from_millis(self.client.metadata.call_interval)).await;
 			} else if self.is_bootstrap_state_synced_as(BootstrapState::NormalStart).await {
 				let block_msg = self.block_receiver.recv().await.unwrap();
 
@@ -199,7 +200,8 @@ impl<T: JsonRpcClient> Handler for BridgeRelayHandler<T> {
 	}
 
 	fn is_target_contract(&self, log: &Log) -> bool {
-		if log.address == self.client.socket.address() || log.address == self.client.vault.address()
+		if log.address == self.client.contracts.socket.address() ||
+			log.address == self.client.contracts.vault.address()
 		{
 			return true
 		}
@@ -215,7 +217,7 @@ impl<T: JsonRpcClient> Handler for BridgeRelayHandler<T> {
 impl<T: JsonRpcClient> BridgeRelayBuilder for BridgeRelayHandler<T> {
 	fn build_poll_call_data(&self, msg: SocketMessage, sigs: Signatures) -> Bytes {
 		let poll_submit = PollSubmit { msg, sigs, option: U256::default() };
-		self.client.socket.poll(poll_submit).calldata().unwrap()
+		self.client.contracts.socket.poll(poll_submit).calldata().unwrap()
 	}
 
 	async fn build_transaction(
@@ -229,6 +231,7 @@ impl<T: JsonRpcClient> BridgeRelayBuilder for BridgeRelayHandler<T> {
 			.system_clients
 			.get(&relay_tx_chain_id)
 			.expect(INVALID_CHAIN_ID)
+			.contracts
 			.socket
 			.address();
 
@@ -334,7 +337,10 @@ impl<T: JsonRpcClient> BridgeRelayBuilder for BridgeRelayHandler<T> {
 		let raw_sigs = self
 			.client
 			.contract_call(
-				self.client.socket.get_signatures(msg.clone().req_id, msg.clone().status),
+				self.client
+					.contracts
+					.socket
+					.get_signatures(msg.clone().req_id, msg.clone().status),
 				"socket.get_signatures",
 			)
 			.await;
@@ -384,6 +390,7 @@ impl<T: JsonRpcClient> BridgeRelayHandler<T> {
 				let selector = &tx.input[0..4];
 				let poll_selector = self
 					.client
+					.contracts
 					.socket
 					.abi()
 					.function("poll")
@@ -392,6 +399,7 @@ impl<T: JsonRpcClient> BridgeRelayHandler<T> {
 				if selector == poll_selector {
 					match self
 						.client
+						.contracts
 						.socket
 						.decode_with_selector::<SerializedPoll, Bytes>(poll_selector, tx.input)
 					{
@@ -550,15 +558,15 @@ impl<T: JsonRpcClient> BridgeRelayHandler<T> {
 	/// Verifies whether the socket event is an inbound sequence.
 	fn is_inbound_sequence(&self, dst_chain_id: ChainID) -> bool {
 		matches!(
-			(self.client.get_chain_id() == dst_chain_id, self.client.if_destination_chain),
+			(self.client.get_chain_id() == dst_chain_id, self.client.metadata.if_destination_chain),
 			(true, BridgeDirection::Inbound) | (false, BridgeDirection::Outbound)
 		)
 	}
 
 	/// Verifies whether the current relayer was selected at the given round.
 	async fn is_selected_relayer(&self, round: U256) -> bool {
-		if self.client.is_native {
-			let relayer_manager = self.client.relayer_manager.as_ref().unwrap();
+		if self.client.metadata.is_native {
+			let relayer_manager = self.client.contracts.relayer_manager.as_ref().unwrap();
 			return self
 				.client
 				.contract_call(
@@ -571,9 +579,9 @@ impl<T: JsonRpcClient> BridgeRelayHandler<T> {
 				)
 				.await
 		} else if let Some((_id, native_client)) =
-			self.system_clients.iter().find(|(_id, client)| client.is_native)
+			self.system_clients.iter().find(|(_id, client)| client.metadata.is_native)
 		{
-			let relayer_manager = native_client.relayer_manager.as_ref().unwrap();
+			let relayer_manager = native_client.contracts.relayer_manager.as_ref().unwrap();
 			return native_client
 				.contract_call(
 					relayer_manager.is_previous_selected_relayer(
@@ -643,7 +651,7 @@ impl<T: JsonRpcClient> BridgeRelayHandler<T> {
 	/// event has already been executed
 	async fn is_already_done(&self, rid: &RequestID, src_chain_id: ChainID) -> bool {
 		let socket_contract =
-			&self.system_clients.get(&src_chain_id).expect(INVALID_CHAIN_ID).socket;
+			&self.system_clients.get(&src_chain_id).expect(INVALID_CHAIN_ID).contracts.socket;
 		let request = self
 			.client
 			.contract_call(socket_contract.get_request(rid.clone()), "socket.get_request")
@@ -697,15 +705,21 @@ impl<T: JsonRpcClient> BootstrapHandler for BridgeRelayHandler<T> {
 		let mut logs = vec![];
 
 		if let Some(bootstrap_config) = &self.bootstrap_config {
-			let round_info: RoundMetaData = if self.client.is_native {
+			let round_info: RoundMetaData = if self.client.metadata.is_native {
 				self.client
-					.contract_call(self.client.authority.round_info(), "authority.round_info")
+					.contract_call(
+						self.client.contracts.authority.round_info(),
+						"authority.round_info",
+					)
 					.await
 			} else if let Some((_id, native_client)) =
-				self.system_clients.iter().find(|(_id, client)| client.is_native)
+				self.system_clients.iter().find(|(_id, client)| client.metadata.is_native)
 			{
 				native_client
-					.contract_call(native_client.authority.round_info(), "authority.round_info")
+					.contract_call(
+						native_client.contracts.authority.round_info(),
+						"authority.round_info",
+					)
 					.await
 			} else {
 				panic!(
@@ -734,7 +748,7 @@ impl<T: JsonRpcClient> BootstrapHandler for BridgeRelayHandler<T> {
 					std::cmp::min(from_block + BOOTSTRAP_BLOCK_CHUNK_SIZE - 1, to_block);
 
 				let filter = Filter::new()
-					.address(self.client.socket.address())
+					.address(self.client.contracts.socket.address())
 					.topic0(self.socket_signature)
 					.from_block(from_block)
 					.to_block(chunk_to_block);
