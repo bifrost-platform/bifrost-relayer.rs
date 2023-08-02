@@ -67,9 +67,9 @@ impl<T: JsonRpcClient> KucoinPriceFetcher<T> {
 		match reqwest::get(url).await {
 			Ok(response) => match response.json::<KucoinResponse>().await {
 				Ok(response) => Ok(response),
-				Err(_) => Err(Error::default()),
+				Err(_) => Err(Error),
 			},
-			Err(_) => Err(Error::default()),
+			Err(_) => Err(Error),
 		}
 	}
 }

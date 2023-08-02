@@ -64,9 +64,9 @@ pub async fn krw_to_usd(krw_amount: U256) -> Result<U256, Error> {
 					.checked_div(U256::from(10u64.pow(exchange_rate_decimal)))
 					.unwrap())
 			},
-			Err(_) => Err(Error::default()),
+			Err(_) => Err(Error),
 		},
-		Err(_) => Err(Error::default()),
+		Err(_) => Err(Error),
 	}
 }
 

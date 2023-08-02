@@ -34,14 +34,14 @@ impl<T: JsonRpcClient + 'static> PriceFetcher for ChainlinkPriceFetcher<T> {
 							volume: U256::from(1).into(),
 						})
 					} else {
-						Err(Error::default())
+						Err(Error)
 					},
 				_ => {
 					todo!()
 				},
 			}
 		} else {
-			return Err(Error::default())
+			return Err(Error)
 		}
 	}
 
@@ -55,7 +55,7 @@ impl<T: JsonRpcClient + 'static> PriceFetcher for ChainlinkPriceFetcher<T> {
 			};
 		}
 
-		return if ret.is_empty() { Err(Error::default()) } else { Ok(ret) }
+		return if ret.is_empty() { Err(Error) } else { Ok(ret) }
 	}
 }
 

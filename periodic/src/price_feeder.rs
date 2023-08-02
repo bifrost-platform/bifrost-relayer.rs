@@ -192,7 +192,7 @@ impl<T: JsonRpcClient + 'static> OraclePriceFeeder<T> {
 		}
 
 		if volume_weighted.is_empty() {
-			return Err(Error::default())
+			return Err(Error)
 		}
 
 		if !volume_weighted.contains_key("USDC") {

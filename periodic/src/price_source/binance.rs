@@ -54,9 +54,9 @@ impl<T: JsonRpcClient> PriceFetcher for BinancePriceFetcher<T> {
 						},
 					);
 				}),
-				Err(_) => return Err(Error::default()),
+				Err(_) => return Err(Error),
 			},
-			Err(_) => return Err(Error::default()),
+			Err(_) => return Err(Error),
 		};
 
 		Ok(ret)
