@@ -156,7 +156,7 @@ impl<T: JsonRpcClient> Handler for RoundupRelayHandler<T> {
 	}
 
 	fn is_target_contract(&self, log: &Log) -> bool {
-		return log.address == self.client.socket.address()
+		log.address == self.client.socket.address()
 	}
 
 	fn is_target_event(&self, topic: H256) -> bool {
