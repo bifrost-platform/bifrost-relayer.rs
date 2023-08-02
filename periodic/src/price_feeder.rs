@@ -123,6 +123,27 @@ impl<T: JsonRpcClient + 'static> OraclePriceFeeder<T> {
 		}
 	}
 
+	async fn feed_period_spreader(&self, until: DateTime<Utc>, in_between: bool) {
+		let should_be_done_in = until - Utc::now();
+
+		if in_between {
+			let sleep_duration = should_be_done_in
+				- chrono::Duration::seconds(
+					rand::thread_rng().gen_range(0..=should_be_done_in.num_seconds()),
+				);
+
+			match sleep_duration.to_std() {
+				Ok(sleep_duration) => sleep(sleep_duration).await,
+				Err(_) => return,
+			}
+		} else {
+			match should_be_done_in.to_std() {
+				Ok(sleep_duration) => sleep(sleep_duration).await,
+				Err(_) => return,
+			}
+		}
+	}
+
 	async fn try_with_primary(&self) {
 		match self.primary_source[0].get_tickers().await {
 			// If primary source works well.
