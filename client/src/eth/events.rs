@@ -259,15 +259,14 @@ impl TxRequest {
 	/// If self is Legacy, converts it self to Eip1559 and return it.
 	pub fn to_eip1559(&self) -> Eip1559TransactionRequest {
 		match self {
-			TxRequest::Legacy(tx_request) => {
-				let mut ret = Eip1559TransactionRequest::default();
-				ret.from = tx_request.from;
-				ret.to = tx_request.to.clone();
-				ret.value = tx_request.value;
-				ret.nonce = tx_request.nonce;
-				ret.data = tx_request.data.clone();
-				ret.gas = tx_request.gas;
-				ret
+			TxRequest::Legacy(tx_request) => Eip1559TransactionRequest {
+				from: tx_request.from,
+				to: tx_request.to.clone(),
+				value: tx_request.value,
+				nonce: tx_request.nonce,
+				data: tx_request.data.clone(),
+				gas: tx_request.gas,
+				..Default::default()
 			},
 			TxRequest::Eip1559(tx_request) => tx_request.clone(),
 		}
@@ -278,15 +277,14 @@ impl TxRequest {
 	pub fn to_legacy(&self) -> TransactionRequest {
 		match self {
 			TxRequest::Legacy(tx_request) => tx_request.clone(),
-			TxRequest::Eip1559(tx_request) => {
-				let mut ret = TransactionRequest::default();
-				ret.from = tx_request.from;
-				ret.to = tx_request.to.clone();
-				ret.value = tx_request.value;
-				ret.nonce = tx_request.nonce;
-				ret.data = tx_request.data.clone();
-				ret.gas = tx_request.gas;
-				ret
+			TxRequest::Eip1559(tx_request) => TransactionRequest {
+				from: tx_request.from,
+				to: tx_request.to.clone(),
+				value: tx_request.value,
+				nonce: tx_request.nonce,
+				data: tx_request.data.clone(),
+				gas: tx_request.gas,
+				..Default::default()
 			},
 		}
 	}
