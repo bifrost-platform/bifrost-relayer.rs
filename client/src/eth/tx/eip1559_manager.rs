@@ -35,12 +35,13 @@ pub struct Eip1559TransactionManager<T> {
 	receiver: UnboundedReceiver<EventMessage>,
 	/// The flag whether the client has enabled txpool namespace.
 	is_txpool_enabled: bool,
-	/// The flag whether debug mode is enabled. If enabled, certain errors will be logged.
+	/// The flag whether debug mode is enabled. If enabled, certain errors will be logged such as
+	/// gas estimation failures.
 	debug_mode: bool,
 	/// The minimum priority fee required.
 	min_priority_fee: U256,
 	/// If first relay transaction is stuck in mempool after waiting for this amount of time(ms),
-	/// ignore duplicate prevent logic. (default: {call_interval * 10})
+	/// ignore duplicate prevent logic. (default: 12s)
 	duplicate_confirm_delay: Option<u64>,
 }
 
