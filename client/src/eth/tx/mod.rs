@@ -111,8 +111,11 @@ where
 					}
 
 					sleep(self.duplicate_confirm_delay()).await;
-					return if let Some(_) =
-						self.get_client().get_transaction_receipt(mempool_tx.hash).await
+					return if self
+						.get_client()
+						.get_transaction_receipt(mempool_tx.hash)
+						.await
+						.is_some()
 					{
 						br_metrics::increase_rpc_calls(&client.get_chain_name());
 						true
