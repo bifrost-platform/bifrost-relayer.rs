@@ -1,6 +1,6 @@
 use crate::eth::{
 	generate_delay, EthClient, EventMessage, TransactionManager, TxRequest, DEFAULT_CALL_RETRIES,
-	DEFAULT_CALL_RETRY_INTERVAL_MS, DEFAULT_TX_RETRIES, RETRY_GAS_PRICE_COEFFICIENT,
+	DEFAULT_CALL_RETRY_INTERVAL_MS, DEFAULT_TX_RETRIES,
 };
 use async_trait::async_trait;
 use br_primitives::{eth::ETHEREUM_BLOCK_TIME, sub_display_format};
@@ -109,7 +109,7 @@ impl<T: 'static + JsonRpcClient> LegacyTransactionManager<T> {
 				self.handle_failed_get_gas_price(DEFAULT_CALL_RETRIES, error.to_string()).await,
 		};
 		let escalated_gas_price =
-			U256::from((previous_gas_price * RETRY_GAS_PRICE_COEFFICIENT).ceil() as u64);
+			U256::from((previous_gas_price * self.gas_price_coefficient).ceil() as u64);
 
 		max(current_network_gas_price, escalated_gas_price)
 	}
