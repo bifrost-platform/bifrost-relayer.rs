@@ -56,7 +56,7 @@ impl<T: JsonRpcClient> PeriodicWorker for RoundupEmitter<T> {
 				break
 			}
 
-			sleep(Duration::from_millis(self.client.call_interval)).await;
+			sleep(Duration::from_millis(self.client.metadata.call_interval)).await;
 		}
 
 		loop {
@@ -100,7 +100,7 @@ impl<T: JsonRpcClient> RoundupEmitter<T> {
 	) -> Self {
 		let client = clients
 			.iter()
-			.find(|client| client.is_native)
+			.find(|client| client.metadata.is_native)
 			.expect(INVALID_BIFROST_NATIVENESS)
 			.clone();
 
@@ -128,7 +128,7 @@ impl<T: JsonRpcClient> RoundupEmitter<T> {
 
 	/// Check relayer has selected in previous round
 	async fn is_selected_relayer(&self, round: U256) -> bool {
-		let relayer_manager = self.client.relayer_manager.as_ref().unwrap();
+		let relayer_manager = self.client.contracts.relayer_manager.as_ref().unwrap();
 		self.client
 			.contract_call(
 				relayer_manager.is_previous_selected_relayer(
@@ -143,7 +143,7 @@ impl<T: JsonRpcClient> RoundupEmitter<T> {
 
 	/// Fetch new validator list
 	async fn fetch_validator_list(&self, round: U256) -> Vec<Address> {
-		let relayer_manager = self.client.relayer_manager.as_ref().unwrap();
+		let relayer_manager = self.client.contracts.relayer_manager.as_ref().unwrap();
 		let mut addresses = self
 			.client
 			.contract_call(
@@ -164,9 +164,14 @@ impl<T: JsonRpcClient> RoundupEmitter<T> {
 		let sigs = Signatures::from(self.client.wallet.sign_message(&encoded_msg));
 		let round_up_submit = RoundUpSubmit { round, new_relayers, sigs };
 
-		TransactionRequest::default()
-			.to(self.client.socket.address())
-			.data(self.client.socket.round_control_poll(round_up_submit).calldata().unwrap())
+		TransactionRequest::default().to(self.client.contracts.socket.address()).data(
+			self.client
+				.contracts
+				.socket
+				.round_control_poll(round_up_submit)
+				.calldata()
+				.unwrap(),
+		)
 	}
 
 	/// Request send transaction to the target event channel.
@@ -198,9 +203,10 @@ impl<T: JsonRpcClient> RoundupEmitter<T> {
 		}
 	}
 
+	/// Get the latest round index.
 	async fn get_latest_round(&self) -> U256 {
 		self.client
-			.contract_call(self.client.authority.latest_round(), "authority.latest_round")
+			.contract_call(self.client.contracts.authority.latest_round(), "authority.latest_round")
 			.await
 	}
 }
@@ -263,7 +269,7 @@ impl<T: JsonRpcClient> BootstrapHandler for RoundupEmitter<T> {
 						break
 					}
 
-					sleep(Duration::from_millis(self.client.call_interval)).await;
+					sleep(Duration::from_millis(self.client.metadata.call_interval)).await;
 				}
 			}
 		}
@@ -281,7 +287,7 @@ impl<T: JsonRpcClient> BootstrapHandler for RoundupEmitter<T> {
 		if let Some(bootstrap_config) = &self.bootstrap_config {
 			let round_info: RoundMetaData = self
 				.client
-				.contract_call(self.client.authority.round_info(), "authority.round_info")
+				.contract_call(self.client.contracts.authority.round_info(), "authority.round_info")
 				.await;
 			let bootstrap_offset_height = self
 				.client
@@ -301,9 +307,10 @@ impl<T: JsonRpcClient> BootstrapHandler for RoundupEmitter<T> {
 					std::cmp::min(from_block + BOOTSTRAP_BLOCK_CHUNK_SIZE - 1, to_block);
 
 				let filter = Filter::new()
-					.address(self.client.socket.address())
+					.address(self.client.contracts.socket.address())
 					.topic0(
 						self.client
+							.contracts
 							.socket
 							.abi()
 							.event("RoundUp")

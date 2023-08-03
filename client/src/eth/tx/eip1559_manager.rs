@@ -23,22 +23,25 @@ use tokio::{
 
 const SUB_LOG_TARGET: &str = "eip1559-tx-manager";
 
+type Eip1559Middleware<T> = NonceManagerMiddleware<SignerMiddleware<Arc<Provider<T>>, LocalWallet>>;
+
 /// The essential task that sends eip1559 transactions asynchronously.
 pub struct Eip1559TransactionManager<T> {
 	/// The ethereum client for the connected chain.
 	pub client: Arc<EthClient<T>>,
 	/// The client signs transaction for the connected chain with local nonce manager.
-	middleware: NonceManagerMiddleware<SignerMiddleware<Arc<Provider<T>>, LocalWallet>>,
+	middleware: Eip1559Middleware<T>,
 	/// The receiver connected to the event channel.
 	receiver: UnboundedReceiver<EventMessage>,
 	/// The flag whether the client has enabled txpool namespace.
 	is_txpool_enabled: bool,
-	/// The flag whether debug mode is enabled. If enabled, certain errors will be logged.
+	/// The flag whether debug mode is enabled. If enabled, certain errors will be logged such as
+	/// gas estimation failures.
 	debug_mode: bool,
 	/// The minimum priority fee required.
 	min_priority_fee: U256,
 	/// If first relay transaction is stuck in mempool after waiting for this amount of time(ms),
-	/// ignore duplicate prevent logic. (default: {call_interval * 10})
+	/// ignore duplicate prevent logic. (default: 12s)
 	duplicate_confirm_delay: Option<u64>,
 }
 
@@ -88,6 +91,7 @@ impl<T: 'static + JsonRpcClient> Eip1559TransactionManager<T> {
 		}
 	}
 
+	/// Handles the failed eip1559 fees rpc request.
 	async fn handle_failed_get_estimated_eip1559_fees(
 		&self,
 		retries_remaining: u8,

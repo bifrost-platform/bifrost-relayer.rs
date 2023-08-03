@@ -64,7 +64,7 @@ impl<T: JsonRpcClient> Handler for RoundupRelayHandler<T> {
 			if self.is_bootstrap_state_synced_as(BootstrapState::BootstrapRoundUpPhase2).await {
 				self.bootstrap().await;
 
-				sleep(Duration::from_millis(self.client.call_interval)).await;
+				sleep(Duration::from_millis(self.client.metadata.call_interval)).await;
 			} else if self.is_bootstrap_state_synced_as(BootstrapState::NormalStart).await {
 				let block_msg = self.block_receiver.recv().await.unwrap();
 
@@ -156,7 +156,7 @@ impl<T: JsonRpcClient> Handler for RoundupRelayHandler<T> {
 	}
 
 	fn is_target_contract(&self, log: &Log) -> bool {
-		return log.address == self.client.socket.address()
+		log.address == self.client.contracts.socket.address()
 	}
 
 	fn is_target_event(&self, topic: H256) -> bool {
@@ -185,14 +185,20 @@ impl<T: JsonRpcClient> RoundupRelayHandler<T> {
 
 		let client = clients
 			.iter()
-			.find(|client| client.is_native)
+			.find(|client| client.metadata.is_native)
 			.expect(INVALID_BIFROST_NATIVENESS)
 			.clone();
 
-		let external_clients = clients.into_iter().filter(|client| !client.is_native).collect();
+		let external_clients =
+			clients.into_iter().filter(|client| !client.metadata.is_native).collect();
 
-		let roundup_signature =
-			client.socket.abi().event("RoundUp").expect(INVALID_CONTRACT_ABI).signature();
+		let roundup_signature = client
+			.contracts
+			.socket
+			.abi()
+			.event("RoundUp")
+			.expect(INVALID_CONTRACT_ABI)
+			.signature();
 
 		let roundup_barrier = Arc::new(Barrier::new(number_of_relay_targets));
 		let bootstrapping_count = Arc::new(Mutex::new(u8::default()));
@@ -229,7 +235,7 @@ impl<T: JsonRpcClient> RoundupRelayHandler<T> {
 		let unordered_sigs = self
 			.client
 			.contract_call(
-				self.client.socket.get_round_signatures(round),
+				self.client.contracts.socket.get_round_signatures(round),
 				"socket.get_round_signatures",
 			)
 			.await;
@@ -266,7 +272,7 @@ impl<T: JsonRpcClient> RoundupRelayHandler<T> {
 
 	/// Verifies whether the current relayer was selected at the given round.
 	async fn is_selected_relayer(&self, round: U256) -> bool {
-		let relayer_manager = self.client.relayer_manager.as_ref().unwrap();
+		let relayer_manager = self.client.contracts.relayer_manager.as_ref().unwrap();
 		self.client
 			.contract_call(
 				relayer_manager.is_previous_selected_relayer(round, self.client.address(), true),
@@ -314,11 +320,14 @@ impl<T: JsonRpcClient> RoundupRelayHandler<T> {
 			// Check roundup submitted to target chain before.
 			let latest_round = self
 				.client
-				.contract_call(target_client.authority.latest_round(), "authority.latest_round")
+				.contract_call(
+					target_client.contracts.authority.latest_round(),
+					"authority.latest_round",
+				)
 				.await;
 			if roundup_submit.round > latest_round {
 				let transaction_request =
-					self.build_transaction_request(&target_client.socket, roundup_submit);
+					self.build_transaction_request(&target_client.contracts.socket, roundup_submit);
 
 				if let Some(event_sender) = self.event_senders.get(&target_client.get_chain_id()) {
 					event_sender
@@ -338,6 +347,7 @@ impl<T: JsonRpcClient> RoundupRelayHandler<T> {
 		}
 	}
 
+	/// Check if external clients are in the latest round.
 	async fn wait_if_latest_round(&self) {
 		let barrier_clone = self.roundup_barrier.clone();
 		let external_clients = &self.external_clients;
@@ -346,11 +356,17 @@ impl<T: JsonRpcClient> RoundupRelayHandler<T> {
 			let barrier_clone_inner = barrier_clone.clone();
 			let current_round = self
 				.client
-				.contract_call(self.client.authority.latest_round(), "authority.latest_round")
+				.contract_call(
+					self.client.contracts.authority.latest_round(),
+					"authority.latest_round",
+				)
 				.await;
 			let target_chain_round = self
 				.client
-				.contract_call(target_client.authority.latest_round(), "authority.latest_round")
+				.contract_call(
+					target_client.contracts.authority.latest_round(),
+					"authority.latest_round",
+				)
 				.await;
 			let bootstrap_guard = self.bootstrapping_count.clone();
 
@@ -412,7 +428,7 @@ impl<T: JsonRpcClient> BootstrapHandler for RoundupRelayHandler<T> {
 		if let Some(bootstrap_config) = &self.bootstrap_config {
 			let round_info: RoundMetaData = self
 				.client
-				.contract_call(self.client.authority.round_info(), "authority.round_info")
+				.contract_call(self.client.contracts.authority.round_info(), "authority.round_info")
 				.await;
 			let bootstrap_offset_height = self
 				.client
@@ -432,7 +448,7 @@ impl<T: JsonRpcClient> BootstrapHandler for RoundupRelayHandler<T> {
 					std::cmp::min(from_block + BOOTSTRAP_BLOCK_CHUNK_SIZE - 1, to_block);
 
 				let filter = Filter::new()
-					.address(self.client.socket.address())
+					.address(self.client.contracts.socket.address())
 					.topic0(self.roundup_signature)
 					.from_block(from_block)
 					.to_block(chunk_to_block);

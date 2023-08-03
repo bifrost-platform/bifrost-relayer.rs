@@ -39,7 +39,7 @@ pub struct OraclePriceFeeder<T> {
 	/// The `EthClient` to interact with the bifrost network.
 	pub client: Arc<EthClient<T>>,
 	/// The vector that contains each `EthClient`.
-	clients: Vec<Arc<EthClient<T>>>,
+	system_clients: Vec<Arc<EthClient<T>>>,
 }
 
 #[async_trait]
@@ -77,7 +77,7 @@ impl<T: JsonRpcClient + 'static> OraclePriceFeeder<T> {
 	pub fn new(
 		event_senders: Vec<Arc<EventSender>>,
 		schedule: String,
-		clients: Vec<Arc<EthClient<T>>>,
+		system_clients: Vec<Arc<EthClient<T>>>,
 	) -> Self {
 		let asset_oid = get_asset_oids();
 
@@ -91,12 +91,12 @@ impl<T: JsonRpcClient + 'static> OraclePriceFeeder<T> {
 				.expect(INVALID_BIFROST_NATIVENESS)
 				.clone(),
 			asset_oid,
-			client: clients
+			client: system_clients
 				.iter()
-				.find(|client| client.is_native)
+				.find(|client| client.metadata.is_native)
 				.expect(INVALID_BIFROST_NATIVENESS)
 				.clone(),
-			clients,
+			system_clients,
 		}
 	}
 
@@ -109,15 +109,11 @@ impl<T: JsonRpcClient + 'static> OraclePriceFeeder<T> {
 					rand::thread_rng().gen_range(0..=should_be_done_in.num_seconds()),
 				);
 
-			match sleep_duration.to_std() {
-				Ok(sleep_duration) => sleep(sleep_duration).await,
-				Err(_) => return,
+			if let Ok(sleep_duration) = sleep_duration.to_std() {
+				sleep(sleep_duration).await
 			}
-		} else {
-			match should_be_done_in.to_std() {
-				Ok(sleep_duration) => sleep(sleep_duration).await,
-				Err(_) => return,
-			}
+		} else if let Ok(sleep_duration) = should_be_done_in.to_std() {
+			sleep(sleep_duration).await
 		}
 	}
 
@@ -192,7 +188,7 @@ impl<T: JsonRpcClient + 'static> OraclePriceFeeder<T> {
 		}
 
 		if volume_weighted.is_empty() {
-			return Err(Error::default())
+			return Err(Error)
 		}
 
 		if !volume_weighted.contains_key("USDC") {
@@ -233,8 +229,10 @@ impl<T: JsonRpcClient + 'static> OraclePriceFeeder<T> {
 				self.secondary_sources.push(fetcher);
 			}
 		}
-		for client in &self.clients {
-			if client.chainlink_usdc_usd.is_some() || client.chainlink_usdt_usd.is_some() {
+		for client in &self.system_clients {
+			if client.contracts.chainlink_usdc_usd.is_some() ||
+				client.contracts.chainlink_usdt_usd.is_some()
+			{
 				if let Ok(fetcher) =
 					PriceFetchers::new(PriceSource::Chainlink, client.clone().into()).await
 				{
@@ -267,8 +265,9 @@ impl<T: JsonRpcClient + 'static> OraclePriceFeeder<T> {
 		oid_bytes_list: Vec<[u8; 32]>,
 		price_bytes_list: Vec<[u8; 32]>,
 	) -> TransactionRequest {
-		TransactionRequest::default().to(self.client.socket.address()).data(
+		TransactionRequest::default().to(self.client.contracts.socket.address()).data(
 			self.client
+				.contracts
 				.socket
 				.oracle_aggregate_feeding(oid_bytes_list, price_bytes_list)
 				.calldata()
@@ -324,7 +323,7 @@ impl<T: JsonRpcClient + 'static> OraclePriceFeeder<T> {
 
 	/// Verifies whether the current relayer was selected at the current round.
 	async fn is_selected_relayer(&self) -> bool {
-		let relayer_manager = self.client.relayer_manager.as_ref().unwrap();
+		let relayer_manager = self.client.contracts.relayer_manager.as_ref().unwrap();
 		self.client
 			.contract_call(
 				relayer_manager.is_selected_relayer(self.client.address(), false),
