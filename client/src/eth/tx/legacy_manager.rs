@@ -38,6 +38,12 @@ pub struct LegacyTransactionManager<T> {
 	receiver: UnboundedReceiver<EventMessage>,
 	/// The flag whether the client has enabled txpool namespace.
 	is_txpool_enabled: bool,
+	/// The flag whether if the gas price will be initially escalated. The `escalate_percentage`
+	/// will be used on escalation. This will only have effect on legacy transactions. (default:
+	/// false)
+	is_initially_escalated: bool,
+	/// The coefficient used on transaction gas price escalation (default: 1.15)
+	gas_price_coefficient: f64,
 	/// The flag whether debug mode is enabled. If enabled, certain errors will be logged such as
 	/// gas estimation failures.
 	debug_mode: bool,
@@ -53,17 +59,18 @@ impl<T: 'static + JsonRpcClient> LegacyTransactionManager<T> {
 		debug_mode: bool,
 		escalate_interval: Option<u64>,
 		escalate_percentage: Option<f64>,
+		is_initially_escalated: bool,
 		duplicate_confirm_delay: Option<u64>,
 	) -> (Self, UnboundedSender<EventMessage>) {
 		let (sender, receiver) = mpsc::unbounded_channel::<EventMessage>();
 
-		let mut coefficient = 1.15;
+		let mut gas_price_coefficient = 1.15;
 		if let Some(escalate_percentage) = escalate_percentage {
-			coefficient = 1.0 + (escalate_percentage / 100.0);
+			gas_price_coefficient = 1.0 + (escalate_percentage / 100.0);
 		}
 
 		let escalator = GeometricGasPrice::new(
-			coefficient,
+			gas_price_coefficient,
 			escalate_interval.unwrap_or(ETHEREUM_BLOCK_TIME),
 			None::<u64>,
 		);
@@ -79,6 +86,8 @@ impl<T: 'static + JsonRpcClient> LegacyTransactionManager<T> {
 				middleware,
 				receiver,
 				is_txpool_enabled: false,
+				is_initially_escalated,
+				gas_price_coefficient,
 				debug_mode,
 				duplicate_confirm_delay,
 			},
@@ -103,6 +112,22 @@ impl<T: 'static + JsonRpcClient> LegacyTransactionManager<T> {
 			U256::from((previous_gas_price * RETRY_GAS_PRICE_COEFFICIENT).ceil() as u64);
 
 		max(current_network_gas_price, escalated_gas_price)
+	}
+
+	/// Get gas_price for escalated legacy transaction request. This will be only used when
+	/// `is_initially_escalated` is enabled.
+	async fn get_gas_price_for_escalation(&self) -> U256 {
+		let current_network_gas_price = match self.middleware.get_gas_price().await {
+			Ok(gas_price) => {
+				br_metrics::increase_rpc_calls(&self.client.get_chain_name());
+				gas_price
+			},
+			Err(error) =>
+				self.handle_failed_get_gas_price(DEFAULT_CALL_RETRIES, error.to_string()).await,
+		};
+		U256::from(
+			(current_network_gas_price.as_u64() as f64 * self.gas_price_coefficient).ceil() as u64
+		)
 	}
 
 	/// Handles the failed gas price rpc request.
@@ -231,7 +256,11 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> for LegacyTransactionMana
 
 		// check the txpool for transaction duplication prevention
 		if !(self.is_duplicate_relay(&msg.tx_request, msg.check_mempool).await) {
-			let result = self.middleware.send_transaction(msg.tx_request.to_legacy(), None).await;
+			let mut tx = msg.tx_request.to_legacy();
+			if self.is_initially_escalated {
+				tx = tx.gas_price(self.get_gas_price_for_escalation().await);
+			}
+			let result = self.middleware.send_transaction(tx, None).await;
 			br_metrics::increase_rpc_calls(&self.client.get_chain_name());
 
 			match result {

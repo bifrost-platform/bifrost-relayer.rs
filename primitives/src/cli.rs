@@ -85,16 +85,21 @@ pub struct EVMProvider {
 	pub is_native: Option<bool>,
 	/// The flag whether it will handle relay transactions to the current chain.
 	pub is_relay_target: bool,
-	/// If true, enables Eip1559
+	/// If true, enables Eip1559. (default: false)
 	pub eip1559: Option<bool>,
-	/// The minimum priority fee required.
+	/// The minimum priority fee required. (default: 0)
 	pub min_priority_fee: Option<u64>,
 	/// Gas price escalate interval(seconds) when tx stuck in mempool. (default: 12)
 	pub escalate_interval: Option<u64>,
-	/// Gas price increase percentage on retry when transaction stuck in mempool. (default: 15.0)
+	/// Gas price increase percentage on gas price escalation such as when handling tx
+	/// replacements. (default: 15.0)
 	pub escalate_percentage: Option<f64>,
+	/// The flag whether if the gas price will be initially escalated. The `escalate_percentage`
+	/// will be used on escalation. This will only have effect on legacy transactions. (default:
+	/// false)
+	pub is_initially_escalated: Option<bool>,
 	/// If first relay transaction is stuck in mempool after waiting for this amount of time(ms),
-	/// ignore duplicate prevent logic. (default: {call_interval * 10})
+	/// ignore duplicate prevent logic. (default: 12s)
 	pub duplicate_confirm_delay: Option<u64>,
 	/// Socket contract address
 	pub socket_address: String,

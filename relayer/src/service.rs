@@ -103,6 +103,7 @@ pub fn new_relay_base(config: Configuration) -> Result<RelayBase, ServiceError> 
 							system.debug_mode.unwrap_or(false),
 							evm_provider.escalate_interval,
 							evm_provider.escalate_percentage,
+							evm_provider.is_initially_escalated.unwrap_or(false),
 							evm_provider.duplicate_confirm_delay,
 						);
 						tx_managers.0.push(tx_manager);
