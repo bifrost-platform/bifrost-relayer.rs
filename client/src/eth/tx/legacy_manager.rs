@@ -33,6 +33,10 @@ use super::{generate_delay, TransactionMiddleware};
 
 const SUB_LOG_TARGET: &str = "legacy-tx-manager";
 
+type LegacyMiddleware<T> = NonceManagerMiddleware<
+	Arc<GasEscalatorMiddleware<SignerMiddleware<Arc<Provider<T>>, LocalWallet>>>,
+>;
+
 /// The essential task that sends legacy transactions asynchronously.
 pub struct LegacyTransactionManager<T> {
 	/// The ethereum client for the connected chain.

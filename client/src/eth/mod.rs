@@ -294,7 +294,7 @@ pub struct EthClient<T> {
 
 	/// Returns id which chain this client interacts with.
 	pub fn get_chain_id(&self) -> ChainID {
-		self.id
+		self.metadata.id
 	}
 
 	/// Returns `Arc<Provider>`.

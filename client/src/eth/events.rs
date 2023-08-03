@@ -256,6 +256,7 @@ impl<T: JsonRpcClient> BootstrapHandler for EventManager<T> {
 		vec![]
 	}
 
+	/// Sends a new event message.
 	pub fn send(&self, message: EventMessage) -> Result<(), SendError<EventMessage>> {
 		self.sender.send(message)
 	}
