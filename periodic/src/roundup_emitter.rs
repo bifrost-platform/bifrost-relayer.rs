@@ -164,14 +164,17 @@ impl<T: JsonRpcClient> RoundupEmitter<T> {
 		let sigs = Signatures::from(self.client.wallet.sign_message(&encoded_msg));
 		let round_up_submit = RoundUpSubmit { round, new_relayers, sigs };
 
-		TransactionRequest::default().to(self.client.contracts.socket.address()).data(
-			self.client
-				.contracts
-				.socket
-				.round_control_poll(round_up_submit)
-				.calldata()
-				.unwrap(),
-		)
+		TransactionRequest::default()
+			.to(self.client.contracts.socket.address())
+			.data(
+				self.client
+					.contracts
+					.socket
+					.round_control_poll(round_up_submit)
+					.calldata()
+					.unwrap(),
+			)
+			.from(self.client.address())
 	}
 
 	/// Request send transaction to the target event channel.

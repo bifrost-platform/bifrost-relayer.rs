@@ -307,6 +307,7 @@ impl<T: JsonRpcClient> RoundupRelayHandler<T> {
 		TransactionRequest::default()
 			.to(target_socket.address())
 			.data(target_socket.round_control_relay(roundup_submit.clone()).calldata().unwrap())
+			.from(self.client.address())
 	}
 
 	/// Check roundup submitted before. If not, call `round_control_relay`.

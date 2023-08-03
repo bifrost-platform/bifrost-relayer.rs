@@ -265,14 +265,17 @@ impl<T: JsonRpcClient + 'static> OraclePriceFeeder<T> {
 		oid_bytes_list: Vec<[u8; 32]>,
 		price_bytes_list: Vec<[u8; 32]>,
 	) -> TransactionRequest {
-		TransactionRequest::default().to(self.client.contracts.socket.address()).data(
-			self.client
-				.contracts
-				.socket
-				.oracle_aggregate_feeding(oid_bytes_list, price_bytes_list)
-				.calldata()
-				.unwrap(),
-		)
+		TransactionRequest::default()
+			.to(self.client.contracts.socket.address())
+			.data(
+				self.client
+					.contracts
+					.socket
+					.oracle_aggregate_feeding(oid_bytes_list, price_bytes_list)
+					.calldata()
+					.unwrap(),
+			)
+			.from(self.client.address())
 	}
 
 	/// Request send transaction to the target event channel.

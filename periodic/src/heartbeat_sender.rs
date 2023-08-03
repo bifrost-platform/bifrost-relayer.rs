@@ -95,6 +95,7 @@ impl<T: JsonRpcClient> HeartbeatSender<T> {
 		TransactionRequest::default()
 			.to(relayer_manager.address())
 			.data(relayer_manager.heartbeat().calldata().unwrap())
+			.from(self.client.address())
 	}
 
 	/// Request send transaction to the target event channel.
