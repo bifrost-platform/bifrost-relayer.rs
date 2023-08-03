@@ -240,8 +240,7 @@ impl<T: JsonRpcClient> BridgeRelayBuilder for BridgeRelayHandler<T> {
 		(
 			TransactionRequest::default()
 				.data(self.build_poll_call_data(submit_msg, signatures))
-				.to(to_socket)
-				.from(self.client.address()),
+				.to(to_socket),
 			is_external,
 		)
 	}
