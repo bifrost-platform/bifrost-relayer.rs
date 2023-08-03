@@ -20,8 +20,8 @@ impl<T: JsonRpcClient + 'static> PriceFetcher for ChainlinkPriceFetcher<T> {
 			match symbol_str {
 				"USDC" | "USDT" =>
 					return if let Some(contract) = match symbol_str {
-						"USDC" => &client.chainlink_usdc_usd,
-						"USDT" => &client.chainlink_usdt_usd,
+						"USDC" => &client.contracts.chainlink_usdc_usd,
+						"USDT" => &client.contracts.chainlink_usdt_usd,
 						_ => todo!(),
 					} {
 						let (_, price, _, _, _) = contract.latest_round_data().await.unwrap();
@@ -34,14 +34,14 @@ impl<T: JsonRpcClient + 'static> PriceFetcher for ChainlinkPriceFetcher<T> {
 							volume: U256::from(1).into(),
 						})
 					} else {
-						Err(Error::default())
+						Err(Error)
 					},
 				_ => {
 					todo!()
 				},
 			}
 		} else {
-			return Err(Error::default())
+			return Err(Error)
 		}
 	}
 
@@ -55,7 +55,7 @@ impl<T: JsonRpcClient + 'static> PriceFetcher for ChainlinkPriceFetcher<T> {
 			};
 		}
 
-		return if ret.is_empty() { Err(Error::default()) } else { Ok(ret) }
+		return if ret.is_empty() { Err(Error) } else { Ok(ret) }
 	}
 }
 

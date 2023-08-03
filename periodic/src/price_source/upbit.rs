@@ -59,7 +59,7 @@ impl<T: JsonRpcClient> PriceFetcher for UpbitPriceFetcher<T> {
 				}
 				Ok(ret)
 			},
-			Err(_) => Err(Error::default()),
+			Err(_) => Err(Error),
 		}
 	}
 }
@@ -99,7 +99,7 @@ impl<T: JsonRpcClient> UpbitPriceFetcher<T> {
 						volume: parse_ether(response.acc_trade_volume_24h).unwrap().into(),
 					},
 				)),
-				Err(_) => Err(Error::default()),
+				Err(_) => Err(Error),
 			}
 		} else if response.market.contains("BTC-") {
 			match self.btc_to_krw(response.trade_price).await {
@@ -111,9 +111,9 @@ impl<T: JsonRpcClient> UpbitPriceFetcher<T> {
 							volume: parse_ether(response.acc_trade_volume_24h).unwrap().into(),
 						},
 					)),
-					Err(_) => Err(Error::default()),
+					Err(_) => Err(Error),
 				},
-				Err(_) => Err(Error::default()),
+				Err(_) => Err(Error),
 			}
 		} else {
 			todo!()
@@ -126,7 +126,7 @@ impl<T: JsonRpcClient> UpbitPriceFetcher<T> {
 				let btc_price = response[0].trade_price;
 				Ok(parse_ether(btc_price * btc_amount).unwrap())
 			},
-			Err(_) => Err(Error::default()),
+			Err(_) => Err(Error),
 		}
 	}
 
@@ -134,9 +134,9 @@ impl<T: JsonRpcClient> UpbitPriceFetcher<T> {
 		match reqwest::get(url).await {
 			Ok(response) => match response.json::<Vec<UpbitResponse>>().await {
 				Ok(response) => Ok(response),
-				Err(_) => Err(Error::default()),
+				Err(_) => Err(Error),
 			},
-			Err(_) => Err(Error::default()),
+			Err(_) => Err(Error),
 		}
 	}
 }

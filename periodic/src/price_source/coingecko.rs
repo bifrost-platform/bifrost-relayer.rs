@@ -126,7 +126,7 @@ impl<T: JsonRpcClient> CoingeckoPriceFetcher<T> {
 								e.to_string(),
 								retry_interval
 							);
-							Err(Error::default())
+							Err(Error)
 						},
 					},
 				Err(e) => {
@@ -165,12 +165,12 @@ impl<T: JsonRpcClient> CoingeckoPriceFetcher<T> {
 								sub_display_format(SUB_LOG_TARGET),
 								e.to_string(),
 							);
-							Err(Error::default())
+							Err(Error)
 						},
 					},
 				Err(e) => {
 					if retries_remaining == 0 {
-						return Err(Error::default())
+						return Err(Error)
 					}
 
 					log::warn!(

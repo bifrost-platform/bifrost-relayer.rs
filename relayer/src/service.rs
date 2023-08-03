@@ -22,7 +22,7 @@ use br_primitives::{
 	errors::{
 		INVALID_BIFROST_NATIVENESS, INVALID_CHAIN_ID, INVALID_PRIVATE_KEY, INVALID_PROVIDER_URL,
 	},
-	eth::BootstrapState,
+	eth::{BootstrapState, ProviderContracts, ProviderMetadata},
 	periodic::PeriodicWorker,
 	sub_display_format,
 };
@@ -71,24 +71,28 @@ pub fn new_relay_base(config: Configuration) -> Result<RelayBase, ServiceError> 
 					.expect(INVALID_PRIVATE_KEY);
 
 			let is_native = evm_provider.is_native.unwrap_or(false);
+			let provider = Provider::<Http>::try_from(evm_provider.provider.clone())
+				.expect(INVALID_PROVIDER_URL)
+				.interval(Duration::from_millis(evm_provider.call_interval));
 			let client = Arc::new(EthClient::new(
 				wallet,
-				Arc::new(
-					Provider::<Http>::try_from(evm_provider.provider.clone())
-						.expect(INVALID_PROVIDER_URL)
-						.interval(Duration::from_millis(evm_provider.call_interval)),
+				Arc::new(provider.clone()),
+				ProviderMetadata::new(
+					evm_provider.name.clone(),
+					evm_provider.id,
+					evm_provider.block_confirmations,
+					evm_provider.call_interval,
+					is_native,
 				),
-				evm_provider.name.clone(),
-				evm_provider.id,
-				evm_provider.block_confirmations,
-				evm_provider.call_interval,
-				is_native,
-				evm_provider.socket_address.clone(),
-				evm_provider.vault_address.clone(),
-				evm_provider.authority_address.clone(),
-				evm_provider.relayer_manager_address.clone(),
-				evm_provider.chainlink_usdc_usd_address.clone(),
-				evm_provider.chainlink_usdt_usd_address.clone(),
+				ProviderContracts::new(
+					Arc::new(provider),
+					evm_provider.socket_address.clone(),
+					evm_provider.vault_address.clone(),
+					evm_provider.authority_address.clone(),
+					evm_provider.relayer_manager_address.clone(),
+					evm_provider.chainlink_usdc_usd_address.clone(),
+					evm_provider.chainlink_usdt_usd_address.clone(),
+				),
 			));
 
 			if evm_provider.is_relay_target {
@@ -204,7 +208,7 @@ pub fn new_relay_base(config: Configuration) -> Result<RelayBase, ServiceError> 
 		periodic_configs.clone().unwrap().heartbeat,
 		clients
 			.iter()
-			.find(|client| client.is_native)
+			.find(|client| client.metadata.is_native)
 			.expect(INVALID_BIFROST_NATIVENESS)
 			.clone(),
 		event_channels.clone(),

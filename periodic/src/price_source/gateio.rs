@@ -55,7 +55,7 @@ impl<T: JsonRpcClient> PriceFetcher for GateioPriceFetcher<T> {
 				});
 				Ok(ret)
 			},
-			Err(_) => Err(Error::default()),
+			Err(_) => Err(Error),
 		}
 	}
 }
@@ -85,9 +85,9 @@ impl<T: JsonRpcClient> GateioPriceFetcher<T> {
 		match reqwest::get(url).await {
 			Ok(response) => match response.json::<Vec<GateioResponse>>().await {
 				Ok(ret) => Ok(ret),
-				Err(_) => Err(Error::default()),
+				Err(_) => Err(Error),
 			},
-			Err(_) => Err(Error::default()),
+			Err(_) => Err(Error),
 		}
 	}
 }

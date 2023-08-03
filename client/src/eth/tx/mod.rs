@@ -25,9 +25,18 @@ pub trait TransactionManager<T>
 where
 	T: JsonRpcClient,
 {
+	/// The flag whether the client has enabled txpool namespace.
 	fn is_txpool_enabled(&self) -> bool;
+
+	/// The flag whether debug mode is enabled. If enabled, certain errors will be logged such as
+	/// gas estimation failures.
 	fn debug_mode(&self) -> bool;
+
+	/// Get the `EthClient`.
 	fn get_client(&self) -> Arc<EthClient<T>>;
+
+	/// If first relay transaction is stuck in mempool after waiting for this amount of time(ms),
+	/// ignore duplicate prevent logic. (default: 12s)
 	fn duplicate_confirm_delay(&self) -> Duration;
 
 	/// Initialize transaction manager.
@@ -35,7 +44,7 @@ where
 
 	/// Flush all transaction from mempool.
 	async fn flush_stuck_transaction(&self) {
-		if self.is_txpool_enabled() && !self.get_client().is_native {
+		if self.is_txpool_enabled() && !self.get_client().metadata.is_native {
 			let mempool = self.get_client().get_txpool_content().await;
 			br_metrics::increase_rpc_calls(&self.get_client().get_chain_name());
 
@@ -89,7 +98,7 @@ where
 		// 1. the txpool namespace is disabled for the client
 		// 2. the txpool check flag is false
 		// 3. the client is BIFROST (native)
-		if !self.is_txpool_enabled() || !check_mempool || client.is_native {
+		if !self.is_txpool_enabled() || !check_mempool || client.metadata.is_native {
 			return false
 		}
 
@@ -111,8 +120,11 @@ where
 					}
 
 					sleep(self.duplicate_confirm_delay()).await;
-					return if let Some(_) =
-						self.get_client().get_transaction_receipt(mempool_tx.hash).await
+					return if self
+						.get_client()
+						.get_transaction_receipt(mempool_tx.hash)
+						.await
+						.is_some()
 					{
 						br_metrics::increase_rpc_calls(&client.get_chain_name());
 						true
@@ -126,6 +138,7 @@ where
 		false
 	}
 
+	/// Handles the successful transaction receipt.
 	fn handle_success_tx_receipt(
 		&self,
 		sub_target: &str,

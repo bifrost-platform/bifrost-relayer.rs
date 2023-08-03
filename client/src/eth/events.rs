@@ -100,7 +100,9 @@ impl Display for PriceFeedMetadata {
 
 #[derive(Clone, Debug)]
 pub struct VSPPhase1Metadata {
+	/// The round index to update.
 	pub round: U256,
+	/// The relayer addresses of the round.
 	pub relayer_addresses: Vec<Address>,
 }
 
@@ -123,7 +125,9 @@ impl Display for VSPPhase1Metadata {
 
 #[derive(Clone, Debug)]
 pub struct VSPPhase2Metadata {
+	/// The round index to update.
 	pub round: U256,
+	/// The destination chain ID to update.
 	pub dst_chain_id: ChainID,
 }
 
@@ -141,7 +145,9 @@ impl Display for VSPPhase2Metadata {
 
 #[derive(Clone, Debug)]
 pub struct HeartbeatMetadata {
+	/// The current round index.
 	pub current_round_index: U256,
+	/// The current session index.
 	pub current_session_index: U256,
 }
 
@@ -218,18 +224,23 @@ pub enum TxRequest {
 }
 
 impl TxRequest {
+	/// Get the `data` field of the transaction request.
 	pub fn get_data(&self) -> &Bytes {
 		match self {
 			TxRequest::Legacy(tx_request) => tx_request.data.as_ref().unwrap(),
 			TxRequest::Eip1559(tx_request) => tx_request.data.as_ref().unwrap(),
 		}
 	}
+
+	/// Get the `to` field of the transaction request.
 	pub fn get_to(&self) -> &NameOrAddress {
 		match self {
 			TxRequest::Legacy(tx_request) => tx_request.to.as_ref().unwrap(),
 			TxRequest::Eip1559(tx_request) => tx_request.to.as_ref().unwrap(),
 		}
 	}
+
+	/// Get the `from` field of the transaction request.
 	pub fn get_from(&self) -> &Address {
 		match self {
 			TxRequest::Legacy(tx_request) => tx_request.from.as_ref().unwrap(),
@@ -237,7 +248,7 @@ impl TxRequest {
 		}
 	}
 
-	/// Sets the `from` field in the transaction to the provided value
+	/// Sets the `from` field in the transaction to the provided value.
 	pub fn from(&self, address: Address) -> Self {
 		match self {
 			TxRequest::Legacy(tx_request) => TxRequest::Legacy(tx_request.clone().from(address)),
@@ -245,7 +256,7 @@ impl TxRequest {
 		}
 	}
 
-	/// Sets the `gas` field in the transaction to the provided
+	/// Sets the `gas` field in the transaction to the provided.
 	pub fn gas(&self, estimated_gas: U256) -> Self {
 		match self {
 			TxRequest::Legacy(tx_request) =>
@@ -259,15 +270,14 @@ impl TxRequest {
 	/// If self is Legacy, converts it self to Eip1559 and return it.
 	pub fn to_eip1559(&self) -> Eip1559TransactionRequest {
 		match self {
-			TxRequest::Legacy(tx_request) => {
-				let mut ret = Eip1559TransactionRequest::default();
-				ret.from = tx_request.from;
-				ret.to = tx_request.to.clone();
-				ret.value = tx_request.value;
-				ret.nonce = tx_request.nonce;
-				ret.data = tx_request.data.clone();
-				ret.gas = tx_request.gas;
-				ret
+			TxRequest::Legacy(tx_request) => Eip1559TransactionRequest {
+				from: tx_request.from,
+				to: tx_request.to.clone(),
+				value: tx_request.value,
+				nonce: tx_request.nonce,
+				data: tx_request.data.clone(),
+				gas: tx_request.gas,
+				..Default::default()
 			},
 			TxRequest::Eip1559(tx_request) => tx_request.clone(),
 		}
@@ -278,20 +288,19 @@ impl TxRequest {
 	pub fn to_legacy(&self) -> TransactionRequest {
 		match self {
 			TxRequest::Legacy(tx_request) => tx_request.clone(),
-			TxRequest::Eip1559(tx_request) => {
-				let mut ret = TransactionRequest::default();
-				ret.from = tx_request.from;
-				ret.to = tx_request.to.clone();
-				ret.value = tx_request.value;
-				ret.nonce = tx_request.nonce;
-				ret.data = tx_request.data.clone();
-				ret.gas = tx_request.gas;
-				ret
+			TxRequest::Eip1559(tx_request) => TransactionRequest {
+				from: tx_request.from,
+				to: tx_request.to.clone(),
+				value: tx_request.value,
+				nonce: tx_request.nonce,
+				data: tx_request.data.clone(),
+				gas: tx_request.gas,
+				..Default::default()
 			},
 		}
 	}
 
-	/// Converts to `TypedTransaction`
+	/// Converts to `TypedTransaction`.
 	pub fn to_typed(&self) -> TypedTransaction {
 		match self {
 			TxRequest::Legacy(tx_request) => TypedTransaction::Legacy(tx_request.clone()),
@@ -366,6 +375,7 @@ impl EventSender {
 		Self { id, sender, is_native }
 	}
 
+	/// Sends a new event message.
 	pub fn send(&self, message: EventMessage) -> Result<(), SendError<EventMessage>> {
 		self.sender.send(message)
 	}
