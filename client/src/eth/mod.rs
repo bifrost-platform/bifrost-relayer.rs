@@ -154,12 +154,12 @@ pub struct EthClient<T> {
 
 	/// Returns name which chain this client interacts with.
 	pub fn get_chain_name(&self) -> String {
-		self.name.clone()
+		self.metadata.name.clone()
 	}
 
 	/// Returns id which chain this client interacts with.
 	pub fn get_chain_id(&self) -> ChainID {
-		self.id
+		self.metadata.id
 	}
 
 	/// Returns `Arc<Provider>`.
