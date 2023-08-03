@@ -132,15 +132,11 @@ impl<T: JsonRpcClient + 'static> OraclePriceFeeder<T> {
 					rand::thread_rng().gen_range(0..=should_be_done_in.num_seconds()),
 				);
 
-			match sleep_duration.to_std() {
-				Ok(sleep_duration) => sleep(sleep_duration).await,
-				Err(_) => return,
+			if let Ok(sleep_duration) = sleep_duration.to_std() {
+				sleep(sleep_duration).await
 			}
-		} else {
-			match should_be_done_in.to_std() {
-				Ok(sleep_duration) => sleep(sleep_duration).await,
-				Err(_) => return,
-			}
+		} else if let Ok(sleep_duration) = should_be_done_in.to_std() {
+			sleep(sleep_duration).await
 		}
 	}
 
@@ -370,7 +366,7 @@ impl<T: JsonRpcClient + 'static> OraclePriceFeeder<T> {
 
 	/// Verifies whether the current relayer was selected at the current round.
 	async fn is_selected_relayer(&self) -> bool {
-		let relayer_manager = self.client.relayer_manager.as_ref().unwrap();
+		let relayer_manager = self.client.contracts.relayer_manager.as_ref().unwrap();
 		self.client
 			.contract_call(
 				relayer_manager.is_selected_relayer(self.client.address(), false),

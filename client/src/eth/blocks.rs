@@ -117,7 +117,7 @@ impl<T: JsonRpcClient> BlockManager<T> {
 				}
 			}
 
-			sleep(Duration::from_millis(self.client.call_interval)).await;
+			sleep(Duration::from_millis(self.client.metadata.call_interval)).await;
 		}
 	}
 
@@ -127,7 +127,7 @@ impl<T: JsonRpcClient> BlockManager<T> {
 		let filter = Filter::new()
 			.from_block(BlockNumber::from(self.waiting_block))
 			.to_block(BlockNumber::from(self.waiting_block))
-			.address(self.client.socket.address());
+			.address(self.client.contracts.socket.address());
 
 		let target_logs = self.client.get_logs(&filter).await;
 		if !target_logs.is_empty() {
@@ -150,7 +150,7 @@ impl<T: JsonRpcClient> BlockManager<T> {
 
 	/// Verifies if the stored waiting block has waited enough.
 	fn is_block_confirmed(&self, latest_block: U64) -> bool {
-		latest_block.saturating_sub(self.waiting_block) > self.client.block_confirmations
+		latest_block.saturating_sub(self.waiting_block) > self.client.metadata.block_confirmations
 	}
 
 	/// Verifies if the connected provider is in block sync mode.
@@ -183,7 +183,7 @@ impl<T: JsonRpcClient> BlockManager<T> {
 				return
 			}
 
-			sleep(Duration::from_millis(self.client.call_interval)).await;
+			sleep(Duration::from_millis(self.client.metadata.call_interval)).await;
 		}
 	}
 }

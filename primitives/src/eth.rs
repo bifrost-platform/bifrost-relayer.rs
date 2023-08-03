@@ -224,6 +224,104 @@ impl From<&GasCoefficient> for f64 {
 	}
 }
 
+/// The metadata of the EVM provider.
+pub struct ProviderMetadata {
+	pub name: String,
+	/// Id of chain which this client interact with.
+	pub id: ChainID,
+	/// The number of confirmations required for a block to be processed.
+	pub block_confirmations: U64,
+	/// The `get_block` request interval in milliseconds.
+	pub call_interval: u64,
+	/// Bridge direction when bridge event points this chain as destination.
+	pub if_destination_chain: BridgeDirection,
+	/// The flag whether the chain is BIFROST(native) or an external chain.
+	pub is_native: bool,
+}
+
+impl ProviderMetadata {
+	pub fn new(
+		name: String,
+		id: ChainID,
+		block_confirmations: U64,
+		call_interval: u64,
+		is_native: bool,
+	) -> Self {
+		Self {
+			name,
+			id,
+			block_confirmations,
+			call_interval,
+			is_native,
+			if_destination_chain: match is_native {
+				true => BridgeDirection::Inbound,
+				false => BridgeDirection::Outbound,
+			},
+		}
+	}
+}
+
+/// The contract instances of the EVM provider.
+pub struct ProviderContracts<T> {
+	/// SocketContract
+	pub socket: SocketContract<Provider<T>>,
+	/// VaultContract
+	pub vault: VaultContract<Provider<T>>,
+	/// AuthorityContract
+	pub authority: AuthorityContract<Provider<T>>,
+	/// RelayerManagerContract (BIFROST only)
+	pub relayer_manager: Option<RelayerManagerContract<Provider<T>>>,
+	/// Chainlink usdc/usd aggregator
+	pub chainlink_usdc_usd: Option<ChainlinkContract<Provider<T>>>,
+	/// Chainlink usdt/usd aggregator
+	pub chainlink_usdt_usd: Option<ChainlinkContract<Provider<T>>>,
+}
+
+impl<T: JsonRpcClient> ProviderContracts<T> {
+	pub fn new(
+		provider: Arc<Provider<T>>,
+		socket_address: String,
+		vault_address: String,
+		authority_address: String,
+		relayer_manager_address: Option<String>,
+		chainlink_usdc_usd_address: Option<String>,
+		chainlink_usdt_usd_address: Option<String>,
+	) -> Self {
+		Self {
+			socket: SocketContract::new(
+				H160::from_str(&socket_address).expect(INVALID_CONTRACT_ADDRESS),
+				provider.clone(),
+			),
+			vault: VaultContract::new(
+				H160::from_str(&vault_address).expect(INVALID_CONTRACT_ADDRESS),
+				provider.clone(),
+			),
+			authority: AuthorityContract::new(
+				H160::from_str(&authority_address).expect(INVALID_CONTRACT_ADDRESS),
+				provider.clone(),
+			),
+			relayer_manager: relayer_manager_address.map(|address| {
+				RelayerManagerContract::new(
+					H160::from_str(&address).expect(INVALID_CONTRACT_ADDRESS),
+					provider.clone(),
+				)
+			}),
+			chainlink_usdc_usd: chainlink_usdc_usd_address.map(|address| {
+				ChainlinkContract::new(
+					H160::from_str(&address).expect(INVALID_CONTRACT_ADDRESS),
+					provider.clone(),
+				)
+			}),
+			chainlink_usdt_usd: chainlink_usdt_usd_address.map(|address| {
+				ChainlinkContract::new(
+					H160::from_str(&address).expect(INVALID_CONTRACT_ADDRESS),
+					provider.clone(),
+				)
+			}),
+		}
+	}
+}
+
 #[derive(Clone, Debug)]
 /// Coefficients to multiply the estimated gas amount.
 pub enum GasCoefficient {

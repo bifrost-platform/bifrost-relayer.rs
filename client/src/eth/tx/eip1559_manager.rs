@@ -36,6 +36,8 @@ use super::{generate_delay, TransactionMiddleware};
 
 const SUB_LOG_TARGET: &str = "eip1559-tx-manager";
 
+type Eip1559Middleware<T> = NonceManagerMiddleware<SignerMiddleware<Arc<Provider<T>>, LocalWallet>>;
+
 /// The essential task that sends eip1559 transactions asynchronously.
 pub struct Eip1559TransactionManager<T> {
 	/// The ethereum client for the connected chain.
