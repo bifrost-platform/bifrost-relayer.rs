@@ -24,9 +24,8 @@ use tokio::{
 
 const SUB_LOG_TARGET: &str = "legacy-tx-manager";
 
-type LegacyMiddleware<T> = NonceManagerMiddleware<
-	Arc<GasEscalatorMiddleware<SignerMiddleware<Arc<Provider<T>>, LocalWallet>>>,
->;
+type LegacyMiddleware<T> =
+	NonceManagerMiddleware<SignerMiddleware<GasEscalatorMiddleware<Arc<Provider<T>>>, LocalWallet>>;
 
 /// The essential task that sends legacy transactions asynchronously.
 pub struct LegacyTransactionManager<T> {
@@ -76,8 +75,8 @@ impl<T: 'static + JsonRpcClient> LegacyTransactionManager<T> {
 		);
 		let middleware = client
 			.get_provider()
+			.wrap_into(|p| GasEscalatorMiddleware::new(p, escalator, Frequency::PerBlock))
 			.wrap_into(|p| SignerMiddleware::new(p, client.wallet.signer.clone()))
-			.wrap_into(|p| Arc::new(GasEscalatorMiddleware::new(p, escalator, Frequency::PerBlock)))
 			.wrap_into(|p| NonceManagerMiddleware::new(p, client.address()));
 
 		(
