@@ -30,6 +30,7 @@ evm_providers:
     call_interval: 3000
     block_confirmations: 5
     is_relay_target: false
+    is_initially_escalated: true
     socket_address: "0x8039c3AD8ED55509fD3f6Daa78867923fDe6E61c"
     vault_address: "0x27C66cb5caa07C9B332939c357c789C606f5054C"
     authority_address: "0xCf9f6428A309b6652a1dfaA4d8aB8B61C9c7E8CF"
