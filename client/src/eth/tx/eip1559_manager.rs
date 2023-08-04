@@ -221,6 +221,9 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> for Eip1559TransactionMan
 			sleep(Duration::from_millis(generate_delay())).await;
 		}
 
+		// set transaction `from` field
+		msg.tx_request = msg.tx_request.from(self.client.address());
+
 		// estimate the gas amount to be used
 		let estimated_gas =
 			match self.middleware.estimate_gas(&msg.tx_request.to_typed(), None).await {
