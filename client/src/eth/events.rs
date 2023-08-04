@@ -32,9 +32,6 @@ pub const MAX_FEE_COEFFICIENT: u64 = 2;
 /// The coefficient that will be multipled on the max priority fee.
 pub const MAX_PRIORITY_FEE_COEFFICIENT: u64 = 2;
 
-/// The coefficient that will be multiplied on the previously send transaction gas price.
-pub const RETRY_GAS_PRICE_COEFFICIENT: f64 = 1.2;
-
 /// The coefficient that will be multiplied on the max fee.
 pub const MAX_FEE_COEFFICIENT: u64 = 2;
 
