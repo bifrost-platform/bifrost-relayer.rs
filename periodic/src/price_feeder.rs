@@ -17,7 +17,7 @@ use br_client::eth::{
 use br_primitives::{
 	errors::INVALID_PERIODIC_SCHEDULE, eth::GasCoefficient, periodic::PeriodicWorker,
 	socket::get_asset_oids, sub_display_format, PriceFetcher, PriceResponse, PriceSource,
-	INVALID_BIFROST_NATIVENESS,
+	INVALID_BIFROST_NATIVENESS, PRICE_FEEDER_SCHEDULE,
 };
 
 use crate::price_source::PriceFetchers;
@@ -53,7 +53,7 @@ impl<T: JsonRpcClient + 'static> PeriodicWorker for OraclePriceFeeder<T> {
 
 		loop {
 			let upcoming = self.schedule.upcoming(Utc).next().unwrap();
-			self.feed_period_spreader(upcoming, true).await;
+			self.feed_period_spreader(upcoming - chrono::Duration::seconds(30), true).await;
 
 			if self.is_selected_relayer().await {
 				if self.primary_source.is_empty() {
@@ -76,13 +76,12 @@ impl<T: JsonRpcClient + 'static> PeriodicWorker for OraclePriceFeeder<T> {
 impl<T: JsonRpcClient + 'static> OraclePriceFeeder<T> {
 	pub fn new(
 		event_senders: Vec<Arc<EventSender>>,
-		schedule: String,
 		system_clients: Vec<Arc<EthClient<T>>>,
 	) -> Self {
 		let asset_oid = get_asset_oids();
 
 		Self {
-			schedule: Schedule::from_str(&schedule).expect(INVALID_PERIODIC_SCHEDULE),
+			schedule: Schedule::from_str(PRICE_FEEDER_SCHEDULE).expect(INVALID_PERIODIC_SCHEDULE),
 			primary_source: vec![],
 			secondary_sources: vec![],
 			event_sender: event_senders

@@ -51,8 +51,6 @@ pub struct RelayerConfig {
 	pub evm_providers: Vec<EVMProvider>,
 	/// Handler configs
 	pub handler_configs: Vec<HandlerConfig>,
-	/// Periodic worker configs
-	pub periodic_configs: Option<PeriodicWorkerConfig>,
 	/// Bootstrapping configs
 	pub bootstrap_config: Option<BootstrapConfig>,
 	/// Sentry config
@@ -138,16 +136,6 @@ pub struct HandlerConfig {
 	pub handler_type: HandlerType,
 	/// Watch target list
 	pub watch_list: Vec<ChainID>,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-pub struct PeriodicWorkerConfig {
-	/// Oracle price feeder
-	pub oracle_price_feeder: String,
-	/// Roundup Phase1 feeder
-	pub roundup_emitter: String,
-	/// Heartbeat sender
-	pub heartbeat: String,
 }
 
 #[derive(Debug, Clone, Deserialize)]
