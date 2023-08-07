@@ -36,7 +36,6 @@ pub fn relay(config: Configuration) -> Result<TaskManager, ServiceError> {
 pub fn new_relay_base(config: Configuration) -> Result<RelayBase, ServiceError> {
 	let prometheus_config = config.relayer_config.prometheus_config;
 	let bootstrap_config = config.relayer_config.bootstrap_config;
-	let periodic_configs = config.relayer_config.periodic_configs;
 	let handler_configs = config.relayer_config.handler_configs;
 	let evm_providers = config.relayer_config.evm_providers;
 	let system = config.relayer_config.system;
@@ -206,7 +205,6 @@ pub fn new_relay_base(config: Configuration) -> Result<RelayBase, ServiceError> 
 
 	// initialize heartbeat sender & spawn task
 	let mut heartbeat_sender = HeartbeatSender::new(
-		periodic_configs.clone().unwrap().heartbeat,
 		clients
 			.iter()
 			.find(|client| client.metadata.is_native)
@@ -219,11 +217,7 @@ pub fn new_relay_base(config: Configuration) -> Result<RelayBase, ServiceError> 
 		.spawn("heartbeat", Some("heartbeat"), async move { heartbeat_sender.run().await });
 
 	// initialize oracle price feeder & spawn tasks
-	let mut oracle_price_feeder = OraclePriceFeeder::new(
-		event_channels.clone(),
-		periodic_configs.clone().unwrap().oracle_price_feeder,
-		clients.clone(),
-	);
+	let mut oracle_price_feeder = OraclePriceFeeder::new(event_channels.clone(), clients.clone());
 	task_manager.spawn_essential_handle().spawn(
 		Box::leak(
 			format!("{}-oracle-price-feeder", oracle_price_feeder.client.get_chain_name())
@@ -301,13 +295,8 @@ pub fn new_relay_base(config: Configuration) -> Result<RelayBase, ServiceError> 
 	});
 
 	// initialize roundup feeder & spawn tasks
-	let mut roundup_emitter = RoundupEmitter::new(
-		event_channels,
-		clients,
-		periodic_configs.unwrap().roundup_emitter,
-		bootstrap_states,
-		bootstrap_config,
-	);
+	let mut roundup_emitter =
+		RoundupEmitter::new(event_channels, clients, bootstrap_states, bootstrap_config);
 	task_manager.spawn_essential_handle().spawn(
 		"roundup-emitter",
 		Some("roundup-emitter"),
