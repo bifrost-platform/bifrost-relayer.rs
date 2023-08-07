@@ -6,9 +6,9 @@ use ethers::types::U256;
 use serde::Deserialize;
 use tokio::time::sleep;
 
-pub const HEARTBEAT_SCHEDULE: &str = "0 */5 * * * * *"; // Every 5th minute.
-pub const PRICE_FEEDER_SCHEDULE: &str = "*/15 * * * * * *"; // Every 15th second.
-pub const ROUNDUP_EMITTER_SCHEDULE: &str = "0 * * * * * *"; // Every minute.
+pub const PRICE_FEEDER_SCHEDULE: &str = "0 */5 * * * * *"; // Every 5th minute.
+pub const ROUNDUP_EMITTER_SCHEDULE: &str = "*/15 * * * * * *"; // Every 15th second.
+pub const HEARTBEAT_SCHEDULE: &str = "0 * * * * * *"; // Every minute.
 
 #[async_trait]
 pub trait PeriodicWorker {
