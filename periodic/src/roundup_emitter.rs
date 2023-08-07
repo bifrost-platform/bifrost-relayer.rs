@@ -20,6 +20,7 @@ use br_primitives::{
 	eth::{BootstrapState, GasCoefficient, RoundUpEventStatus, BOOTSTRAP_BLOCK_CHUNK_SIZE},
 	socket::{RoundUpSubmit, SerializedRoundUp, Signatures, SocketContractEvents},
 	sub_display_format, PeriodicWorker, INVALID_BIFROST_NATIVENESS, INVALID_CONTRACT_ABI,
+	ROUNDUP_EMITTER_SCHEDULE,
 };
 
 const SUB_LOG_TARGET: &str = "roundup-emitter";
@@ -94,7 +95,6 @@ impl<T: JsonRpcClient> RoundupEmitter<T> {
 	pub fn new(
 		event_senders: Vec<Arc<EventSender>>,
 		clients: Vec<Arc<EthClient<T>>>,
-		schedule: String,
 		bootstrap_states: Arc<RwLock<Vec<BootstrapState>>>,
 		bootstrap_config: Option<BootstrapConfig>,
 	) -> Self {
@@ -112,7 +112,8 @@ impl<T: JsonRpcClient> RoundupEmitter<T> {
 				.find(|event_sender| event_sender.is_native)
 				.expect(INVALID_BIFROST_NATIVENESS)
 				.clone(),
-			schedule: Schedule::from_str(&schedule).expect(INVALID_PERIODIC_SCHEDULE),
+			schedule: Schedule::from_str(ROUNDUP_EMITTER_SCHEDULE)
+				.expect(INVALID_PERIODIC_SCHEDULE),
 			bootstrap_states,
 			bootstrap_config,
 		}

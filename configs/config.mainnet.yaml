@@ -54,11 +54,6 @@ handler_configs:
   - handler_type: Roundup
     watch_list: [3068]
 
-periodic_configs:
-  oracle_price_feeder: "0 */5 * * * * *" # Every 5th minute.
-  roundup_emitter: "*/15 * * * * * *" # Every 15th seconds.
-  heartbeat: "0 * * * * * *" # Every minute.
-
 ###  The items below are optional. ###
 
 bootstrap_config:

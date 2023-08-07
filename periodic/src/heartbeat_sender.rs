@@ -4,7 +4,7 @@ use br_client::eth::{
 use br_primitives::{
 	errors::{INVALID_BIFROST_NATIVENESS, INVALID_PERIODIC_SCHEDULE},
 	eth::GasCoefficient,
-	sub_display_format, PeriodicWorker,
+	sub_display_format, PeriodicWorker, HEARTBEAT_SCHEDULE,
 };
 use cron::Schedule;
 use ethers::{providers::JsonRpcClient, types::TransactionRequest};
@@ -73,13 +73,9 @@ impl<T: JsonRpcClient> PeriodicWorker for HeartbeatSender<T> {
 
 impl<T: JsonRpcClient> HeartbeatSender<T> {
 	/// Instantiates a new `HeartbeatSender` instance.
-	pub fn new(
-		schedule: String,
-		client: Arc<EthClient<T>>,
-		event_senders: Vec<Arc<EventSender>>,
-	) -> Self {
+	pub fn new(client: Arc<EthClient<T>>, event_senders: Vec<Arc<EventSender>>) -> Self {
 		Self {
-			schedule: Schedule::from_str(&schedule).expect(INVALID_PERIODIC_SCHEDULE),
+			schedule: Schedule::from_str(HEARTBEAT_SCHEDULE).expect(INVALID_PERIODIC_SCHEDULE),
 			event_sender: event_senders
 				.iter()
 				.find(|channel| channel.is_native)
