@@ -60,7 +60,7 @@ impl<T: JsonRpcClient + 'static> PeriodicWorker for OraclePriceFeeder<T> {
 
 		loop {
 			let upcoming = self.schedule.upcoming(Utc).next().unwrap();
-			self.feed_period_spreader(upcoming - chrono::Duration::seconds(30), true).await;
+			self.feed_period_spreader(upcoming, true).await;
 
 			if self.client.is_selected_relayer().await {
 				if self.primary_source.is_empty() {
