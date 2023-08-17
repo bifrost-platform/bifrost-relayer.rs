@@ -1,8 +1,8 @@
 # build stage: where we create binary
-FROM rust:1.70 AS builder
+FROM rust:1.71.1 AS builder
 
 RUN rustup set profile minimal
-RUN apt update && apt install -y make clang pkg-config libssl-dev protobuf-compiler
+RUN apt update && apt install -y protobuf-compiler
 
 WORKDIR /relayer
 COPY . /relayer
