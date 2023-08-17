@@ -106,7 +106,8 @@ And now build the project to generate the executable binary file. (The first bui
 - Binance Smart Chain
 - Polygon
 
-You should also prepare an EVM account that will act as your relayer account. This account should have enough balance for transaction fees used in operations.
+You should also prepare an EVM account that will act as your relayer account. This account should have enough balance
+for transaction fees used in operations.
 
 ### Run the Relayer
 
