@@ -318,8 +318,7 @@ impl<T: JsonRpcClient> RoundupRelayHandler<T> {
 		let mut stream = tokio_stream::iter(self.external_clients.iter());
 		while let Some(target_client) = stream.next().await {
 			// Check roundup submitted to target chain before.
-			let latest_round = self
-				.client
+			let latest_round = target_client
 				.contract_call(
 					target_client.contracts.authority.latest_round(),
 					"authority.latest_round",
@@ -361,8 +360,7 @@ impl<T: JsonRpcClient> RoundupRelayHandler<T> {
 					"authority.latest_round",
 				)
 				.await;
-			let target_chain_round = self
-				.client
+			let target_chain_round = target_client
 				.contract_call(
 					target_client.contracts.authority.latest_round(),
 					"authority.latest_round",
