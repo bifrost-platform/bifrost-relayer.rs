@@ -648,19 +648,18 @@ impl<T: JsonRpcClient> BridgeRelayHandler<T> {
 	}
 
 	/// Compare the request status recorded in source chain with event status to determine if the
-	/// event has already been executed
+	/// event has already been committed or rollbacked.
 	async fn is_already_done(&self, rid: &RequestID, src_chain_id: ChainID) -> bool {
-		let socket_contract =
-			&self.system_clients.get(&src_chain_id).expect(INVALID_CHAIN_ID).contracts.socket;
-		let request = self
-			.client
-			.contract_call(socket_contract.get_request(rid.clone()), "socket.get_request")
+		let src_client = &self.system_clients.get(&src_chain_id).expect(INVALID_CHAIN_ID);
+		let request = src_client
+			.contract_call(
+				src_client.contracts.socket.get_request(rid.clone()),
+				"socket.get_request",
+			)
 			.await;
 
-		let event_status = request.field[0].clone();
-
 		matches!(
-			SocketEventStatus::from_u8(event_status.into()),
+			SocketEventStatus::from_u8(request.field[0].clone().into()),
 			SocketEventStatus::Committed | SocketEventStatus::Rollbacked
 		)
 	}
