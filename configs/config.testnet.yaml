@@ -36,6 +36,7 @@ evm_providers:
     authority_address: "0xCf9f6428A309b6652a1dfaA4d8aB8B61C9c7E8CF"
     chainlink_usdc_usd_address: "0x90c069C4538adAc136E051052E14c1cD799C41B7"
     chainlink_usdt_usd_address: "0xEca2605f0BCF2BA5966372C99837b1F182d3D620"
+    chainlink_dai_usd_address: "0xE4eE17114774713d2De0eC0f035d4F7665fc025D"
   - name: "polygon"
     id: 80001
     provider: "<YOUR_MUMBAI_RPC_ENDPOINT>"
@@ -48,6 +49,7 @@ evm_providers:
     authority_address: "0x2FD5232fDFa6e1c127e7821CC48108Ca79281a38"
     chainlink_usdc_usd_address: "0x572dDec9087154dC5dfBB1546Bb62713147e0Ab0"
     chainlink_usdt_usd_address: "0x92C09849638959196E976289418e5973CC96d645"
+    chainlink_dai_usd_address: "0x0FCAa9c899EC5A91eBc3D5Dd869De833b06fB046"
 
 handler_configs:
   - handler_type: BridgeRelay
