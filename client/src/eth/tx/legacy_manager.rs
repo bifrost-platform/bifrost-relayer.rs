@@ -196,7 +196,7 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> for LegacyTransactionMana
 	}
 
 	async fn initialize(&mut self) {
-		self.is_txpool_enabled = self.client.provider.txpool_status().await.is_ok();
+		self.is_txpool_enabled = self.client.provider.txpool_content().await.is_ok();
 
 		self.flush_stuck_transaction().await;
 	}
