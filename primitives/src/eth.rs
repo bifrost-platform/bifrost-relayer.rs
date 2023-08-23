@@ -77,6 +77,8 @@ pub struct ProviderContracts<T> {
 	pub chainlink_usdc_usd: Option<ChainlinkContract<Provider<T>>>,
 	/// Chainlink usdt/usd aggregator
 	pub chainlink_usdt_usd: Option<ChainlinkContract<Provider<T>>>,
+	/// Chainlink dai/usd aggregator
+	pub chainlink_dai_usd: Option<ChainlinkContract<Provider<T>>>,
 }
 
 impl<T: JsonRpcClient> ProviderContracts<T> {
@@ -88,6 +90,7 @@ impl<T: JsonRpcClient> ProviderContracts<T> {
 		relayer_manager_address: Option<String>,
 		chainlink_usdc_usd_address: Option<String>,
 		chainlink_usdt_usd_address: Option<String>,
+		chainlink_dai_usd_address: Option<String>,
 	) -> Self {
 		Self {
 			socket: SocketContract::new(
@@ -115,6 +118,12 @@ impl<T: JsonRpcClient> ProviderContracts<T> {
 				)
 			}),
 			chainlink_usdt_usd: chainlink_usdt_usd_address.map(|address| {
+				ChainlinkContract::new(
+					H160::from_str(&address).expect(INVALID_CONTRACT_ADDRESS),
+					provider.clone(),
+				)
+			}),
+			chainlink_dai_usd: chainlink_dai_usd_address.map(|address| {
 				ChainlinkContract::new(
 					H160::from_str(&address).expect(INVALID_CONTRACT_ADDRESS),
 					provider.clone(),
