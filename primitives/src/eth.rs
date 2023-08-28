@@ -2,7 +2,7 @@ use std::{str::FromStr, sync::Arc};
 
 use ethers::{
 	providers::{JsonRpcClient, Provider},
-	types::{Address, Signature, H160, U64},
+	types::{Address, Signature, TransactionRequest, H160, U64},
 };
 
 use crate::{
@@ -250,5 +250,20 @@ pub struct RecoveredSignature {
 impl RecoveredSignature {
 	pub fn new(idx: usize, signature: Signature, signer: Address) -> Self {
 		Self { idx, signature, signer }
+	}
+}
+
+#[derive(Clone, Debug)]
+/// The built relay transaction request.
+pub struct BuiltRelayTransaction {
+	/// The raw transaction request body.
+	pub tx_request: TransactionRequest,
+	/// The flag whether if the destination is an external chain.
+	pub is_external: bool,
+}
+
+impl BuiltRelayTransaction {
+	pub fn new(tx_request: TransactionRequest, is_external: bool) -> Self {
+		Self { tx_request, is_external }
 	}
 }

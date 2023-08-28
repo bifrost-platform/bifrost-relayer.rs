@@ -3,10 +3,10 @@ use std::{collections::BTreeMap, str::FromStr};
 use ethers::{
 	abi::RawLog,
 	prelude::{abigen, H256},
-	types::{Bytes, Signature, TransactionRequest, U256},
+	types::{Bytes, Signature, U256},
 };
 
-use crate::eth::ChainID;
+use crate::eth::{BuiltRelayTransaction, ChainID};
 
 abigen!(
 	SocketContract,
@@ -172,7 +172,7 @@ pub trait BridgeRelayBuilder {
 		sig_msg: SocketMessage,
 		is_inbound: bool,
 		relay_tx_chain_id: ChainID,
-	) -> (TransactionRequest, bool);
+	) -> Option<BuiltRelayTransaction>;
 
 	/// Build the signatures required to request `poll()` and returns a flag which represents
 	/// whether the it should be processed to an external chain.
