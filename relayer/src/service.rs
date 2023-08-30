@@ -91,6 +91,7 @@ pub fn new_relay_base(config: Configuration) -> Result<RelayBase, ServiceError> 
 					evm_provider.relayer_manager_address.clone(),
 					evm_provider.chainlink_usdc_usd_address.clone(),
 					evm_provider.chainlink_usdt_usd_address.clone(),
+					evm_provider.chainlink_dai_usd_address.clone(),
 				),
 			));
 

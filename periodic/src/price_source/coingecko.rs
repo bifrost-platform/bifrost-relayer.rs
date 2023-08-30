@@ -90,6 +90,7 @@ impl<T: JsonRpcClient> CoingeckoPriceFetcher<T> {
 			"usd-coin".into(),
 			"bifi".into(),
 			"tether".into(),
+			"dai".into(),
 		];
 
 		let support_coin_list: Vec<SupportedCoin> = Self::get_all_coin_list()

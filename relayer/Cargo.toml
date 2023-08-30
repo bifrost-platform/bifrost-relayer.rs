@@ -1,6 +1,6 @@
 [package]
 name = "bifrost-relayer"
-version = "1.0.2"
+version = "1.0.3"
 description = "The core rust implementation for Bifrost relayer"
 authors = { workspace = true }
 homepage = { workspace = true }
@@ -18,7 +18,11 @@ serde_yaml = { workspace = true }
 ethers = { workspace = true }
 futures = { workspace = true }
 clap = { workspace = true, features = ["derive"] }
-tokio = { workspace = true, features = ["signal", "rt-multi-thread", "parking_lot"] }
+tokio = { workspace = true, features = [
+	"signal",
+	"rt-multi-thread",
+	"parking_lot",
+] }
 
 # Bifrost Relayer
 br-cli = { path = "../client/cli", default-features = false }
