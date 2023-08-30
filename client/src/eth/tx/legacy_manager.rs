@@ -91,7 +91,7 @@ impl<T: 'static + JsonRpcClient> LegacyTransactionManager<T> {
 				is_txpool_enabled: false,
 				is_initially_escalated,
 				gas_price_coefficient,
-				min_gas_price: U256::from(min_gas_price.unwrap_or(0) * 1_000_000_000),
+				min_gas_price: U256::from(min_gas_price.unwrap_or(0)),
 				debug_mode,
 				duplicate_confirm_delay,
 			},

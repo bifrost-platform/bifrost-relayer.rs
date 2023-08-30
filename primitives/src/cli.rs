@@ -85,7 +85,7 @@ pub struct EVMProvider {
 	pub is_relay_target: bool,
 	/// If true, enables Eip1559. (default: false)
 	pub eip1559: Option<bool>,
-	/// The minimum value use for gas_price. (default: 0, unit: GWEI)
+	/// The minimum value use for gas_price. (default: 0, unit: WEI)
 	pub min_gas_price: Option<u64>,
 	/// The minimum priority fee required. (default: 0)
 	pub min_priority_fee: Option<u64>,
