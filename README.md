@@ -62,14 +62,13 @@ Next, the configuration YAML file contains certain parameters that the operator 
 as the relayer private key and each EVM provider's RPC endpoints depend on the operator, thus these values should be
 manuall input.
 
-You should prepare RPC endpoints for the following blockchain networks. There are two options for this: 1) operating
-your own nodes for the blockchains, or 2) utilizing services that offer RPC endpoints, such as Infura or NodeReal. It’s
-crucial that each node must be archive-mode enabled.
+You should prepare RPC endpoints for the following blockchain networks. There are two options for this: 1) operating your own blockchains nodes, or 2) utilizing services that offers RPC endpoints. You can find node providers on the links below. **It’s crucial that each node must be archive-mode enabled**.
 
-- Bifrost (**Must be priorly self-operating and fully synced**)
-- Ethereum
-- Binance Smart Chain
-- Polygon
+- [Bifrost](https://docs.bifrostnetwork.com/bifrost-network/running-a-node/guide-for-operators/setting-up-a-validator-node) (**Must be priorly self-operating and fully synced**)
+- [Ethereum](https://ethereum.org/en/developers/docs/nodes-and-clients/nodes-as-a-service/#popular-node-services)
+- [Binance Smart Chain](https://docs.bnbchain.org/docs/rpc)
+- [Polygon](https://wiki.polygon.technology/docs/pos/reference/rpc-endpoints/)
+- [Base](https://docs.base.org/tools/node-providers/)
 
 You should also prepare an EVM account that will act as your relayer account. This account should have enough balance
 for transaction fees used in operations.
