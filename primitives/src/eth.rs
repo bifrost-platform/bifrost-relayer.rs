@@ -10,7 +10,7 @@ use crate::{
 	constants::errors::{INVALID_CONTRACT_ADDRESS, INVALID_PROVIDER_URL, MISSING_CONTRACT_ADDRESS},
 	contracts::{
 		authority::AuthorityContract, bitcoin_socket::BitcoinSocketContract,
-		chainlink_aggregator::ChainlinkContract, registration_pool::RegistrationPoolContract,
+		chainlink_aggregator::ChainlinkContract, registration_pool::RegistrationPoolCoㄴract,
 		relay_executive::RelayExecutiveContract, relayer_manager::RelayerManagerContract,
 		socket::SocketContract, socket_queue::SocketQueueContract,
 	},
@@ -275,6 +275,8 @@ pub struct ProviderContracts<T> {
 	pub chainlink_usdc_usd: Option<ChainlinkContract<Provider<T>>>,
 	/// Chainlink usdt/usd aggregator
 	pub chainlink_usdt_usd: Option<ChainlinkContract<Provider<T>>>,
+	/// Chainlink dai/usd aggregator
+	pub chainlink_dai_usd: Option<ChainlinkContract<Provider<T>>>,
 }
 
 impl<T: JsonRpcClient> ProviderContracts<T> {
@@ -286,6 +288,7 @@ impl<T: JsonRpcClient> ProviderContracts<T> {
 		relayer_manager_address: Option<String>,
 		chainlink_usdc_usd_address: Option<String>,
 		chainlink_usdt_usd_address: Option<String>,
+		chainlink_dai_usd_address: Option<String>,
 	) -> Self {
 		Self {
 			socket: SocketContract::new(
@@ -313,6 +316,12 @@ impl<T: JsonRpcClient> ProviderContracts<T> {
 				)
 			}),
 			chainlink_usdt_usd: chainlink_usdt_usd_address.map(|address| {
+				ChainlinkContract::new(
+					H160::from_str(&address).expect(INVALID_CONTRACT_ADDRESS),
+					provider.clone(),
+				)
+			}),
+			chainlink_dai_usd: chainlink_dai_usd_address.map(|address| {
 				ChainlinkContract::new(
 					H160::from_str(&address).expect(INVALID_CONTRACT_ADDRESS),
 					provider.clone(),
@@ -518,5 +527,20 @@ pub struct RecoveredSignature {
 impl RecoveredSignature {
 	pub fn new(idx: usize, signature: Signature, signer: Address) -> Self {
 		Self { idx, signature, signer }
+	}
+}
+
+#[derive(Clone, Debug)]
+/// The built relay transaction request.
+pub struct BuiltRelayTransaction {
+	/// The raw transaction request body.
+	pub tx_request: TransactionRequest,
+	/// The flag whether if the destination is an external chain.
+	pub is_external: bool,
+}
+
+impl BuiltRelayTransaction {
+	pub fn new(tx_request: TransactionRequest, is_external: bool) -> Self {
+		Self { tx_request, is_external }
 	}
 }
