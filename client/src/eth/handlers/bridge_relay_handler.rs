@@ -16,8 +16,8 @@ use br_primitives::{
 	authority::RoundMetaData,
 	cli::{BootstrapConfig, BOOTSTRAP_DEFAULT_ROUND_OFFSET},
 	eth::{
-		BootstrapState, BridgeDirection, ChainID, GasCoefficient, RecoveredSignature,
-		SocketEventStatus, BOOTSTRAP_BLOCK_CHUNK_SIZE,
+		BootstrapState, BridgeDirection, BuiltRelayTransaction, ChainID, GasCoefficient,
+		RecoveredSignature, SocketEventStatus, BOOTSTRAP_BLOCK_CHUNK_SIZE,
 	},
 	socket::{
 		BridgeRelayBuilder, PollSubmit, RequestID, SerializedPoll, Signatures, SocketEvents,
@@ -226,23 +226,19 @@ impl<T: JsonRpcClient> BridgeRelayBuilder for BridgeRelayHandler<T> {
 		sig_msg: SocketMessage,
 		is_inbound: bool,
 		relay_tx_chain_id: ChainID,
-	) -> (TransactionRequest, bool) {
-		let to_socket = self
-			.system_clients
-			.get(&relay_tx_chain_id)
-			.expect(INVALID_CHAIN_ID)
-			.contracts
-			.socket
-			.address();
-
-		// the original msg must be used for building calldata
-		let (signatures, is_external) = self.build_signatures(sig_msg, is_inbound).await;
-		(
-			TransactionRequest::default()
-				.data(self.build_poll_call_data(submit_msg, signatures))
-				.to(to_socket),
-			is_external,
-		)
+	) -> Option<BuiltRelayTransaction> {
+		if let Some(system_client) = self.system_clients.get(&relay_tx_chain_id) {
+			let to_socket = system_client.contracts.socket.address();
+			// the original msg must be used for building calldata
+			let (signatures, is_external) = self.build_signatures(sig_msg, is_inbound).await;
+			return Some(BuiltRelayTransaction::new(
+				TransactionRequest::default()
+					.data(self.build_poll_call_data(submit_msg, signatures))
+					.to(to_socket),
+				is_external,
+			))
+		}
+		None
 	}
 
 	async fn build_signatures(
@@ -495,15 +491,21 @@ impl<T: JsonRpcClient> BridgeRelayHandler<T> {
 		};
 
 		// build and send transaction request
-		let (tx_request, is_external) =
-			self.build_transaction(submit_msg, sig_msg, is_inbound, relay_tx_chain_id).await;
-		self.request_send_transaction(
-			relay_tx_chain_id,
-			tx_request,
-			metadata,
-			is_external,
-			if is_external { GasCoefficient::Low } else { GasCoefficient::Mid },
-		);
+		if let Some(built_transaction) =
+			self.build_transaction(submit_msg, sig_msg, is_inbound, relay_tx_chain_id).await
+		{
+			self.request_send_transaction(
+				relay_tx_chain_id,
+				built_transaction.tx_request,
+				metadata,
+				built_transaction.is_external,
+				if built_transaction.is_external {
+					GasCoefficient::Low
+				} else {
+					GasCoefficient::Mid
+				},
+			);
+		}
 	}
 
 	/// Get the chain ID of the inbound sequence relay transaction.
@@ -650,18 +652,20 @@ impl<T: JsonRpcClient> BridgeRelayHandler<T> {
 	/// Compare the request status recorded in source chain with event status to determine if the
 	/// event has already been committed or rollbacked.
 	async fn is_already_done(&self, rid: &RequestID, src_chain_id: ChainID) -> bool {
-		let src_client = &self.system_clients.get(&src_chain_id).expect(INVALID_CHAIN_ID);
-		let request = src_client
-			.contract_call(
-				src_client.contracts.socket.get_request(rid.clone()),
-				"socket.get_request",
-			)
-			.await;
+		if let Some(src_client) = &self.system_clients.get(&src_chain_id) {
+			let request = src_client
+				.contract_call(
+					src_client.contracts.socket.get_request(rid.clone()),
+					"socket.get_request",
+				)
+				.await;
 
-		matches!(
-			SocketEventStatus::from_u8(request.field[0].clone().into()),
-			SocketEventStatus::Committed | SocketEventStatus::Rollbacked
-		)
+			return matches!(
+				SocketEventStatus::from_u8(request.field[0].clone().into()),
+				SocketEventStatus::Committed | SocketEventStatus::Rollbacked
+			)
+		}
+		false
 	}
 }
 
