@@ -44,6 +44,8 @@ pub struct LegacyTransactionManager<T> {
 	is_initially_escalated: bool,
 	/// The coefficient used on transaction gas price escalation (default: 1.15)
 	gas_price_coefficient: f64,
+	/// The minimum value use for gas_price. (default: 0)
+	min_gas_price: U256,
 	/// The flag whether debug mode is enabled. If enabled, certain errors will be logged such as
 	/// gas estimation failures.
 	debug_mode: bool,
@@ -59,6 +61,7 @@ impl<T: 'static + JsonRpcClient> LegacyTransactionManager<T> {
 		debug_mode: bool,
 		escalate_interval: Option<u64>,
 		escalate_percentage: Option<f64>,
+		min_gas_price: Option<u64>,
 		is_initially_escalated: bool,
 		duplicate_confirm_delay: Option<u64>,
 	) -> (Self, UnboundedSender<EventMessage>) {
@@ -88,6 +91,7 @@ impl<T: 'static + JsonRpcClient> LegacyTransactionManager<T> {
 				is_txpool_enabled: false,
 				is_initially_escalated,
 				gas_price_coefficient,
+				min_gas_price: U256::from(min_gas_price.unwrap_or(0) * 1_000_000_000),
 				debug_mode,
 				duplicate_confirm_delay,
 			},
@@ -111,7 +115,7 @@ impl<T: 'static + JsonRpcClient> LegacyTransactionManager<T> {
 		let escalated_gas_price =
 			U256::from((previous_gas_price * self.gas_price_coefficient).ceil() as u64);
 
-		max(current_network_gas_price, escalated_gas_price)
+		max(max(current_network_gas_price, escalated_gas_price), self.min_gas_price)
 	}
 
 	/// Get gas_price for escalated legacy transaction request. This will be only used when
@@ -125,8 +129,13 @@ impl<T: 'static + JsonRpcClient> LegacyTransactionManager<T> {
 			Err(error) =>
 				self.handle_failed_get_gas_price(DEFAULT_CALL_RETRIES, error.to_string()).await,
 		};
-		U256::from(
-			(current_network_gas_price.as_u64() as f64 * self.gas_price_coefficient).ceil() as u64
+
+		max(
+			U256::from(
+				(current_network_gas_price.as_u64() as f64 * self.gas_price_coefficient).ceil()
+					as u64,
+			),
+			self.min_gas_price,
 		)
 	}
 
