@@ -4,13 +4,16 @@ use crate::eth::{
 	MAX_PRIORITY_FEE_COEFFICIENT,
 };
 use async_trait::async_trait;
-use br_primitives::{eth::ETHEREUM_BLOCK_TIME, sub_display_format};
+use br_primitives::{eth::ETHEREUM_BLOCK_TIME, sub_display_format, NETWORK_NOT_SUPPORT_EIP1559};
 use ethers::{
 	middleware::{MiddlewareBuilder, NonceManagerMiddleware, SignerMiddleware},
 	prelude::Transaction,
 	providers::{JsonRpcClient, Middleware, Provider},
 	signers::LocalWallet,
-	types::{transaction::eip2718::TypedTransaction, Bytes, Eip1559TransactionRequest, U256},
+	types::{
+		transaction::eip2718::TypedTransaction, BlockId, BlockNumber, Bytes,
+		Eip1559TransactionRequest, U256,
+	},
 };
 use std::{cmp::max, sync::Arc, time::Duration};
 use tokio::{
@@ -170,19 +173,42 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> for Eip1559TransactionMan
 		&self,
 		transaction: &Transaction,
 	) -> TxRequest {
-		let mut request: Eip1559TransactionRequest = transaction.into();
-
 		let current_fees = self.get_estimated_eip1559_fees().await;
 
-		let new_max_fee_per_gas = max(request.max_fee_per_gas.unwrap(), current_fees.0);
-		let new_priority_fee = max(
-			request.max_priority_fee_per_gas.unwrap() * MAX_PRIORITY_FEE_COEFFICIENT,
-			max(current_fees.1, self.min_priority_fee),
-		);
+		let mut request: Eip1559TransactionRequest = transaction.into();
+		if let Some(prev_max_fee_per_gas) = transaction.max_fee_per_gas {
+			let prev_max_priority_fee_per_gas = transaction.max_priority_fee_per_gas.unwrap();
 
-		request = request
-			.max_fee_per_gas(new_max_fee_per_gas.saturating_add(new_priority_fee))
-			.max_priority_fee_per_gas(new_priority_fee);
+			let new_max_fee_per_gas = max(prev_max_fee_per_gas, current_fees.0);
+			let new_priority_fee = max(
+				prev_max_priority_fee_per_gas * MAX_PRIORITY_FEE_COEFFICIENT,
+				max(current_fees.1, self.min_priority_fee),
+			);
+
+			request = request
+				.max_fee_per_gas(new_max_fee_per_gas.saturating_add(new_priority_fee))
+				.max_priority_fee_per_gas(new_priority_fee);
+		} else {
+			let prev_gas_price_escalated =
+				U256::from((transaction.gas_price.unwrap().as_u64() as f64 * 1.125).ceil() as u64);
+			let pending_base_fee = self
+				.client
+				.get_block(BlockId::Number(BlockNumber::Pending))
+				.await
+				.unwrap()
+				.base_fee_per_gas
+				.expect(NETWORK_NOT_SUPPORT_EIP1559);
+
+			if prev_gas_price_escalated > pending_base_fee + current_fees.1 {
+				request = request
+					.max_fee_per_gas(prev_gas_price_escalated)
+					.max_priority_fee_per_gas(prev_gas_price_escalated - pending_base_fee);
+			} else {
+				request = request
+					.max_fee_per_gas(current_fees.0)
+					.max_priority_fee_per_gas(current_fees.1);
+			}
+		};
 
 		if self
 			.middleware

@@ -11,7 +11,7 @@ use ethers::{
 	},
 	providers::{JsonRpcClient, Middleware, Provider},
 	signers::LocalWallet,
-	types::{Transaction, TransactionRequest, U256},
+	types::{BlockId, BlockNumber, Transaction, TransactionRequest, U256},
 };
 use std::{cmp::max, sync::Arc, time::Duration};
 use tokio::{
@@ -206,9 +206,23 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> for LegacyTransactionMana
 		transaction: &Transaction,
 	) -> TxRequest {
 		let request: TransactionRequest = transaction.into();
-		let new_gas_price = self.get_gas_price_for_retry(request.gas_price.unwrap()).await;
 
-		TxRequest::Legacy(request.gas_price(new_gas_price))
+		return if let Some(gas_price) = transaction.gas_price {
+			TxRequest::Legacy(request.gas_price(self.get_gas_price_for_retry(gas_price).await))
+		} else {
+			let prev_priority_fee_per_gas = transaction.max_priority_fee_per_gas.unwrap();
+			let pending_base_fee = self
+				.client
+				.get_block(BlockId::Number(BlockNumber::Pending))
+				.await
+				.unwrap()
+				.base_fee_per_gas
+				.unwrap();
+
+			TxRequest::Legacy(request.gas_price(
+				self.get_gas_price_for_retry(prev_priority_fee_per_gas + pending_base_fee).await,
+			))
+		}
 	}
 
 	async fn run(&mut self) {
