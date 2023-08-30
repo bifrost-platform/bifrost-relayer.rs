@@ -3,7 +3,7 @@ use crate::eth::{
 	DEFAULT_CALL_RETRY_INTERVAL_MS, DEFAULT_TX_RETRIES,
 };
 use async_trait::async_trait;
-use br_primitives::{eth::ETHEREUM_BLOCK_TIME, sub_display_format};
+use br_primitives::{eth::ETHEREUM_BLOCK_TIME, sub_display_format, NETWORK_NOT_SUPPORT_EIP1559};
 use ethers::{
 	middleware::{
 		gas_escalator::{Frequency, GasEscalatorMiddleware, GeometricGasPrice},
@@ -211,17 +211,26 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> for LegacyTransactionMana
 			TxRequest::Legacy(request.gas_price(self.get_gas_price_for_retry(gas_price).await))
 		} else {
 			let prev_priority_fee_per_gas = transaction.max_priority_fee_per_gas.unwrap();
-			let pending_base_fee = self
-				.client
-				.get_block(BlockId::Number(BlockNumber::Pending))
-				.await
-				.unwrap()
-				.base_fee_per_gas
-				.unwrap();
 
-			TxRequest::Legacy(request.gas_price(
-				self.get_gas_price_for_retry(prev_priority_fee_per_gas + pending_base_fee).await,
-			))
+			if let Some(pending_block) =
+				self.client.get_block(BlockId::Number(BlockNumber::Pending)).await
+			{
+				let pending_base_fee =
+					pending_block.base_fee_per_gas.expect(NETWORK_NOT_SUPPORT_EIP1559);
+
+				TxRequest::Legacy(
+					request.gas_price(
+						self.get_gas_price_for_retry(prev_priority_fee_per_gas + pending_base_fee)
+							.await,
+					),
+				)
+			} else {
+				panic!(
+					"[{}]-[{}] Error on call get_block rpc",
+					self.client.get_chain_name(),
+					SUB_LOG_TARGET,
+				)
+			}
 		}
 	}
 

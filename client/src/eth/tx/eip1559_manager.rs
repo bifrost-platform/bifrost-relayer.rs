@@ -191,22 +191,27 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> for Eip1559TransactionMan
 		} else {
 			let prev_gas_price_escalated =
 				U256::from((transaction.gas_price.unwrap().as_u64() as f64 * 1.125).ceil() as u64);
-			let pending_base_fee = self
-				.client
-				.get_block(BlockId::Number(BlockNumber::Pending))
-				.await
-				.unwrap()
-				.base_fee_per_gas
-				.expect(NETWORK_NOT_SUPPORT_EIP1559);
 
-			if prev_gas_price_escalated > pending_base_fee + current_fees.1 {
-				request = request
-					.max_fee_per_gas(prev_gas_price_escalated)
-					.max_priority_fee_per_gas(prev_gas_price_escalated - pending_base_fee);
+			if let Some(pending_block) =
+				self.client.get_block(BlockId::Number(BlockNumber::Pending)).await
+			{
+				let pending_base_fee =
+					pending_block.base_fee_per_gas.expect(NETWORK_NOT_SUPPORT_EIP1559);
+				if prev_gas_price_escalated > pending_base_fee + current_fees.1 {
+					request = request
+						.max_fee_per_gas(prev_gas_price_escalated)
+						.max_priority_fee_per_gas(prev_gas_price_escalated - pending_base_fee);
+				} else {
+					request = request
+						.max_fee_per_gas(current_fees.0)
+						.max_priority_fee_per_gas(current_fees.1);
+				}
 			} else {
-				request = request
-					.max_fee_per_gas(current_fees.0)
-					.max_priority_fee_per_gas(current_fees.1);
+				panic!(
+					"[{}]-[{}] Error on call get_block rpc",
+					self.client.get_chain_name(),
+					SUB_LOG_TARGET,
+				)
 			}
 		};
 
