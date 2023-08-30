@@ -50,10 +50,20 @@ evm_providers:
     chainlink_usdc_usd_address: "0x572dDec9087154dC5dfBB1546Bb62713147e0Ab0"
     chainlink_usdt_usd_address: "0x92C09849638959196E976289418e5973CC96d645"
     chainlink_dai_usd_address: "0x0FCAa9c899EC5A91eBc3D5Dd869De833b06fB046"
+  - name: "base"
+    id: 84531
+    provider: "<YOUR_BASE_GOERLI_RPC_ENDPOINT>"
+    call_interval: 2000
+    block_confirmations: 7
+    is_relay_target: true
+    eip1559: true
+    socket_address: "0x9c8B701961C20d006cb7c4B5B91c6cb93EdB44Ac"
+    vault_address: "0x6EeE91b7c69e3576C13cE7a9C7C0E305dF6996F9"
+    authority_address: "0xb3f5C3a2237Df09F94dDAC32F63E5D962Ae66a42"
 
 handler_configs:
   - handler_type: BridgeRelay
-    watch_list: [49088, 5, 97, 80001]
+    watch_list: [49088, 5, 97, 80001, 84531]
   - handler_type: Roundup
     watch_list: [49088]
 
