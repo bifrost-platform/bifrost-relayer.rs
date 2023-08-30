@@ -26,6 +26,7 @@ evm_providers:
     authority_address: "0xAdcaa90cabDc730855064d5b0f5242c16A9B7E10"
     chainlink_usdc_usd_address: "0x8fFfFfd4AfB6115b954Bd326cbe7B4BA576818f6"
     chainlink_usdt_usd_address: "0x3E7d1eAB13ad0104d2750B8863b489D65364e32D"
+    chainlink_dai_usd_address: "0xAed0c38402a5d19df6E4c03F4E2DceD6e29c1ee9"
   - name: "bsc"
     id: 56
     provider: "<YOUR_BSC_RPC_ENDPOINT>"
@@ -47,10 +48,20 @@ evm_providers:
     socket_address: "0x050606CC2Bcd9504991Be2c309D6c6c832Bb5bd0"
     vault_address: "0x5fA7fe5F94f2D15585a3134C1C5d3019c8c1645d"
     authority_address: "0x7F48909fBd1E38f1e05B5E326A44175fc2462B13"
+  - name: "base"
+    id: 8453
+    provider: "<YOUR_BASE_RPC_ENDPOINT>"
+    call_interval: 2000
+    block_confirmations: 7
+    is_relay_target: true
+    eip1559: true
+    socket_address: "0xAe172D8c5E428D4b7C70f9E593b207F9daC9BF3e"
+    vault_address: "0x4F7aB59b5AC112970F5dD66D8a7ac505c8E5e08B"
+    authority_address: "0x4C7a44F3FB37A53F33D3fe3cCdE97A444F105239"
 
 handler_configs:
   - handler_type: BridgeRelay
-    watch_list: [3068, 1, 56, 137]
+    watch_list: [3068, 1, 56, 137, 8453]
   - handler_type: Roundup
     watch_list: [3068]
 
