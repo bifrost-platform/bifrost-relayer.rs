@@ -3,7 +3,7 @@ use crate::eth::{
 	DEFAULT_CALL_RETRY_INTERVAL_MS, DEFAULT_TX_RETRIES,
 };
 use async_trait::async_trait;
-use br_primitives::{eth::ETHEREUM_BLOCK_TIME, sub_display_format};
+use br_primitives::{eth::ETHEREUM_BLOCK_TIME, sub_display_format, NETWORK_NOT_SUPPORT_EIP1559};
 use ethers::{
 	middleware::{
 		gas_escalator::{Frequency, GasEscalatorMiddleware, GeometricGasPrice},
@@ -11,7 +11,7 @@ use ethers::{
 	},
 	providers::{JsonRpcClient, Middleware, Provider},
 	signers::LocalWallet,
-	types::{Transaction, TransactionRequest, U256},
+	types::{BlockId, BlockNumber, Transaction, TransactionRequest, U256},
 };
 use std::{cmp::max, sync::Arc, time::Duration};
 use tokio::{
@@ -44,6 +44,8 @@ pub struct LegacyTransactionManager<T> {
 	is_initially_escalated: bool,
 	/// The coefficient used on transaction gas price escalation (default: 1.15)
 	gas_price_coefficient: f64,
+	/// The minimum value use for gas_price. (default: 0)
+	min_gas_price: U256,
 	/// The flag whether debug mode is enabled. If enabled, certain errors will be logged such as
 	/// gas estimation failures.
 	debug_mode: bool,
@@ -59,6 +61,7 @@ impl<T: 'static + JsonRpcClient> LegacyTransactionManager<T> {
 		debug_mode: bool,
 		escalate_interval: Option<u64>,
 		escalate_percentage: Option<f64>,
+		min_gas_price: Option<u64>,
 		is_initially_escalated: bool,
 		duplicate_confirm_delay: Option<u64>,
 	) -> (Self, UnboundedSender<EventMessage>) {
@@ -88,6 +91,7 @@ impl<T: 'static + JsonRpcClient> LegacyTransactionManager<T> {
 				is_txpool_enabled: false,
 				is_initially_escalated,
 				gas_price_coefficient,
+				min_gas_price: U256::from(min_gas_price.unwrap_or(0)),
 				debug_mode,
 				duplicate_confirm_delay,
 			},
@@ -111,7 +115,7 @@ impl<T: 'static + JsonRpcClient> LegacyTransactionManager<T> {
 		let escalated_gas_price =
 			U256::from((previous_gas_price * self.gas_price_coefficient).ceil() as u64);
 
-		max(current_network_gas_price, escalated_gas_price)
+		max(max(current_network_gas_price, escalated_gas_price), self.min_gas_price)
 	}
 
 	/// Get gas_price for escalated legacy transaction request. This will be only used when
@@ -125,8 +129,13 @@ impl<T: 'static + JsonRpcClient> LegacyTransactionManager<T> {
 			Err(error) =>
 				self.handle_failed_get_gas_price(DEFAULT_CALL_RETRIES, error.to_string()).await,
 		};
-		U256::from(
-			(current_network_gas_price.as_u64() as f64 * self.gas_price_coefficient).ceil() as u64
+
+		max(
+			U256::from(
+				(current_network_gas_price.as_u64() as f64 * self.gas_price_coefficient).ceil()
+					as u64,
+			),
+			self.min_gas_price,
 		)
 	}
 
@@ -206,9 +215,32 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> for LegacyTransactionMana
 		transaction: &Transaction,
 	) -> TxRequest {
 		let request: TransactionRequest = transaction.into();
-		let new_gas_price = self.get_gas_price_for_retry(request.gas_price.unwrap()).await;
 
-		TxRequest::Legacy(request.gas_price(new_gas_price))
+		return if let Some(gas_price) = transaction.gas_price {
+			TxRequest::Legacy(request.gas_price(self.get_gas_price_for_retry(gas_price).await))
+		} else {
+			let prev_priority_fee_per_gas = transaction.max_priority_fee_per_gas.unwrap();
+
+			if let Some(pending_block) =
+				self.client.get_block(BlockId::Number(BlockNumber::Pending)).await
+			{
+				let pending_base_fee =
+					pending_block.base_fee_per_gas.expect(NETWORK_NOT_SUPPORT_EIP1559);
+
+				TxRequest::Legacy(
+					request.gas_price(
+						self.get_gas_price_for_retry(prev_priority_fee_per_gas + pending_base_fee)
+							.await,
+					),
+				)
+			} else {
+				panic!(
+					"[{}]-[{}] Error on call get_block rpc",
+					self.client.get_chain_name(),
+					SUB_LOG_TARGET,
+				)
+			}
+		}
 	}
 
 	async fn run(&mut self) {
