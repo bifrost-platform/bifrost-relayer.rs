@@ -27,3 +27,6 @@ pub const INVALID_CONFIG_FILE_STRUCTURE: &str =
 
 pub const INVALID_CHAIN_SPECIFICATION: &str =
 	"Invalid --chain specification provided. Please check your CLI options.";
+
+pub const NETWORK_NOT_SUPPORT_EIP1559: &str =
+	"Network not support EIP-1559 transaction. Please check your evm_providers config";
