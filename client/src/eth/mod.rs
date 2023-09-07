@@ -20,6 +20,7 @@ use br_primitives::{
 	eth::{
 		ChainID, ProviderContracts, ProviderMetadata, BOOTSTRAP_BLOCK_OFFSET, NATIVE_BLOCK_TIME,
 	},
+	PROVIDER_INTERNAL_ERROR,
 };
 pub use events::*;
 pub use handlers::*;
@@ -101,10 +102,11 @@ impl<T: JsonRpcClient> EthClient<T> {
 			sleep(Duration::from_millis(DEFAULT_CALL_RETRY_INTERVAL_MS)).await;
 		}
 		panic!(
-			"[{}]-[{}]-[{}] An internal error thrown when making a call to the provider. Please check your provider's status [method: {}]: {}",
+			"[{}]-[{}]-[{}] {} [method: {}]: {}",
 			&self.get_chain_name(),
 			SUB_LOG_TARGET,
 			self.address(),
+			PROVIDER_INTERNAL_ERROR,
 			method,
 			error_msg
 		);
@@ -134,10 +136,11 @@ impl<T: JsonRpcClient> EthClient<T> {
 			sleep(Duration::from_millis(DEFAULT_CALL_RETRY_INTERVAL_MS)).await;
 		}
 		panic!(
-			"[{}]-[{}]-[{}] An internal error thrown when making a call to the provider. Please check your provider's status [method: {}]: {}",
+			"[{}]-[{}]-[{}] {} [method: {}]: {}",
 			&self.get_chain_name(),
 			SUB_LOG_TARGET,
 			self.address(),
+			PROVIDER_INTERNAL_ERROR,
 			method,
 			error_msg
 		);
@@ -219,9 +222,10 @@ impl<T: JsonRpcClient> EthClient<T> {
 				.into()
 		} else {
 			panic!(
-				"[{}]-[{}]-[{}] An internal error thrown when making a call to the provider. Please check your provider's status [method: bootstrap]",
+				"[{}]-[{}]-[{}] {} [method: bootstrap]",
 				&self.get_chain_name(),
 				SUB_LOG_TARGET,
+				PROVIDER_INTERNAL_ERROR,
 				self.address()
 			);
 		}

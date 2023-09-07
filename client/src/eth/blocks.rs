@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use ethers::{
-	providers::{JsonRpcClient, Middleware},
+	providers::JsonRpcClient,
 	types::{BlockNumber, Filter, Log, SyncingStatus, U64},
 };
 use tokio::{
@@ -155,16 +155,6 @@ impl<T: JsonRpcClient> BlockManager<T> {
 
 	/// Verifies if the connected provider is in block sync mode.
 	pub async fn wait_provider_sync(&self) {
-		if let Err(error) = self.client.provider.client_version().await {
-			panic!(
-				"[{}]-[{}]-[{}] An internal error thrown when making a call to the provider. Please check your provider's status [method: client_version]: {}",
-				&self.client.get_chain_name(),
-				SUB_LOG_TARGET,
-				self.client.address(),
-				error
-			);
-		}
-
 		loop {
 			if let SyncingStatus::IsSyncing(status) = self.client.is_syncing().await {
 				log::info!(

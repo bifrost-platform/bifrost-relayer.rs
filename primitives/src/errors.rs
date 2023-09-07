@@ -30,3 +30,6 @@ pub const INVALID_CHAIN_SPECIFICATION: &str =
 
 pub const NETWORK_NOT_SUPPORT_EIP1559: &str =
 	"Network not support EIP-1559 transaction. Please check your evm_providers config";
+
+pub const PROVIDER_INTERNAL_ERROR: &str =
+	"An internal error thrown when making a call to the provider. Please check your provider's status";
