@@ -160,7 +160,6 @@ impl<T: JsonRpcClient> EthClient<T> {
 		}
 	}
 
-<<<<<<< HEAD
 	/// Verifies whether the relayer enough balance remained.
 	pub async fn verify_balance(&self) {
 		if self.metadata.is_native {
@@ -177,8 +176,6 @@ impl<T: JsonRpcClient> EthClient<T> {
 		}
 	}
 
-=======
->>>>>>> 256ee54 (CCCP-228, feature: verify provider chain ID on start)
 	/// Retrieves the balance of the given address.
 	pub async fn get_balance(&self, who: Address) -> U256 {
 		self.rpc_call("eth_getBalance", (who, "latest")).await
