@@ -86,6 +86,7 @@ impl<T: JsonRpcClient> BlockManager<T> {
 	/// Initialize block manager.
 	async fn initialize(&mut self) {
 		self.client.verify_chain_id().await;
+		self.client.verify_balance().await;
 
 		// initialize waiting block to the latest block
 		self.waiting_block = self.client.get_latest_block_number().await;

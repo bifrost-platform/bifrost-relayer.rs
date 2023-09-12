@@ -8,7 +8,7 @@ use ethers::{
 		Address, Block, BlockId, Filter, Log, SyncingStatus, Transaction, TransactionReceipt,
 		TxpoolContent, H256, U256, U64,
 	},
-	utils::format_units,
+	utils::{format_units, WEI_IN_ETHER},
 };
 use serde::{de::DeserializeOwned, Serialize};
 use tokio::time::{sleep, Duration};
@@ -20,7 +20,7 @@ use br_primitives::{
 	eth::{
 		ChainID, ProviderContracts, ProviderMetadata, BOOTSTRAP_BLOCK_OFFSET, NATIVE_BLOCK_TIME,
 	},
-	INVALID_CHAIN_ID, PROVIDER_INTERNAL_ERROR,
+	INSUFFICIENT_FUNDS, INVALID_CHAIN_ID, PROVIDER_INTERNAL_ERROR,
 };
 pub use events::*;
 pub use handlers::*;
@@ -157,6 +157,22 @@ impl<T: JsonRpcClient> EthClient<T> {
 				self.address(),
 				INVALID_CHAIN_ID
 			);
+		}
+	}
+
+	/// Verifies whether the relayer enough balance remained.
+	pub async fn verify_balance(&self) {
+		if self.metadata.is_native {
+			let balance = self.get_balance(self.address()).await;
+			if balance < WEI_IN_ETHER {
+				panic!(
+					"[{}]-[{}]-[{}] {}",
+					&self.get_chain_name(),
+					SUB_LOG_TARGET,
+					self.address(),
+					INSUFFICIENT_FUNDS
+				);
+			}
 		}
 	}
 
