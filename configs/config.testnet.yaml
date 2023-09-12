@@ -55,7 +55,7 @@ evm_providers:
     provider: "<YOUR_BASE_GOERLI_RPC_ENDPOINT>"
     call_interval: 2000
     block_confirmations: 7
-    is_relay_target: true
+    is_relay_target: false
     eip1559: true
     socket_address: "0x9c8B701961C20d006cb7c4B5B91c6cb93EdB44Ac"
     vault_address: "0x6EeE91b7c69e3576C13cE7a9C7C0E305dF6996F9"
