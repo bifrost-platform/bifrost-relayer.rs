@@ -302,7 +302,7 @@ pub struct EthClient<T> {
 		self.provider.clone()
 	}
 
-	/// Make an RPC request to the chain provider via the internal connection, and return the
+	/// Make a JSON RPC request to the chain provider via the internal connection, and return the
 	/// result. This method wraps the original JSON RPC call and retries whenever the request fails
 	/// until it exceeds the maximum retries.
 	async fn rpc_call<P, R>(&self, method: &str, params: P) -> R
@@ -326,16 +326,17 @@ pub struct EthClient<T> {
 			sleep(Duration::from_millis(DEFAULT_CALL_RETRY_INTERVAL_MS)).await;
 		}
 		panic!(
-			"[{}]-[{}]-[{}] An internal error thrown when making a call to the provider. Please check your provider's status [method: {}]: {}",
+			"[{}]-[{}]-[{}] {} [method: {}]: {}",
 			&self.get_chain_name(),
 			SUB_LOG_TARGET,
 			self.address(),
+			PROVIDER_INTERNAL_ERROR,
 			method,
 			error_msg
 		);
 	}
 
-	/// Make an contract call to the chain provider via the internal connection, and return the
+	/// Make a contract call to the chain provider via the internal connection, and return the
 	/// result. This method wraps the original contract call and retries whenever the request fails
 	/// until it exceeds the maximum retries.
 	pub async fn contract_call<M, D>(&self, raw_call: ContractCall<M, D>, method: &str) -> D
@@ -359,13 +360,44 @@ pub struct EthClient<T> {
 			sleep(Duration::from_millis(DEFAULT_CALL_RETRY_INTERVAL_MS)).await;
 		}
 		panic!(
-			"[{}]-[{}]-[{}] An internal error thrown when making a call to the provider. Please check your provider's status [method: {}]: {}",
+			"[{}]-[{}]-[{}] {} [method: {}]: {}",
 			&self.get_chain_name(),
 			SUB_LOG_TARGET,
 			self.address(),
+			PROVIDER_INTERNAL_ERROR,
 			method,
 			error_msg
 		);
+	}
+
+	/// Verifies whether the configured chain ID and the provider's actual chain ID matches.
+	pub async fn verify_chain_id(&self) {
+		let chain_id: U256 = self.rpc_call("eth_chainId", ()).await;
+		if self.get_chain_id() != chain_id.as_u32() {
+			panic!(
+				"[{}]-[{}]-[{}] {}",
+				&self.get_chain_name(),
+				SUB_LOG_TARGET,
+				self.address(),
+				INVALID_CHAIN_ID
+			);
+		}
+	}
+
+	/// Verifies whether the relayer enough balance remained.
+	pub async fn verify_balance(&self) {
+		if self.metadata.is_native {
+			let balance = self.get_balance(self.address()).await;
+			if balance < WEI_IN_ETHER {
+				panic!(
+					"[{}]-[{}]-[{}] {}",
+					&self.get_chain_name(),
+					SUB_LOG_TARGET,
+					self.address(),
+					INSUFFICIENT_FUNDS
+				);
+			}
+		}
 	}
 
 	/// Retrieves the balance of the given address.

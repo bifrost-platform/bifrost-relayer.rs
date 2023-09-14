@@ -28,5 +28,11 @@ pub const INVALID_CONFIG_FILE_STRUCTURE: &str =
 pub const INVALID_CHAIN_SPECIFICATION: &str =
 	"Invalid --chain specification provided. Please check your CLI options.";
 
+pub const INSUFFICIENT_FUNDS: &str =
+	"Insufficient funds. Please check your relayer's remaining balance.";
+
 pub const NETWORK_NOT_SUPPORT_EIP1559: &str =
 	"Network not support EIP-1559 transaction. Please check your evm_providers config";
+
+pub const PROVIDER_INTERNAL_ERROR: &str =
+	"An internal error thrown when making a call to the provider. Please check your provider's status";
