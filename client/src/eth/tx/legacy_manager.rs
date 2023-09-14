@@ -3,7 +3,10 @@ use crate::eth::{
 	DEFAULT_CALL_RETRY_INTERVAL_MS, DEFAULT_TX_RETRIES,
 };
 use async_trait::async_trait;
-use br_primitives::{eth::ETHEREUM_BLOCK_TIME, sub_display_format, NETWORK_NOT_SUPPORT_EIP1559};
+use br_primitives::{
+	eth::ETHEREUM_BLOCK_TIME, sub_display_format, NETWORK_NOT_SUPPORT_EIP1559,
+	PROVIDER_INTERNAL_ERROR,
+};
 use ethers::{
 	middleware::{
 		gas_escalator::{Frequency, GasEscalatorMiddleware, GeometricGasPrice},
@@ -180,10 +183,12 @@ impl<T: 'static + JsonRpcClient> LegacyTransactionManager<T> {
 		}
 
 		panic!(
-			"[{}]-[{}] Error on call get_gas_price(): {:?}",
-			self.client.get_chain_name(),
+			"[{}]-[{}]-[{}] {} [method: get_gas_price]: {}",
+			&self.client.get_chain_name(),
 			SUB_LOG_TARGET,
-			last_error,
+			self.client.address(),
+			PROVIDER_INTERNAL_ERROR,
+			last_error
 		);
 	}
 }
@@ -235,10 +240,12 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> for LegacyTransactionMana
 				)
 			} else {
 				panic!(
-					"[{}]-[{}] Error on call get_block rpc",
-					self.client.get_chain_name(),
+					"[{}]-[{}]-[{}] {} [method: get_block]",
+					&self.client.get_chain_name(),
 					SUB_LOG_TARGET,
-				)
+					self.client.address(),
+					PROVIDER_INTERNAL_ERROR,
+				);
 			}
 		}
 	}

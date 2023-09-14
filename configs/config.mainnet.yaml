@@ -53,7 +53,7 @@ evm_providers:
     provider: "<YOUR_BASE_RPC_ENDPOINT>"
     call_interval: 2000
     block_confirmations: 7
-    is_relay_target: true
+    is_relay_target: false
     eip1559: true
     socket_address: "0xAe172D8c5E428D4b7C70f9E593b207F9daC9BF3e"
     vault_address: "0x4F7aB59b5AC112970F5dD66D8a7ac505c8E5e08B"

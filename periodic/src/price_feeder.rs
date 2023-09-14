@@ -196,6 +196,9 @@ impl<T: JsonRpcClient + 'static> OraclePriceFeeder<T> {
 		if !volume_weighted.contains_key("USDT") {
 			volume_weighted.insert("USDT".into(), (parse_ether(1).unwrap(), U256::from(1)));
 		}
+		if !volume_weighted.contains_key("DAI") {
+			volume_weighted.insert("DAI".into(), (parse_ether(1).unwrap(), U256::from(1)));
+		}
 
 		Ok(volume_weighted
 			.into_iter()
