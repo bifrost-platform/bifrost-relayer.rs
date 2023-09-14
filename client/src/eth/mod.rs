@@ -8,7 +8,7 @@ use ethers::{
 		Address, Block, BlockId, Filter, Log, SyncingStatus, Transaction, TransactionReceipt,
 		TxpoolContent, H256, U256, U64,
 	},
-	utils::format_units,
+	utils::{format_units, WEI_IN_ETHER},
 };
 use serde::{de::DeserializeOwned, Serialize};
 use tokio::time::{sleep, Duration};
@@ -20,6 +20,7 @@ use br_primitives::{
 	eth::{
 		ChainID, ProviderContracts, ProviderMetadata, BOOTSTRAP_BLOCK_OFFSET, NATIVE_BLOCK_TIME,
 	},
+	INSUFFICIENT_FUNDS, INVALID_CHAIN_ID, PROVIDER_INTERNAL_ERROR,
 };
 pub use events::*;
 pub use handlers::*;
@@ -77,7 +78,7 @@ impl<T: JsonRpcClient> EthClient<T> {
 		self.provider.clone()
 	}
 
-	/// Make an RPC request to the chain provider via the internal connection, and return the
+	/// Make a JSON RPC request to the chain provider via the internal connection, and return the
 	/// result. This method wraps the original JSON RPC call and retries whenever the request fails
 	/// until it exceeds the maximum retries.
 	async fn rpc_call<P, R>(&self, method: &str, params: P) -> R
@@ -101,16 +102,17 @@ impl<T: JsonRpcClient> EthClient<T> {
 			sleep(Duration::from_millis(DEFAULT_CALL_RETRY_INTERVAL_MS)).await;
 		}
 		panic!(
-			"[{}]-[{}]-[{}] An internal error thrown when making a call to the provider. Please check your provider's status [method: {}]: {}",
+			"[{}]-[{}]-[{}] {} [method: {}]: {}",
 			&self.get_chain_name(),
 			SUB_LOG_TARGET,
 			self.address(),
+			PROVIDER_INTERNAL_ERROR,
 			method,
 			error_msg
 		);
 	}
 
-	/// Make an contract call to the chain provider via the internal connection, and return the
+	/// Make a contract call to the chain provider via the internal connection, and return the
 	/// result. This method wraps the original contract call and retries whenever the request fails
 	/// until it exceeds the maximum retries.
 	pub async fn contract_call<M, D>(&self, raw_call: ContractCall<M, D>, method: &str) -> D
@@ -134,13 +136,44 @@ impl<T: JsonRpcClient> EthClient<T> {
 			sleep(Duration::from_millis(DEFAULT_CALL_RETRY_INTERVAL_MS)).await;
 		}
 		panic!(
-			"[{}]-[{}]-[{}] An internal error thrown when making a call to the provider. Please check your provider's status [method: {}]: {}",
+			"[{}]-[{}]-[{}] {} [method: {}]: {}",
 			&self.get_chain_name(),
 			SUB_LOG_TARGET,
 			self.address(),
+			PROVIDER_INTERNAL_ERROR,
 			method,
 			error_msg
 		);
+	}
+
+	/// Verifies whether the configured chain ID and the provider's actual chain ID matches.
+	pub async fn verify_chain_id(&self) {
+		let chain_id: U256 = self.rpc_call("eth_chainId", ()).await;
+		if self.get_chain_id() != chain_id.as_u32() {
+			panic!(
+				"[{}]-[{}]-[{}] {}",
+				&self.get_chain_name(),
+				SUB_LOG_TARGET,
+				self.address(),
+				INVALID_CHAIN_ID
+			);
+		}
+	}
+
+	/// Verifies whether the relayer enough balance remained.
+	pub async fn verify_balance(&self) {
+		if self.metadata.is_native {
+			let balance = self.get_balance(self.address()).await;
+			if balance < WEI_IN_ETHER {
+				panic!(
+					"[{}]-[{}]-[{}] {}",
+					&self.get_chain_name(),
+					SUB_LOG_TARGET,
+					self.address(),
+					INSUFFICIENT_FUNDS
+				);
+			}
+		}
 	}
 
 	/// Retrieves the balance of the given address.
@@ -219,9 +252,10 @@ impl<T: JsonRpcClient> EthClient<T> {
 				.into()
 		} else {
 			panic!(
-				"[{}]-[{}]-[{}] An internal error thrown when making a call to the provider. Please check your provider's status [method: bootstrap]",
+				"[{}]-[{}]-[{}] {} [method: bootstrap]",
 				&self.get_chain_name(),
 				SUB_LOG_TARGET,
+				PROVIDER_INTERNAL_ERROR,
 				self.address()
 			);
 		}

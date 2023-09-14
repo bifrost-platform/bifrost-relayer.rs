@@ -4,7 +4,10 @@ use crate::eth::{
 	MAX_PRIORITY_FEE_COEFFICIENT,
 };
 use async_trait::async_trait;
-use br_primitives::{eth::ETHEREUM_BLOCK_TIME, sub_display_format, NETWORK_NOT_SUPPORT_EIP1559};
+use br_primitives::{
+	eth::ETHEREUM_BLOCK_TIME, sub_display_format, NETWORK_NOT_SUPPORT_EIP1559,
+	PROVIDER_INTERNAL_ERROR,
+};
 use ethers::{
 	middleware::{MiddlewareBuilder, NonceManagerMiddleware, SignerMiddleware},
 	prelude::Transaction,
@@ -139,10 +142,12 @@ impl<T: 'static + JsonRpcClient> Eip1559TransactionManager<T> {
 		}
 
 		panic!(
-			"[{}]-[{}] Error on call get_estimated_eip1559_fees(): {:?}",
-			self.client.get_chain_name(),
+			"[{}]-[{}]-[{}] {} [method: get_estimated_eip1559_fees]: {}",
+			&self.client.get_chain_name(),
 			SUB_LOG_TARGET,
-			last_error,
+			self.client.address(),
+			PROVIDER_INTERNAL_ERROR,
+			last_error
 		);
 	}
 }
@@ -208,10 +213,12 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> for Eip1559TransactionMan
 				}
 			} else {
 				panic!(
-					"[{}]-[{}] Error on call get_block rpc",
-					self.client.get_chain_name(),
+					"[{}]-[{}]-[{}] {} [method: get_block]",
+					&self.client.get_chain_name(),
 					SUB_LOG_TARGET,
-				)
+					self.client.address(),
+					PROVIDER_INTERNAL_ERROR
+				);
 			}
 		};
 
