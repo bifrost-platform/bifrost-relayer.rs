@@ -4,10 +4,15 @@ use crate::eth::{
 };
 use async_trait::async_trait;
 use br_primitives::{
+<<<<<<< HEAD
 	cli::{DEFAULT_ESCALATE_PERCENTAGE, DEFAULT_MIN_GAS_PRICE},
 	eth::ETHEREUM_BLOCK_TIME,
 	sub_display_format, INSUFFICIENT_FUNDS, NETWORK_DOES_NOT_SUPPORT_EIP1559,
 	PROVIDER_INTERNAL_ERROR,
+=======
+	eth::ETHEREUM_BLOCK_TIME, sub_display_format, INSUFFICIENT_FUNDS,
+	NETWORK_DOES_NOT_SUPPORT_EIP1559, PROVIDER_INTERNAL_ERROR,
+>>>>>>> 6f073b5 (CCCP-229, feature: check balance before submitting transactions)
 };
 use ethers::{
 	middleware::{
