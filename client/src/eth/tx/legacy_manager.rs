@@ -192,16 +192,6 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> for LegacyTransactionMana
 		self.is_txpool_enabled
 	}
 
-	async fn is_sufficient_funds(&self, gas_price: U256, gas: U256) -> bool {
-		let fee = gas_price.saturating_mul(gas);
-		let balance = self.client.get_balance(self.client.address()).await;
-		br_metrics::increase_rpc_calls(&self.client.get_chain_name());
-		if balance < fee {
-			return false
-		}
-		true
-	}
-
 	fn debug_mode(&self) -> bool {
 		self.debug_mode
 	}

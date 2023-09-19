@@ -29,7 +29,15 @@ where
 	fn is_txpool_enabled(&self) -> bool;
 
 	/// Verifies whether the relayer has sufficient funds to pay for the transaction.
-	async fn is_sufficient_funds(&self, gas_price: U256, gas: U256) -> bool;
+	async fn is_sufficient_funds(&self, gas_price: U256, gas: U256) -> bool {
+		let fee = gas_price.saturating_mul(gas);
+		let balance = self.get_client().get_balance(self.get_client().address()).await;
+		br_metrics::increase_rpc_calls(&self.get_client().get_chain_name());
+		if balance < fee {
+			return false
+		}
+		true
+	}
 
 	/// The flag whether debug mode is enabled. If enabled, certain errors will be logged such as
 	/// gas estimation failures.
