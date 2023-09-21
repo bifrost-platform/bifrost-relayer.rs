@@ -5,7 +5,10 @@ use std::{
 	time::Duration,
 };
 
-use ethers::providers::{Http, Provider};
+use ethers::{
+	providers::{Http, Provider},
+	types::U64,
+};
 use futures::FutureExt;
 use sc_service::{config::PrometheusConfig, Error as ServiceError, TaskManager};
 use tokio::sync::{Barrier, Mutex, RwLock};
