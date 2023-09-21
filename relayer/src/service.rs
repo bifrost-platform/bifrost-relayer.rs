@@ -5,7 +5,10 @@ use std::{
 	time::Duration,
 };
 
-use ethers::providers::{Http, Provider};
+use ethers::{
+	providers::{Http, Provider},
+	types::U64,
+};
 use futures::FutureExt;
 use sc_service::{config::PrometheusConfig, Error as ServiceError, TaskManager};
 use tokio::sync::{Barrier, Mutex, RwLock};
@@ -81,6 +84,7 @@ pub fn new_relay_base(config: Configuration) -> Result<RelayBase, ServiceError> 
 					evm_provider.id,
 					evm_provider.block_confirmations,
 					evm_provider.call_interval,
+					evm_provider.get_logs_batch_size.unwrap_or(U64::from(1)),
 					is_native,
 				),
 				ProviderContracts::new(

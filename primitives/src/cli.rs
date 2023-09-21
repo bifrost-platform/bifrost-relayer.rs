@@ -101,6 +101,11 @@ pub struct EVMProvider {
 	/// If first relay transaction is stuck in mempool after waiting for this amount of time(ms),
 	/// ignore duplicate prevent logic. (default: 12s)
 	pub duplicate_confirm_delay: Option<u64>,
+	/// The batch size (=block range) used when requesting `eth_getLogs()`. If increased the RPC
+	/// request ratio will be reduced, however event processing will be delayed regarded to the
+	/// configured batch size. Default size is set to 1, which means it will be requested on every
+	/// new block. (default: 1)
+	pub get_logs_batch_size: Option<U64>,
 	/// Socket contract address
 	pub socket_address: String,
 	/// Vault contract address
