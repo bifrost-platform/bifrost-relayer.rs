@@ -48,16 +48,16 @@ impl ProviderMetadata {
 	pub fn new(
 		name: String,
 		id: ChainID,
-		block_confirmations: U64,
+		block_confirmations: u64,
 		call_interval: u64,
-		get_logs_batch_size: U64,
+		get_logs_batch_size: u64,
 		is_native: bool,
 	) -> Self {
 		Self {
 			name,
 			id,
-			block_confirmations: block_confirmations.saturating_add(get_logs_batch_size),
-			get_logs_batch_size,
+			block_confirmations: U64::from(block_confirmations.saturating_add(get_logs_batch_size)),
+			get_logs_batch_size: U64::from(get_logs_batch_size),
 			call_interval,
 			is_native,
 			if_destination_chain: match is_native {

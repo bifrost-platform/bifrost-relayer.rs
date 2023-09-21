@@ -1,4 +1,3 @@
-use ethers::types::U64;
 use serde::Deserialize;
 use std::borrow::Cow;
 
@@ -6,11 +5,53 @@ use crate::eth::ChainID;
 
 pub type Result<T> = std::result::Result<T, Error>;
 
-/// The default round offset used on bootstrap.
-pub const BOOTSTRAP_DEFAULT_ROUND_OFFSET: u32 = 3;
+/// The default round offset used on bootstrap. (=3 rounds)
+pub const DEFAULT_BOOTSTRAP_ROUND_OFFSET: u32 = 3;
 
 /// The default port used for prometheus.
-pub const PROMETHEUS_DEFAULT_PORT: u16 = 8000;
+pub const DEFAULT_PROMETHEUS_PORT: u16 = 8000;
+
+/// The default batch size used for `eth_getLogs()`. (=1 block)
+pub const DEFAULT_GET_LOGS_BATCH_SIZE: u64 = 1;
+
+/// The default escalate percentage. (=15%)
+pub const DEFAULT_ESCALATE_PERCENTAGE: f64 = 15.0;
+
+/// The default escalate interval in seconds. (=12s)
+pub const DEFAULT_ESCALATE_INTERVAL_SEC: u64 = 12;
+
+/// The default duplication confirm delay in milliseconds. (=12s)
+pub const DEFAULT_DUPLICATE_CONFIRM_DELAY_MS: u64 = 12_000;
+
+/// The default minimum priority fee in wei. (=0 wei)
+pub const DEFAULT_MIN_PRIORITY_FEE: u64 = 0;
+
+/// The default minimum gas price in wei. (=0 wei)
+pub const DEFAULT_MIN_GAS_PRICE: u64 = 0;
+
+/// The maximum call interval allowed in milliseconds. (=60s)
+pub const MAX_CALL_INTERVAL_MS: u64 = 60_000;
+
+/// The maximum block confirmations allowed. (=100 blocks)
+pub const MAX_BLOCK_CONFIRMATIONS: u64 = 100;
+
+/// The maximum escalate percentage allowed. (=100%)
+pub const MAX_ESCALATE_PERCENTAGE: f64 = 100.0;
+
+/// The maximum escalate interval allowed in seconds. (=60s)
+pub const MAX_ESCALATE_INTERVAL_SEC: u64 = 60;
+
+/// The maximum duplication confirm delay allowed in milliseconds. (=60s)
+pub const MAX_DUPLICATE_CONFIRM_DELAY_MS: u64 = 60_000;
+
+/// The maximum batch size allowed for `eth_getLogs()`. (=100 blocks)
+pub const MAX_GET_LOGS_BATCH_SIZE: u64 = 100;
+
+/// The minimum batch size allowed for `eth_getLogs()`. (=1 block)
+pub const MIN_GET_LOGS_BATCH_SIZE: u64 = 1;
+
+/// The maximum round offset allowed for bootstrap. (=64 rounds)
+pub const MAX_BOOTSTRAP_ROUND_OFFSET: u32 = 64;
 
 /// Error type for the CLI.
 #[derive(Debug, thiserror::Error)]
@@ -78,7 +119,7 @@ pub struct EVMProvider {
 	/// The time interval(ms) used when to request a new block
 	pub call_interval: u64,
 	/// The number of confirmations required for a block to be processed.
-	pub block_confirmations: U64,
+	pub block_confirmations: u64,
 	/// The flag whether the chain is BIFROST(native) or an external chain.
 	pub is_native: Option<bool>,
 	/// The flag whether it will handle relay transactions to the current chain.
@@ -87,7 +128,7 @@ pub struct EVMProvider {
 	pub eip1559: Option<bool>,
 	/// The minimum value use for gas_price. (default: 0, unit: WEI)
 	pub min_gas_price: Option<u64>,
-	/// The minimum priority fee required. (default: 0)
+	/// The minimum priority fee required. (default: 0, unit: WEI)
 	pub min_priority_fee: Option<u64>,
 	/// Gas price escalate interval(seconds) when tx stuck in mempool. (default: 12)
 	pub escalate_interval: Option<u64>,
@@ -105,7 +146,7 @@ pub struct EVMProvider {
 	/// request ratio will be reduced, however event processing will be delayed regarded to the
 	/// configured batch size. Default size is set to 1, which means it will be requested on every
 	/// new block. (default: 1)
-	pub get_logs_batch_size: Option<U64>,
+	pub get_logs_batch_size: Option<u64>,
 	/// Socket contract address
 	pub socket_address: String,
 	/// Vault contract address
