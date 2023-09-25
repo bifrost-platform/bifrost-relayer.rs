@@ -1,6 +1,6 @@
 [package]
 name = "bifrost-relayer"
-version = "1.0.3"
+version = "1.0.4"
 description = "The core rust implementation for Bifrost relayer"
 authors = { workspace = true }
 homepage = { workspace = true }
