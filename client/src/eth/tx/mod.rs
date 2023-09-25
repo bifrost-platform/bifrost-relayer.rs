@@ -33,7 +33,7 @@ where
 		let fee = gas_price.saturating_mul(gas);
 		let client = self.get_client();
 		let balance = client.get_balance(client.address()).await;
-		br_metrics::increase_rpc_calls(&self.get_client().get_chain_name());
+		br_metrics::increase_rpc_calls(&client.get_chain_name());
 		if balance < fee {
 			return false
 		}
