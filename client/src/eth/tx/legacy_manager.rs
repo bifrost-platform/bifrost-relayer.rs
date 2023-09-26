@@ -4,8 +4,8 @@ use crate::eth::{
 };
 use async_trait::async_trait;
 use br_primitives::{
-	eth::ETHEREUM_BLOCK_TIME, sub_display_format, NETWORK_NOT_SUPPORT_EIP1559,
-	PROVIDER_INTERNAL_ERROR,
+	eth::ETHEREUM_BLOCK_TIME, sub_display_format, INSUFFICIENT_FUNDS,
+	NETWORK_DOES_NOT_SUPPORT_EIP1559, PROVIDER_INTERNAL_ERROR,
 };
 use ethers::{
 	middleware::{
@@ -102,42 +102,35 @@ impl<T: 'static + JsonRpcClient> LegacyTransactionManager<T> {
 		)
 	}
 
+	/// Get the current gas price of the network.
+	async fn get_gas_price(&self) -> U256 {
+		match self.middleware.get_gas_price().await {
+			Ok(gas_price) => {
+				br_metrics::increase_rpc_calls(&self.client.get_chain_name());
+				gas_price
+			},
+			Err(error) =>
+				self.handle_failed_get_gas_price(DEFAULT_CALL_RETRIES, error.to_string()).await,
+		}
+	}
+
 	/// Get gas_price for legacy retry transaction request.
 	/// returns `max(current_network_gas_price,escalated_gas_price)`
 	async fn get_gas_price_for_retry(&self, previous_gas_price: U256) -> U256 {
 		let previous_gas_price = previous_gas_price.as_u64() as f64;
 
-		let current_network_gas_price = match self.middleware.get_gas_price().await {
-			Ok(gas_price) => {
-				br_metrics::increase_rpc_calls(&self.client.get_chain_name());
-				gas_price
-			},
-			Err(error) =>
-				self.handle_failed_get_gas_price(DEFAULT_CALL_RETRIES, error.to_string()).await,
-		};
+		let current_gas_price = self.get_gas_price().await;
 		let escalated_gas_price =
 			U256::from((previous_gas_price * self.gas_price_coefficient).ceil() as u64);
 
-		max(max(current_network_gas_price, escalated_gas_price), self.min_gas_price)
+		max(max(current_gas_price, escalated_gas_price), self.min_gas_price)
 	}
 
 	/// Get gas_price for escalated legacy transaction request. This will be only used when
 	/// `is_initially_escalated` is enabled.
-	async fn get_gas_price_for_escalation(&self) -> U256 {
-		let current_network_gas_price = match self.middleware.get_gas_price().await {
-			Ok(gas_price) => {
-				br_metrics::increase_rpc_calls(&self.client.get_chain_name());
-				gas_price
-			},
-			Err(error) =>
-				self.handle_failed_get_gas_price(DEFAULT_CALL_RETRIES, error.to_string()).await,
-		};
-
+	async fn get_gas_price_for_escalation(&self, gas_price: U256) -> U256 {
 		max(
-			U256::from(
-				(current_network_gas_price.as_u64() as f64 * self.gas_price_coefficient).ceil()
-					as u64,
-			),
+			U256::from((gas_price.as_u64() as f64 * self.gas_price_coefficient).ceil() as u64),
 			self.min_gas_price,
 		)
 	}
@@ -198,9 +191,11 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> for LegacyTransactionMana
 	fn is_txpool_enabled(&self) -> bool {
 		self.is_txpool_enabled
 	}
+
 	fn debug_mode(&self) -> bool {
 		self.debug_mode
 	}
+
 	fn get_client(&self) -> Arc<EthClient<T>> {
 		self.client.clone()
 	}
@@ -230,7 +225,7 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> for LegacyTransactionMana
 				self.client.get_block(BlockId::Number(BlockNumber::Pending)).await
 			{
 				let pending_base_fee =
-					pending_block.base_fee_per_gas.expect(NETWORK_NOT_SUPPORT_EIP1559);
+					pending_block.base_fee_per_gas.expect(NETWORK_DOES_NOT_SUPPORT_EIP1559);
 
 				TxRequest::Legacy(
 					request.gas_price(
@@ -296,8 +291,19 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> for LegacyTransactionMana
 		// check the txpool for transaction duplication prevention
 		if !(self.is_duplicate_relay(&msg.tx_request, msg.check_mempool).await) {
 			let mut tx = msg.tx_request.to_legacy();
+			let gas_price = self.get_gas_price().await;
+			if !self.is_sufficient_funds(gas_price, estimated_gas).await {
+				panic!(
+					"[{}]-[{}]-[{}] {}",
+					&self.client.get_chain_name(),
+					SUB_LOG_TARGET,
+					self.client.address(),
+					INSUFFICIENT_FUNDS,
+				);
+			}
+
 			if self.is_initially_escalated {
-				tx = tx.gas_price(self.get_gas_price_for_escalation().await);
+				tx = tx.gas_price(self.get_gas_price_for_escalation(gas_price).await);
 			}
 			let result = self.middleware.send_transaction(tx, None).await;
 			br_metrics::increase_rpc_calls(&self.client.get_chain_name());

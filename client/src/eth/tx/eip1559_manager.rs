@@ -5,8 +5,8 @@ use crate::eth::{
 };
 use async_trait::async_trait;
 use br_primitives::{
-	eth::ETHEREUM_BLOCK_TIME, sub_display_format, NETWORK_NOT_SUPPORT_EIP1559,
-	PROVIDER_INTERNAL_ERROR,
+	eth::ETHEREUM_BLOCK_TIME, sub_display_format, INSUFFICIENT_FUNDS,
+	NETWORK_DOES_NOT_SUPPORT_EIP1559, PROVIDER_INTERNAL_ERROR,
 };
 use ethers::{
 	middleware::{MiddlewareBuilder, NonceManagerMiddleware, SignerMiddleware},
@@ -157,9 +157,11 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> for Eip1559TransactionMan
 	fn is_txpool_enabled(&self) -> bool {
 		self.is_txpool_enabled
 	}
+
 	fn debug_mode(&self) -> bool {
 		self.debug_mode
 	}
+
 	fn get_client(&self) -> Arc<EthClient<T>> {
 		self.client.clone()
 	}
@@ -201,7 +203,7 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> for Eip1559TransactionMan
 				self.client.get_block(BlockId::Number(BlockNumber::Pending)).await
 			{
 				let pending_base_fee =
-					pending_block.base_fee_per_gas.expect(NETWORK_NOT_SUPPORT_EIP1559);
+					pending_block.base_fee_per_gas.expect(NETWORK_DOES_NOT_SUPPORT_EIP1559);
 				if prev_gas_price_escalated > pending_base_fee + current_fees.1 {
 					request = request
 						.max_fee_per_gas(prev_gas_price_escalated)
@@ -282,17 +284,25 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> for Eip1559TransactionMan
 			// no duplication found
 			let fees = self.get_estimated_eip1559_fees().await;
 			let priority_fee = max(fees.1, self.min_priority_fee);
+			let max_fee_per_gas =
+				fees.0.saturating_add(priority_fee).saturating_mul(MAX_FEE_COEFFICIENT.into());
+
+			if !self.is_sufficient_funds(max_fee_per_gas, estimated_gas).await {
+				panic!(
+					"[{}]-[{}]-[{}] {}",
+					&self.client.get_chain_name(),
+					SUB_LOG_TARGET,
+					self.client.address(),
+					INSUFFICIENT_FUNDS,
+				);
+			}
 
 			let result = self
 				.middleware
 				.send_transaction(
 					msg.tx_request
 						.to_eip1559()
-						.max_fee_per_gas(
-							fees.0
-								.saturating_add(priority_fee)
-								.saturating_mul(MAX_FEE_COEFFICIENT.into()),
-						)
+						.max_fee_per_gas(max_fee_per_gas)
 						.max_priority_fee_per_gas(priority_fee),
 					None,
 				)

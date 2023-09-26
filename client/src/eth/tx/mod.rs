@@ -3,7 +3,7 @@ use async_trait::async_trait;
 use br_primitives::{eth::GasCoefficient, sub_display_format};
 use ethers::{
 	providers::JsonRpcClient,
-	types::{Transaction, TransactionReceipt},
+	types::{Transaction, TransactionReceipt, U256},
 };
 use rand::Rng;
 use std::{error::Error, sync::Arc, time::Duration};
@@ -27,6 +27,18 @@ where
 {
 	/// The flag whether the client has enabled txpool namespace.
 	fn is_txpool_enabled(&self) -> bool;
+
+	/// Verifies whether the relayer has sufficient funds to pay for the transaction.
+	async fn is_sufficient_funds(&self, gas_price: U256, gas: U256) -> bool {
+		let fee = gas_price.saturating_mul(gas);
+		let client = self.get_client();
+		let balance = client.get_balance(client.address()).await;
+		br_metrics::increase_rpc_calls(&client.get_chain_name());
+		if balance < fee {
+			return false
+		}
+		true
+	}
 
 	/// The flag whether debug mode is enabled. If enabled, certain errors will be logged such as
 	/// gas estimation failures.
