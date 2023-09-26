@@ -166,7 +166,7 @@ pub struct EthClient<T> {
 	}
 
 	/// Verifies whether the relayer enough balance remained.
-	pub async fn verify_balance(&self) {
+	pub async fn verify_minimum_balance(&self) {
 		if self.metadata.is_native {
 			let balance = self.get_balance(self.address()).await;
 			if balance < WEI_IN_ETHER {
