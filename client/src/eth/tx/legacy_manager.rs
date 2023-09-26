@@ -72,10 +72,13 @@ impl<T: 'static + JsonRpcClient> LegacyTransactionManager<T> {
 	) -> (Self, UnboundedSender<EventMessage>) {
 		let (sender, receiver) = mpsc::unbounded_channel::<EventMessage>();
 
-		let mut gas_price_coefficient = 1.0 + (DEFAULT_ESCALATE_PERCENTAGE / 100.0);
-		if let Some(escalate_percentage) = escalate_percentage {
-			gas_price_coefficient = 1.0 + (escalate_percentage / 100.0);
-		}
+		let gas_price_coefficient = {
+			if let Some(escalate_percentage) = escalate_percentage {
+				1.0 + (escalate_percentage / 100.0)
+			} else {
+				1.0 + (DEFAULT_ESCALATE_PERCENTAGE / 100.0)
+			}
+		};
 
 		let escalator = GeometricGasPrice::new(
 			gas_price_coefficient,
@@ -111,8 +114,9 @@ impl<T: 'static + JsonRpcClient> LegacyTransactionManager<T> {
 				br_metrics::increase_rpc_calls(&self.client.get_chain_name());
 				gas_price
 			},
-			Err(error) =>
-				self.handle_failed_get_gas_price(DEFAULT_CALL_RETRIES, error.to_string()).await,
+			Err(error) => {
+				self.handle_failed_get_gas_price(DEFAULT_CALL_RETRIES, error.to_string()).await
+			},
 		}
 	}
 
@@ -244,7 +248,7 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> for LegacyTransactionMana
 					PROVIDER_INTERNAL_ERROR,
 				);
 			}
-		}
+		};
 	}
 
 	async fn run(&mut self) {
@@ -264,7 +268,7 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> for LegacyTransactionMana
 
 	async fn try_send_transaction(&self, mut msg: EventMessage) {
 		if msg.retries_remaining == 0 {
-			return
+			return;
 		}
 
 		// sets a random delay on external chain transactions on first try
@@ -285,8 +289,9 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> for LegacyTransactionMana
 							as u64,
 					)
 				},
-				Err(error) =>
-					return self.handle_failed_gas_estimation(SUB_LOG_TARGET, msg, &error).await,
+				Err(error) => {
+					return self.handle_failed_gas_estimation(SUB_LOG_TARGET, msg, &error).await
+				},
 			};
 		msg.tx_request = msg.tx_request.gas(estimated_gas);
 
@@ -312,8 +317,9 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> for LegacyTransactionMana
 
 			match result {
 				Ok(pending_tx) => match pending_tx.await {
-					Ok(receipt) =>
-						self.handle_success_tx_receipt(SUB_LOG_TARGET, receipt, msg.metadata),
+					Ok(receipt) => {
+						self.handle_success_tx_receipt(SUB_LOG_TARGET, receipt, msg.metadata)
+					},
 					Err(error) => self.handle_failed_tx_request(SUB_LOG_TARGET, msg, &error).await,
 				},
 				Err(error) => self.handle_failed_tx_request(SUB_LOG_TARGET, msg, &error).await,
