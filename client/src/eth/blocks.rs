@@ -112,7 +112,6 @@ impl<T: JsonRpcClient> BlockManager<T> {
 				let latest_block = self.client.get_latest_block_number().await;
 				while self.is_block_confirmed(latest_block) {
 					self.process_confirmed_block().await;
-					self.increment_waiting_block();
 
 					if self.is_balance_sync_enabled {
 						self.client.sync_balance().await;
@@ -126,10 +125,14 @@ impl<T: JsonRpcClient> BlockManager<T> {
 
 	/// Process the confirmed block and verifies if any transaction interacted with the target
 	/// contracts.
-	async fn process_confirmed_block(&self) {
+	async fn process_confirmed_block(&mut self) {
+		let from = self.waiting_block;
+		let to = from.saturating_add(
+			self.client.metadata.get_logs_batch_size.saturating_sub(U64::from(1u64)),
+		);
 		let filter = Filter::new()
-			.from_block(BlockNumber::from(self.waiting_block))
-			.to_block(BlockNumber::from(self.waiting_block))
+			.from_block(BlockNumber::from(from))
+			.to_block(BlockNumber::from(to))
 			.address(self.client.contracts.socket.address());
 
 		let target_logs = self.client.get_logs(&filter).await;
@@ -137,23 +140,35 @@ impl<T: JsonRpcClient> BlockManager<T> {
 			self.sender.send(BlockMessage::new(self.waiting_block, target_logs)).unwrap();
 		}
 
-		log::info!(
-			target: &self.client.get_chain_name(),
-			"-[{}] ✨ Imported #{:?}",
-			sub_display_format(SUB_LOG_TARGET),
-			self.waiting_block
-		);
+		if from < to {
+			log::info!(
+				target: &self.client.get_chain_name(),
+				"-[{}] ✨ Imported #({:?} … {:?})",
+				sub_display_format(SUB_LOG_TARGET),
+				from,
+				to
+			);
+		} else {
+			log::info!(
+				target: &self.client.get_chain_name(),
+				"-[{}] ✨ Imported #{:?}",
+				sub_display_format(SUB_LOG_TARGET),
+				self.waiting_block
+			);
+		}
+
+		self.increment_waiting_block(to);
 	}
 
 	/// Increment the waiting block.
-	fn increment_waiting_block(&mut self) {
-		self.waiting_block = self.waiting_block.saturating_add(U64::from(1u64));
+	fn increment_waiting_block(&mut self, to: U64) {
+		self.waiting_block = to.saturating_add(U64::from(1u64));
 		br_metrics::set_block_height(&self.client.get_chain_name(), self.waiting_block.as_u64());
 	}
 
 	/// Verifies if the stored waiting block has waited enough.
 	fn is_block_confirmed(&self, latest_block: U64) -> bool {
-		latest_block.saturating_sub(self.waiting_block) > self.client.metadata.block_confirmations
+		latest_block.saturating_sub(self.waiting_block) >= self.client.metadata.block_confirmations
 	}
 
 	/// Verifies if the connected provider is in block sync mode.
