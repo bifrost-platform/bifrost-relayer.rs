@@ -46,9 +46,6 @@ pub const MAX_ESCALATE_INTERVAL_SEC: u64 = 60;
 /// The maximum duplication confirm delay allowed in milliseconds. (=60s)
 pub const MAX_DUPLICATE_CONFIRM_DELAY_MS: u64 = 60_000;
 
-/// The maximum batch size allowed for `eth_getLogs()`. (=100 blocks)
-pub const MAX_GET_LOGS_BATCH_SIZE: u64 = 100;
-
 /// The minimum batch size allowed for `eth_getLogs()`. (=1 block)
 pub const MIN_GET_LOGS_BATCH_SIZE: u64 = 1;
 
