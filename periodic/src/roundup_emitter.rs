@@ -15,7 +15,7 @@ use br_client::eth::{
 };
 use br_primitives::{
 	authority::RoundMetaData,
-	cli::{BootstrapConfig, BOOTSTRAP_DEFAULT_ROUND_OFFSET},
+	cli::{BootstrapConfig, DEFAULT_BOOTSTRAP_ROUND_OFFSET},
 	errors::INVALID_PERIODIC_SCHEDULE,
 	eth::{BootstrapState, GasCoefficient, RoundUpEventStatus, BOOTSTRAP_BLOCK_CHUNK_SIZE},
 	socket::{RoundUpSubmit, SerializedRoundUp, Signatures, SocketContractEvents},
@@ -293,7 +293,7 @@ impl<T: JsonRpcClient> BootstrapHandler for RoundupEmitter<T> {
 			let bootstrap_offset_height = self
 				.client
 				.get_bootstrap_offset_height_based_on_block_time(
-					bootstrap_config.round_offset.unwrap_or(BOOTSTRAP_DEFAULT_ROUND_OFFSET),
+					bootstrap_config.round_offset.unwrap_or(DEFAULT_BOOTSTRAP_ROUND_OFFSET),
 					round_info,
 				)
 				.await;
@@ -333,7 +333,7 @@ impl<T: JsonRpcClient> BootstrapHandler for RoundupEmitter<T> {
 					self.client.get_chain_name(),
 					SUB_LOG_TARGET,
 					self.client.address(),
-					bootstrap_config.round_offset.unwrap_or(BOOTSTRAP_DEFAULT_ROUND_OFFSET)
+					bootstrap_config.round_offset.unwrap_or(DEFAULT_BOOTSTRAP_ROUND_OFFSET)
 				);
 			}
 		}

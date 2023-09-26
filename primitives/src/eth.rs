@@ -31,8 +31,11 @@ pub struct ProviderMetadata {
 	pub name: String,
 	/// Id of chain which this client interact with.
 	pub id: ChainID,
-	/// The number of confirmations required for a block to be processed.
+	/// The total number of confirmations required for a block to be processed. (block
+	/// confirmations + eth_getLogs batch size)
 	pub block_confirmations: U64,
+	/// The batch size used on `eth_getLogs()` requests.
+	pub get_logs_batch_size: U64,
 	/// The `get_block` request interval in milliseconds.
 	pub call_interval: u64,
 	/// Bridge direction when bridge event points this chain as destination.
@@ -45,14 +48,16 @@ impl ProviderMetadata {
 	pub fn new(
 		name: String,
 		id: ChainID,
-		block_confirmations: U64,
+		block_confirmations: u64,
 		call_interval: u64,
+		get_logs_batch_size: u64,
 		is_native: bool,
 	) -> Self {
 		Self {
 			name,
 			id,
-			block_confirmations,
+			block_confirmations: U64::from(block_confirmations.saturating_add(get_logs_batch_size)),
+			get_logs_batch_size: U64::from(get_logs_batch_size),
 			call_interval,
 			is_native,
 			if_destination_chain: match is_native {

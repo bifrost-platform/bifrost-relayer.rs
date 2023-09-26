@@ -18,13 +18,20 @@ use br_periodic::{
 	heartbeat_sender::HeartbeatSender, roundup_emitter::RoundupEmitter, OraclePriceFeeder,
 };
 use br_primitives::{
-	cli::{Configuration, HandlerType, PROMETHEUS_DEFAULT_PORT},
+	cli::{
+		Configuration, HandlerType, DEFAULT_BOOTSTRAP_ROUND_OFFSET,
+		DEFAULT_DUPLICATE_CONFIRM_DELAY_MS, DEFAULT_ESCALATE_INTERVAL_SEC,
+		DEFAULT_ESCALATE_PERCENTAGE, DEFAULT_GET_LOGS_BATCH_SIZE, DEFAULT_MIN_PRIORITY_FEE,
+		DEFAULT_PROMETHEUS_PORT, MAX_BLOCK_CONFIRMATIONS, MAX_BOOTSTRAP_ROUND_OFFSET,
+		MAX_CALL_INTERVAL_MS, MAX_DUPLICATE_CONFIRM_DELAY_MS, MAX_ESCALATE_INTERVAL_SEC,
+		MAX_ESCALATE_PERCENTAGE, MAX_GET_LOGS_BATCH_SIZE, MIN_GET_LOGS_BATCH_SIZE,
+	},
 	errors::{
 		INVALID_BIFROST_NATIVENESS, INVALID_CHAIN_ID, INVALID_PRIVATE_KEY, INVALID_PROVIDER_URL,
 	},
 	eth::{BootstrapState, ProviderContracts, ProviderMetadata},
 	periodic::PeriodicWorker,
-	sub_display_format,
+	sub_display_format, PARAMETER_OUT_OF_RANGE,
 };
 
 use crate::cli::{LOG_TARGET, SUB_LOG_TARGET};
@@ -33,7 +40,85 @@ pub fn relay(config: Configuration) -> Result<TaskManager, ServiceError> {
 	new_relay_base(config).map(|RelayBase { task_manager, .. }| task_manager)
 }
 
+fn assert_configuration_validity(config: &Configuration) {
+	let bootstrap_config = &config.relayer_config.bootstrap_config;
+	let evm_providers = &config.relayer_config.evm_providers;
+
+	if let Some(bootstrap_config) = bootstrap_config {
+		if let Some(round_offset) = bootstrap_config.round_offset {
+			assert!(
+				(0..=MAX_BOOTSTRAP_ROUND_OFFSET).contains(&round_offset),
+				"{} [parameter: {}, range: 0…{}, default: {}]",
+				PARAMETER_OUT_OF_RANGE,
+				"bootstrap_config.round_offset",
+				MAX_BOOTSTRAP_ROUND_OFFSET,
+				DEFAULT_BOOTSTRAP_ROUND_OFFSET
+			);
+		}
+	}
+
+	evm_providers.iter().for_each(|evm_provider| {
+		assert!(
+			(0..=MAX_CALL_INTERVAL_MS).contains(&evm_provider.call_interval),
+			"{} [parameter: {}, range: 0…{}]",
+			PARAMETER_OUT_OF_RANGE,
+			"evm_provider.call_interval",
+			MAX_CALL_INTERVAL_MS
+		);
+		assert!(
+			(0..=MAX_BLOCK_CONFIRMATIONS).contains(&evm_provider.block_confirmations),
+			"{} [parameter: {}, range: 0…{}]",
+			PARAMETER_OUT_OF_RANGE,
+			"evm_provider.block_confirmations",
+			MAX_BLOCK_CONFIRMATIONS
+		);
+		if let Some(escalate_percentage) = evm_provider.escalate_percentage {
+			assert!(
+				(f64::from(0)..=MAX_ESCALATE_PERCENTAGE).contains(&escalate_percentage),
+				"{} [parameter: {}, range: 0…{}, default: {}]",
+				PARAMETER_OUT_OF_RANGE,
+				"evm_provider.escalate_percentage",
+				MAX_ESCALATE_PERCENTAGE,
+				DEFAULT_ESCALATE_PERCENTAGE
+			);
+		}
+		if let Some(escalate_interval) = evm_provider.escalate_interval {
+			assert!(
+				(0..=MAX_ESCALATE_INTERVAL_SEC).contains(&escalate_interval),
+				"{} [parameter: {}, range: 0…{}, default: {}]",
+				PARAMETER_OUT_OF_RANGE,
+				"evm_provider.escalate_interval",
+				MAX_ESCALATE_INTERVAL_SEC,
+				DEFAULT_ESCALATE_INTERVAL_SEC
+			);
+		}
+		if let Some(duplicate_confirm_delay) = evm_provider.duplicate_confirm_delay {
+			assert!(
+				(0..=MAX_DUPLICATE_CONFIRM_DELAY_MS).contains(&duplicate_confirm_delay),
+				"{} [parameter: {}, range: 0…{}, default: {}]",
+				PARAMETER_OUT_OF_RANGE,
+				"evm_provider.duplicate_confirm_delay",
+				MAX_DUPLICATE_CONFIRM_DELAY_MS,
+				DEFAULT_DUPLICATE_CONFIRM_DELAY_MS
+			);
+		}
+		if let Some(get_logs_batch_size) = evm_provider.get_logs_batch_size {
+			assert!(
+				(MIN_GET_LOGS_BATCH_SIZE..=MAX_GET_LOGS_BATCH_SIZE).contains(&get_logs_batch_size),
+				"{} [parameter: {}, range: {}…{}, default: {}]",
+				PARAMETER_OUT_OF_RANGE,
+				"evm_provider.get_logs_batch_size",
+				MIN_GET_LOGS_BATCH_SIZE,
+				MAX_GET_LOGS_BATCH_SIZE,
+				DEFAULT_GET_LOGS_BATCH_SIZE
+			);
+		}
+	});
+}
+
 pub fn new_relay_base(config: Configuration) -> Result<RelayBase, ServiceError> {
+	assert_configuration_validity(&config);
+
 	let prometheus_config = config.relayer_config.prometheus_config;
 	let bootstrap_config = config.relayer_config.bootstrap_config;
 	let handler_configs = config.relayer_config.handler_configs;
@@ -81,6 +166,7 @@ pub fn new_relay_base(config: Configuration) -> Result<RelayBase, ServiceError> 
 					evm_provider.id,
 					evm_provider.block_confirmations,
 					evm_provider.call_interval,
+					evm_provider.get_logs_batch_size.unwrap_or(DEFAULT_GET_LOGS_BATCH_SIZE),
 					is_native,
 				),
 				ProviderContracts::new(
@@ -118,7 +204,10 @@ pub fn new_relay_base(config: Configuration) -> Result<RelayBase, ServiceError> 
 						let (tx_manager, sender) = Eip1559TransactionManager::new(
 							client.clone(),
 							system.debug_mode.unwrap_or(false),
-							evm_provider.min_priority_fee.unwrap_or(u64::default()).into(),
+							evm_provider
+								.min_priority_fee
+								.unwrap_or(DEFAULT_MIN_PRIORITY_FEE)
+								.into(),
 							evm_provider.duplicate_confirm_delay,
 						);
 						tx_managers.1.push(tx_manager);
@@ -330,7 +419,7 @@ pub fn new_relay_base(config: Configuration) -> Result<RelayBase, ServiceError> 
 			let prometheus = PrometheusConfig::new_with_default_registry(
 				SocketAddr::new(
 					interface.into(),
-					prometheus_config.port.unwrap_or(PROMETHEUS_DEFAULT_PORT),
+					prometheus_config.port.unwrap_or(DEFAULT_PROMETHEUS_PORT),
 				),
 				String::default(),
 			);

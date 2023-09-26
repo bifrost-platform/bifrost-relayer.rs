@@ -36,3 +36,6 @@ pub const NETWORK_DOES_NOT_SUPPORT_EIP1559: &str =
 
 pub const PROVIDER_INTERNAL_ERROR: &str =
 	"An internal error thrown when making a call to the provider. Please check your provider's status";
+
+pub const PARAMETER_OUT_OF_RANGE: &str =
+	"An invalid parameter is out of range. Please check your configuration file.";
