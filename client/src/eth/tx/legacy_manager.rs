@@ -4,8 +4,10 @@ use crate::eth::{
 };
 use async_trait::async_trait;
 use br_primitives::{
-	eth::ETHEREUM_BLOCK_TIME, sub_display_format, INSUFFICIENT_FUNDS,
-	NETWORK_DOES_NOT_SUPPORT_EIP1559, PROVIDER_INTERNAL_ERROR,
+	cli::{DEFAULT_ESCALATE_PERCENTAGE, DEFAULT_MIN_GAS_PRICE},
+	eth::ETHEREUM_BLOCK_TIME,
+	sub_display_format, INSUFFICIENT_FUNDS, NETWORK_DOES_NOT_SUPPORT_EIP1559,
+	PROVIDER_INTERNAL_ERROR,
 };
 use ethers::{
 	middleware::{
@@ -70,7 +72,7 @@ impl<T: 'static + JsonRpcClient> LegacyTransactionManager<T> {
 	) -> (Self, UnboundedSender<EventMessage>) {
 		let (sender, receiver) = mpsc::unbounded_channel::<EventMessage>();
 
-		let mut gas_price_coefficient = 1.15;
+		let mut gas_price_coefficient = 1.0 + (DEFAULT_ESCALATE_PERCENTAGE / 100.0);
 		if let Some(escalate_percentage) = escalate_percentage {
 			gas_price_coefficient = 1.0 + (escalate_percentage / 100.0);
 		}
@@ -94,7 +96,7 @@ impl<T: 'static + JsonRpcClient> LegacyTransactionManager<T> {
 				is_txpool_enabled: false,
 				is_initially_escalated,
 				gas_price_coefficient,
-				min_gas_price: U256::from(min_gas_price.unwrap_or(0)),
+				min_gas_price: U256::from(min_gas_price.unwrap_or(DEFAULT_MIN_GAS_PRICE)),
 				debug_mode,
 				duplicate_confirm_delay,
 			},
