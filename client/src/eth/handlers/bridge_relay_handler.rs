@@ -14,7 +14,7 @@ use tokio_stream::StreamExt;
 
 use br_primitives::{
 	authority::RoundMetaData,
-	cli::{BootstrapConfig, BOOTSTRAP_DEFAULT_ROUND_OFFSET},
+	cli::{BootstrapConfig, DEFAULT_BOOTSTRAP_ROUND_OFFSET},
 	eth::{
 		BootstrapState, BridgeDirection, BuiltRelayTransaction, ChainID, GasCoefficient,
 		RecoveredSignature, SocketEventStatus, BOOTSTRAP_BLOCK_CHUNK_SIZE,
@@ -736,7 +736,7 @@ impl<T: JsonRpcClient> BootstrapHandler for BridgeRelayHandler<T> {
 			let bootstrap_offset_height = self
 				.client
 				.get_bootstrap_offset_height_based_on_block_time(
-					bootstrap_config.round_offset.unwrap_or(BOOTSTRAP_DEFAULT_ROUND_OFFSET),
+					bootstrap_config.round_offset.unwrap_or(DEFAULT_BOOTSTRAP_ROUND_OFFSET),
 					round_info,
 				)
 				.await;
