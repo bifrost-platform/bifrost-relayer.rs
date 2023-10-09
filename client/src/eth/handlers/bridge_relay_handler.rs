@@ -163,18 +163,18 @@ impl<T: JsonRpcClient> Handler for BridgeRelayHandler<T> {
 									);
 								}
 
-								if Self::is_sequence_ended(status) ||
-									self.is_already_done(&socket.msg.req_id, src_chain_id).await
+								if Self::is_sequence_ended(status)
+									|| self.is_already_done(&socket.msg.req_id, src_chain_id).await
 								{
 									// do nothing if protocol sequence ended
-									return
+									return;
 								}
 								if !self
 									.is_selected_relayer(socket.msg.req_id.round_id.into())
 									.await
 								{
 									// do nothing if not verified
-									return
+									return;
 								}
 
 								self.send_socket_message(
@@ -200,10 +200,10 @@ impl<T: JsonRpcClient> Handler for BridgeRelayHandler<T> {
 	}
 
 	fn is_target_contract(&self, log: &Log) -> bool {
-		if log.address == self.client.contracts.socket.address() ||
-			log.address == self.client.contracts.vault.address()
+		if log.address == self.client.contracts.socket.address()
+			|| log.address == self.client.contracts.vault.address()
 		{
-			return true
+			return true;
 		}
 		false
 	}
@@ -236,7 +236,7 @@ impl<T: JsonRpcClient> BridgeRelayBuilder for BridgeRelayHandler<T> {
 					.data(self.build_poll_call_data(submit_msg, signatures))
 					.to(to_socket),
 				is_external,
-			))
+			));
 		}
 		None
 	}
@@ -411,13 +411,13 @@ impl<T: JsonRpcClient> BridgeRelayHandler<T> {
 							if is_inbound && matches!(prev_status, SocketEventStatus::Requested) {
 								// if inbound-Requested
 								submit_msg.status = SocketEventStatus::Failed.into();
-							} else if !is_inbound &&
-								matches!(prev_status, SocketEventStatus::Accepted)
+							} else if !is_inbound
+								&& matches!(prev_status, SocketEventStatus::Accepted)
 							{
 								// if outbound-Accepted
 								submit_msg.status = SocketEventStatus::Rejected.into();
 							} else {
-								return
+								return;
 							}
 
 							let metadata = BridgeRelayMetadata::new(
@@ -516,10 +516,10 @@ impl<T: JsonRpcClient> BridgeRelayHandler<T> {
 		dst_chain_id: ChainID,
 	) -> ChainID {
 		match status {
-			SocketEventStatus::Requested |
-			SocketEventStatus::Failed |
-			SocketEventStatus::Executed |
-			SocketEventStatus::Reverted => dst_chain_id,
+			SocketEventStatus::Requested
+			| SocketEventStatus::Failed
+			| SocketEventStatus::Executed
+			| SocketEventStatus::Reverted => dst_chain_id,
 			SocketEventStatus::Accepted | SocketEventStatus::Rejected => src_chain_id,
 			_ => panic!(
 				"[{}]-[{}] Unknown socket event status received: {:?}",
@@ -538,9 +538,9 @@ impl<T: JsonRpcClient> BridgeRelayHandler<T> {
 		dst_chain_id: ChainID,
 	) -> ChainID {
 		match status {
-			SocketEventStatus::Requested |
-			SocketEventStatus::Executed |
-			SocketEventStatus::Reverted => src_chain_id,
+			SocketEventStatus::Requested
+			| SocketEventStatus::Executed
+			| SocketEventStatus::Reverted => src_chain_id,
 			SocketEventStatus::Accepted | SocketEventStatus::Rejected => dst_chain_id,
 			_ => panic!(
 				"[{}]-[{}] Unknown socket event status received: {:?}",
@@ -579,7 +579,7 @@ impl<T: JsonRpcClient> BridgeRelayHandler<T> {
 					),
 					"relayer_manager.is_previous_selected_relayer",
 				)
-				.await
+				.await;
 		} else if let Some((_id, native_client)) =
 			self.system_clients.iter().find(|(_id, client)| client.metadata.is_native)
 		{
@@ -593,7 +593,7 @@ impl<T: JsonRpcClient> BridgeRelayHandler<T> {
 					),
 					"relayer_manager.is_previous_selected_relayer",
 				)
-				.await
+				.await;
 		}
 		false
 	}
@@ -663,7 +663,7 @@ impl<T: JsonRpcClient> BridgeRelayHandler<T> {
 			return matches!(
 				SocketEventStatus::from_u8(request.field[0].clone().into()),
 				SocketEventStatus::Committed | SocketEventStatus::Rollbacked
-			)
+			);
 		}
 		false
 	}

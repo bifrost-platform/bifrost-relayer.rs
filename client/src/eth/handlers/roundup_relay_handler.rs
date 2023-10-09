@@ -40,7 +40,7 @@ pub struct RoundupRelayHandler<T> {
 	/// The block receiver that consumes new blocks from the block channel.
 	block_receiver: Receiver<BlockMessage>,
 	/// The `EthClient` to interact with the bifrost network.
-	client: Arc<EthClient<T>>,
+	pub client: Arc<EthClient<T>>,
 	/// `EthClient`s to interact with provided networks except bifrost network.
 	external_clients: Vec<Arc<EthClient<T>>>,
 	/// Signature of RoundUp Event.
@@ -87,7 +87,7 @@ impl<T: JsonRpcClient> Handler for RoundupRelayHandler<T> {
 	async fn process_confirmed_log(&self, log: &Log, is_bootstrap: bool) {
 		// Pass if interacted contract was not socket contract || not roundup event
 		if !self.is_target_contract(log) || !self.is_target_event(log.topics[0]) {
-			return
+			return;
 		}
 
 		// Check receipt status
@@ -95,10 +95,10 @@ impl<T: JsonRpcClient> Handler for RoundupRelayHandler<T> {
 			self.client.get_transaction_receipt(log.transaction_hash.unwrap()).await
 		{
 			if receipt.status.unwrap().is_zero() {
-				return
+				return;
 			}
 		} else {
-			return
+			return;
 		}
 
 		match self.decode_log(log.clone()).await {
@@ -116,7 +116,7 @@ impl<T: JsonRpcClient> Handler for RoundupRelayHandler<T> {
 					RoundUpEventStatus::NextAuthorityCommitted => {
 						if !self.is_selected_relayer(serialized_log.roundup.round - 1).await {
 							// do nothing if not verified
-							return
+							return;
 						}
 
 						let roundup_submit = self
@@ -150,7 +150,7 @@ impl<T: JsonRpcClient> Handler for RoundupRelayHandler<T> {
 					.as_str(),
 					sentry::Level::Error,
 				);
-				return
+				return;
 			},
 		}
 	}
@@ -312,7 +312,7 @@ impl<T: JsonRpcClient> RoundupRelayHandler<T> {
 	/// Check roundup submitted before. If not, call `round_control_relay`.
 	async fn broadcast_roundup(&self, roundup_submit: &RoundUpSubmit) {
 		if self.external_clients.is_empty() {
-			return
+			return;
 		}
 
 		let mut stream = tokio_stream::iter(self.external_clients.iter());
