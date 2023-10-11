@@ -142,6 +142,7 @@ impl<T: JsonRpcClient> Handler for BridgeRelayHandler<T> {
 			if receipt.status.unwrap().is_zero() && receipt.from == self.client.address() {
 				// only handles owned transactions
 				self.process_reverted_transaction(receipt).await;
+				return;
 			}
 			match decode_logs::<SocketEvents>(&[RawLog::from(log.clone())]) {
 				Ok(decoded) => match &decoded[0] {

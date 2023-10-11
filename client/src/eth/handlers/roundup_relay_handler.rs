@@ -78,80 +78,73 @@ impl<T: JsonRpcClient> Handler for RoundupRelayHandler<T> {
 
 				let mut stream = tokio_stream::iter(block_msg.target_logs);
 				while let Some(log) = stream.next().await {
-					self.process_confirmed_log(&log, false).await;
+					if self.is_target_contract(&log) || self.is_target_event(log.topics[0]) {
+						self.process_confirmed_log(&log, false).await;
+					}
 				}
 			}
 		}
 	}
 
 	async fn process_confirmed_log(&self, log: &Log, is_bootstrap: bool) {
-		// Pass if interacted contract was not socket contract || not roundup event
-		if !self.is_target_contract(log) || !self.is_target_event(log.topics[0]) {
-			return;
-		}
-
-		// Check receipt status
 		if let Some(receipt) =
 			self.client.get_transaction_receipt(log.transaction_hash.unwrap()).await
 		{
 			if receipt.status.unwrap().is_zero() {
 				return;
 			}
-		} else {
-			return;
-		}
-
-		match self.decode_log(log.clone()).await {
-			Ok(serialized_log) => {
-				if !is_bootstrap {
-					log::info!(
-						target: &self.client.get_chain_name(),
-						"-[{}] 👤 RoundUp event detected. ({:?}-{:?})",
-						sub_display_format(SUB_LOG_TARGET),
-						serialized_log.status,
-						log.transaction_hash,
-					);
-				}
-				match RoundUpEventStatus::from_u8(serialized_log.status) {
-					RoundUpEventStatus::NextAuthorityCommitted => {
-						if !self.is_selected_relayer(serialized_log.roundup.round - 1).await {
-							// do nothing if not verified
-							return;
-						}
-
-						let roundup_submit = self
-							.build_roundup_submit(
-								serialized_log.roundup.round,
-								serialized_log.roundup.new_relayers,
+			match self.decode_log(log.clone()).await {
+				Ok(serialized_log) => {
+					if !is_bootstrap {
+						log::info!(
+							target: &self.client.get_chain_name(),
+							"-[{}] 👤 RoundUp event detected. ({:?}-{:?})",
+							sub_display_format(SUB_LOG_TARGET),
+							serialized_log.status,
+							log.transaction_hash,
+						);
+					}
+					match RoundUpEventStatus::from_u8(serialized_log.status) {
+						RoundUpEventStatus::NextAuthorityCommitted => {
+							if !self.is_selected_relayer(serialized_log.roundup.round - 1).await {
+								// do nothing if not selected
+								return;
+							}
+							self.broadcast_roundup(
+								&self
+									.build_roundup_submit(
+										serialized_log.roundup.round,
+										serialized_log.roundup.new_relayers,
+									)
+									.await,
 							)
 							.await;
-						self.broadcast_roundup(&roundup_submit).await;
-					},
-					RoundUpEventStatus::NextAuthorityRelayed => return,
-				}
-			},
-			Err(e) => {
-				log::error!(
-					target: &self.client.get_chain_name(),
-					"-[{}] Error on decoding RoundUp event ({:?}):{}",
-					sub_display_format(SUB_LOG_TARGET),
-					log.transaction_hash,
-					e.to_string(),
-				);
-				sentry::capture_message(
-					format!(
-						"[{}]-[{}]-[{}] Error on decoding RoundUp event ({:?}):{}",
-						&self.client.get_chain_name(),
-						SUB_LOG_TARGET,
-						self.client.address(),
+						},
+						RoundUpEventStatus::NextAuthorityRelayed => return,
+					}
+				},
+				Err(e) => {
+					log::error!(
+						target: &self.client.get_chain_name(),
+						"-[{}] Error on decoding RoundUp event ({:?}):{}",
+						sub_display_format(SUB_LOG_TARGET),
 						log.transaction_hash,
-						e
-					)
-					.as_str(),
-					sentry::Level::Error,
-				);
-				return;
-			},
+						e.to_string(),
+					);
+					sentry::capture_message(
+						format!(
+							"[{}]-[{}]-[{}] Error on decoding RoundUp event ({:?}):{}",
+							&self.client.get_chain_name(),
+							SUB_LOG_TARGET,
+							self.client.address(),
+							log.transaction_hash,
+							e
+						)
+						.as_str(),
+						sentry::Level::Error,
+					);
+				},
+			}
 		}
 	}
 
@@ -225,28 +218,33 @@ impl<T: JsonRpcClient> RoundupRelayHandler<T> {
 		}
 	}
 
-	/// Get the submitted signatures of the updated round.
-	async fn get_sorted_signatures(&self, round: U256, new_relayers: &[Address]) -> Signatures {
-		let encoded_msg = encode(&[
+	/// Encodes the given round and new relayers to bytes.
+	fn encode_relayer_array(&self, round: U256, new_relayers: &[Address]) -> Vec<u8> {
+		encode(&[
 			Token::Uint(round),
 			Token::Array(new_relayers.iter().map(|address| Token::Address(*address)).collect()),
-		]);
+		])
+	}
 
-		let unordered_sigs = self
+	/// Get the submitted signatures of the updated round.
+	async fn get_sorted_signatures(&self, round: U256, new_relayers: &[Address]) -> Signatures {
+		let raw_sigs = self
 			.client
 			.contract_call(
 				self.client.contracts.socket.get_round_signatures(round),
 				"socket.get_round_signatures",
 			)
 			.await;
-		let unordered_concated_v = &unordered_sigs.v.to_string()[2..];
+
+		let raw_concated_v = &raw_sigs.v.to_string()[2..];
 
 		let mut recovered_sigs = vec![];
-		for idx in 0..unordered_sigs.r.len() {
+		let encoded_msg = self.encode_relayer_array(round, new_relayers);
+		for idx in 0..raw_sigs.r.len() {
 			let sig = Signature {
-				r: unordered_sigs.r[idx].into(),
-				s: unordered_sigs.s[idx].into(),
-				v: u64::from_str_radix(&unordered_concated_v[idx * 2..idx * 2 + 2], 16).unwrap(),
+				r: raw_sigs.r[idx].into(),
+				s: raw_sigs.s[idx].into(),
+				v: u64::from_str_radix(&raw_concated_v[idx * 2..idx * 2 + 2], 16).unwrap(),
 			};
 			recovered_sigs.push(RecoveredSignature::new(
 				idx,
@@ -260,8 +258,8 @@ impl<T: JsonRpcClient> RoundupRelayHandler<T> {
 		let mut sorted_concated_v = String::from("0x");
 		recovered_sigs.into_iter().for_each(|sig| {
 			let idx = sig.idx;
-			sorted_sigs.r.push(unordered_sigs.r[idx]);
-			sorted_sigs.s.push(unordered_sigs.s[idx]);
+			sorted_sigs.r.push(raw_sigs.r[idx]);
+			sorted_sigs.s.push(raw_sigs.s[idx]);
 			let v = Bytes::from([sig.signature.v as u8]);
 			sorted_concated_v.push_str(&v.to_string()[2..]);
 		});
