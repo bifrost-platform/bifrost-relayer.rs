@@ -188,7 +188,7 @@ impl<T: JsonRpcClient> BlockManager<T> {
 						*state = BootstrapState::BootstrapRoundUpPhase1;
 					}
 				}
-				return
+				return;
 			}
 
 			sleep(Duration::from_millis(self.client.metadata.call_interval)).await;

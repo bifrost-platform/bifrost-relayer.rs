@@ -37,8 +37,6 @@ pub const MAX_PRIORITY_FEE_COEFFICIENT: u64 = 2;
 
 #[derive(Clone, Debug)]
 pub struct BridgeRelayMetadata {
-	/// The bridge direction raw string.
-	pub direction: String,
 	/// The bridge direction flag.
 	pub is_inbound: bool,
 	/// The bridge request status.
@@ -59,14 +57,7 @@ impl BridgeRelayMetadata {
 		src_chain_id: ChainID,
 		dst_chain_id: ChainID,
 	) -> Self {
-		Self {
-			direction: if is_inbound { "Inbound".to_string() } else { "Outbound".to_string() },
-			is_inbound,
-			status,
-			sequence,
-			src_chain_id,
-			dst_chain_id,
-		}
+		Self { is_inbound, status, sequence, src_chain_id, dst_chain_id }
 	}
 }
 
@@ -75,7 +66,11 @@ impl Display for BridgeRelayMetadata {
 		write!(
 			f,
 			"Relay({}-{:?}-{:?}, {:?} -> {:?})",
-			self.direction, self.status, self.sequence, self.src_chain_id, self.dst_chain_id
+			if self.is_inbound { "Inbound".to_string() } else { "Outbound".to_string() },
+			self.status,
+			self.sequence,
+			self.src_chain_id,
+			self.dst_chain_id
 		)
 	}
 }

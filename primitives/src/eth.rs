@@ -141,8 +141,11 @@ impl<T: JsonRpcClient> ProviderContracts<T> {
 #[derive(Clone, Debug)]
 /// Coefficients to multiply the estimated gas amount.
 pub enum GasCoefficient {
+	/// The lowest coefficient. Only used on transaction submissions to external chains.
 	Low,
+	/// The medium coefficient. Only used on transaction submissions to Bifrost.
 	Mid,
+	/// The high coefficient. Currently not in used.
 	High,
 }
 
@@ -159,7 +162,9 @@ impl GasCoefficient {
 #[derive(Clone, Copy, Debug)]
 /// The roundup event status.
 pub enum RoundUpEventStatus {
+	/// A single relayer has relayed a `RoundUp` event, however the quorum wasn't reached yet.
 	NextAuthorityRelayed = 9,
+	/// A single relayer has relayed a `RoundUp` event and the quorum has been reached.
 	NextAuthorityCommitted,
 }
 

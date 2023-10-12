@@ -15,7 +15,8 @@ use tokio_stream::StreamExt;
 
 use br_primitives::{
 	authority::RoundMetaData,
-	cli::{BootstrapConfig, DEFAULT_BOOTSTRAP_ROUND_OFFSET},
+	cli::BootstrapConfig,
+	constants::DEFAULT_BOOTSTRAP_ROUND_OFFSET,
 	eth::{
 		BootstrapState, ChainID, GasCoefficient, RecoveredSignature, RoundUpEventStatus,
 		BOOTSTRAP_BLOCK_CHUNK_SIZE,

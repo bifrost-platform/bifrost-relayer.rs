@@ -18,10 +18,8 @@ use br_periodic::{
 	heartbeat_sender::HeartbeatSender, roundup_emitter::RoundupEmitter, OraclePriceFeeder,
 };
 use br_primitives::{
-	cli::{
-		Configuration, HandlerType, DEFAULT_GET_LOGS_BATCH_SIZE, DEFAULT_MIN_PRIORITY_FEE,
-		DEFAULT_PROMETHEUS_PORT,
-	},
+	cli::{Configuration, HandlerType},
+	constants::{DEFAULT_GET_LOGS_BATCH_SIZE, DEFAULT_MIN_PRIORITY_FEE, DEFAULT_PROMETHEUS_PORT},
 	errors::{
 		INVALID_BIFROST_NATIVENESS, INVALID_CHAIN_ID, INVALID_PRIVATE_KEY, INVALID_PROVIDER_URL,
 	},
@@ -40,7 +38,8 @@ pub fn relay(config: Configuration) -> Result<TaskManager, ServiceError> {
 	new_relay_base(config).map(|RelayBase { task_manager, .. }| task_manager)
 }
 
-/// Initializes the initial bootstrap state and lock barrier in order to wait until `Socket` events bootstrap process is completed on each chain.
+/// Initializes the initial bootstrap state and lock barrier in order to wait until
+/// `Socket` events bootstrap process is completed on each chain.
 fn construct_bootstrap_state(config: &Configuration) -> BootstrapDeps {
 	let evm_providers = &config.relayer_config.evm_providers;
 	let bootstrap_config = &config.relayer_config.bootstrap_config;
@@ -169,15 +168,14 @@ fn construct_managers(config: &Configuration, bootstrap_deps: &BootstrapDeps) ->
 
 	// iterate each evm provider and construct inner components.
 	evm_providers.iter().for_each(|evm_provider| {
-		let wallet = WalletManager::from_private_key(system.private_key.as_str(), evm_provider.id)
-			.expect(INVALID_PRIVATE_KEY);
-
 		let is_native = evm_provider.is_native.unwrap_or(false);
 		let provider = Provider::<Http>::try_from(evm_provider.provider.clone())
 			.expect(INVALID_PROVIDER_URL)
 			.interval(Duration::from_millis(evm_provider.call_interval));
+
 		let client = Arc::new(EthClient::new(
-			wallet,
+			WalletManager::from_private_key(system.private_key.as_str(), evm_provider.id)
+				.expect(INVALID_PRIVATE_KEY),
 			Arc::new(provider.clone()),
 			ProviderMetadata::new(
 				evm_provider.name.clone(),
@@ -200,40 +198,28 @@ fn construct_managers(config: &Configuration, bootstrap_deps: &BootstrapDeps) ->
 		));
 
 		if evm_provider.is_relay_target {
-			match evm_provider.eip1559.unwrap_or(false) {
-				false => {
-					let (tx_manager, sender) = LegacyTransactionManager::new(
-						client.clone(),
-						system.debug_mode.unwrap_or(false),
-						evm_provider.escalate_interval,
-						evm_provider.escalate_percentage,
-						evm_provider.min_gas_price,
-						evm_provider.is_initially_escalated.unwrap_or(false),
-						evm_provider.duplicate_confirm_delay,
-					);
-					tx_managers.0.push(tx_manager);
-					event_senders.push(Arc::new(EventSender::new(
-						evm_provider.id,
-						sender,
-						is_native,
-					)))
-				},
-				true => {
-					let (tx_manager, sender) = Eip1559TransactionManager::new(
-						client.clone(),
-						system.debug_mode.unwrap_or(false),
-						evm_provider.min_priority_fee.unwrap_or(DEFAULT_MIN_PRIORITY_FEE).into(),
-						evm_provider.duplicate_confirm_delay,
-					);
-					tx_managers.1.push(tx_manager);
-					event_senders.push(Arc::new(EventSender::new(
-						evm_provider.id,
-						sender,
-						is_native,
-					)))
-				},
-			};
-
+			if evm_provider.eip1559.unwrap_or(false) {
+				let (tx_manager, sender) = Eip1559TransactionManager::new(
+					client.clone(),
+					system.debug_mode.unwrap_or(false),
+					evm_provider.min_priority_fee.unwrap_or(DEFAULT_MIN_PRIORITY_FEE).into(),
+					evm_provider.duplicate_confirm_delay,
+				);
+				tx_managers.1.push(tx_manager);
+				event_senders.push(Arc::new(EventSender::new(evm_provider.id, sender, is_native)));
+			} else {
+				let (tx_manager, sender) = LegacyTransactionManager::new(
+					client.clone(),
+					system.debug_mode.unwrap_or(false),
+					evm_provider.escalate_interval,
+					evm_provider.escalate_percentage,
+					evm_provider.min_gas_price,
+					evm_provider.is_initially_escalated.unwrap_or(false),
+					evm_provider.duplicate_confirm_delay,
+				);
+				tx_managers.0.push(tx_manager);
+				event_senders.push(Arc::new(EventSender::new(evm_provider.id, sender, is_native)));
+			}
 			number_of_relay_targets += 1;
 		}
 		let block_manager = BlockManager::new(
@@ -415,14 +401,13 @@ fn spawn_relayer_tasks(
 
 /// Log the configured relay targets.
 fn print_relay_targets(manager_deps: &ManagerDeps) {
-	let who = manager_deps.clients[0].address();
 	let tx_managers = &manager_deps.tx_managers;
 
 	log::info!(
 		target: LOG_TARGET,
 		"-[{}] 👤 Relayer: {:?}",
 		sub_display_format(SUB_LOG_TARGET),
-		who
+		&manager_deps.clients[0].address()
 	);
 
 	if !tx_managers.0.is_empty() {
@@ -462,12 +447,10 @@ fn new_relay_base(config: Configuration) -> Result<RelayBase, ServiceError> {
 
 	print_relay_targets(&manager_deps);
 
-	let deps = FullDeps { bootstrap_deps, manager_deps, periodic_deps, handler_deps };
-
 	Ok(RelayBase {
 		task_manager: spawn_relayer_tasks(
 			TaskManager::new(config.clone().tokio_handle, None)?,
-			deps,
+			FullDeps { bootstrap_deps, manager_deps, periodic_deps, handler_deps },
 			&config,
 		),
 	})
@@ -516,6 +499,7 @@ pub struct HandlerDeps {
 	pub roundup_relay_handlers: Vec<RoundupRelayHandler<Http>>,
 }
 
+/// The relayer client dependencies.
 pub struct FullDeps {
 	pub bootstrap_deps: BootstrapDeps,
 	pub manager_deps: ManagerDeps,

@@ -15,7 +15,8 @@ use br_client::eth::{
 };
 use br_primitives::{
 	authority::RoundMetaData,
-	cli::{BootstrapConfig, DEFAULT_BOOTSTRAP_ROUND_OFFSET},
+	cli::BootstrapConfig,
+	constants::DEFAULT_BOOTSTRAP_ROUND_OFFSET,
 	errors::INVALID_PERIODIC_SCHEDULE,
 	eth::{BootstrapState, GasCoefficient, RoundUpEventStatus, BOOTSTRAP_BLOCK_CHUNK_SIZE},
 	socket::{RoundUpSubmit, SerializedRoundUp, Signatures, SocketContractEvents},
@@ -52,9 +53,9 @@ impl<T: JsonRpcClient> PeriodicWorker for RoundupEmitter<T> {
 		loop {
 			if self.is_bootstrap_state_synced_as(BootstrapState::BootstrapRoundUpPhase1).await {
 				self.bootstrap().await;
-				break
+				break;
 			} else if self.is_bootstrap_state_synced_as(BootstrapState::NormalStart).await {
-				break
+				break;
 			}
 
 			sleep(Duration::from_millis(self.client.metadata.call_interval)).await;
@@ -75,7 +76,7 @@ impl<T: JsonRpcClient> PeriodicWorker for RoundupEmitter<T> {
 				);
 
 				if !self.is_selected_relayer(latest_round).await {
-					continue
+					continue;
 				}
 
 				let new_relayers = self.fetch_validator_list(latest_round).await;
@@ -245,7 +246,7 @@ impl<T: JsonRpcClient> BootstrapHandler for RoundupEmitter<T> {
 		loop {
 			if next_poll_round == self.current_round + 1 {
 				// If RoundUp reached to latest round, escape loop
-				break
+				break;
 			} else if next_poll_round <= self.current_round {
 				// If RoundUp not reached to latest round, process round_control_poll
 				if self.is_selected_relayer(next_poll_round).await {
@@ -267,7 +268,7 @@ impl<T: JsonRpcClient> BootstrapHandler for RoundupEmitter<T> {
 
 					if next_poll_round < new_next_poll_round {
 						next_poll_round = new_next_poll_round;
-						break
+						break;
 					}
 
 					sleep(Duration::from_millis(self.client.metadata.call_interval)).await;
