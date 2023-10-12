@@ -27,13 +27,13 @@ const SUB_LOG_TARGET: &str = "roundup-emitter";
 
 pub struct RoundupEmitter<T> {
 	/// Current round number
-	pub current_round: U256,
+	current_round: U256,
 	/// The ethereum client for the Bifrost network.
-	pub client: Arc<EthClient<T>>,
+	client: Arc<EthClient<T>>,
 	/// The event sender that sends messages to the event channel.
-	pub event_sender: Arc<EventSender>,
+	event_sender: Arc<EventSender>,
 	/// The time schedule that represents when to check round info.
-	pub schedule: Schedule,
+	schedule: Schedule,
 	/// The bootstrap shared data.
 	bootstrap_shared_data: Arc<BootstrapSharedData>,
 }

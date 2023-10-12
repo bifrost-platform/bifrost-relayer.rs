@@ -34,13 +34,13 @@ const SUB_LOG_TARGET: &str = "bridge-handler";
 /// The essential task that handles `bridge relay` related events.
 pub struct BridgeRelayHandler<T> {
 	/// The event senders that sends messages to the event channel. <chain_id, Arc<EventSender>>
-	pub event_senders: BTreeMap<ChainID, Arc<EventSender>>,
+	event_senders: BTreeMap<ChainID, Arc<EventSender>>,
 	/// The block receiver that consumes new blocks from the block channel.
-	pub block_receiver: Receiver<BlockMessage>,
+	block_receiver: Receiver<BlockMessage>,
 	/// The `EthClient` to interact with the connected blockchain.
 	pub client: Arc<EthClient<T>>,
 	/// The entire clients instantiated in the system. <chain_id, Arc<EthClient>>
-	pub system_clients: BTreeMap<ChainID, Arc<EthClient<T>>>,
+	system_clients: BTreeMap<ChainID, Arc<EthClient<T>>>,
 	/// Signature of the `Socket` Event.
 	socket_signature: H256,
 	/// The 4 bytes selector of the `poll()` function.

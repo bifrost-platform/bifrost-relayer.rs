@@ -55,7 +55,7 @@ pub struct BlockManager<T> {
 	/// The channel sending block messages.
 	pub sender: Sender<BlockMessage>,
 	/// The block waiting for enough confirmations.
-	pub waiting_block: U64,
+	waiting_block: U64,
 	/// The bootstrap shared data.
 	bootstrap_shared_data: Arc<BootstrapSharedData>,
 	/// The flag whether the relayer has enabled self balance synchronization. This field will be

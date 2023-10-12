@@ -15,11 +15,11 @@ const SUB_LOG_TARGET: &str = "heartbeat";
 /// The essential task that sending heartbeat transaction.
 pub struct HeartbeatSender<T> {
 	/// The time schedule that represents when to check heartbeat pulsed.
-	pub schedule: Schedule,
+	schedule: Schedule,
 	/// The event sender that sends messages to the event channel.
-	pub event_sender: Arc<EventSender>,
+	event_sender: Arc<EventSender>,
 	/// The `EthClient` to interact with the bifrost network.
-	pub client: Arc<EthClient<T>>,
+	client: Arc<EthClient<T>>,
 }
 
 #[async_trait::async_trait]
