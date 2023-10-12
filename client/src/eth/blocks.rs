@@ -5,19 +5,17 @@ use ethers::{
 	types::{BlockNumber, Filter, Log, SyncingStatus, U64},
 };
 use tokio::{
-	sync::{
-		broadcast::{self, Receiver, Sender},
-		RwLock,
-	},
+	sync::broadcast::{self, Receiver, Sender},
 	time::{sleep, Duration},
 };
 
 use br_primitives::{
+	bootstrap::{BootstrapHandler, BootstrapSharedData},
 	eth::{BootstrapState, ChainID},
 	sub_display_format,
 };
 
-use super::{BootstrapHandler, EthClient};
+use super::EthClient;
 
 #[derive(Clone, Debug)]
 /// The message format passed through the block channel.
@@ -58,8 +56,8 @@ pub struct BlockManager<T> {
 	pub sender: Sender<BlockMessage>,
 	/// The block waiting for enough confirmations.
 	pub waiting_block: U64,
-	/// State of bootstrapping
-	pub bootstrap_states: Arc<RwLock<Vec<BootstrapState>>>,
+	/// The bootstrap shared data.
+	bootstrap_shared_data: Arc<BootstrapSharedData>,
 	/// The flag whether the relayer has enabled self balance synchronization. This field will be
 	/// enabled when prometheus exporter is enabled.
 	is_balance_sync_enabled: bool,
@@ -69,7 +67,7 @@ impl<T: JsonRpcClient> BlockManager<T> {
 	/// Instantiates a new `BlockManager` instance.
 	pub fn new(
 		client: Arc<EthClient<T>>,
-		bootstrap_states: Arc<RwLock<Vec<BootstrapState>>>,
+		bootstrap_shared_data: Arc<BootstrapSharedData>,
 		is_balance_sync_enabled: bool,
 	) -> Self {
 		let (sender, _receiver) = broadcast::channel(512);
@@ -78,7 +76,7 @@ impl<T: JsonRpcClient> BlockManager<T> {
 			client,
 			sender,
 			waiting_block: U64::default(),
-			bootstrap_states,
+			bootstrap_shared_data,
 			is_balance_sync_enabled,
 		}
 	}
@@ -183,7 +181,7 @@ impl<T: JsonRpcClient> BlockManager<T> {
 					status.highest_block,
 				);
 			} else {
-				for state in self.bootstrap_states.write().await.iter_mut() {
+				for state in self.bootstrap_shared_data.bootstrap_states.write().await.iter_mut() {
 					if *state == BootstrapState::NodeSyncing {
 						*state = BootstrapState::BootstrapRoundUpPhase1;
 					}
@@ -205,6 +203,11 @@ impl<T: JsonRpcClient> BootstrapHandler for BlockManager<T> {
 	}
 
 	async fn is_bootstrap_state_synced_as(&self, state: BootstrapState) -> bool {
-		self.bootstrap_states.read().await.iter().all(|s| *s == state)
+		self.bootstrap_shared_data
+			.bootstrap_states
+			.read()
+			.await
+			.iter()
+			.all(|s| *s == state)
 	}
 }

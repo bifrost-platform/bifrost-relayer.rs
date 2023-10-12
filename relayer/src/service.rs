@@ -8,7 +8,6 @@ use std::{
 use ethers::providers::{Http, Provider};
 use futures::FutureExt;
 use sc_service::{config::PrometheusConfig, Error as ServiceError, TaskManager};
-use tokio::sync::{Barrier, Mutex, RwLock};
 
 use br_client::eth::{
 	BlockManager, BridgeRelayHandler, Eip1559TransactionManager, EthClient, EventSender, Handler,
@@ -18,6 +17,7 @@ use br_periodic::{
 	heartbeat_sender::HeartbeatSender, roundup_emitter::RoundupEmitter, OraclePriceFeeder,
 };
 use br_primitives::{
+	bootstrap::BootstrapSharedData,
 	cli::{Configuration, HandlerType},
 	constants::{DEFAULT_GET_LOGS_BATCH_SIZE, DEFAULT_MIN_PRIORITY_FEE, DEFAULT_PROMETHEUS_PORT},
 	errors::{
@@ -38,39 +38,11 @@ pub fn relay(config: Configuration) -> Result<TaskManager, ServiceError> {
 	new_relay_base(config).map(|RelayBase { task_manager, .. }| task_manager)
 }
 
-/// Initializes the initial bootstrap state and lock barrier in order to wait until
-/// `Socket` events bootstrap process is completed on each chain.
-fn construct_bootstrap_state(config: &Configuration) -> BootstrapDeps {
-	let evm_providers = &config.relayer_config.evm_providers;
-	let bootstrap_config = &config.relayer_config.bootstrap_config;
-
-	let (bootstrap_states, socket_barrier_len): (BootstrapState, usize) = {
-		let mut ret: (BootstrapState, usize) = (BootstrapState::NormalStart, 1);
-		if let Some(bootstrap_config) = bootstrap_config.clone() {
-			if bootstrap_config.is_enabled {
-				ret = (BootstrapState::NodeSyncing, evm_providers.len() + 1);
-			}
-		}
-		ret
-	};
-
-	let socket_barrier = Arc::new(Barrier::new(socket_barrier_len));
-	let socket_bootstrapping_count = Arc::new(Mutex::new(u8::default()));
-	let bootstrap_states = Arc::new(RwLock::new(vec![bootstrap_states; evm_providers.len()]));
-
-	BootstrapDeps { socket_barrier, socket_bootstrapping_count, bootstrap_states }
-}
-
 /// Initializes periodic components.
 fn construct_periodics(
-	config: &Configuration,
-	bootstrap_deps: &BootstrapDeps,
+	bootstrap_shared_data: BootstrapSharedData,
 	relayer_deps: &ManagerDeps,
 ) -> PeriodicDeps {
-	let bootstrap_config = &config.relayer_config.bootstrap_config;
-
-	let bootstrap_states = &bootstrap_deps.bootstrap_states;
-
 	let clients = &relayer_deps.clients;
 	let event_senders = &relayer_deps.event_senders;
 
@@ -91,8 +63,7 @@ fn construct_periodics(
 	let roundup_emitter = RoundupEmitter::new(
 		event_senders.clone(),
 		clients.clone(),
-		bootstrap_states.clone(),
-		bootstrap_config.clone(),
+		Arc::new(bootstrap_shared_data.clone()),
 	);
 
 	PeriodicDeps { heartbeat_sender, oracle_price_feeder, roundup_emitter }
@@ -102,23 +73,13 @@ fn construct_periodics(
 fn construct_handlers(
 	config: &Configuration,
 	manager_deps: &ManagerDeps,
-	bootstrap_deps: &BootstrapDeps,
+	bootstrap_shared_data: BootstrapSharedData,
 ) -> HandlerDeps {
 	let mut handlers = (vec![], vec![]);
 
-	let bootstrap_config = &config.relayer_config.bootstrap_config;
 	let handler_configs = &config.relayer_config.handler_configs;
 
-	let ManagerDeps {
-		clients,
-		tx_managers: _,
-		block_managers,
-		event_senders,
-		number_of_relay_targets,
-	} = manager_deps;
-
-	let BootstrapDeps { socket_barrier, socket_bootstrapping_count, bootstrap_states } =
-		bootstrap_deps;
+	let ManagerDeps { clients, tx_managers: _, block_managers, event_senders } = manager_deps;
 
 	handler_configs
 		.iter()
@@ -129,9 +90,7 @@ fn construct_handlers(
 					event_senders.clone(),
 					block_managers.get(target).expect(INVALID_CHAIN_ID).sender.subscribe(),
 					clients.clone(),
-					bootstrap_states.clone(),
-					socket_bootstrapping_count.clone(),
-					bootstrap_config.clone(),
+					Arc::new(bootstrap_shared_data.clone()),
 				));
 			}),
 			HandlerType::Roundup => {
@@ -143,10 +102,7 @@ fn construct_handlers(
 						.sender
 						.subscribe(),
 					clients.clone(),
-					socket_barrier.clone(),
-					bootstrap_states.clone(),
-					bootstrap_config.clone(),
-					*number_of_relay_targets,
+					Arc::new(bootstrap_shared_data.clone()),
 				));
 			},
 		});
@@ -154,7 +110,10 @@ fn construct_handlers(
 }
 
 /// Initializes the `EthClient`, `TransactionManager`, `BlockManager`, `EventSender` for each chain.
-fn construct_managers(config: &Configuration, bootstrap_deps: &BootstrapDeps) -> ManagerDeps {
+fn construct_managers(
+	config: &Configuration,
+	bootstrap_shared_data: BootstrapSharedData,
+) -> ManagerDeps {
 	let prometheus_config = &config.relayer_config.prometheus_config;
 	let evm_providers = &config.relayer_config.evm_providers;
 	let system = &config.relayer_config.system;
@@ -163,8 +122,6 @@ fn construct_managers(config: &Configuration, bootstrap_deps: &BootstrapDeps) ->
 	let mut tx_managers = (vec![], vec![]);
 	let mut block_managers = BTreeMap::new();
 	let mut event_senders = vec![];
-
-	let mut number_of_relay_targets: usize = 0;
 
 	// iterate each evm provider and construct inner components.
 	evm_providers.iter().for_each(|evm_provider| {
@@ -220,11 +177,10 @@ fn construct_managers(config: &Configuration, bootstrap_deps: &BootstrapDeps) ->
 				tx_managers.0.push(tx_manager);
 				event_senders.push(Arc::new(EventSender::new(evm_provider.id, sender, is_native)));
 			}
-			number_of_relay_targets += 1;
 		}
 		let block_manager = BlockManager::new(
 			client.clone(),
-			bootstrap_deps.bootstrap_states.clone(),
+			Arc::new(bootstrap_shared_data.clone()),
 			match &prometheus_config {
 				Some(config) => config.is_enabled,
 				None => false,
@@ -235,7 +191,7 @@ fn construct_managers(config: &Configuration, bootstrap_deps: &BootstrapDeps) ->
 		block_managers.insert(block_manager.client.get_chain_id(), block_manager);
 	});
 
-	ManagerDeps { clients, tx_managers, block_managers, event_senders, number_of_relay_targets }
+	ManagerDeps { clients, tx_managers, block_managers, event_senders }
 }
 
 /// Spawn relayer service tasks by the `TaskManager`.
@@ -246,17 +202,17 @@ fn spawn_relayer_tasks(
 ) -> TaskManager {
 	let prometheus_config = &config.relayer_config.prometheus_config;
 
-	let FullDeps { bootstrap_deps, manager_deps, periodic_deps, handler_deps } = deps;
+	let FullDeps { bootstrap_shared_data, manager_deps, periodic_deps, handler_deps } = deps;
 
-	let BootstrapDeps { socket_barrier, socket_bootstrapping_count: _, bootstrap_states } =
-		bootstrap_deps;
-	let ManagerDeps {
-		tx_managers,
-		block_managers,
-		clients: _,
-		event_senders: _,
-		number_of_relay_targets: _,
-	} = manager_deps;
+	let BootstrapSharedData {
+		socket_barrier,
+		roundup_barrier: _,
+		socket_bootstrap_count: _,
+		roundup_bootstrap_count: _,
+		bootstrap_states,
+		bootstrap_config: _,
+	} = bootstrap_shared_data;
+	let ManagerDeps { tx_managers, block_managers, clients: _, event_senders: _ } = manager_deps;
 	let PeriodicDeps { mut heartbeat_sender, mut oracle_price_feeder, mut roundup_emitter } =
 		periodic_deps;
 	let HandlerDeps { bridge_relay_handlers, roundup_relay_handlers } = handler_deps;
@@ -440,37 +396,29 @@ fn print_relay_targets(manager_deps: &ManagerDeps) {
 fn new_relay_base(config: Configuration) -> Result<RelayBase, ServiceError> {
 	assert_configuration_validity(&config);
 
-	let bootstrap_deps = construct_bootstrap_state(&config);
-	let manager_deps = construct_managers(&config, &bootstrap_deps);
-	let periodic_deps = construct_periodics(&config, &bootstrap_deps, &manager_deps);
-	let handler_deps = construct_handlers(&config, &manager_deps, &bootstrap_deps);
+	let bootstrap_shared_data = BootstrapSharedData::new(&config);
+
+	let manager_deps = construct_managers(&config, bootstrap_shared_data.clone());
+	let periodic_deps = construct_periodics(bootstrap_shared_data.clone(), &manager_deps);
+	let handler_deps = construct_handlers(&config, &manager_deps, bootstrap_shared_data.clone());
 
 	print_relay_targets(&manager_deps);
 
 	Ok(RelayBase {
 		task_manager: spawn_relayer_tasks(
 			TaskManager::new(config.clone().tokio_handle, None)?,
-			FullDeps { bootstrap_deps, manager_deps, periodic_deps, handler_deps },
+			FullDeps { bootstrap_shared_data, manager_deps, periodic_deps, handler_deps },
 			&config,
 		),
 	})
 }
 
-pub struct RelayBase {
+struct RelayBase {
 	/// The task manager of the relayer.
 	pub task_manager: TaskManager,
 }
 
-pub struct BootstrapDeps {
-	/// The barrier used to lock the system until the bootstrap process is done.
-	pub socket_barrier: Arc<Barrier>,
-	/// The current number of finished bootstrap processes.
-	pub socket_bootstrapping_count: Arc<Mutex<u8>>,
-	/// The current global state of the bootstrap process.
-	pub bootstrap_states: Arc<RwLock<Vec<BootstrapState>>>,
-}
-
-pub struct ManagerDeps {
+struct ManagerDeps {
 	/// The `EthClient`'s for each specified chain.
 	pub clients: Vec<Arc<EthClient<Http>>>,
 	/// The `TransactionManager`'s for each specified chain.
@@ -479,11 +427,9 @@ pub struct ManagerDeps {
 	pub block_managers: BTreeMap<ChainID, BlockManager<Http>>,
 	/// The `EventSender`'s for each specified chain.
 	pub event_senders: Vec<Arc<EventSender>>,
-	/// The number of relay targets (chains).
-	pub number_of_relay_targets: usize,
 }
 
-pub struct PeriodicDeps {
+struct PeriodicDeps {
 	/// The `HeartbeatSender` used for system health checks.
 	pub heartbeat_sender: HeartbeatSender<Http>,
 	/// The `OraclePriceFeeder` used for price feeding.
@@ -492,7 +438,7 @@ pub struct PeriodicDeps {
 	pub roundup_emitter: RoundupEmitter<Http>,
 }
 
-pub struct HandlerDeps {
+struct HandlerDeps {
 	/// The `BridgeRelayHandler`'s for each specified chain.
 	pub bridge_relay_handlers: Vec<BridgeRelayHandler<Http>>,
 	/// The `RoundupRelayHandler`'s for each specified chain.
@@ -500,8 +446,8 @@ pub struct HandlerDeps {
 }
 
 /// The relayer client dependencies.
-pub struct FullDeps {
-	pub bootstrap_deps: BootstrapDeps,
+struct FullDeps {
+	pub bootstrap_shared_data: BootstrapSharedData,
 	pub manager_deps: ManagerDeps,
 	pub periodic_deps: PeriodicDeps,
 	pub handler_deps: HandlerDeps,

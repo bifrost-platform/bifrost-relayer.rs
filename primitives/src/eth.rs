@@ -40,7 +40,7 @@ pub struct ProviderMetadata {
 	pub call_interval: u64,
 	/// Bridge direction when bridge event points this chain as destination.
 	pub if_destination_chain: BridgeDirection,
-	/// The flag whether the chain is BIFROST(native) or an external chain.
+	/// The flag whether the chain is Bifrost(native) or an external chain.
 	pub is_native: bool,
 }
 
@@ -76,7 +76,7 @@ pub struct ProviderContracts<T> {
 	pub vault: VaultContract<Provider<T>>,
 	/// AuthorityContract
 	pub authority: AuthorityContract<Provider<T>>,
-	/// RelayerManagerContract (BIFROST only)
+	/// RelayerManagerContract (Bifrost only)
 	pub relayer_manager: Option<RelayerManagerContract<Provider<T>>>,
 	/// Chainlink usdc/usd aggregator
 	pub chainlink_usdc_usd: Option<ChainlinkContract<Provider<T>>>,

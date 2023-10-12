@@ -6,15 +6,12 @@ use ethers::{
 	providers::JsonRpcClient,
 	types::{Bytes, Filter, Log, Signature, TransactionReceipt, TransactionRequest, H256, U256},
 };
-use tokio::{
-	sync::{broadcast::Receiver, Mutex, RwLock},
-	time::sleep,
-};
+use tokio::{sync::broadcast::Receiver, time::sleep};
 use tokio_stream::StreamExt;
 
 use br_primitives::{
 	authority::RoundMetaData,
-	cli::BootstrapConfig,
+	bootstrap::{BootstrapHandler, BootstrapSharedData},
 	constants::DEFAULT_BOOTSTRAP_ROUND_OFFSET,
 	eth::{
 		BootstrapState, BridgeDirection, BuiltRelayTransaction, ChainID, GasCoefficient,
@@ -32,8 +29,6 @@ use crate::eth::{
 	Handler, TxRequest,
 };
 
-use super::BootstrapHandler;
-
 const SUB_LOG_TARGET: &str = "bridge-handler";
 
 /// The essential task that handles `bridge relay` related events.
@@ -50,12 +45,8 @@ pub struct BridgeRelayHandler<T> {
 	socket_signature: H256,
 	/// The 4 bytes selector of the `poll()` function.
 	poll_selector: [u8; 4],
-	/// Completion of bootstrapping
-	pub bootstrap_states: Arc<RwLock<Vec<BootstrapState>>>,
-	/// Completion of bootstrapping count
-	pub bootstrapping_count: Arc<Mutex<u8>>,
-	/// Bootstrap config
-	pub bootstrap_config: Option<BootstrapConfig>,
+	/// The bootstrap shared data.
+	bootstrap_shared_data: Arc<BootstrapSharedData>,
 }
 
 impl<T: JsonRpcClient> BridgeRelayHandler<T> {
@@ -65,9 +56,7 @@ impl<T: JsonRpcClient> BridgeRelayHandler<T> {
 		event_channels: Vec<Arc<EventSender>>,
 		block_receiver: Receiver<BlockMessage>,
 		system_clients_vec: Vec<Arc<EthClient<T>>>,
-		bootstrap_states: Arc<RwLock<Vec<BootstrapState>>>,
-		bootstrapping_count: Arc<Mutex<u8>>,
-		bootstrap_config: Option<BootstrapConfig>,
+		bootstrap_shared_data: Arc<BootstrapSharedData>,
 	) -> Self {
 		let mut system_clients = BTreeMap::new();
 		system_clients_vec.iter().for_each(|client| {
@@ -100,9 +89,7 @@ impl<T: JsonRpcClient> BridgeRelayHandler<T> {
 				.short_signature(),
 			client,
 			system_clients,
-			bootstrap_states,
-			bootstrapping_count,
-			bootstrap_config,
+			bootstrap_shared_data,
 		}
 	}
 }
@@ -675,12 +662,12 @@ impl<T: JsonRpcClient> BootstrapHandler for BridgeRelayHandler<T> {
 			self.process_confirmed_log(&log, true).await;
 		}
 
-		let mut bootstrap_count = self.bootstrapping_count.lock().await;
+		let mut bootstrap_count = self.bootstrap_shared_data.socket_bootstrap_count.lock().await;
 		*bootstrap_count += 1;
 
 		// If All thread complete the task, starts the blockManager
 		if *bootstrap_count == self.system_clients.len() as u8 {
-			let mut bootstrap_guard = self.bootstrap_states.write().await;
+			let mut bootstrap_guard = self.bootstrap_shared_data.bootstrap_states.write().await;
 
 			for state in bootstrap_guard.iter_mut() {
 				*state = BootstrapState::NormalStart;
@@ -697,7 +684,7 @@ impl<T: JsonRpcClient> BootstrapHandler for BridgeRelayHandler<T> {
 	async fn get_bootstrap_events(&self) -> Vec<Log> {
 		let mut logs = vec![];
 
-		if let Some(bootstrap_config) = &self.bootstrap_config {
+		if let Some(bootstrap_config) = &self.bootstrap_shared_data.bootstrap_config {
 			let round_info: RoundMetaData = if self.client.metadata.is_native {
 				self.client
 					.contract_call(
@@ -756,7 +743,12 @@ impl<T: JsonRpcClient> BootstrapHandler for BridgeRelayHandler<T> {
 	}
 
 	async fn is_bootstrap_state_synced_as(&self, state: BootstrapState) -> bool {
-		self.bootstrap_states.read().await.iter().all(|s| *s == state)
+		self.bootstrap_shared_data
+			.bootstrap_states
+			.read()
+			.await
+			.iter()
+			.all(|s| *s == state)
 	}
 }
 
