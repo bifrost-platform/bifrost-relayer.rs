@@ -235,21 +235,14 @@ impl<T: JsonRpcClient> EthClient<T> {
 			self.get_block(block_number.into()).await,
 			self.get_block((block_number - BOOTSTRAP_BLOCK_OFFSET).into()).await,
 		) {
-			let diff = current_block
-				.timestamp
-				.checked_sub(prev_block.timestamp)
-				.unwrap()
-				.checked_div(BOOTSTRAP_BLOCK_OFFSET.into())
-				.unwrap();
+			let timestamp_diff =
+				current_block.timestamp.checked_sub(prev_block.timestamp).unwrap().as_u64() as f64;
+			let block_time = timestamp_diff / BOOTSTRAP_BLOCK_OFFSET as f64;
 
-			round_offset
-				.checked_mul(round_info.round_length.as_u32())
-				.unwrap()
-				.checked_mul(NATIVE_BLOCK_TIME)
-				.unwrap()
-				.checked_div(diff.as_u32())
-				.unwrap()
-				.into()
+			let blocks = round_offset.checked_mul(round_info.round_length.as_u32()).unwrap();
+			let blocks_to_native_chain_time = blocks.checked_mul(NATIVE_BLOCK_TIME).unwrap();
+			let bootstrap_offset_height = blocks_to_native_chain_time as f64 / block_time;
+			(bootstrap_offset_height.ceil() as u32).into()
 		} else {
 			panic!(
 				"[{}]-[{}]-[{}] {} [method: bootstrap]",
