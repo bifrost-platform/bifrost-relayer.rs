@@ -125,7 +125,7 @@ impl<T: JsonRpcClient> RoundupEmitter<T> {
 
 	/// Check relayer has selected in previous round
 	async fn is_selected_relayer(&self, round: U256) -> bool {
-		let relayer_manager = self.client.contracts.relayer_manager.as_ref().unwrap();
+		let relayer_manager = self.client.protocol_contracts.relayer_manager.as_ref().unwrap();
 		self.client
 			.contract_call(
 				relayer_manager.is_previous_selected_relayer(
@@ -140,7 +140,7 @@ impl<T: JsonRpcClient> RoundupEmitter<T> {
 
 	/// Fetch new validator list
 	async fn fetch_validator_list(&self, round: U256) -> Vec<Address> {
-		let relayer_manager = self.client.contracts.relayer_manager.as_ref().unwrap();
+		let relayer_manager = self.client.protocol_contracts.relayer_manager.as_ref().unwrap();
 		let mut addresses = self
 			.client
 			.contract_call(
@@ -161,14 +161,16 @@ impl<T: JsonRpcClient> RoundupEmitter<T> {
 		let sigs = Signatures::from(self.client.wallet.sign_message(&encoded_msg));
 		let round_up_submit = RoundUpSubmit { round, new_relayers, sigs };
 
-		TransactionRequest::default().to(self.client.contracts.socket.address()).data(
-			self.client
-				.contracts
-				.socket
-				.round_control_poll(round_up_submit)
-				.calldata()
-				.unwrap(),
-		)
+		TransactionRequest::default()
+			.to(self.client.protocol_contracts.socket.address())
+			.data(
+				self.client
+					.protocol_contracts
+					.socket
+					.round_control_poll(round_up_submit)
+					.calldata()
+					.unwrap(),
+			)
 	}
 
 	/// Request send transaction to the target event channel.
@@ -203,7 +205,10 @@ impl<T: JsonRpcClient> RoundupEmitter<T> {
 	/// Get the latest round index.
 	async fn get_latest_round(&self) -> U256 {
 		self.client
-			.contract_call(self.client.contracts.authority.latest_round(), "authority.latest_round")
+			.contract_call(
+				self.client.protocol_contracts.authority.latest_round(),
+				"authority.latest_round",
+			)
 			.await
 	}
 }
@@ -284,7 +289,10 @@ impl<T: JsonRpcClient> BootstrapHandler for RoundupEmitter<T> {
 		if let Some(bootstrap_config) = &self.bootstrap_shared_data.bootstrap_config {
 			let round_info: RoundMetaData = self
 				.client
-				.contract_call(self.client.contracts.authority.round_info(), "authority.round_info")
+				.contract_call(
+					self.client.protocol_contracts.authority.round_info(),
+					"authority.round_info",
+				)
 				.await;
 			let bootstrap_offset_height = self
 				.client
@@ -304,10 +312,10 @@ impl<T: JsonRpcClient> BootstrapHandler for RoundupEmitter<T> {
 					std::cmp::min(from_block + BOOTSTRAP_BLOCK_CHUNK_SIZE - 1, to_block);
 
 				let filter = Filter::new()
-					.address(self.client.contracts.socket.address())
+					.address(self.client.protocol_contracts.socket.address())
 					.topic0(
 						self.client
-							.contracts
+							.protocol_contracts
 							.socket
 							.abi()
 							.event("RoundUp")

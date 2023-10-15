@@ -137,7 +137,7 @@ impl<T: JsonRpcClient> Handler for RoundupRelayHandler<T> {
 	}
 
 	fn is_target_contract(&self, log: &Log) -> bool {
-		log.address == self.client.contracts.socket.address()
+		log.address == self.client.protocol_contracts.socket.address()
 	}
 
 	fn is_target_event(&self, topic: H256) -> bool {
@@ -171,7 +171,7 @@ impl<T: JsonRpcClient> RoundupRelayHandler<T> {
 			clients.into_iter().filter(|client| !client.metadata.is_native).collect();
 
 		let roundup_signature = client
-			.contracts
+			.protocol_contracts
 			.socket
 			.abi()
 			.event("RoundUp")
@@ -209,7 +209,7 @@ impl<T: JsonRpcClient> RoundupRelayHandler<T> {
 		let raw_sigs = self
 			.client
 			.contract_call(
-				self.client.contracts.socket.get_round_signatures(round),
+				self.client.protocol_contracts.socket.get_round_signatures(round),
 				"socket.get_round_signatures",
 			)
 			.await;
@@ -248,7 +248,7 @@ impl<T: JsonRpcClient> RoundupRelayHandler<T> {
 
 	/// Verifies whether the current relayer was selected at the given round.
 	async fn is_selected_relayer(&self, round: U256) -> bool {
-		let relayer_manager = self.client.contracts.relayer_manager.as_ref().unwrap();
+		let relayer_manager = self.client.protocol_contracts.relayer_manager.as_ref().unwrap();
 		self.client
 			.contract_call(
 				relayer_manager.is_previous_selected_relayer(round, self.client.address(), true),
@@ -301,13 +301,15 @@ impl<T: JsonRpcClient> RoundupRelayHandler<T> {
 			// Check roundup submitted to target chain before.
 			let latest_round = target_client
 				.contract_call(
-					target_client.contracts.authority.latest_round(),
+					target_client.protocol_contracts.authority.latest_round(),
 					"authority.latest_round",
 				)
 				.await;
 			if roundup_submit.round > latest_round {
-				let transaction_request =
-					self.build_transaction_request(&target_client.contracts.socket, roundup_submit);
+				let transaction_request = self.build_transaction_request(
+					&target_client.protocol_contracts.socket,
+					roundup_submit,
+				);
 
 				if let Some(event_sender) = self.event_senders.get(&target_client.get_chain_id()) {
 					event_sender
@@ -337,13 +339,13 @@ impl<T: JsonRpcClient> RoundupRelayHandler<T> {
 			let current_round = self
 				.client
 				.contract_call(
-					self.client.contracts.authority.latest_round(),
+					self.client.protocol_contracts.authority.latest_round(),
 					"authority.latest_round",
 				)
 				.await;
 			let target_chain_round = target_client
 				.contract_call(
-					target_client.contracts.authority.latest_round(),
+					target_client.protocol_contracts.authority.latest_round(),
 					"authority.latest_round",
 				)
 				.await;
@@ -409,7 +411,10 @@ impl<T: JsonRpcClient> BootstrapHandler for RoundupRelayHandler<T> {
 		if let Some(bootstrap_config) = &self.bootstrap_shared_data.bootstrap_config {
 			let round_info: RoundMetaData = self
 				.client
-				.contract_call(self.client.contracts.authority.round_info(), "authority.round_info")
+				.contract_call(
+					self.client.protocol_contracts.authority.round_info(),
+					"authority.round_info",
+				)
 				.await;
 			let bootstrap_offset_height = self
 				.client
@@ -429,7 +434,7 @@ impl<T: JsonRpcClient> BootstrapHandler for RoundupRelayHandler<T> {
 					std::cmp::min(from_block + BOOTSTRAP_BLOCK_CHUNK_SIZE - 1, to_block);
 
 				let filter = Filter::new()
-					.address(self.client.contracts.socket.address())
+					.address(self.client.protocol_contracts.socket.address())
 					.topic0(self.roundup_signature)
 					.from_block(from_block)
 					.to_block(chunk_to_block);

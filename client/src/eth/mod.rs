@@ -18,7 +18,8 @@ pub use br_primitives::contracts::*;
 use br_primitives::{
 	authority::RoundMetaData,
 	eth::{
-		ChainID, ProviderContracts, ProviderMetadata, BOOTSTRAP_BLOCK_OFFSET, NATIVE_BLOCK_TIME,
+		AggregatorContracts, ChainID, ProtocolContracts, ProviderMetadata, BOOTSTRAP_BLOCK_OFFSET,
+		NATIVE_BLOCK_TIME,
 	},
 	INSUFFICIENT_FUNDS, INVALID_CHAIN_ID, PROVIDER_INTERNAL_ERROR,
 };
@@ -43,8 +44,10 @@ pub struct EthClient<T> {
 	provider: Arc<Provider<T>>,
 	/// The metadata of the provider.
 	pub metadata: ProviderMetadata,
-	/// the contract instances of the provider.
-	pub contracts: ProviderContracts<T>,
+	/// the protocol contract instances of the provider.
+	pub protocol_contracts: ProtocolContracts<T>,
+	/// the aggregator contract instances of the provider.
+	pub aggregator_contracts: AggregatorContracts<T>,
 }
 
 impl<T: JsonRpcClient> EthClient<T> {
@@ -53,9 +56,10 @@ impl<T: JsonRpcClient> EthClient<T> {
 		wallet: WalletManager,
 		provider: Arc<Provider<T>>,
 		metadata: ProviderMetadata,
-		contracts: ProviderContracts<T>,
+		protocol_contracts: ProtocolContracts<T>,
+		aggregator_contracts: AggregatorContracts<T>,
 	) -> Self {
-		Self { wallet, provider, metadata, contracts }
+		Self { wallet, provider, metadata, protocol_contracts, aggregator_contracts }
 	}
 
 	/// Returns the relayer address.

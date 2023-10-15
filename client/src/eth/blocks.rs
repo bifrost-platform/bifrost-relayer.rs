@@ -131,7 +131,7 @@ impl<T: JsonRpcClient> BlockManager<T> {
 		let filter = Filter::new()
 			.from_block(BlockNumber::from(from))
 			.to_block(BlockNumber::from(to))
-			.address(self.client.contracts.socket.address());
+			.address(self.client.protocol_contracts.socket.address());
 
 		let target_logs = self.client.get_logs(&filter).await;
 		if !target_logs.is_empty() {

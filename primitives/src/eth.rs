@@ -68,16 +68,7 @@ impl ProviderMetadata {
 	}
 }
 
-/// The contract instances of the EVM provider.
-pub struct ProviderContracts<T> {
-	/// SocketContract
-	pub socket: SocketContract<Provider<T>>,
-	/// VaultContract
-	pub vault: VaultContract<Provider<T>>,
-	/// AuthorityContract
-	pub authority: AuthorityContract<Provider<T>>,
-	/// RelayerManagerContract (Bifrost only)
-	pub relayer_manager: Option<RelayerManagerContract<Provider<T>>>,
+pub struct AggregatorContracts<T> {
 	/// Chainlink usdc/usd aggregator
 	pub chainlink_usdc_usd: Option<ChainlinkContract<Provider<T>>>,
 	/// Chainlink usdt/usd aggregator
@@ -86,16 +77,55 @@ pub struct ProviderContracts<T> {
 	pub chainlink_dai_usd: Option<ChainlinkContract<Provider<T>>>,
 }
 
-impl<T: JsonRpcClient> ProviderContracts<T> {
+impl<T: JsonRpcClient> AggregatorContracts<T> {
+	pub fn new(
+		provider: Arc<Provider<T>>,
+		chainlink_usdc_usd_address: Option<String>,
+		chainlink_usdt_usd_address: Option<String>,
+		chainlink_dai_usd_address: Option<String>,
+	) -> Self {
+		Self {
+			chainlink_usdc_usd: chainlink_usdc_usd_address.map(|address| {
+				ChainlinkContract::new(
+					H160::from_str(&address).expect(INVALID_CONTRACT_ADDRESS),
+					provider.clone(),
+				)
+			}),
+			chainlink_usdt_usd: chainlink_usdt_usd_address.map(|address| {
+				ChainlinkContract::new(
+					H160::from_str(&address).expect(INVALID_CONTRACT_ADDRESS),
+					provider.clone(),
+				)
+			}),
+			chainlink_dai_usd: chainlink_dai_usd_address.map(|address| {
+				ChainlinkContract::new(
+					H160::from_str(&address).expect(INVALID_CONTRACT_ADDRESS),
+					provider.clone(),
+				)
+			}),
+		}
+	}
+}
+
+/// The protocol contract instances of the EVM provider.
+pub struct ProtocolContracts<T> {
+	/// SocketContract
+	pub socket: SocketContract<Provider<T>>,
+	/// VaultContract
+	pub vault: VaultContract<Provider<T>>,
+	/// AuthorityContract
+	pub authority: AuthorityContract<Provider<T>>,
+	/// RelayerManagerContract (Bifrost only)
+	pub relayer_manager: Option<RelayerManagerContract<Provider<T>>>,
+}
+
+impl<T: JsonRpcClient> ProtocolContracts<T> {
 	pub fn new(
 		provider: Arc<Provider<T>>,
 		socket_address: String,
 		vault_address: String,
 		authority_address: String,
 		relayer_manager_address: Option<String>,
-		chainlink_usdc_usd_address: Option<String>,
-		chainlink_usdt_usd_address: Option<String>,
-		chainlink_dai_usd_address: Option<String>,
 	) -> Self {
 		Self {
 			socket: SocketContract::new(
@@ -112,24 +142,6 @@ impl<T: JsonRpcClient> ProviderContracts<T> {
 			),
 			relayer_manager: relayer_manager_address.map(|address| {
 				RelayerManagerContract::new(
-					H160::from_str(&address).expect(INVALID_CONTRACT_ADDRESS),
-					provider.clone(),
-				)
-			}),
-			chainlink_usdc_usd: chainlink_usdc_usd_address.map(|address| {
-				ChainlinkContract::new(
-					H160::from_str(&address).expect(INVALID_CONTRACT_ADDRESS),
-					provider.clone(),
-				)
-			}),
-			chainlink_usdt_usd: chainlink_usdt_usd_address.map(|address| {
-				ChainlinkContract::new(
-					H160::from_str(&address).expect(INVALID_CONTRACT_ADDRESS),
-					provider.clone(),
-				)
-			}),
-			chainlink_dai_usd: chainlink_dai_usd_address.map(|address| {
-				ChainlinkContract::new(
 					H160::from_str(&address).expect(INVALID_CONTRACT_ADDRESS),
 					provider.clone(),
 				)

@@ -23,7 +23,7 @@ use br_primitives::{
 	errors::{
 		INVALID_BIFROST_NATIVENESS, INVALID_CHAIN_ID, INVALID_PRIVATE_KEY, INVALID_PROVIDER_URL,
 	},
-	eth::{BootstrapState, ChainID, ProviderContracts, ProviderMetadata},
+	eth::{AggregatorContracts, BootstrapState, ChainID, ProtocolContracts, ProviderMetadata},
 	periodic::PeriodicWorker,
 	sub_display_format,
 };
@@ -76,14 +76,10 @@ fn construct_handlers(
 	bootstrap_shared_data: BootstrapSharedData,
 ) -> HandlerDeps {
 	let mut handlers = (vec![], vec![]);
-
-	let handler_configs = &config.relayer_config.handler_configs;
-
 	let ManagerDeps { clients, tx_managers: _, block_managers, event_senders } = manager_deps;
 
-	handler_configs
-		.iter()
-		.for_each(|handler_config| match handler_config.handler_type {
+	config.relayer_config.handler_configs.iter().for_each(|handler_config| {
+		match handler_config.handler_type {
 			HandlerType::BridgeRelay => handler_config.watch_list.iter().for_each(|target| {
 				handlers.0.push(BridgeRelayHandler::new(
 					*target,
@@ -105,7 +101,8 @@ fn construct_handlers(
 					Arc::new(bootstrap_shared_data.clone()),
 				));
 			},
-		});
+		}
+	});
 	HandlerDeps { bridge_relay_handlers: handlers.0, roundup_relay_handlers: handlers.1 }
 }
 
@@ -142,12 +139,15 @@ fn construct_managers(
 				evm_provider.get_logs_batch_size.unwrap_or(DEFAULT_GET_LOGS_BATCH_SIZE),
 				is_native,
 			),
-			ProviderContracts::new(
-				Arc::new(provider),
+			ProtocolContracts::new(
+				Arc::new(provider.clone()),
 				evm_provider.socket_address.clone(),
 				evm_provider.vault_address.clone(),
 				evm_provider.authority_address.clone(),
 				evm_provider.relayer_manager_address.clone(),
+			),
+			AggregatorContracts::new(
+				Arc::new(provider),
 				evm_provider.chainlink_usdc_usd_address.clone(),
 				evm_provider.chainlink_usdt_usd_address.clone(),
 				evm_provider.chainlink_dai_usd_address.clone(),
