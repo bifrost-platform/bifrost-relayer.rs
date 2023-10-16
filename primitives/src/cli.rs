@@ -49,8 +49,8 @@ pub const MAX_DUPLICATE_CONFIRM_DELAY_MS: u64 = 60_000;
 /// The minimum batch size allowed for `eth_getLogs()`. (=1 block)
 pub const MIN_GET_LOGS_BATCH_SIZE: u64 = 1;
 
-/// The maximum round offset allowed for bootstrap. (=64 rounds)
-pub const MAX_BOOTSTRAP_ROUND_OFFSET: u32 = 64;
+/// The maximum round offset allowed for bootstrap. (=14 rounds)
+pub const MAX_BOOTSTRAP_ROUND_OFFSET: u32 = 14;
 
 /// Error type for the CLI.
 #[derive(Debug, thiserror::Error)]
