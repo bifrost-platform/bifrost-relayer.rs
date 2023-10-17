@@ -66,7 +66,7 @@ impl<T: JsonRpcClient> Handler for RoundupRelayHandler<T> {
 
 				let mut stream = tokio_stream::iter(block_msg.target_logs);
 				while let Some(log) = stream.next().await {
-					if self.is_target_contract(&log) || self.is_target_event(log.topics[0]) {
+					if self.is_target_contract(&log) && self.is_target_event(log.topics[0]) {
 						self.process_confirmed_log(&log, false).await;
 					}
 				}
