@@ -31,12 +31,12 @@ const SUB_LOG_TARGET: &str = "roundup-handler";
 
 /// The essential task that handles `roundup relay` related events.
 pub struct RoundupRelayHandler<T> {
+	/// The `EthClient` to interact with the bifrost network.
+	pub client: Arc<EthClient<T>>,
 	/// The event senders that sends messages to each event channel.
 	event_senders: BTreeMap<ChainID, Arc<EventSender>>,
 	/// The block receiver that consumes new blocks from the block channel.
 	block_receiver: Receiver<BlockMessage>,
-	/// The `EthClient` to interact with the bifrost network.
-	pub client: Arc<EthClient<T>>,
 	/// `EthClient`s to interact with provided networks except bifrost network.
 	external_clients: Vec<Arc<EthClient<T>>>,
 	/// Signature of RoundUp Event.
@@ -255,16 +255,6 @@ impl<T: JsonRpcClient> RoundupRelayHandler<T> {
 				"relayer_manager.is_previous_selected_relayer",
 			)
 			.await
-	}
-
-	/// Verifies whether the bootstrap state has been synced to the given state.
-	async fn is_bootstrap_state_synced_as(&self, state: BootstrapState) -> bool {
-		self.bootstrap_shared_data
-			.bootstrap_states
-			.read()
-			.await
-			.iter()
-			.all(|s| *s == state)
 	}
 
 	/// Build `round_control_relay` method call param.

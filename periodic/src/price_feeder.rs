@@ -26,6 +26,8 @@ const SUB_LOG_TARGET: &str = "price-oracle";
 
 /// The essential task that handles oracle price feedings.
 pub struct OraclePriceFeeder<T> {
+	/// The `EthClient` to interact with the bifrost network.
+	pub client: Arc<EthClient<T>>,
 	/// The time schedule that represents when to send price feeds.
 	schedule: Schedule,
 	/// The primary source for fetching prices. (Coingecko)
@@ -36,8 +38,6 @@ pub struct OraclePriceFeeder<T> {
 	event_sender: Arc<EventSender>,
 	/// The pre-defined oracle ID's for each asset.
 	asset_oid: BTreeMap<String, H256>,
-	/// The `EthClient` to interact with the bifrost network.
-	pub client: Arc<EthClient<T>>,
 	/// The vector that contains each `EthClient`.
 	system_clients: Vec<Arc<EthClient<T>>>,
 }

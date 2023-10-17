@@ -40,14 +40,14 @@ const SUB_LOG_TARGET: &str = "eth-client";
 pub struct EthClient<T> {
 	/// The wallet manager for the connected relayer.
 	pub wallet: WalletManager,
-	/// The ethers.rs wrapper for the connected chain.
-	provider: Arc<Provider<T>>,
 	/// The metadata of the provider.
 	pub metadata: ProviderMetadata,
 	/// the protocol contract instances of the provider.
 	pub protocol_contracts: ProtocolContracts<T>,
 	/// the aggregator contract instances of the provider.
 	pub aggregator_contracts: AggregatorContracts<T>,
+	/// The ethers.rs wrapper for the connected chain.
+	provider: Arc<Provider<T>>,
 }
 
 impl<T: JsonRpcClient> EthClient<T> {

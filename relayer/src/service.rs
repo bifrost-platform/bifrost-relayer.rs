@@ -415,40 +415,40 @@ fn new_relay_base(config: Configuration) -> Result<RelayBase, ServiceError> {
 
 struct RelayBase {
 	/// The task manager of the relayer.
-	pub task_manager: TaskManager,
+	task_manager: TaskManager,
 }
 
 struct ManagerDeps {
 	/// The `EthClient`'s for each specified chain.
-	pub clients: Vec<Arc<EthClient<Http>>>,
+	clients: Vec<Arc<EthClient<Http>>>,
 	/// The `TransactionManager`'s for each specified chain.
-	pub tx_managers: (Vec<LegacyTransactionManager<Http>>, Vec<Eip1559TransactionManager<Http>>),
+	tx_managers: (Vec<LegacyTransactionManager<Http>>, Vec<Eip1559TransactionManager<Http>>),
 	/// The `BlockManager`'s for each specified chain.
-	pub block_managers: BTreeMap<ChainID, BlockManager<Http>>,
+	block_managers: BTreeMap<ChainID, BlockManager<Http>>,
 	/// The `EventSender`'s for each specified chain.
-	pub event_senders: Vec<Arc<EventSender>>,
+	event_senders: Vec<Arc<EventSender>>,
 }
 
 struct PeriodicDeps {
 	/// The `HeartbeatSender` used for system health checks.
-	pub heartbeat_sender: HeartbeatSender<Http>,
+	heartbeat_sender: HeartbeatSender<Http>,
 	/// The `OraclePriceFeeder` used for price feeding.
-	pub oracle_price_feeder: OraclePriceFeeder<Http>,
+	oracle_price_feeder: OraclePriceFeeder<Http>,
 	/// The `RoundupEmitter` used for detecting and emitting new round updates.
-	pub roundup_emitter: RoundupEmitter<Http>,
+	roundup_emitter: RoundupEmitter<Http>,
 }
 
 struct HandlerDeps {
 	/// The `BridgeRelayHandler`'s for each specified chain.
-	pub bridge_relay_handlers: Vec<BridgeRelayHandler<Http>>,
+	bridge_relay_handlers: Vec<BridgeRelayHandler<Http>>,
 	/// The `RoundupRelayHandler`'s for each specified chain.
-	pub roundup_relay_handlers: Vec<RoundupRelayHandler<Http>>,
+	roundup_relay_handlers: Vec<RoundupRelayHandler<Http>>,
 }
 
 /// The relayer client dependencies.
 struct FullDeps {
-	pub bootstrap_shared_data: BootstrapSharedData,
-	pub manager_deps: ManagerDeps,
-	pub periodic_deps: PeriodicDeps,
-	pub handler_deps: HandlerDeps,
+	bootstrap_shared_data: BootstrapSharedData,
+	manager_deps: ManagerDeps,
+	periodic_deps: PeriodicDeps,
+	handler_deps: HandlerDeps,
 }
