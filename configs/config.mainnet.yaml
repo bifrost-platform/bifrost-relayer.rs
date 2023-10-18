@@ -58,10 +58,21 @@ evm_providers:
     socket_address: "0xAe172D8c5E428D4b7C70f9E593b207F9daC9BF3e"
     vault_address: "0x4F7aB59b5AC112970F5dD66D8a7ac505c8E5e08B"
     authority_address: "0x4C7a44F3FB37A53F33D3fe3cCdE97A444F105239"
+  - name: "arbitrum"
+    id: 42161
+    provider: "<YOUR_ARBITRUM_ONE_RPC_ENDPOINT>"
+    call_interval: 2000
+    block_confirmations: 5
+    get_logs_batch_size: 8
+    is_relay_target: false
+    eip1559: true
+    socket_address: "0xac1552e30857A814a225BAa81145bcB071B46DDd"
+    vault_address: "0xf549E4B5B4Cb7fd4e83b8AA047C742C06D527429"
+    authority_address: "0xA069a57426Cd4c53925c1847Bec01aAB832A5118"
 
 handler_configs:
   - handler_type: BridgeRelay
-    watch_list: [3068, 1, 56, 137, 8453]
+    watch_list: [3068, 1, 56, 137, 8453, 42161]
   - handler_type: Roundup
     watch_list: [3068]
 
