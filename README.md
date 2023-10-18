@@ -69,6 +69,7 @@ You should prepare RPC endpoints for the following blockchain networks. There ar
 - [Binance Smart Chain](https://docs.bnbchain.org/docs/rpc)
 - [Polygon](https://wiki.polygon.technology/docs/pos/reference/rpc-endpoints/)
 - [Base](https://docs.base.org/tools/node-providers/)
+- [Arbitrum](https://docs.arbitrum.io/node-running/node-providers)
 
 You should also prepare an EVM account that will act as your relayer account. This account should have enough balance
 for transaction fees used in operations.
