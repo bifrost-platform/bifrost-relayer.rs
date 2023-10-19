@@ -252,11 +252,6 @@ impl<T: JsonRpcClient> RoundupRelayHandler<T> {
 			.await
 	}
 
-	/// Verifies whether the bootstrap state has been synced to the given state.
-	async fn is_bootstrap_state_synced_as(&self, state: BootstrapState) -> bool {
-		self.bootstrap_states.read().await.iter().all(|s| *s == state)
-	}
-
 	/// Build `round_control_relay` method call param.
 	async fn build_roundup_submit(
 		&self,

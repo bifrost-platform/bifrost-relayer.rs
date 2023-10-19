@@ -6,15 +6,13 @@ use ethers::{
 	providers::JsonRpcClient,
 	types::{Bytes, Filter, Log, Signature, TransactionReceipt, TransactionRequest, H256, U256},
 };
-use tokio::{
-	sync::{broadcast::Receiver, Mutex, RwLock},
-	time::sleep,
-};
+use tokio::{sync::broadcast::Receiver, time::sleep};
 use tokio_stream::StreamExt;
 
 use br_primitives::{
 	authority::RoundMetaData,
-	cli::{BootstrapConfig, DEFAULT_BOOTSTRAP_ROUND_OFFSET},
+	bootstrap::{BootstrapHandler, BootstrapSharedData},
+	constants::DEFAULT_BOOTSTRAP_ROUND_OFFSET,
 	eth::{
 		BootstrapState, BridgeDirection, BuiltRelayTransaction, ChainID, GasCoefficient,
 		RecoveredSignature, SocketEventStatus, BOOTSTRAP_BLOCK_CHUNK_SIZE,
@@ -31,28 +29,24 @@ use crate::eth::{
 	Handler, TxRequest,
 };
 
-use super::BootstrapHandler;
-
 const SUB_LOG_TARGET: &str = "bridge-handler";
 
 /// The essential task that handles `bridge relay` related events.
 pub struct BridgeRelayHandler<T> {
-	/// The event senders that sends messages to the event channel. <chain_id, Arc<EventSender>>
-	pub event_senders: BTreeMap<ChainID, Arc<EventSender>>,
-	/// The block receiver that consumes new blocks from the block channel.
-	pub block_receiver: Receiver<BlockMessage>,
 	/// The `EthClient` to interact with the connected blockchain.
 	pub client: Arc<EthClient<T>>,
+	/// The event senders that sends messages to the event channel. <chain_id, Arc<EventSender>>
+	event_senders: BTreeMap<ChainID, Arc<EventSender>>,
+	/// The block receiver that consumes new blocks from the block channel.
+	block_receiver: Receiver<BlockMessage>,
 	/// The entire clients instantiated in the system. <chain_id, Arc<EthClient>>
-	pub system_clients: BTreeMap<ChainID, Arc<EthClient<T>>>,
+	system_clients: BTreeMap<ChainID, Arc<EthClient<T>>>,
 	/// Signature of the `Socket` Event.
-	pub socket_signature: H256,
-	/// Completion of bootstrapping
-	pub bootstrap_states: Arc<RwLock<Vec<BootstrapState>>>,
-	/// Completion of bootstrapping count
-	pub bootstrapping_count: Arc<Mutex<u8>>,
-	/// Bootstrap config
-	pub bootstrap_config: Option<BootstrapConfig>,
+	socket_signature: H256,
+	/// The 4 bytes selector of the `poll()` function.
+	poll_selector: [u8; 4],
+	/// The bootstrap shared data.
+	bootstrap_shared_data: Arc<BootstrapSharedData>,
 }
 
 impl<T: JsonRpcClient> BridgeRelayHandler<T> {
@@ -62,9 +56,7 @@ impl<T: JsonRpcClient> BridgeRelayHandler<T> {
 		event_channels: Vec<Arc<EventSender>>,
 		block_receiver: Receiver<BlockMessage>,
 		system_clients_vec: Vec<Arc<EthClient<T>>>,
-		bootstrap_states: Arc<RwLock<Vec<BootstrapState>>>,
-		bootstrapping_count: Arc<Mutex<u8>>,
-		bootstrap_config: Option<BootstrapConfig>,
+		bootstrap_shared_data: Arc<BootstrapSharedData>,
 	) -> Self {
 		let mut system_clients = BTreeMap::new();
 		system_clients_vec.iter().for_each(|client| {
@@ -82,17 +74,22 @@ impl<T: JsonRpcClient> BridgeRelayHandler<T> {
 			event_senders,
 			block_receiver,
 			socket_signature: client
-				.contracts
+				.protocol_contracts
 				.socket
 				.abi()
 				.event("Socket")
 				.expect(INVALID_CONTRACT_ABI)
 				.signature(),
+			poll_selector: client
+				.protocol_contracts
+				.socket
+				.abi()
+				.function("poll")
+				.expect(INVALID_CONTRACT_ABI)
+				.short_signature(),
 			client,
 			system_clients,
-			bootstrap_states,
-			bootstrapping_count,
-			bootstrap_config,
+			bootstrap_shared_data,
 		}
 	}
 }
@@ -118,92 +115,81 @@ impl<T: JsonRpcClient> Handler for BridgeRelayHandler<T> {
 
 				let mut stream = tokio_stream::iter(block_msg.target_logs);
 				while let Some(log) = stream.next().await {
-					self.process_confirmed_log(&log, false).await;
-				}
-			}
-		}
-	}
-
-	async fn process_confirmed_log(&self, log: &Log, is_bootstrap: bool) {
-		if self.is_target_contract(log) {
-			if let Some(receipt) =
-				self.client.get_transaction_receipt(log.transaction_hash.unwrap()).await
-			{
-				if receipt.status.unwrap().is_zero() {
-					self.process_reverted_transaction(receipt).await;
-				}
-
-				if self.is_target_event(log.topics[0]) {
-					let raw_log = RawLog::from(log.clone());
-					match decode_logs::<SocketEvents>(&[raw_log]) {
-						Ok(decoded) => match &decoded[0] {
-							SocketEvents::Socket(socket) => {
-								let status = SocketEventStatus::from_u8(socket.msg.status);
-								let src_chain_id = ChainID::from_be_bytes(socket.msg.req_id.chain);
-								let dst_chain_id =
-									ChainID::from_be_bytes(socket.msg.ins_code.chain);
-								let is_inbound = self.is_inbound_sequence(dst_chain_id);
-
-								let metadata = BridgeRelayMetadata::new(
-									is_inbound,
-									status,
-									socket.msg.req_id.sequence,
-									src_chain_id,
-									dst_chain_id,
-								);
-
-								if !is_bootstrap {
-									log::info!(
-										target: &self.client.get_chain_name(),
-										"-[{}] 🔖 Detected socket event: {}, {:?}-{:?}",
-										sub_display_format(SUB_LOG_TARGET),
-										metadata,
-										log.block_number.unwrap(),
-										log.transaction_hash,
-									);
-								}
-
-								if Self::is_sequence_ended(status) ||
-									self.is_already_done(&socket.msg.req_id, src_chain_id).await
-								{
-									// do nothing if protocol sequence ended
-									return
-								}
-								if !self
-									.is_selected_relayer(socket.msg.req_id.round_id.into())
-									.await
-								{
-									// do nothing if not verified
-									return
-								}
-
-								self.send_socket_message(
-									socket.msg.clone(),
-									socket.msg.clone(),
-									metadata,
-									is_inbound,
-								)
-								.await;
-							},
-						},
-						Err(error) => panic!(
-							"[{}]-[{}]-[{}] Unknown error while decoding socket event: {:?}",
-							self.client.get_chain_name(),
-							SUB_LOG_TARGET,
-							self.client.address(),
-							error,
-						),
+					if self.is_target_contract(&log) && self.is_target_event(log.topics[0]) {
+						self.process_confirmed_log(&log, false).await;
 					}
 				}
 			}
 		}
 	}
 
-	fn is_target_contract(&self, log: &Log) -> bool {
-		if log.address == self.client.contracts.socket.address() ||
-			log.address == self.client.contracts.vault.address()
+	async fn process_confirmed_log(&self, log: &Log, is_bootstrap: bool) {
+		if let Some(receipt) =
+			self.client.get_transaction_receipt(log.transaction_hash.unwrap()).await
 		{
-			return true
+			if receipt.status.unwrap().is_zero() && receipt.from == self.client.address() {
+				// only handles owned transactions
+				self.process_reverted_transaction(receipt).await;
+				return;
+			}
+			match decode_logs::<SocketEvents>(&[RawLog::from(log.clone())]) {
+				Ok(decoded) => match &decoded[0] {
+					SocketEvents::Socket(socket) => {
+						let metadata = BridgeRelayMetadata::new(
+							self.is_inbound_sequence(ChainID::from_be_bytes(
+								socket.msg.ins_code.chain,
+							)),
+							SocketEventStatus::from_u8(socket.msg.status),
+							socket.msg.req_id.sequence,
+							ChainID::from_be_bytes(socket.msg.req_id.chain),
+							ChainID::from_be_bytes(socket.msg.ins_code.chain),
+						);
+
+						if !is_bootstrap {
+							log::info!(
+								target: &self.client.get_chain_name(),
+								"-[{}] 🔖 Detected socket event: {}, {:?}-{:?}",
+								sub_display_format(SUB_LOG_TARGET),
+								metadata,
+								log.block_number.unwrap(),
+								log.transaction_hash,
+							);
+						}
+
+						if !self.is_selected_relayer(socket.msg.req_id.round_id.into()).await {
+							// do nothing if not selected
+							return;
+						}
+						if self.is_sequence_ended(&socket.msg.req_id, metadata.src_chain_id).await {
+							// do nothing if protocol sequence ended
+							return;
+						}
+
+						self.send_socket_message(
+							socket.msg.clone(),
+							socket.msg.clone(),
+							metadata.clone(),
+							metadata.is_inbound,
+						)
+						.await;
+					},
+				},
+				Err(error) => panic!(
+					"[{}]-[{}]-[{}] Unknown error while decoding socket event: {:?}",
+					self.client.get_chain_name(),
+					SUB_LOG_TARGET,
+					self.client.address(),
+					error,
+				),
+			}
+		}
+	}
+
+	fn is_target_contract(&self, log: &Log) -> bool {
+		if log.address == self.client.protocol_contracts.socket.address()
+			|| log.address == self.client.protocol_contracts.vault.address()
+		{
+			return true;
 		}
 		false
 	}
@@ -217,7 +203,7 @@ impl<T: JsonRpcClient> Handler for BridgeRelayHandler<T> {
 impl<T: JsonRpcClient> BridgeRelayBuilder for BridgeRelayHandler<T> {
 	fn build_poll_call_data(&self, msg: SocketMessage, sigs: Signatures) -> Bytes {
 		let poll_submit = PollSubmit { msg, sigs, option: U256::default() };
-		self.client.contracts.socket.poll(poll_submit).calldata().unwrap()
+		self.client.protocol_contracts.socket.poll(poll_submit).calldata().unwrap()
 	}
 
 	async fn build_transaction(
@@ -228,70 +214,71 @@ impl<T: JsonRpcClient> BridgeRelayBuilder for BridgeRelayHandler<T> {
 		relay_tx_chain_id: ChainID,
 	) -> Option<BuiltRelayTransaction> {
 		if let Some(system_client) = self.system_clients.get(&relay_tx_chain_id) {
-			let to_socket = system_client.contracts.socket.address();
+			let to_socket = system_client.protocol_contracts.socket.address();
 			// the original msg must be used for building calldata
-			let (signatures, is_external) = self.build_signatures(sig_msg, is_inbound).await;
+			let (signatures, is_external) = if is_inbound {
+				self.build_inbound_signatures(sig_msg).await
+			} else {
+				self.build_outbound_signatures(sig_msg).await
+			};
 			return Some(BuiltRelayTransaction::new(
 				TransactionRequest::default()
 					.data(self.build_poll_call_data(submit_msg, signatures))
 					.to(to_socket),
 				is_external,
-			))
+			));
 		}
 		None
 	}
 
-	async fn build_signatures(
-		&self,
-		mut msg: SocketMessage,
-		is_inbound: bool,
-	) -> (Signatures, bool) {
+	async fn build_inbound_signatures(&self, mut msg: SocketMessage) -> (Signatures, bool) {
 		let status = SocketEventStatus::from_u8(msg.status);
 		let mut is_external = false;
-		let signatures = if is_inbound {
-			// build signatures for inbound requests
-			match status {
-				SocketEventStatus::Requested | SocketEventStatus::Failed => Signatures::default(),
-				SocketEventStatus::Executed => {
-					msg.status = SocketEventStatus::Accepted.into();
-					Signatures::from(self.sign_socket_message(msg))
-				},
-				SocketEventStatus::Reverted => {
-					msg.status = SocketEventStatus::Rejected.into();
-					Signatures::from(self.sign_socket_message(msg))
-				},
-				SocketEventStatus::Accepted | SocketEventStatus::Rejected => {
-					is_external = true;
-					self.get_sorted_signatures(msg).await
-				},
-				_ => panic!(
-					"[{}]-[{}]-[{}] Unknown socket event status received: {:?}",
-					&self.client.get_chain_name(),
-					SUB_LOG_TARGET,
-					self.client.address(),
-					status
-				),
-			}
-		} else {
-			// build signatures for outbound requests
-			match status {
-				SocketEventStatus::Requested => {
-					msg.status = SocketEventStatus::Accepted.into();
-					Signatures::from(self.sign_socket_message(msg))
-				},
-				SocketEventStatus::Accepted | SocketEventStatus::Rejected => {
-					is_external = true;
-					self.get_sorted_signatures(msg).await
-				},
-				SocketEventStatus::Executed | SocketEventStatus::Reverted => Signatures::default(),
-				_ => panic!(
-					"[{}]-[{}]-[{}] Unknown socket event status received: {:?}",
-					&self.client.get_chain_name(),
-					SUB_LOG_TARGET,
-					self.client.address(),
-					status
-				),
-			}
+		let signatures = match status {
+			SocketEventStatus::Requested | SocketEventStatus::Failed => Signatures::default(),
+			SocketEventStatus::Executed => {
+				msg.status = SocketEventStatus::Accepted.into();
+				Signatures::from(self.sign_socket_message(msg))
+			},
+			SocketEventStatus::Reverted => {
+				msg.status = SocketEventStatus::Rejected.into();
+				Signatures::from(self.sign_socket_message(msg))
+			},
+			SocketEventStatus::Accepted | SocketEventStatus::Rejected => {
+				is_external = true;
+				self.get_sorted_signatures(msg).await
+			},
+			_ => panic!(
+				"[{}]-[{}]-[{}] Unknown socket event status received: {:?}",
+				&self.client.get_chain_name(),
+				SUB_LOG_TARGET,
+				self.client.address(),
+				status
+			),
+		};
+		(signatures, is_external)
+	}
+
+	async fn build_outbound_signatures(&self, mut msg: SocketMessage) -> (Signatures, bool) {
+		let status = SocketEventStatus::from_u8(msg.status);
+		let mut is_external = false;
+		let signatures = match status {
+			SocketEventStatus::Requested => {
+				msg.status = SocketEventStatus::Accepted.into();
+				Signatures::from(self.sign_socket_message(msg))
+			},
+			SocketEventStatus::Accepted | SocketEventStatus::Rejected => {
+				is_external = true;
+				self.get_sorted_signatures(msg).await
+			},
+			SocketEventStatus::Executed | SocketEventStatus::Reverted => Signatures::default(),
+			_ => panic!(
+				"[{}]-[{}]-[{}] Unknown socket event status received: {:?}",
+				&self.client.get_chain_name(),
+				SUB_LOG_TARGET,
+				self.client.address(),
+				status
+			),
 		};
 		(signatures, is_external)
 	}
@@ -334,7 +321,7 @@ impl<T: JsonRpcClient> BridgeRelayBuilder for BridgeRelayHandler<T> {
 			.client
 			.contract_call(
 				self.client
-					.contracts
+					.protocol_contracts
 					.socket
 					.get_signatures(msg.clone().req_id, msg.clone().status),
 				"socket.get_signatures",
@@ -379,78 +366,74 @@ impl<T: JsonRpcClient> BridgeRelayHandler<T> {
 	/// Inbound-Requested or Outbound-Accepted sequence. This will let the sequence follow the
 	/// fail-case flow.
 	async fn process_reverted_transaction(&self, receipt: TransactionReceipt) {
-		// only handles owned transactions
-		if receipt.from == self.client.address() {
-			if let Some(tx) = self.client.get_transaction(receipt.transaction_hash).await {
-				// the reverted transaction must be execution of `poll()`
-				let selector = &tx.input[0..4];
-				let poll_selector = self
+		if let Some(tx) = self.client.get_transaction(receipt.transaction_hash).await {
+			// the reverted transaction must be execution of `poll()`
+			let tx_selector = &tx.input[0..4];
+			if tx_selector == self.poll_selector {
+				match self
 					.client
-					.contracts
+					.protocol_contracts
 					.socket
-					.abi()
-					.function("poll")
-					.expect(INVALID_CONTRACT_ABI)
-					.short_signature();
-				if selector == poll_selector {
-					match self
-						.client
-						.contracts
-						.socket
-						.decode_with_selector::<SerializedPoll, Bytes>(poll_selector, tx.input)
-					{
-						Ok(poll) => {
-							let prev_status = SocketEventStatus::from_u8(poll.msg.status);
-							let src_chain_id = ChainID::from_be_bytes(poll.msg.req_id.chain);
-							let dst_chain_id = ChainID::from_be_bytes(poll.msg.ins_code.chain);
-							let is_inbound = self.is_inbound_sequence(dst_chain_id);
+					.decode_with_selector::<SerializedPoll, Bytes>(self.poll_selector, tx.input)
+				{
+					Ok(poll) => {
+						let mut submit_msg = poll.msg.clone();
+						let sig_msg = poll.msg;
+						let prev_status = SocketEventStatus::from_u8(sig_msg.status);
+						let mut metadata = BridgeRelayMetadata::new(
+							self.is_inbound_sequence(ChainID::from_be_bytes(
+								sig_msg.ins_code.chain,
+							)),
+							SocketEventStatus::from_u8(submit_msg.status),
+							sig_msg.req_id.sequence,
+							ChainID::from_be_bytes(sig_msg.req_id.chain),
+							ChainID::from_be_bytes(sig_msg.ins_code.chain),
+						);
 
-							let mut submit_msg = poll.msg.clone();
-							let sig_msg = poll.msg;
+						if metadata.is_inbound
+							&& matches!(prev_status, SocketEventStatus::Requested)
+						{
+							// if inbound-Requested
+							submit_msg.status = SocketEventStatus::Failed.into();
+						} else if !metadata.is_inbound
+							&& matches!(prev_status, SocketEventStatus::Accepted)
+						{
+							// if outbound-Accepted
+							submit_msg.status = SocketEventStatus::Rejected.into();
+						} else {
+							// do not re-process
+							return;
+						}
+						metadata.status = SocketEventStatus::from_u8(submit_msg.status);
 
-							if is_inbound && matches!(prev_status, SocketEventStatus::Requested) {
-								// if inbound-Requested
-								submit_msg.status = SocketEventStatus::Failed.into();
-							} else if !is_inbound &&
-								matches!(prev_status, SocketEventStatus::Accepted)
-							{
-								// if outbound-Accepted
-								submit_msg.status = SocketEventStatus::Rejected.into();
-							} else {
-								return
-							}
+						log::info!(
+							target: &self.client.get_chain_name(),
+							"-[{}] ♻️  Re-Processed reverted relay transaction: {}, Reverted at: {:?}-{:?}",
+							sub_display_format(SUB_LOG_TARGET),
+							metadata,
+							receipt.block_number.unwrap(),
+							receipt.transaction_hash,
+						);
 
-							let metadata = BridgeRelayMetadata::new(
-								is_inbound,
-								SocketEventStatus::from_u8(submit_msg.status),
-								sig_msg.req_id.sequence,
-								src_chain_id,
-								dst_chain_id,
-							);
-
-							log::info!(
-								target: &self.client.get_chain_name(),
-								"-[{}] ♻️  Re-Processed reverted relay transaction: {}, Reverted at: {:?}-{:?}",
-								sub_display_format(SUB_LOG_TARGET),
-								metadata,
-								receipt.block_number.unwrap(),
-								receipt.transaction_hash,
-							);
-
-							self.send_socket_message(submit_msg, sig_msg, metadata, is_inbound)
-								.await;
-						},
-						Err(error) => {
-							// ignore for now if function input data decode fails
-							log::warn!(
-								target: &self.client.get_chain_name(),
-								"-[{}] ⚠️  Tried to re-process the reverted relay transaction but failed to decode function input: {}, Reverted at: {:?}-{:?}",
-								sub_display_format(SUB_LOG_TARGET),
-								error.to_string(),
-								receipt.block_number.unwrap(),
-								receipt.transaction_hash,
-							);
-							sentry::capture_message(
+						self.send_socket_message(
+							submit_msg,
+							sig_msg,
+							metadata.clone(),
+							metadata.is_inbound,
+						)
+						.await;
+					},
+					Err(error) => {
+						// ignore for now if function input data decode fails
+						log::warn!(
+							target: &self.client.get_chain_name(),
+							"-[{}] ⚠️  Tried to re-process the reverted relay transaction but failed to decode function input: {}, Reverted at: {:?}-{:?}",
+							sub_display_format(SUB_LOG_TARGET),
+							error.to_string(),
+							receipt.block_number.unwrap(),
+							receipt.transaction_hash,
+						);
+						sentry::capture_message(
 								format!(
 									"[{}]-[{}]-[{}] ⚠️  Tried to re-process the reverted relay transaction but failed to decode function input: {}, Reverted at: {:?}-{:?}",
 									&self.client.get_chain_name(),
@@ -463,8 +446,7 @@ impl<T: JsonRpcClient> BridgeRelayHandler<T> {
 								.as_str(),
 								sentry::Level::Warning,
 							);
-						},
-					}
+					},
 				}
 			}
 		}
@@ -516,10 +498,10 @@ impl<T: JsonRpcClient> BridgeRelayHandler<T> {
 		dst_chain_id: ChainID,
 	) -> ChainID {
 		match status {
-			SocketEventStatus::Requested |
-			SocketEventStatus::Failed |
-			SocketEventStatus::Executed |
-			SocketEventStatus::Reverted => dst_chain_id,
+			SocketEventStatus::Requested
+			| SocketEventStatus::Failed
+			| SocketEventStatus::Executed
+			| SocketEventStatus::Reverted => dst_chain_id,
 			SocketEventStatus::Accepted | SocketEventStatus::Rejected => src_chain_id,
 			_ => panic!(
 				"[{}]-[{}] Unknown socket event status received: {:?}",
@@ -538,9 +520,9 @@ impl<T: JsonRpcClient> BridgeRelayHandler<T> {
 		dst_chain_id: ChainID,
 	) -> ChainID {
 		match status {
-			SocketEventStatus::Requested |
-			SocketEventStatus::Executed |
-			SocketEventStatus::Reverted => src_chain_id,
+			SocketEventStatus::Requested
+			| SocketEventStatus::Executed
+			| SocketEventStatus::Reverted => src_chain_id,
 			SocketEventStatus::Accepted | SocketEventStatus::Rejected => dst_chain_id,
 			_ => panic!(
 				"[{}]-[{}] Unknown socket event status received: {:?}",
@@ -551,10 +533,23 @@ impl<T: JsonRpcClient> BridgeRelayHandler<T> {
 		}
 	}
 
-	/// Verifies whether the socket event status is `COMMITTED` or `ROLLBACKED`. If `true`,
-	/// inbound|outbound sequence has been ended. No further actions required.
-	fn is_sequence_ended(status: SocketEventStatus) -> bool {
-		matches!(status, SocketEventStatus::Committed | SocketEventStatus::Rollbacked)
+	/// Compare the request status recorded in source chain with event status to determine if the
+	/// event has already been committed or rollbacked.
+	async fn is_sequence_ended(&self, rid: &RequestID, src_chain_id: ChainID) -> bool {
+		if let Some(src_client) = &self.system_clients.get(&src_chain_id) {
+			let request = src_client
+				.contract_call(
+					src_client.protocol_contracts.socket.get_request(rid.clone()),
+					"socket.get_request",
+				)
+				.await;
+
+			return matches!(
+				SocketEventStatus::from_u8(request.field[0].clone().into()),
+				SocketEventStatus::Committed | SocketEventStatus::Rollbacked
+			);
+		}
+		false
 	}
 
 	/// Verifies whether the socket event is an inbound sequence.
@@ -568,7 +563,7 @@ impl<T: JsonRpcClient> BridgeRelayHandler<T> {
 	/// Verifies whether the current relayer was selected at the given round.
 	async fn is_selected_relayer(&self, round: U256) -> bool {
 		if self.client.metadata.is_native {
-			let relayer_manager = self.client.contracts.relayer_manager.as_ref().unwrap();
+			let relayer_manager = self.client.protocol_contracts.relayer_manager.as_ref().unwrap();
 			return self
 				.client
 				.contract_call(
@@ -579,11 +574,13 @@ impl<T: JsonRpcClient> BridgeRelayHandler<T> {
 					),
 					"relayer_manager.is_previous_selected_relayer",
 				)
-				.await
+				.await;
 		} else if let Some((_id, native_client)) =
 			self.system_clients.iter().find(|(_id, client)| client.metadata.is_native)
 		{
-			let relayer_manager = native_client.contracts.relayer_manager.as_ref().unwrap();
+			// always use the native client's contract. due to handle missed VSP's.
+			let relayer_manager =
+				native_client.protocol_contracts.relayer_manager.as_ref().unwrap();
 			return native_client
 				.contract_call(
 					relayer_manager.is_previous_selected_relayer(
@@ -593,7 +590,7 @@ impl<T: JsonRpcClient> BridgeRelayHandler<T> {
 					),
 					"relayer_manager.is_previous_selected_relayer",
 				)
-				.await
+				.await;
 		}
 		false
 	}
@@ -648,25 +645,6 @@ impl<T: JsonRpcClient> BridgeRelayHandler<T> {
 			}
 		}
 	}
-
-	/// Compare the request status recorded in source chain with event status to determine if the
-	/// event has already been committed or rollbacked.
-	async fn is_already_done(&self, rid: &RequestID, src_chain_id: ChainID) -> bool {
-		if let Some(src_client) = &self.system_clients.get(&src_chain_id) {
-			let request = src_client
-				.contract_call(
-					src_client.contracts.socket.get_request(rid.clone()),
-					"socket.get_request",
-				)
-				.await;
-
-			return matches!(
-				SocketEventStatus::from_u8(request.field[0].clone().into()),
-				SocketEventStatus::Committed | SocketEventStatus::Rollbacked
-			)
-		}
-		false
-	}
 }
 
 #[async_trait::async_trait]
@@ -685,12 +663,12 @@ impl<T: JsonRpcClient> BootstrapHandler for BridgeRelayHandler<T> {
 			self.process_confirmed_log(&log, true).await;
 		}
 
-		let mut bootstrap_count = self.bootstrapping_count.lock().await;
+		let mut bootstrap_count = self.bootstrap_shared_data.socket_bootstrap_count.lock().await;
 		*bootstrap_count += 1;
 
 		// If All thread complete the task, starts the blockManager
 		if *bootstrap_count == self.system_clients.len() as u8 {
-			let mut bootstrap_guard = self.bootstrap_states.write().await;
+			let mut bootstrap_guard = self.bootstrap_shared_data.bootstrap_states.write().await;
 
 			for state in bootstrap_guard.iter_mut() {
 				*state = BootstrapState::NormalStart;
@@ -707,11 +685,11 @@ impl<T: JsonRpcClient> BootstrapHandler for BridgeRelayHandler<T> {
 	async fn get_bootstrap_events(&self) -> Vec<Log> {
 		let mut logs = vec![];
 
-		if let Some(bootstrap_config) = &self.bootstrap_config {
+		if let Some(bootstrap_config) = &self.bootstrap_shared_data.bootstrap_config {
 			let round_info: RoundMetaData = if self.client.metadata.is_native {
 				self.client
 					.contract_call(
-						self.client.contracts.authority.round_info(),
+						self.client.protocol_contracts.authority.round_info(),
 						"authority.round_info",
 					)
 					.await
@@ -720,7 +698,7 @@ impl<T: JsonRpcClient> BootstrapHandler for BridgeRelayHandler<T> {
 			{
 				native_client
 					.contract_call(
-						native_client.contracts.authority.round_info(),
+						native_client.protocol_contracts.authority.round_info(),
 						"authority.round_info",
 					)
 					.await
@@ -751,7 +729,7 @@ impl<T: JsonRpcClient> BootstrapHandler for BridgeRelayHandler<T> {
 					std::cmp::min(from_block + BOOTSTRAP_BLOCK_CHUNK_SIZE - 1, to_block);
 
 				let filter = Filter::new()
-					.address(self.client.contracts.socket.address())
+					.address(self.client.protocol_contracts.socket.address())
 					.topic0(self.socket_signature)
 					.from_block(from_block)
 					.to_block(chunk_to_block);
@@ -766,7 +744,12 @@ impl<T: JsonRpcClient> BootstrapHandler for BridgeRelayHandler<T> {
 	}
 
 	async fn is_bootstrap_state_synced_as(&self, state: BootstrapState) -> bool {
-		self.bootstrap_states.read().await.iter().all(|s| *s == state)
+		self.bootstrap_shared_data
+			.bootstrap_states
+			.read()
+			.await
+			.iter()
+			.all(|s| *s == state)
 	}
 }
 
