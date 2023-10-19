@@ -26,18 +26,18 @@ const SUB_LOG_TARGET: &str = "price-oracle";
 
 /// The essential task that handles oracle price feedings.
 pub struct OraclePriceFeeder<T> {
-	/// The time schedule that represents when to send price feeds.
-	pub schedule: Schedule,
-	/// The primary source for fetching prices. (Coingecko)
-	pub primary_source: Vec<PriceFetchers<T>>,
-	/// The secondary source for fetching prices. (aggregated from external sources)
-	pub secondary_sources: Vec<PriceFetchers<T>>,
-	/// The event sender that sends messages to the event channel.
-	pub event_sender: Arc<EventSender>,
-	/// The pre-defined oracle ID's for each asset.
-	pub asset_oid: BTreeMap<String, H256>,
 	/// The `EthClient` to interact with the bifrost network.
 	pub client: Arc<EthClient<T>>,
+	/// The time schedule that represents when to send price feeds.
+	schedule: Schedule,
+	/// The primary source for fetching prices. (Coingecko)
+	primary_source: Vec<PriceFetchers<T>>,
+	/// The secondary source for fetching prices. (aggregated from external sources)
+	secondary_sources: Vec<PriceFetchers<T>>,
+	/// The event sender that sends messages to the event channel.
+	event_sender: Arc<EventSender>,
+	/// The pre-defined oracle ID's for each asset.
+	asset_oid: BTreeMap<String, H256>,
 	/// The vector that contains each `EthClient`.
 	system_clients: Vec<Arc<EthClient<T>>>,
 }
@@ -103,8 +103,8 @@ impl<T: JsonRpcClient + 'static> OraclePriceFeeder<T> {
 		let should_be_done_in = until - Utc::now();
 
 		if in_between {
-			let sleep_duration = should_be_done_in -
-				chrono::Duration::seconds(
+			let sleep_duration = should_be_done_in
+				- chrono::Duration::seconds(
 					rand::thread_rng().gen_range(0..=should_be_done_in.num_seconds()),
 				);
 
@@ -187,7 +187,7 @@ impl<T: JsonRpcClient + 'static> OraclePriceFeeder<T> {
 		}
 
 		if volume_weighted.is_empty() {
-			return Err(Error)
+			return Err(Error);
 		}
 
 		if !volume_weighted.contains_key("USDC") {
@@ -232,8 +232,8 @@ impl<T: JsonRpcClient + 'static> OraclePriceFeeder<T> {
 			}
 		}
 		for client in &self.system_clients {
-			if client.contracts.chainlink_usdc_usd.is_some() ||
-				client.contracts.chainlink_usdt_usd.is_some()
+			if client.aggregator_contracts.chainlink_usdc_usd.is_some()
+				|| client.aggregator_contracts.chainlink_usdt_usd.is_some()
 			{
 				if let Ok(fetcher) =
 					PriceFetchers::new(PriceSource::Chainlink, client.clone().into()).await
@@ -267,14 +267,16 @@ impl<T: JsonRpcClient + 'static> OraclePriceFeeder<T> {
 		oid_bytes_list: Vec<[u8; 32]>,
 		price_bytes_list: Vec<[u8; 32]>,
 	) -> TransactionRequest {
-		TransactionRequest::default().to(self.client.contracts.socket.address()).data(
-			self.client
-				.contracts
-				.socket
-				.oracle_aggregate_feeding(oid_bytes_list, price_bytes_list)
-				.calldata()
-				.unwrap(),
-		)
+		TransactionRequest::default()
+			.to(self.client.protocol_contracts.socket.address())
+			.data(
+				self.client
+					.protocol_contracts
+					.socket
+					.oracle_aggregate_feeding(oid_bytes_list, price_bytes_list)
+					.calldata()
+					.unwrap(),
+			)
 	}
 
 	/// Request send transaction to the target event channel.
@@ -325,7 +327,7 @@ impl<T: JsonRpcClient + 'static> OraclePriceFeeder<T> {
 
 	/// Verifies whether the current relayer was selected at the current round.
 	async fn is_selected_relayer(&self) -> bool {
-		let relayer_manager = self.client.contracts.relayer_manager.as_ref().unwrap();
+		let relayer_manager = self.client.protocol_contracts.relayer_manager.as_ref().unwrap();
 		self.client
 			.contract_call(
 				relayer_manager.is_selected_relayer(self.client.address(), false),

@@ -6,12 +6,18 @@ use ethers::types::U256;
 use serde::Deserialize;
 use tokio::time::sleep;
 
-pub const PRICE_FEEDER_SCHEDULE: &str = "0 */5 * * * * *"; // Every 5th minute.
-pub const ROUNDUP_EMITTER_SCHEDULE: &str = "*/15 * * * * * *"; // Every 15th second.
-pub const HEARTBEAT_SCHEDULE: &str = "0 * * * * * *"; // Every minute.
+/// The schedule definition for oracle price feeding. This will trigger on every 5th minute.
+pub const PRICE_FEEDER_SCHEDULE: &str = "0 */5 * * * * *";
+
+/// The schedule definition for roundup emissions. This will trigger on every 15th second.
+pub const ROUNDUP_EMITTER_SCHEDULE: &str = "*/15 * * * * * *";
+
+/// The scedule definition for heartbeats. This will trigger on every minute.
+pub const HEARTBEAT_SCHEDULE: &str = "0 * * * * * *";
 
 #[async_trait]
 pub trait PeriodicWorker {
+	/// Returns the schedule definition.
 	fn schedule(&self) -> Schedule;
 
 	/// Starts the periodic worker.

@@ -7,15 +7,15 @@ use ethers::{
 	providers::JsonRpcClient,
 	types::{Address, Filter, Log, TransactionRequest, U256},
 };
-use tokio::{sync::RwLock, time::sleep};
+use tokio::time::sleep;
 
 use br_client::eth::{
-	BootstrapHandler, EthClient, EventMessage, EventMetadata, EventSender, TxRequest,
-	VSPPhase1Metadata,
+	EthClient, EventMessage, EventMetadata, EventSender, TxRequest, VSPPhase1Metadata,
 };
 use br_primitives::{
 	authority::RoundMetaData,
-	cli::{BootstrapConfig, DEFAULT_BOOTSTRAP_ROUND_OFFSET},
+	bootstrap::{BootstrapHandler, BootstrapSharedData},
+	constants::DEFAULT_BOOTSTRAP_ROUND_OFFSET,
 	errors::INVALID_PERIODIC_SCHEDULE,
 	eth::{BootstrapState, GasCoefficient, RoundUpEventStatus, BOOTSTRAP_BLOCK_CHUNK_SIZE},
 	socket::{RoundUpSubmit, SerializedRoundUp, Signatures, SocketContractEvents},
@@ -27,17 +27,15 @@ const SUB_LOG_TARGET: &str = "roundup-emitter";
 
 pub struct RoundupEmitter<T> {
 	/// Current round number
-	pub current_round: U256,
+	current_round: U256,
 	/// The ethereum client for the Bifrost network.
-	pub client: Arc<EthClient<T>>,
+	client: Arc<EthClient<T>>,
 	/// The event sender that sends messages to the event channel.
-	pub event_sender: Arc<EventSender>,
+	event_sender: Arc<EventSender>,
 	/// The time schedule that represents when to check round info.
-	pub schedule: Schedule,
-	/// State of bootstrapping
-	pub bootstrap_states: Arc<RwLock<Vec<BootstrapState>>>,
-	/// Bootstrap config
-	pub bootstrap_config: Option<BootstrapConfig>,
+	schedule: Schedule,
+	/// The bootstrap shared data.
+	bootstrap_shared_data: Arc<BootstrapSharedData>,
 }
 
 #[async_trait::async_trait]
@@ -52,9 +50,9 @@ impl<T: JsonRpcClient> PeriodicWorker for RoundupEmitter<T> {
 		loop {
 			if self.is_bootstrap_state_synced_as(BootstrapState::BootstrapRoundUpPhase1).await {
 				self.bootstrap().await;
-				break
+				break;
 			} else if self.is_bootstrap_state_synced_as(BootstrapState::NormalStart).await {
-				break
+				break;
 			}
 
 			sleep(Duration::from_millis(self.client.metadata.call_interval)).await;
@@ -75,7 +73,7 @@ impl<T: JsonRpcClient> PeriodicWorker for RoundupEmitter<T> {
 				);
 
 				if !self.is_selected_relayer(latest_round).await {
-					continue
+					continue;
 				}
 
 				let new_relayers = self.fetch_validator_list(latest_round).await;
@@ -95,8 +93,7 @@ impl<T: JsonRpcClient> RoundupEmitter<T> {
 	pub fn new(
 		event_senders: Vec<Arc<EventSender>>,
 		clients: Vec<Arc<EthClient<T>>>,
-		bootstrap_states: Arc<RwLock<Vec<BootstrapState>>>,
-		bootstrap_config: Option<BootstrapConfig>,
+		bootstrap_shared_data: Arc<BootstrapSharedData>,
 	) -> Self {
 		let client = clients
 			.iter()
@@ -114,8 +111,7 @@ impl<T: JsonRpcClient> RoundupEmitter<T> {
 				.clone(),
 			schedule: Schedule::from_str(ROUNDUP_EMITTER_SCHEDULE)
 				.expect(INVALID_PERIODIC_SCHEDULE),
-			bootstrap_states,
-			bootstrap_config,
+			bootstrap_shared_data,
 		}
 	}
 
@@ -129,7 +125,7 @@ impl<T: JsonRpcClient> RoundupEmitter<T> {
 
 	/// Check relayer has selected in previous round
 	async fn is_selected_relayer(&self, round: U256) -> bool {
-		let relayer_manager = self.client.contracts.relayer_manager.as_ref().unwrap();
+		let relayer_manager = self.client.protocol_contracts.relayer_manager.as_ref().unwrap();
 		self.client
 			.contract_call(
 				relayer_manager.is_previous_selected_relayer(
@@ -144,7 +140,7 @@ impl<T: JsonRpcClient> RoundupEmitter<T> {
 
 	/// Fetch new validator list
 	async fn fetch_validator_list(&self, round: U256) -> Vec<Address> {
-		let relayer_manager = self.client.contracts.relayer_manager.as_ref().unwrap();
+		let relayer_manager = self.client.protocol_contracts.relayer_manager.as_ref().unwrap();
 		let mut addresses = self
 			.client
 			.contract_call(
@@ -165,14 +161,16 @@ impl<T: JsonRpcClient> RoundupEmitter<T> {
 		let sigs = Signatures::from(self.client.wallet.sign_message(&encoded_msg));
 		let round_up_submit = RoundUpSubmit { round, new_relayers, sigs };
 
-		TransactionRequest::default().to(self.client.contracts.socket.address()).data(
-			self.client
-				.contracts
-				.socket
-				.round_control_poll(round_up_submit)
-				.calldata()
-				.unwrap(),
-		)
+		TransactionRequest::default()
+			.to(self.client.protocol_contracts.socket.address())
+			.data(
+				self.client
+					.protocol_contracts
+					.socket
+					.round_control_poll(round_up_submit)
+					.calldata()
+					.unwrap(),
+			)
 	}
 
 	/// Request send transaction to the target event channel.
@@ -207,7 +205,10 @@ impl<T: JsonRpcClient> RoundupEmitter<T> {
 	/// Get the latest round index.
 	async fn get_latest_round(&self) -> U256 {
 		self.client
-			.contract_call(self.client.contracts.authority.latest_round(), "authority.latest_round")
+			.contract_call(
+				self.client.protocol_contracts.authority.latest_round(),
+				"authority.latest_round",
+			)
 			.await
 	}
 }
@@ -245,7 +246,7 @@ impl<T: JsonRpcClient> BootstrapHandler for RoundupEmitter<T> {
 		loop {
 			if next_poll_round == self.current_round + 1 {
 				// If RoundUp reached to latest round, escape loop
-				break
+				break;
 			} else if next_poll_round <= self.current_round {
 				// If RoundUp not reached to latest round, process round_control_poll
 				if self.is_selected_relayer(next_poll_round).await {
@@ -267,7 +268,7 @@ impl<T: JsonRpcClient> BootstrapHandler for RoundupEmitter<T> {
 
 					if next_poll_round < new_next_poll_round {
 						next_poll_round = new_next_poll_round;
-						break
+						break;
 					}
 
 					sleep(Duration::from_millis(self.client.metadata.call_interval)).await;
@@ -275,7 +276,7 @@ impl<T: JsonRpcClient> BootstrapHandler for RoundupEmitter<T> {
 			}
 		}
 
-		for state in self.bootstrap_states.write().await.iter_mut() {
+		for state in self.bootstrap_shared_data.bootstrap_states.write().await.iter_mut() {
 			if *state == BootstrapState::BootstrapRoundUpPhase1 {
 				*state = BootstrapState::BootstrapRoundUpPhase2;
 			}
@@ -285,10 +286,13 @@ impl<T: JsonRpcClient> BootstrapHandler for RoundupEmitter<T> {
 	async fn get_bootstrap_events(&self) -> Vec<Log> {
 		let mut round_up_events = vec![];
 
-		if let Some(bootstrap_config) = &self.bootstrap_config {
+		if let Some(bootstrap_config) = &self.bootstrap_shared_data.bootstrap_config {
 			let round_info: RoundMetaData = self
 				.client
-				.contract_call(self.client.contracts.authority.round_info(), "authority.round_info")
+				.contract_call(
+					self.client.protocol_contracts.authority.round_info(),
+					"authority.round_info",
+				)
 				.await;
 			let bootstrap_offset_height = self
 				.client
@@ -308,10 +312,10 @@ impl<T: JsonRpcClient> BootstrapHandler for RoundupEmitter<T> {
 					std::cmp::min(from_block + BOOTSTRAP_BLOCK_CHUNK_SIZE - 1, to_block);
 
 				let filter = Filter::new()
-					.address(self.client.contracts.socket.address())
+					.address(self.client.protocol_contracts.socket.address())
 					.topic0(
 						self.client
-							.contracts
+							.protocol_contracts
 							.socket
 							.abi()
 							.event("RoundUp")
@@ -342,6 +346,11 @@ impl<T: JsonRpcClient> BootstrapHandler for RoundupEmitter<T> {
 	}
 
 	async fn is_bootstrap_state_synced_as(&self, state: BootstrapState) -> bool {
-		self.bootstrap_states.read().await.iter().all(|s| *s == state)
+		self.bootstrap_shared_data
+			.bootstrap_states
+			.read()
+			.await
+			.iter()
+			.all(|s| *s == state)
 	}
 }
