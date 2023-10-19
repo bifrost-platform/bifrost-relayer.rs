@@ -38,9 +38,24 @@ pub struct RoundupEmitter<T> {
 	/// The sender that sends messages to the tx request channel.
 	tx_request_sender: Arc<TxRequestSender>,
 	/// The time schedule that represents when to check round info.
+	schedule: Schedule,
 	/// The bootstrap shared data.
 	bootstrap_shared_data: Arc<BootstrapSharedData>,
+}
 
+#[async_trait::async_trait]
+impl<T: JsonRpcClient> PeriodicWorker for RoundupEmitter<T> {
+	fn schedule(&self) -> Schedule {
+		self.schedule.clone()
+	}
+
+	async fn run(&mut self) {
+		self.current_round = self.get_latest_round().await;
+
+		loop {
+			if self.is_bootstrap_state_synced_as(BootstrapState::BootstrapRoundUpPhase1).await {
+				self.bootstrap().await;
+				break;
 			} else if self.is_bootstrap_state_synced_as(BootstrapState::NormalStart).await {
 				break;
 			}

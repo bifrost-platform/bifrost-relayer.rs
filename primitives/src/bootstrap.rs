@@ -10,11 +10,8 @@ use crate::{
 pub struct BootstrapSharedData {
 	/// The evm + non-evm providers length.
 	pub system_providers_len: usize,
-	/// The barrier used to lock the system until the socket bootstrap process is done.
 	pub socket_barrier: Arc<Barrier>,
 	/// The barrier used to lock the system until the roundup bootstrap process is done.
-	pub roundup_barrier: Arc<Barrier>,
-	/// The current number of finished socket bootstrap processes.
 	pub socket_bootstrap_count: Arc<Mutex<u8>>,
 	/// The current number of finished roundup bootstrap processes.
 	pub roundup_bootstrap_count: Arc<Mutex<u8>>,

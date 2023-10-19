@@ -315,7 +315,6 @@ impl<T: JsonRpcClient> TransactionTask<T> for Eip1559TransactionTask<T> {
 							self.handle_success_tx_receipt(SUB_LOG_TARGET, receipt, msg.metadata);
 						} else {
 							self.handle_failed_tx_receipt(SUB_LOG_TARGET, msg).await;
-						}
 					},
 					Err(error) => {
 						self.handle_failed_tx_request(SUB_LOG_TARGET, msg, &error).await;
