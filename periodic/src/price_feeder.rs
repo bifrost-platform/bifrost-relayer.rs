@@ -369,7 +369,7 @@ impl<T: JsonRpcClient + 'static> OraclePriceFeeder<T> {
 
 	/// Verifies whether the current relayer was selected at the current round.
 	async fn is_selected_relayer(&self) -> bool {
-		let relayer_manager = self.client.contracts.relayer_manager.as_ref().unwrap();
+		let relayer_manager = self.client.protocol_contracts.relayer_manager.as_ref().unwrap();
 		self.client
 			.contract_call(
 				relayer_manager.is_selected_relayer(self.client.address(), false),
