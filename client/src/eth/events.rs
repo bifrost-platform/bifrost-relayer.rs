@@ -37,8 +37,8 @@ pub const MAX_PRIORITY_FEE_COEFFICIENT: u64 = 2;
 
 #[derive(Clone, Debug)]
 pub struct BridgeRelayMetadata {
-	/// The bridge direction.
-	pub direction: String,
+	/// The bridge direction flag.
+	pub is_inbound: bool,
 	/// The bridge request status.
 	pub status: SocketEventStatus,
 	/// The bridge request sequence ID.
@@ -57,13 +57,7 @@ impl BridgeRelayMetadata {
 		src_chain_id: ChainID,
 		dst_chain_id: ChainID,
 	) -> Self {
-		Self {
-			direction: if is_inbound { "Inbound".to_string() } else { "Outbound".to_string() },
-			status,
-			sequence,
-			src_chain_id,
-			dst_chain_id,
-		}
+		Self { is_inbound, status, sequence, src_chain_id, dst_chain_id }
 	}
 }
 
@@ -72,7 +66,11 @@ impl Display for BridgeRelayMetadata {
 		write!(
 			f,
 			"Relay({}-{:?}-{:?}, {:?} -> {:?})",
-			self.direction, self.status, self.sequence, self.src_chain_id, self.dst_chain_id
+			if self.is_inbound { "Inbound".to_string() } else { "Outbound".to_string() },
+			self.status,
+			self.sequence,
+			self.src_chain_id,
+			self.dst_chain_id
 		)
 	}
 }
@@ -256,10 +254,12 @@ impl TxRequest {
 	/// Sets the `gas` field in the transaction to the provided.
 	pub fn gas(&self, estimated_gas: U256) -> Self {
 		match self {
-			TxRequest::Legacy(tx_request) =>
-				TxRequest::Legacy(tx_request.clone().gas(estimated_gas)),
-			TxRequest::Eip1559(tx_request) =>
-				TxRequest::Eip1559(tx_request.clone().gas(estimated_gas)),
+			TxRequest::Legacy(tx_request) => {
+				TxRequest::Legacy(tx_request.clone().gas(estimated_gas))
+			},
+			TxRequest::Eip1559(tx_request) => {
+				TxRequest::Eip1559(tx_request.clone().gas(estimated_gas))
+			},
 		}
 	}
 

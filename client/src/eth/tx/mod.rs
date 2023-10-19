@@ -35,7 +35,7 @@ where
 		let balance = client.get_balance(client.address()).await;
 		br_metrics::increase_rpc_calls(&client.get_chain_name());
 		if balance < fee {
-			return false
+			return false;
 		}
 		true
 	}
@@ -111,7 +111,7 @@ where
 		// 2. the txpool check flag is false
 		// 3. the client is BIFROST (native)
 		if !self.is_txpool_enabled() || !check_mempool || client.metadata.is_native {
-			return false
+			return false;
 		}
 
 		let (data, to, from) = (
@@ -128,7 +128,7 @@ where
 				if mempool_tx.to.unwrap_or_default() == *to && mempool_tx.input == *data {
 					// Trying gas escalating is not duplicate action
 					if mempool_tx.from == *from {
-						return false
+						return false;
 					}
 
 					sleep(self.duplicate_confirm_delay()).await;
@@ -143,7 +143,7 @@ where
 					} else {
 						br_metrics::increase_rpc_calls(&client.get_chain_name());
 						false
-					}
+					};
 				}
 			}
 		}

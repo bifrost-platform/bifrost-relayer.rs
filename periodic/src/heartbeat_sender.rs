@@ -15,11 +15,11 @@ const SUB_LOG_TARGET: &str = "heartbeat";
 /// The essential task that sending heartbeat transaction.
 pub struct HeartbeatSender<T> {
 	/// The time schedule that represents when to check heartbeat pulsed.
-	pub schedule: Schedule,
+	schedule: Schedule,
 	/// The event sender that sends messages to the event channel.
-	pub event_sender: Arc<EventSender>,
+	event_sender: Arc<EventSender>,
 	/// The `EthClient` to interact with the bifrost network.
-	pub client: Arc<EthClient<T>>,
+	client: Arc<EthClient<T>>,
 }
 
 #[async_trait::async_trait]
@@ -32,7 +32,7 @@ impl<T: JsonRpcClient> PeriodicWorker for HeartbeatSender<T> {
 		loop {
 			let address = self.client.address();
 
-			let relayer_manager = self.client.contracts.relayer_manager.as_ref().unwrap();
+			let relayer_manager = self.client.protocol_contracts.relayer_manager.as_ref().unwrap();
 			let is_selected = self
 				.client
 				.contract_call(
@@ -52,7 +52,7 @@ impl<T: JsonRpcClient> PeriodicWorker for HeartbeatSender<T> {
 				let round_info = self
 					.client
 					.contract_call(
-						self.client.contracts.authority.round_info(),
+						self.client.protocol_contracts.authority.round_info(),
 						"authority.round_info",
 					)
 					.await;
@@ -87,7 +87,7 @@ impl<T: JsonRpcClient> HeartbeatSender<T> {
 
 	/// Build `heartbeat` transaction.
 	fn build_transaction(&self) -> TransactionRequest {
-		let relayer_manager = self.client.contracts.relayer_manager.as_ref().unwrap();
+		let relayer_manager = self.client.protocol_contracts.relayer_manager.as_ref().unwrap();
 		TransactionRequest::default()
 			.to(relayer_manager.address())
 			.data(relayer_manager.heartbeat().calldata().unwrap())

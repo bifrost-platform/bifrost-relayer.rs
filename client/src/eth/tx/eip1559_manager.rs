@@ -88,12 +88,13 @@ impl<T: 'static + JsonRpcClient> Eip1559TransactionManager<T> {
 				br_metrics::increase_rpc_calls(&self.client.get_chain_name());
 				fees
 			},
-			Err(error) =>
+			Err(error) => {
 				self.handle_failed_get_estimated_eip1559_fees(
 					DEFAULT_CALL_RETRIES,
 					error.to_string(),
 				)
-				.await,
+				.await
+			},
 		}
 	}
 
@@ -253,7 +254,7 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> for Eip1559TransactionMan
 
 	async fn try_send_transaction(&self, mut msg: EventMessage) {
 		if msg.retries_remaining == 0 {
-			return
+			return;
 		}
 
 		// sets a random delay on external chain transactions on first try
@@ -274,8 +275,9 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> for Eip1559TransactionMan
 							as u64,
 					)
 				},
-				Err(error) =>
-					return self.handle_failed_gas_estimation(SUB_LOG_TARGET, msg, &error).await,
+				Err(error) => {
+					return self.handle_failed_gas_estimation(SUB_LOG_TARGET, msg, &error).await
+				},
 			};
 		msg.tx_request = msg.tx_request.gas(estimated_gas);
 
@@ -311,7 +313,7 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> for Eip1559TransactionMan
 
 			match result {
 				Ok(pending_tx) => match pending_tx.await {
-					Ok(receipt) =>
+					Ok(receipt) => {
 						if let Some(receipt) = receipt {
 							self.handle_success_tx_receipt(
 								SUB_LOG_TARGET,
@@ -320,7 +322,8 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> for Eip1559TransactionMan
 							);
 						} else {
 							self.handle_failed_tx_receipt(SUB_LOG_TARGET, msg).await;
-						},
+						}
+					},
 					Err(error) => {
 						self.handle_failed_tx_request(SUB_LOG_TARGET, msg, &error).await;
 					},

@@ -45,7 +45,7 @@ impl ethers::contract::EthLogDecode for SocketEvents {
 		Self: Sized,
 	{
 		if let Ok(decoded) = Socket::decode_log(log) {
-			return Ok(SocketEvents::Socket(decoded))
+			return Ok(SocketEvents::Socket(decoded));
 		}
 		Err(ethers::abi::Error::InvalidData)
 	}
@@ -165,7 +165,11 @@ pub trait BridgeRelayBuilder {
 	/// Builds the `poll()` function call data.
 	fn build_poll_call_data(&self, msg: SocketMessage, sigs: Signatures) -> Bytes;
 
-	/// Builds the `poll()` transaction request.
+	/// Builds the `poll()` transaction request. `submit_msg` is the `Socket` event message used for transaction submission
+	/// and `sig_msg` is the `Socket` event message used for signature construction.
+	///
+	/// This method returns an `Option` in order to bypass unknown chain events.
+	/// Possibly can happen when a new chain definition hasn't been added to the operator's config.
 	async fn build_transaction(
 		&self,
 		submit_msg: SocketMessage,
@@ -174,9 +178,13 @@ pub trait BridgeRelayBuilder {
 		relay_tx_chain_id: ChainID,
 	) -> Option<BuiltRelayTransaction>;
 
-	/// Build the signatures required to request `poll()` and returns a flag which represents
-	/// whether the it should be processed to an external chain.
-	async fn build_signatures(&self, msg: SocketMessage, is_inbound: bool) -> (Signatures, bool);
+	/// Build the signatures required to request an inbound `poll()` and returns a flag which represents
+	/// whether the relay transaction should be processed to an external chain.
+	async fn build_inbound_signatures(&self, msg: SocketMessage) -> (Signatures, bool);
+
+	/// Build the signatures required to request an outbound `poll()` and returns a flag which represents
+	/// whether the relay transaction should be processed to an external chain.
+	async fn build_outbound_signatures(&self, msg: SocketMessage) -> (Signatures, bool);
 
 	/// Encodes the given socket message to bytes.
 	fn encode_socket_message(&self, msg: SocketMessage) -> Vec<u8>;
