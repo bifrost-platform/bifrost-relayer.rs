@@ -36,12 +36,12 @@ pub const MAX_FEE_COEFFICIENT: u64 = 2;
 pub const MAX_PRIORITY_FEE_COEFFICIENT: u64 = 2;
 
 #[derive(Clone, Debug)]
-pub struct BridgeRelayMetadata {
-	/// The bridge direction flag.
+pub struct SocketRelayMetadata {
+	/// The socket relay direction flag.
 	pub is_inbound: bool,
-	/// The bridge request status.
+	/// The socket event status.
 	pub status: SocketEventStatus,
-	/// The bridge request sequence ID.
+	/// The socket request sequence ID.
 	pub sequence: u128,
 	/// The source chain ID.
 	pub src_chain_id: ChainID,
@@ -49,7 +49,7 @@ pub struct BridgeRelayMetadata {
 	pub dst_chain_id: ChainID,
 }
 
-impl BridgeRelayMetadata {
+impl SocketRelayMetadata {
 	pub fn new(
 		is_inbound: bool,
 		status: SocketEventStatus,
@@ -61,7 +61,7 @@ impl BridgeRelayMetadata {
 	}
 }
 
-impl Display for BridgeRelayMetadata {
+impl Display for SocketRelayMetadata {
 	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
 		write!(
 			f,
@@ -185,7 +185,7 @@ impl Display for FlushMetadata {
 
 #[derive(Clone, Debug)]
 pub enum EventMetadata {
-	BridgeRelay(BridgeRelayMetadata),
+	SocketRelay(SocketRelayMetadata),
 	PriceFeed(PriceFeedMetadata),
 	VSPPhase1(VSPPhase1Metadata),
 	VSPPhase2(VSPPhase2Metadata),
@@ -199,7 +199,7 @@ impl Display for EventMetadata {
 			f,
 			"{}",
 			match self {
-				EventMetadata::BridgeRelay(metadata) => metadata.to_string(),
+				EventMetadata::SocketRelay(metadata) => metadata.to_string(),
 				EventMetadata::PriceFeed(metadata) => metadata.to_string(),
 				EventMetadata::VSPPhase1(metadata) => metadata.to_string(),
 				EventMetadata::VSPPhase2(metadata) => metadata.to_string(),

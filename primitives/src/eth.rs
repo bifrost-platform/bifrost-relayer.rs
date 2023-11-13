@@ -38,8 +38,8 @@ pub struct ProviderMetadata {
 	pub get_logs_batch_size: U64,
 	/// The `get_block` request interval in milliseconds.
 	pub call_interval: u64,
-	/// Bridge direction when bridge event points this chain as destination.
-	pub if_destination_chain: BridgeDirection,
+	/// Relay direction when CCCP event points this chain as destination.
+	pub if_destination_chain: RelayDirection,
 	/// The flag whether the chain is Bifrost(native) or an external chain.
 	pub is_native: bool,
 }
@@ -61,8 +61,8 @@ impl ProviderMetadata {
 			call_interval,
 			is_native,
 			if_destination_chain: match is_native {
-				true => BridgeDirection::Inbound,
-				false => BridgeDirection::Outbound,
+				true => RelayDirection::Inbound,
+				false => RelayDirection::Outbound,
 			},
 		}
 	}
@@ -235,8 +235,8 @@ impl From<SocketEventStatus> for u8 {
 }
 
 #[derive(Clone, Copy, Debug)]
-/// The CCCP protocols bridge direction.
-pub enum BridgeDirection {
+/// The CCCP protocols relay direction.
+pub enum RelayDirection {
 	/// From external network, to bifrost network.
 	Inbound,
 	/// From bifrost network, to external network.
@@ -252,8 +252,8 @@ pub enum BootstrapState {
 	BootstrapRoundUpPhase1,
 	/// phase 1-2. bootstrap for RoundUp event
 	BootstrapRoundUpPhase2,
-	/// phase 2. bootstrap for Bridge event
-	BootstrapBridgeRelay,
+	/// phase 2. bootstrap for Socket event
+	BootstrapSocketRelay,
 	/// phase 3. process for latest block as normal
 	NormalStart,
 }

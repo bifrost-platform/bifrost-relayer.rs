@@ -161,7 +161,7 @@ impl From<Signature> for Signatures {
 
 #[async_trait::async_trait]
 /// The client to interact with the `Socket` contract instance.
-pub trait BridgeRelayBuilder {
+pub trait SocketRelayBuilder {
 	/// Builds the `poll()` function call data.
 	fn build_poll_call_data(&self, msg: SocketMessage, sigs: Signatures) -> Bytes;
 

@@ -373,7 +373,7 @@ impl<T: JsonRpcClient> BootstrapHandler for RoundupRelayHandler<T> {
 		{
 			// set all of state to BootstrapSocket
 			for state in bootstrap_guard.iter_mut() {
-				*state = BootstrapState::BootstrapBridgeRelay;
+				*state = BootstrapState::BootstrapSocketRelay;
 			}
 		}
 

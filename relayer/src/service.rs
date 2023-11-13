@@ -10,8 +10,9 @@ use futures::FutureExt;
 use sc_service::{config::PrometheusConfig, Error as ServiceError, TaskManager};
 
 use br_client::eth::{
-	BlockManager, BridgeRelayHandler, Eip1559TransactionManager, EthClient, EventSender, Handler,
-	LegacyTransactionManager, RoundupRelayHandler, TransactionManager, WalletManager,
+	BlockManager, Eip1559TransactionManager, EthClient, EventSender, Handler,
+	LegacyTransactionManager, RoundupRelayHandler, SocketRelayHandler, TransactionManager,
+	WalletManager,
 };
 use br_periodic::{
 	heartbeat_sender::HeartbeatSender, roundup_emitter::RoundupEmitter, OraclePriceFeeder,
@@ -69,7 +70,7 @@ fn construct_periodics(
 	PeriodicDeps { heartbeat_sender, oracle_price_feeder, roundup_emitter }
 }
 
-/// Initializes `BridgeRelay` & `RoundUp` handlers.
+/// Initializes `Socket` & `RoundUp` handlers.
 fn construct_handlers(
 	config: &Configuration,
 	manager_deps: &ManagerDeps,
@@ -80,8 +81,8 @@ fn construct_handlers(
 
 	config.relayer_config.handler_configs.iter().for_each(|handler_config| {
 		match handler_config.handler_type {
-			HandlerType::BridgeRelay => handler_config.watch_list.iter().for_each(|target| {
-				handlers.0.push(BridgeRelayHandler::new(
+			HandlerType::Socket => handler_config.watch_list.iter().for_each(|target| {
+				handlers.0.push(SocketRelayHandler::new(
 					*target,
 					event_senders.clone(),
 					block_managers.get(target).expect(INVALID_CHAIN_ID).sender.subscribe(),
@@ -103,7 +104,7 @@ fn construct_handlers(
 			},
 		}
 	});
-	HandlerDeps { bridge_relay_handlers: handlers.0, roundup_relay_handlers: handlers.1 }
+	HandlerDeps { socket_relay_handlers: handlers.0, roundup_relay_handlers: handlers.1 }
 }
 
 /// Initializes the `EthClient`, `TransactionManager`, `BlockManager`, `EventSender` for each chain.
@@ -215,7 +216,7 @@ fn spawn_relayer_tasks(
 	let ManagerDeps { tx_managers, block_managers, clients: _, event_senders: _ } = manager_deps;
 	let PeriodicDeps { mut heartbeat_sender, mut oracle_price_feeder, mut roundup_emitter } =
 		periodic_deps;
-	let HandlerDeps { bridge_relay_handlers, roundup_relay_handlers } = handler_deps;
+	let HandlerDeps { socket_relay_handlers, roundup_relay_handlers } = handler_deps;
 
 	// spawn legacy transaction managers
 	tx_managers.0.into_iter().for_each(|mut tx_manager| {
@@ -255,8 +256,8 @@ fn spawn_relayer_tasks(
 		async move { oracle_price_feeder.run().await },
 	);
 
-	// spawn bridge relay handlers
-	bridge_relay_handlers.into_iter().for_each(|mut handler| {
+	// spawn socket relay handlers
+	socket_relay_handlers.into_iter().for_each(|mut handler| {
 		let socket_barrier_clone = socket_barrier.clone();
 		let is_bootstrapped = bootstrap_states.clone();
 
@@ -265,7 +266,7 @@ fn spawn_relayer_tasks(
 				format!(
 					"{}-{}-handler",
 					handler.client.get_chain_name(),
-					HandlerType::BridgeRelay.to_string(),
+					HandlerType::Socket.to_string(),
 				)
 				.into_boxed_str(),
 			),
@@ -277,7 +278,7 @@ fn spawn_relayer_tasks(
 				let mut guard = is_bootstrapped.write().await;
 				if guard.iter().all(|s| *s == BootstrapState::BootstrapRoundUpPhase2) {
 					for state in guard.iter_mut() {
-						*state = BootstrapState::BootstrapBridgeRelay;
+						*state = BootstrapState::BootstrapSocketRelay;
 					}
 				}
 				drop(guard);
@@ -439,8 +440,8 @@ struct PeriodicDeps {
 }
 
 struct HandlerDeps {
-	/// The `BridgeRelayHandler`'s for each specified chain.
-	bridge_relay_handlers: Vec<BridgeRelayHandler<Http>>,
+	/// The `SocketRelayHandler`'s for each specified chain.
+	socket_relay_handlers: Vec<SocketRelayHandler<Http>>,
 	/// The `RoundupRelayHandler`'s for each specified chain.
 	roundup_relay_handlers: Vec<RoundupRelayHandler<Http>>,
 }

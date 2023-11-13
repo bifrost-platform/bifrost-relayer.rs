@@ -103,6 +103,10 @@ pub struct EVMProvider {
 	pub socket_address: String,
 	/// Vault contract address
 	pub vault_address: String,
+	/// Socket contract address (v2)
+	pub socket_v2_address: String,
+	/// Vault contract address (v2)
+	pub vault_v2_address: String,
 	/// Authority contract address
 	pub authority_address: String,
 	/// Relayer manager contract address (BIFROST only)
@@ -117,8 +121,8 @@ pub struct EVMProvider {
 
 #[derive(Debug, Clone, Deserialize, PartialEq)]
 pub enum HandlerType {
-	/// BridgeRelay handler
-	BridgeRelay,
+	/// Socket handler
+	Socket,
 	/// Roundup handler
 	Roundup,
 }
@@ -126,7 +130,7 @@ pub enum HandlerType {
 impl ToString for HandlerType {
 	fn to_string(&self) -> String {
 		match *self {
-			HandlerType::BridgeRelay => "BridgeRelay".to_string(),
+			HandlerType::Socket => "Socket".to_string(),
 			HandlerType::Roundup => "Roundup".to_string(),
 		}
 	}
