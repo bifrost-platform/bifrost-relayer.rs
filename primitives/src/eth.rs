@@ -7,8 +7,7 @@ use ethers::{
 
 use crate::{
 	authority::AuthorityContract, chainlink_aggregator::ChainlinkContract,
-	relayer_manager::RelayerManagerContract, socket::SocketContract, vault::VaultContract,
-	INVALID_CONTRACT_ADDRESS,
+	relayer_manager::RelayerManagerContract, socket::SocketContract, INVALID_CONTRACT_ADDRESS,
 };
 
 /// The type of EVM chain ID's.
@@ -111,29 +110,25 @@ impl<T: JsonRpcClient> AggregatorContracts<T> {
 pub struct ProtocolContracts<T> {
 	/// SocketContract
 	pub socket: SocketContract<Provider<T>>,
-	/// VaultContract
-	pub vault: VaultContract<Provider<T>>,
 	/// AuthorityContract
 	pub authority: AuthorityContract<Provider<T>>,
 	/// RelayerManagerContract (Bifrost only)
 	pub relayer_manager: Option<RelayerManagerContract<Provider<T>>>,
+	/// SocketV2Contract
+	pub socket_v2: Option<SocketContract<Provider<T>>>,
 }
 
 impl<T: JsonRpcClient> ProtocolContracts<T> {
 	pub fn new(
 		provider: Arc<Provider<T>>,
 		socket_address: String,
-		vault_address: String,
 		authority_address: String,
 		relayer_manager_address: Option<String>,
+		socket_v2_address: Option<String>,
 	) -> Self {
 		Self {
 			socket: SocketContract::new(
 				H160::from_str(&socket_address).expect(INVALID_CONTRACT_ADDRESS),
-				provider.clone(),
-			),
-			vault: VaultContract::new(
-				H160::from_str(&vault_address).expect(INVALID_CONTRACT_ADDRESS),
 				provider.clone(),
 			),
 			authority: AuthorityContract::new(
@@ -142,6 +137,12 @@ impl<T: JsonRpcClient> ProtocolContracts<T> {
 			),
 			relayer_manager: relayer_manager_address.map(|address| {
 				RelayerManagerContract::new(
+					H160::from_str(&address).expect(INVALID_CONTRACT_ADDRESS),
+					provider.clone(),
+				)
+			}),
+			socket_v2: socket_v2_address.map(|address| {
+				SocketContract::new(
 					H160::from_str(&address).expect(INVALID_CONTRACT_ADDRESS),
 					provider.clone(),
 				)

@@ -186,9 +186,7 @@ impl<T: JsonRpcClient> Handler for SocketRelayHandler<T> {
 	}
 
 	fn is_target_contract(&self, log: &Log) -> bool {
-		if log.address == self.client.protocol_contracts.socket.address()
-			|| log.address == self.client.protocol_contracts.vault.address()
-		{
+		if log.address == self.client.protocol_contracts.socket.address() {
 			return true;
 		}
 		false
