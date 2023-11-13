@@ -1,7 +1,7 @@
 use std::{collections::BTreeMap, str::FromStr, sync::Arc, time::Duration};
 
 use ethers::{
-	abi::{RawLog, Token},
+	abi::{ParamType, RawLog, Token},
 	prelude::decode_logs,
 	providers::JsonRpcClient,
 	types::{Bytes, Filter, Log, Signature, TransactionReceipt, TransactionRequest, H256, U256},
@@ -15,7 +15,7 @@ use br_primitives::{
 	constants::DEFAULT_BOOTSTRAP_ROUND_OFFSET,
 	eth::{
 		BootstrapState, BuiltRelayTransaction, ChainID, GasCoefficient, RecoveredSignature,
-		RelayDirection, SocketEventStatus, BOOTSTRAP_BLOCK_CHUNK_SIZE,
+		RelayDirection, SocketEventStatus, SocketVariants, BOOTSTRAP_BLOCK_CHUNK_SIZE,
 	},
 	socket::{
 		PollSubmit, RequestID, SerializedPoll, Signatures, SocketEvents, SocketMessage,
@@ -28,6 +28,8 @@ use crate::eth::{
 	BlockMessage, EthClient, EventMessage, EventMetadata, EventSender, Handler,
 	SocketRelayMetadata, TxRequest,
 };
+
+use super::v2::V2Handler;
 
 const SUB_LOG_TARGET: &str = "socket-handler";
 
@@ -95,6 +97,72 @@ impl<T: JsonRpcClient> SocketRelayHandler<T> {
 }
 
 #[async_trait::async_trait]
+impl<T: JsonRpcClient> V2Handler for SocketRelayHandler<T> {
+	async fn process_confirmed_log(&self, _log: &Log, _is_bootstrap: bool) {}
+
+	fn is_target_contract(&self, log: &Log) -> bool {
+		if let Some(socket_v2) = &self.client.protocol_contracts.socket_v2 {
+			if log.address == socket_v2.address() {
+				return true;
+			}
+		}
+		false
+	}
+
+	fn is_version2(&self, msg: &SocketMessage) -> bool {
+		let v1_variants = Bytes::from_str("0x00").unwrap();
+		let raw_variants = &msg.params.variants;
+		if raw_variants == &v1_variants {
+			return false;
+		}
+		true
+	}
+
+	fn decode_msg_variants(&self, raw_variants: &Bytes) -> SocketVariants {
+		match ethers::abi::decode(
+			&[ParamType::FixedBytes(4), ParamType::Address, ParamType::Uint(256), ParamType::Bytes],
+			&raw_variants,
+		) {
+			Ok(variants) => {
+				let mut result = SocketVariants::default();
+				variants.into_iter().for_each(|variant| match variant {
+					Token::FixedBytes(source_chain) => {
+						result.source_chain = Bytes::from(source_chain);
+					},
+					Token::Address(sender) => {
+						result.sender = sender;
+					},
+					Token::Uint(gas_limit) => result.gas_limit = gas_limit,
+					Token::Bytes(data) => {
+						result.data = Bytes::from(data);
+					},
+					_ => {
+						panic!(
+							"[{}]-[{}]-[{}] Invalid Socket::variants received: {:?}",
+							&self.client.get_chain_name(),
+							SUB_LOG_TARGET,
+							self.client.address(),
+							raw_variants,
+						);
+					},
+				});
+				return result;
+			},
+			Err(error) => {
+				panic!(
+					"[{}]-[{}]-[{}] Invalid Socket::variants received: {:?}, Error: {}",
+					&self.client.get_chain_name(),
+					SUB_LOG_TARGET,
+					self.client.address(),
+					raw_variants,
+					error
+				)
+			},
+		}
+	}
+}
+
+#[async_trait::async_trait]
 impl<T: JsonRpcClient> Handler for SocketRelayHandler<T> {
 	async fn run(&mut self) {
 		loop {
@@ -115,8 +183,12 @@ impl<T: JsonRpcClient> Handler for SocketRelayHandler<T> {
 
 				let mut stream = tokio_stream::iter(block_msg.target_logs);
 				while let Some(log) = stream.next().await {
-					if self.is_target_contract(&log) && self.is_target_event(log.topics[0]) {
-						self.process_confirmed_log(&log, false).await;
+					// TODO: update required
+					if (Handler::is_target_contract(self, &log)
+						|| V2Handler::is_target_contract(self, &log))
+						&& self.is_target_event(log.topics[0])
+					{
+						Handler::process_confirmed_log(self, &log, false).await;
 					}
 				}
 			}
@@ -135,7 +207,7 @@ impl<T: JsonRpcClient> Handler for SocketRelayHandler<T> {
 			match decode_logs::<SocketEvents>(&[RawLog::from(log.clone())]) {
 				Ok(decoded) => match &decoded[0] {
 					SocketEvents::Socket(socket) => {
-						let metadata = SocketRelayMetadata::new(
+						let mut metadata = SocketRelayMetadata::new(
 							self.is_inbound_sequence(ChainID::from_be_bytes(
 								socket.msg.ins_code.chain,
 							)),
@@ -144,6 +216,12 @@ impl<T: JsonRpcClient> Handler for SocketRelayHandler<T> {
 							ChainID::from_be_bytes(socket.msg.req_id.chain),
 							ChainID::from_be_bytes(socket.msg.ins_code.chain),
 						);
+						if V2Handler::is_version2(self, &socket.msg) {
+							// TODO: call execution_filter
+							metadata.variants =
+								V2Handler::decode_msg_variants(self, &socket.msg.params.variants);
+							V2Handler::process_confirmed_log(self, log, is_bootstrap).await;
+						}
 
 						if !is_bootstrap {
 							log::info!(
@@ -658,7 +736,7 @@ impl<T: JsonRpcClient> BootstrapHandler for SocketRelayHandler<T> {
 
 		let mut stream = tokio_stream::iter(logs);
 		while let Some(log) = stream.next().await {
-			self.process_confirmed_log(&log, true).await;
+			Handler::process_confirmed_log(self, &log, true).await;
 		}
 
 		let mut bootstrap_count = self.bootstrap_shared_data.socket_bootstrap_count.lock().await;
@@ -784,5 +862,40 @@ mod tests {
 
 		let request = target_socket.get_request(request_id).call().await.unwrap();
 		println!("request : {:?}", request);
+	}
+
+	#[test]
+	fn test_socket_variants_decode() {
+		println!("default -> {}", Bytes::default());
+		println!("zero -> {}", Bytes::from_str("0x00").unwrap());
+		let raw_variants = Bytes::from_str("0x00000005000000000000000000000000000000000000000000000000000000000000000000000000000000005b38da6a701c568545dcfcb03fcb875f56beddc400000000000000000000000000000000000000000000000000000000000001c8000000000000000000000000000000000000000000000000000000000000008000000000000000000000000000000000000000000000000000000000000000012300000000000000000000000000000000000000000000000000000000000000").unwrap();
+		match ethers::abi::decode(
+			&[ParamType::FixedBytes(4), ParamType::Address, ParamType::Uint(256), ParamType::Bytes],
+			&raw_variants,
+		) {
+			Ok(variants) => {
+				log::info!("variants -> {:?}", variants);
+				let mut result = SocketVariants::default();
+				variants.into_iter().for_each(|variant| match variant {
+					Token::FixedBytes(source_chain) => {
+						result.source_chain = Bytes::from(source_chain);
+					},
+					Token::Address(sender) => {
+						result.sender = sender;
+					},
+					Token::Uint(gas_limit) => result.gas_limit = gas_limit,
+					Token::Bytes(data) => {
+						result.data = Bytes::from(data);
+					},
+					_ => {
+						panic!("decode failed");
+					},
+				});
+				println!("variants -> {:?}", result);
+			},
+			Err(error) => {
+				panic!("decode failed -> {}", error);
+			},
+		}
 	}
 }
