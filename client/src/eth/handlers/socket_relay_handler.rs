@@ -100,15 +100,6 @@ impl<T: JsonRpcClient> SocketRelayHandler<T> {
 impl<T: JsonRpcClient> V2Handler for SocketRelayHandler<T> {
 	async fn process_confirmed_log(&self, _log: &Log, _is_bootstrap: bool) {}
 
-	fn is_target_contract(&self, log: &Log) -> bool {
-		if let Some(socket_v2) = &self.client.protocol_contracts.socket_v2 {
-			if log.address == socket_v2.address() {
-				return true;
-			}
-		}
-		false
-	}
-
 	fn is_version2(&self, msg: &SocketMessage) -> bool {
 		let v1_variants = Bytes::from_str("0x00").unwrap();
 		let raw_variants = &msg.params.variants;
@@ -183,11 +174,7 @@ impl<T: JsonRpcClient> Handler for SocketRelayHandler<T> {
 
 				let mut stream = tokio_stream::iter(block_msg.target_logs);
 				while let Some(log) = stream.next().await {
-					// TODO: update required
-					if (Handler::is_target_contract(self, &log)
-						|| V2Handler::is_target_contract(self, &log))
-						&& self.is_target_event(log.topics[0])
-					{
+					if self.is_target_contract(&log) && self.is_target_event(log.topics[0]) {
 						Handler::process_confirmed_log(self, &log, false).await;
 					}
 				}

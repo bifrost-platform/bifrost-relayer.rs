@@ -101,8 +101,6 @@ pub struct EVMProvider {
 	pub get_logs_batch_size: Option<u64>,
 	/// Socket contract address
 	pub socket_address: String,
-	/// Socket contract address (v2)
-	pub socket_v2_address: Option<String>,
 	/// Authority contract address
 	pub authority_address: String,
 	/// Relayer manager contract address (BIFROST only)
