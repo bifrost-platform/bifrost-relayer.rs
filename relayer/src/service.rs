@@ -144,6 +144,7 @@ fn construct_managers(
 				Arc::new(provider.clone()),
 				evm_provider.socket_address.clone(),
 				evm_provider.authority_address.clone(),
+				evm_provider.router_address.clone(),
 				evm_provider.relayer_manager_address.clone(),
 			),
 			AggregatorContracts::new(

@@ -123,7 +123,7 @@ impl<T: JsonRpcClient> V2Handler for SocketRelayHandler<T> {
 					Token::Address(sender) => {
 						result.sender = sender;
 					},
-					Token::Uint(gas_limit) => result.gas_limit = gas_limit,
+					Token::Uint(max_fee) => result.max_fee = max_fee,
 					Token::Bytes(data) => {
 						result.data = Bytes::from(data);
 					},
@@ -907,7 +907,7 @@ mod tests {
 					Token::Address(sender) => {
 						result.sender = sender;
 					},
-					Token::Uint(gas_limit) => result.gas_limit = gas_limit,
+					Token::Uint(max_fee) => result.max_fee = max_fee,
 					Token::Bytes(data) => {
 						result.data = Bytes::from(data);
 					},

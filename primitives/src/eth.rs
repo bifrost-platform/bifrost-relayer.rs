@@ -114,6 +114,8 @@ pub struct ProtocolContracts<T> {
 	pub authority: AuthorityContract<Provider<T>>,
 	/// RelayerManagerContract (Bifrost only)
 	pub relayer_manager: Option<RelayerManagerContract<Provider<T>>>,
+	/// Router contract address
+	pub router_address: Address,
 }
 
 impl<T: JsonRpcClient> ProtocolContracts<T> {
@@ -121,6 +123,7 @@ impl<T: JsonRpcClient> ProtocolContracts<T> {
 		provider: Arc<Provider<T>>,
 		socket_address: String,
 		authority_address: String,
+		router_address: String,
 		relayer_manager_address: Option<String>,
 	) -> Self {
 		Self {
@@ -138,6 +141,7 @@ impl<T: JsonRpcClient> ProtocolContracts<T> {
 					provider.clone(),
 				)
 			}),
+			router_address: H160::from_str(&router_address).expect(INVALID_CONTRACT_ADDRESS),
 		}
 	}
 }
@@ -286,7 +290,7 @@ impl BuiltRelayTransaction {
 pub struct SocketVariants {
 	pub source_chain: Bytes,
 	pub sender: Address,
-	pub gas_limit: U256,
+	pub max_fee: U256,
 	pub data: Bytes,
 }
 
@@ -295,7 +299,7 @@ impl Default for SocketVariants {
 		Self {
 			source_chain: Bytes::default(),
 			sender: Address::default(),
-			gas_limit: U256::default(),
+			max_fee: U256::default(),
 			data: Bytes::default(),
 		}
 	}
