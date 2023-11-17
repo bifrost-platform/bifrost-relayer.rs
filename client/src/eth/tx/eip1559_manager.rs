@@ -1,7 +1,6 @@
 use crate::eth::{
-	generate_delay, EthClient, EventMessage, TransactionManager, TxRequest, DEFAULT_CALL_RETRIES,
-	DEFAULT_CALL_RETRY_INTERVAL_MS, DEFAULT_TX_RETRIES, MAX_FEE_COEFFICIENT,
-	MAX_PRIORITY_FEE_COEFFICIENT,
+	generate_delay, Eip1559GasMiddleware, EthClient, EventMessage, TransactionManager, TxRequest,
+	DEFAULT_TX_RETRIES, MAX_FEE_COEFFICIENT, MAX_PRIORITY_FEE_COEFFICIENT,
 };
 use async_trait::async_trait;
 use br_primitives::{
@@ -41,9 +40,6 @@ pub struct Eip1559TransactionManager<T> {
 	receiver: UnboundedReceiver<EventMessage>,
 	/// The flag whether the client has enabled txpool namespace.
 	is_txpool_enabled: bool,
-	/// The flag whether debug mode is enabled. If enabled, certain errors will be logged such as
-	/// gas estimation failures.
-	debug_mode: bool,
 	/// The minimum priority fee required.
 	min_priority_fee: U256,
 	/// If first relay transaction is stuck in mempool after waiting for this amount of time(ms),
@@ -55,7 +51,6 @@ impl<T: 'static + JsonRpcClient> Eip1559TransactionManager<T> {
 	/// Instantiates a new `Eip1559TransactionManager` instance.
 	pub fn new(
 		client: Arc<EthClient<T>>,
-		debug_mode: bool,
 		min_priority_fee: U256,
 		duplicate_confirm_delay: Option<u64>,
 	) -> (Self, UnboundedSender<EventMessage>) {
@@ -72,84 +67,11 @@ impl<T: 'static + JsonRpcClient> Eip1559TransactionManager<T> {
 				middleware,
 				receiver,
 				is_txpool_enabled: false,
-				debug_mode,
 				min_priority_fee,
 				duplicate_confirm_delay,
 			},
 			sender,
 		)
-	}
-
-	/// Gets a heuristic recommendation of max fee per gas and max priority fee per gas for EIP-1559
-	/// compatible transactions.
-	async fn get_estimated_eip1559_fees(&self) -> (U256, U256) {
-		match self.middleware.estimate_eip1559_fees(None).await {
-			Ok(fees) => {
-				br_metrics::increase_rpc_calls(&self.client.get_chain_name());
-				fees
-			},
-			Err(error) => {
-				self.handle_failed_get_estimated_eip1559_fees(
-					DEFAULT_CALL_RETRIES,
-					error.to_string(),
-				)
-				.await
-			},
-		}
-	}
-
-	/// Handles the failed eip1559 fees rpc request.
-	async fn handle_failed_get_estimated_eip1559_fees(
-		&self,
-		retries_remaining: u8,
-		error: String,
-	) -> (U256, U256) {
-		let mut retries = retries_remaining;
-		let mut last_error = error;
-
-		while retries > 0 {
-			br_metrics::increase_rpc_calls(&self.client.get_chain_name());
-
-			if self.debug_mode {
-				log::warn!(
-					target: &self.client.get_chain_name(),
-					"-[{}] ⚠️  Warning! Error encountered during get estimated eip1559 fees, Retries left: {:?}, Error: {}",
-					sub_display_format(SUB_LOG_TARGET),
-					retries - 1,
-					last_error
-				);
-				sentry::capture_message(
-					format!(
-						"[{}]-[{}]-[{}] ⚠️  Warning! Error encountered during get estimated eip1559 fees, Retries left: {:?}, Error: {}",
-						&self.client.get_chain_name(),
-						SUB_LOG_TARGET,
-						self.client.address(),
-						retries - 1,
-						last_error
-					)
-						.as_str(),
-					sentry::Level::Warning,
-				);
-			}
-
-			match self.middleware.estimate_eip1559_fees(None).await {
-				Ok(fees) => return fees,
-				Err(error) => {
-					sleep(Duration::from_millis(DEFAULT_CALL_RETRY_INTERVAL_MS)).await;
-					retries -= 1;
-					last_error = error.to_string();
-				},
-			}
-		}
-
-		panic!(
-			"[{}]-[{}]-[{}] {} [method: get_estimated_eip1559_fees]: {}",
-			&self.client.get_chain_name(),
-			SUB_LOG_TARGET,
-			self.client.address(),
-			PROVIDER_INTERNAL_ERROR,
-			last_error
-		);
 	}
 }
 
@@ -160,7 +82,7 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> for Eip1559TransactionMan
 	}
 
 	fn debug_mode(&self) -> bool {
-		self.debug_mode
+		self.client.debug_mode
 	}
 
 	fn get_client(&self) -> Arc<EthClient<T>> {
@@ -181,7 +103,7 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> for Eip1559TransactionMan
 		&self,
 		transaction: &Transaction,
 	) -> TxRequest {
-		let current_fees = self.get_estimated_eip1559_fees().await;
+		let current_fees = self.client.get_estimated_eip1559_fees().await;
 
 		let mut request: Eip1559TransactionRequest = transaction.into();
 		if let Some(prev_max_fee_per_gas) = transaction.max_fee_per_gas {
@@ -284,7 +206,7 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> for Eip1559TransactionMan
 		// check the txpool for transaction duplication prevention
 		if !(self.is_duplicate_relay(&msg.tx_request, msg.check_mempool).await) {
 			// no duplication found
-			let fees = self.get_estimated_eip1559_fees().await;
+			let fees = self.client.get_estimated_eip1559_fees().await;
 			let priority_fee = max(fees.1, self.min_priority_fee);
 			let max_fee_per_gas =
 				fees.0.saturating_add(priority_fee).saturating_mul(MAX_FEE_COEFFICIENT.into());

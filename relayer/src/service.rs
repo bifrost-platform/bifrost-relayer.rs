@@ -153,13 +153,13 @@ fn construct_managers(
 				evm_provider.chainlink_usdt_usd_address.clone(),
 				evm_provider.chainlink_dai_usd_address.clone(),
 			),
+			system.debug_mode.unwrap_or(false),
 		));
 
 		if evm_provider.is_relay_target {
 			if evm_provider.eip1559.unwrap_or(false) {
 				let (tx_manager, sender) = Eip1559TransactionManager::new(
 					client.clone(),
-					system.debug_mode.unwrap_or(false),
 					evm_provider.min_priority_fee.unwrap_or(DEFAULT_MIN_PRIORITY_FEE).into(),
 					evm_provider.duplicate_confirm_delay,
 				);
@@ -168,7 +168,6 @@ fn construct_managers(
 			} else {
 				let (tx_manager, sender) = LegacyTransactionManager::new(
 					client.clone(),
-					system.debug_mode.unwrap_or(false),
 					evm_provider.escalate_interval,
 					evm_provider.escalate_percentage,
 					evm_provider.min_gas_price,
