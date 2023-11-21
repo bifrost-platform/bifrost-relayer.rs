@@ -47,6 +47,8 @@ pub struct SocketRelayMetadata {
 	pub src_chain_id: ChainID,
 	/// The destination chain ID.
 	pub dst_chain_id: ChainID,
+	/// The receiver address for this request.
+	pub receiver: Address,
 	/// The socket variants requested for V2 logic.
 	pub variants: SocketVariants,
 }
@@ -58,6 +60,7 @@ impl SocketRelayMetadata {
 		sequence: u128,
 		src_chain_id: ChainID,
 		dst_chain_id: ChainID,
+		receiver: Address,
 	) -> Self {
 		Self {
 			is_inbound,
@@ -65,6 +68,7 @@ impl SocketRelayMetadata {
 			sequence,
 			src_chain_id,
 			dst_chain_id,
+			receiver,
 			variants: SocketVariants::default(),
 		}
 	}

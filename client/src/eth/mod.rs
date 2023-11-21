@@ -317,7 +317,7 @@ impl<T: JsonRpcClient> EthClient<T> {
 }
 
 #[async_trait::async_trait]
-impl<T: 'static + JsonRpcClient> LegacyGasMiddleware for EthClient<T> {
+impl<T: JsonRpcClient> LegacyGasMiddleware for EthClient<T> {
 	async fn get_gas_price(&self) -> U256 {
 		match self.provider.get_gas_price().await {
 			Ok(gas_price) => {
@@ -408,7 +408,7 @@ impl<T: 'static + JsonRpcClient> LegacyGasMiddleware for EthClient<T> {
 }
 
 #[async_trait::async_trait]
-impl<T: 'static + JsonRpcClient> Eip1559GasMiddleware for EthClient<T> {
+impl<T: JsonRpcClient> Eip1559GasMiddleware for EthClient<T> {
 	async fn get_estimated_eip1559_fees(&self) -> (U256, U256) {
 		match self.provider.estimate_eip1559_fees(None).await {
 			Ok(fees) => {

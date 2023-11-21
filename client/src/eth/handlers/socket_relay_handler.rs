@@ -202,6 +202,7 @@ impl<T: JsonRpcClient> Handler for SocketRelayHandler<T> {
 							socket.msg.req_id.sequence,
 							ChainID::from_be_bytes(socket.msg.req_id.chain),
 							ChainID::from_be_bytes(socket.msg.ins_code.chain),
+							socket.msg.params.to,
 						);
 						if V2Handler::is_version2(self, &socket.msg) {
 							// TODO: call execution_filter
@@ -451,6 +452,7 @@ impl<T: JsonRpcClient> SocketRelayHandler<T> {
 							sig_msg.req_id.sequence,
 							ChainID::from_be_bytes(sig_msg.req_id.chain),
 							ChainID::from_be_bytes(sig_msg.ins_code.chain),
+							sig_msg.params.to,
 						);
 
 						if metadata.is_inbound
