@@ -1,4 +1,4 @@
-use std::{collections::BTreeMap, str::FromStr, sync::Arc, time::Duration};
+use std::{collections::BTreeMap, marker::PhantomData, str::FromStr, sync::Arc, time::Duration};
 
 use ethers::{
 	abi::{ParamType, RawLog, Token},
@@ -29,12 +29,12 @@ use crate::eth::{
 	SocketRelayMetadata, TxRequest,
 };
 
-use super::v2::V2Handler;
+use super::v2::{CCCPFilter, V2Handler};
 
 const SUB_LOG_TARGET: &str = "socket-handler";
 
 /// The essential task that handles `socket relay` related events.
-pub struct SocketRelayHandler<T> {
+pub struct SocketRelayHandler<T, ExecutionFilter> {
 	/// The `EthClient` to interact with the connected blockchain.
 	pub client: Arc<EthClient<T>>,
 	/// The event senders that sends messages to the event channel. <chain_id, Arc<EventSender>>
@@ -49,9 +49,14 @@ pub struct SocketRelayHandler<T> {
 	poll_selector: [u8; 4],
 	/// The bootstrap shared data.
 	bootstrap_shared_data: Arc<BootstrapSharedData>,
+	_phantom_data: PhantomData<ExecutionFilter>,
 }
 
-impl<T: JsonRpcClient> SocketRelayHandler<T> {
+impl<T, ExecutionFilter> SocketRelayHandler<T, ExecutionFilter>
+where
+	Self: Send + Sync,
+	T: JsonRpcClient,
+{
 	/// Instantiates a new `SocketRelayHandler` instance.
 	pub fn new(
 		id: ChainID,
@@ -90,15 +95,31 @@ impl<T: JsonRpcClient> SocketRelayHandler<T> {
 				.expect(INVALID_CONTRACT_ABI)
 				.short_signature(),
 			client,
-			system_clients,
+			system_clients: system_clients.clone(),
 			bootstrap_shared_data,
+			_phantom_data: Default::default(),
 		}
 	}
 }
 
 #[async_trait::async_trait]
-impl<T: JsonRpcClient> V2Handler for SocketRelayHandler<T> {
-	async fn process_confirmed_log(&self, _log: &Log, _is_bootstrap: bool) {}
+impl<T, ExecutionFilter> V2Handler for SocketRelayHandler<T, ExecutionFilter>
+where
+	Self: Send + Sync,
+	T: JsonRpcClient,
+	ExecutionFilter: CCCPFilter<T>,
+{
+	async fn process_confirmed_log(&self, metadata: &SocketRelayMetadata) -> SocketEventStatus {
+		if let Some(client) = self.system_clients.get(&metadata.dst_chain_id) {
+			// Only handle V2 requests on Inbound::Requested or Outbound::Accepted
+			if (metadata.is_inbound && matches!(metadata.status, SocketEventStatus::Requested))
+				|| (!metadata.is_inbound && matches!(metadata.status, SocketEventStatus::Accepted))
+			{
+				return ExecutionFilter::try_filter(client, metadata.clone()).await;
+			}
+		}
+		metadata.status
+	}
 
 	fn is_version2(&self, msg: &SocketMessage) -> bool {
 		let v1_variants = Bytes::from_str("0x00").unwrap();
@@ -154,7 +175,12 @@ impl<T: JsonRpcClient> V2Handler for SocketRelayHandler<T> {
 }
 
 #[async_trait::async_trait]
-impl<T: JsonRpcClient> Handler for SocketRelayHandler<T> {
+impl<T, ExecutionFilter> Handler for SocketRelayHandler<T, ExecutionFilter>
+where
+	Self: Send + Sync,
+	T: JsonRpcClient,
+	ExecutionFilter: CCCPFilter<T>,
+{
 	async fn run(&mut self) {
 		loop {
 			if self.is_bootstrap_state_synced_as(BootstrapState::BootstrapSocketRelay).await {
@@ -194,22 +220,15 @@ impl<T: JsonRpcClient> Handler for SocketRelayHandler<T> {
 			match decode_logs::<SocketEvents>(&[RawLog::from(log.clone())]) {
 				Ok(decoded) => match &decoded[0] {
 					SocketEvents::Socket(socket) => {
+						let mut msg = socket.clone().msg;
 						let mut metadata = SocketRelayMetadata::new(
-							self.is_inbound_sequence(ChainID::from_be_bytes(
-								socket.msg.ins_code.chain,
-							)),
-							SocketEventStatus::from_u8(socket.msg.status),
-							socket.msg.req_id.sequence,
-							ChainID::from_be_bytes(socket.msg.req_id.chain),
-							ChainID::from_be_bytes(socket.msg.ins_code.chain),
-							socket.msg.params.to,
+							self.is_inbound_sequence(ChainID::from_be_bytes(msg.ins_code.chain)),
+							SocketEventStatus::from_u8(msg.status),
+							msg.req_id.sequence,
+							ChainID::from_be_bytes(msg.req_id.chain),
+							ChainID::from_be_bytes(msg.ins_code.chain),
+							msg.params.to,
 						);
-						if V2Handler::is_version2(self, &socket.msg) {
-							// TODO: call execution_filter
-							metadata.variants =
-								V2Handler::decode_msg_variants(self, &socket.msg.params.variants);
-							V2Handler::process_confirmed_log(self, log, is_bootstrap).await;
-						}
 
 						if !is_bootstrap {
 							log::info!(
@@ -222,18 +241,25 @@ impl<T: JsonRpcClient> Handler for SocketRelayHandler<T> {
 							);
 						}
 
-						if !self.is_selected_relayer(socket.msg.req_id.round_id.into()).await {
+						if !self.is_selected_relayer(&msg.req_id.round_id.into()).await {
 							// do nothing if not selected
 							return;
 						}
-						if self.is_sequence_ended(&socket.msg.req_id, metadata.src_chain_id).await {
+						if self.is_sequence_ended(&msg.req_id, metadata.src_chain_id).await {
 							// do nothing if protocol sequence ended
 							return;
 						}
 
+						if V2Handler::is_version2(self, &msg) {
+							metadata.variants =
+								V2Handler::decode_msg_variants(self, &msg.params.variants);
+							msg.status =
+								V2Handler::process_confirmed_log(self, &metadata).await.into();
+						}
+
 						self.send_socket_message(
-							socket.msg.clone(),
-							socket.msg.clone(),
+							msg.clone(),
+							msg.clone(),
 							metadata.clone(),
 							metadata.is_inbound,
 						)
@@ -264,7 +290,12 @@ impl<T: JsonRpcClient> Handler for SocketRelayHandler<T> {
 }
 
 #[async_trait::async_trait]
-impl<T: JsonRpcClient> SocketRelayBuilder for SocketRelayHandler<T> {
+impl<T, ExecutionFilter> SocketRelayBuilder for SocketRelayHandler<T, ExecutionFilter>
+where
+	Self: Send + Sync,
+	T: JsonRpcClient,
+	ExecutionFilter: CCCPFilter<T>,
+{
 	fn build_poll_call_data(&self, msg: SocketMessage, sigs: Signatures) -> Bytes {
 		let poll_submit = PollSubmit { msg, sigs, option: U256::default() };
 		self.client.protocol_contracts.socket.poll(poll_submit).calldata().unwrap()
@@ -425,7 +456,12 @@ impl<T: JsonRpcClient> SocketRelayBuilder for SocketRelayHandler<T> {
 	}
 }
 
-impl<T: JsonRpcClient> SocketRelayHandler<T> {
+impl<T, ExecutionFilter> SocketRelayHandler<T, ExecutionFilter>
+where
+	Self: Send + Sync,
+	T: JsonRpcClient,
+	ExecutionFilter: CCCPFilter<T>,
+{
 	/// (Re-)Handle the reverted relay transaction. This method only handles if it was an
 	/// Inbound-Requested or Outbound-Accepted sequence. This will let the sequence follow the
 	/// fail-case flow.
@@ -626,14 +662,14 @@ impl<T: JsonRpcClient> SocketRelayHandler<T> {
 	}
 
 	/// Verifies whether the current relayer was selected at the given round.
-	async fn is_selected_relayer(&self, round: U256) -> bool {
+	async fn is_selected_relayer(&self, round: &U256) -> bool {
 		if self.client.metadata.is_native {
 			let relayer_manager = self.client.protocol_contracts.relayer_manager.as_ref().unwrap();
 			return self
 				.client
 				.contract_call(
 					relayer_manager.is_previous_selected_relayer(
-						round,
+						*round,
 						self.client.address(),
 						false,
 					),
@@ -649,7 +685,7 @@ impl<T: JsonRpcClient> SocketRelayHandler<T> {
 			return native_client
 				.contract_call(
 					relayer_manager.is_previous_selected_relayer(
-						round,
+						*round,
 						self.client.address(),
 						false,
 					),
@@ -713,7 +749,12 @@ impl<T: JsonRpcClient> SocketRelayHandler<T> {
 }
 
 #[async_trait::async_trait]
-impl<T: JsonRpcClient> BootstrapHandler for SocketRelayHandler<T> {
+impl<T, ExecutionFilter> BootstrapHandler for SocketRelayHandler<T, ExecutionFilter>
+where
+	Self: Send + Sync,
+	T: JsonRpcClient,
+	ExecutionFilter: CCCPFilter<T>,
+{
 	async fn bootstrap(&self) {
 		log::info!(
 			target: &self.client.get_chain_name(),

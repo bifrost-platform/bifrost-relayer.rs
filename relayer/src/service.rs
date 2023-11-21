@@ -10,8 +10,8 @@ use futures::FutureExt;
 use sc_service::{config::PrometheusConfig, Error as ServiceError, TaskManager};
 
 use br_client::eth::{
-	BlockManager, Eip1559TransactionManager, EthClient, EventSender, Handler,
-	LegacyTransactionManager, RoundupRelayHandler, SocketRelayHandler, TransactionManager,
+	v2::CCCPExecutionFilter, BlockManager, Eip1559TransactionManager, EthClient, EventSender,
+	Handler, LegacyTransactionManager, RoundupRelayHandler, SocketRelayHandler, TransactionManager,
 	WalletManager,
 };
 use br_periodic::{
@@ -440,7 +440,7 @@ struct PeriodicDeps {
 
 struct HandlerDeps {
 	/// The `SocketRelayHandler`'s for each specified chain.
-	socket_relay_handlers: Vec<SocketRelayHandler<Http>>,
+	socket_relay_handlers: Vec<SocketRelayHandler<Http, CCCPExecutionFilter<Http>>>,
 	/// The `RoundupRelayHandler`'s for each specified chain.
 	roundup_relay_handlers: Vec<RoundupRelayHandler<Http>>,
 }
