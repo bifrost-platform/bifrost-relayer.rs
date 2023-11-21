@@ -95,7 +95,7 @@ where
 				.expect(INVALID_CONTRACT_ABI)
 				.short_signature(),
 			client,
-			system_clients: system_clients.clone(),
+			system_clients,
 			bootstrap_shared_data,
 			_phantom_data: Default::default(),
 		}
@@ -133,7 +133,7 @@ where
 	fn decode_msg_variants(&self, raw_variants: &Bytes) -> SocketVariants {
 		match ethers::abi::decode(
 			&[ParamType::FixedBytes(4), ParamType::Address, ParamType::Uint(256), ParamType::Bytes],
-			&raw_variants,
+			raw_variants,
 		) {
 			Ok(variants) => {
 				let mut result = SocketVariants::default();
@@ -158,7 +158,7 @@ where
 						);
 					},
 				});
-				return result;
+				result
 			},
 			Err(error) => {
 				panic!(

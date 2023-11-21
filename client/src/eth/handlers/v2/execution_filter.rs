@@ -14,9 +14,6 @@ use crate::eth::{
 
 const SUB_LOG_TARGET: &str = "execution-filter";
 
-const INBOUND_FILTER_FAILED: SocketEventStatus = SocketEventStatus::Failed;
-const OUTBOUND_FILTER_FAILED: SocketEventStatus = SocketEventStatus::Rejected;
-
 pub enum FilterResult {
 	/// Gas estimation has success. This contains the estimated gas amount.
 	ExecutionPossible(U256),
@@ -64,6 +61,7 @@ pub trait CCCPFilter<T> {
 	fn build_transaction_request(receiver: Address, data: Bytes) -> TransactionRequest;
 }
 
+/// The implementation used to verify and filter CCCP v2 requests.
 pub struct CCCPExecutionFilter<T>(PhantomData<T>);
 
 impl<T: JsonRpcClient> CCCPExecutionFilter<T> {
@@ -125,8 +123,8 @@ impl<T: JsonRpcClient> CCCPFilter<T> for CCCPExecutionFilter<T> {
 		metadata: SocketRelayMetadata,
 	) -> SocketEventStatus {
 		let failed_status = match metadata.is_inbound {
-			true => INBOUND_FILTER_FAILED,
-			false => OUTBOUND_FILTER_FAILED,
+			true => SocketEventStatus::Failed,
+			false => SocketEventStatus::Rejected,
 		};
 
 		match Self::filter_executable(client, metadata.clone()).await {

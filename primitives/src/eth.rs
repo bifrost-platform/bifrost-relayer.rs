@@ -286,21 +286,10 @@ impl BuiltRelayTransaction {
 	}
 }
 
-#[derive(Clone, Debug)]
+#[derive(Default, Clone, Debug)]
 pub struct SocketVariants {
 	pub source_chain: Bytes,
 	pub sender: Address,
 	pub max_fee: U256,
 	pub data: Bytes,
-}
-
-impl Default for SocketVariants {
-	fn default() -> Self {
-		Self {
-			source_chain: Bytes::default(),
-			sender: Address::default(),
-			max_fee: U256::default(),
-			data: Bytes::default(),
-		}
-	}
 }
