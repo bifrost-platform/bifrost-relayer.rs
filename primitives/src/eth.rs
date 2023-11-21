@@ -287,9 +287,14 @@ impl BuiltRelayTransaction {
 }
 
 #[derive(Default, Clone, Debug)]
+/// The variants of a single Socket message.
 pub struct SocketVariants {
+	/// The source chain ID in bytes.
 	pub source_chain: Bytes,
+	/// The request sender address.
 	pub sender: Address,
+	/// The maximum execution fee allowed for the request.
 	pub max_fee: U256,
+	/// The callData in bytes.
 	pub data: Bytes,
 }
