@@ -133,19 +133,36 @@ impl<T: JsonRpcClient> CCCPFilter<T> for CCCPExecutionFilter<T> {
 					FilterResult::FeePayable(fee) => {
 						match Self::filter_receiver_balance(client, metadata.clone(), fee).await {
 							FilterResult::SufficientFunds => return metadata.status,
-							FilterResult::InsufficientFunds => return failed_status,
+							FilterResult::InsufficientFunds => {
+								log::warn!(
+									target: &client.get_chain_name(),
+									"-[{}] ⚠️  Relay transaction failed filter [FilterResult::InsufficientFunds]: {}",
+									sub_display_format(SUB_LOG_TARGET),
+									metadata
+								);
+								return failed_status;
+							},
 							_ => panic!("Invalid FilterResult received"),
 						}
 					},
-					FilterResult::FeeLimitExceeds => return failed_status,
+					FilterResult::FeeLimitExceeds => {
+						log::warn!(
+							target: &client.get_chain_name(),
+							"-[{}] ⚠️  Relay transaction failed filter [FilterResult::FeeLimitExceeds]: {}",
+							sub_display_format(SUB_LOG_TARGET),
+							metadata
+						);
+						return failed_status;
+					},
 					_ => panic!("Invalid FilterResult received"),
 				}
 			},
 			FilterResult::ExecutionFailed(reason) => {
 				log::warn!(
 					target: &client.get_chain_name(),
-					"-[{}] ⚠️  Tried to execute the relay transaction but failed: {}",
+					"-[{}] ⚠️  Relay transaction failed filter [FilterResult::ExecutionFailed]: {}, {}",
 					sub_display_format(SUB_LOG_TARGET),
+					metadata,
 					reason
 				);
 				return failed_status;

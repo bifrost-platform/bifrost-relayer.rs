@@ -109,12 +109,24 @@ where
 	T: JsonRpcClient,
 	ExecutionFilter: CCCPFilter<T>,
 {
-	async fn process_confirmed_log(&self, metadata: &SocketRelayMetadata) -> SocketEventStatus {
+	async fn process_confirmed_log(
+		&self,
+		metadata: &SocketRelayMetadata,
+		is_bootstrap: bool,
+	) -> SocketEventStatus {
 		if let Some(client) = self.system_clients.get(&metadata.dst_chain_id) {
 			// Only handle V2 requests on Inbound::Requested or Outbound::Accepted
 			if (metadata.is_inbound && matches!(metadata.status, SocketEventStatus::Requested))
 				|| (!metadata.is_inbound && matches!(metadata.status, SocketEventStatus::Accepted))
 			{
+				if !is_bootstrap {
+					log::info!(
+						target: &self.client.get_chain_name(),
+						"-[{}] ⛓️ Run ExecutionFilter: {}",
+						sub_display_format(SUB_LOG_TARGET),
+						metadata
+					);
+				}
 				return ExecutionFilter::try_filter(client, metadata.clone()).await;
 			}
 		}
@@ -254,7 +266,9 @@ where
 							metadata.variants =
 								V2Handler::decode_msg_variants(self, &msg.params.variants);
 							msg.status =
-								V2Handler::process_confirmed_log(self, &metadata).await.into();
+								V2Handler::process_confirmed_log(self, &metadata, is_bootstrap)
+									.await
+									.into();
 						}
 
 						self.send_socket_message(
