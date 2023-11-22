@@ -19,14 +19,10 @@ pub enum FilterResult {
 	ExecutionPossible(U256),
 	/// Gas estimation has failed. This contains the failure reason.
 	ExecutionFailed(String),
-	/// The estimated execution fee for the current request is within the maximum payable fee. This contains the estimated fee.
-	FeePayable(U256),
+	/// The estimated execution fee for the current request is within the maximum payable fee.
+	FeePayable,
 	/// The estimated execution fee for the current request exceeds the maximum payable fee.
 	FeeLimitExceeds,
-	/// The receiver contract has sufficient balance to pay.
-	SufficientFunds,
-	/// The receiver contract has insufficient balance to pay.
-	InsufficientFunds,
 }
 
 #[async_trait::async_trait]
@@ -48,13 +44,6 @@ pub trait CCCPFilter<T> {
 		client: &Arc<EthClient<T>>,
 		metadata: SocketRelayMetadata,
 		gas: U256,
-	) -> FilterResult;
-
-	/// Verify whether the receiver contract has insufficient funds.
-	async fn filter_receiver_balance(
-		client: &Arc<EthClient<T>>,
-		metadata: SocketRelayMetadata,
-		fee: U256,
 	) -> FilterResult;
 
 	/// Build a raw transaction for the execution.
@@ -130,21 +119,7 @@ impl<T: JsonRpcClient> CCCPFilter<T> for CCCPExecutionFilter<T> {
 		match Self::filter_executable(client, metadata.clone()).await {
 			FilterResult::ExecutionPossible(gas) => {
 				match Self::filter_max_fee(client, metadata.clone(), gas).await {
-					FilterResult::FeePayable(fee) => {
-						match Self::filter_receiver_balance(client, metadata.clone(), fee).await {
-							FilterResult::SufficientFunds => return metadata.status,
-							FilterResult::InsufficientFunds => {
-								log::warn!(
-									target: &client.get_chain_name(),
-									"-[{}] ⚠️  Relay transaction failed filter [FilterResult::InsufficientFunds]: {}",
-									sub_display_format(SUB_LOG_TARGET),
-									metadata
-								);
-								return failed_status;
-							},
-							_ => panic!("Invalid FilterResult received"),
-						}
-					},
+					FilterResult::FeePayable => return metadata.status,
 					FilterResult::FeeLimitExceeds => {
 						log::warn!(
 							target: &client.get_chain_name(),
@@ -199,19 +174,7 @@ impl<T: JsonRpcClient> CCCPFilter<T> for CCCPExecutionFilter<T> {
 		if fee > metadata.variants.max_fee {
 			return FilterResult::FeeLimitExceeds;
 		}
-		FilterResult::FeePayable(fee)
-	}
-
-	async fn filter_receiver_balance(
-		client: &Arc<EthClient<T>>,
-		metadata: SocketRelayMetadata,
-		fee: U256,
-	) -> FilterResult {
-		let balance = client.get_balance(metadata.receiver).await;
-		if fee > balance {
-			return FilterResult::InsufficientFunds;
-		}
-		FilterResult::SufficientFunds
+		FilterResult::FeePayable
 	}
 
 	fn build_transaction_request(receiver: Address, data: Bytes) -> TransactionRequest {
