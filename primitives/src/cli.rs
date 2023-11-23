@@ -72,7 +72,7 @@ pub struct EVMProvider {
 	pub call_interval: u64,
 	/// The number of confirmations required for a block to be processed.
 	pub block_confirmations: u64,
-	/// The flag whether the chain is BIFROST(native) or an external chain.
+	/// The flag whether the chain is Bifrost(native) or an external chain.
 	pub is_native: Option<bool>,
 	/// The flag whether it will handle relay transactions to the current chain.
 	pub is_relay_target: bool,
@@ -105,7 +105,7 @@ pub struct EVMProvider {
 	pub authority_address: String,
 	/// Router contract address
 	pub router_address: String,
-	/// Relayer manager contract address (BIFROST only)
+	/// Relayer manager contract address (Bifrost only)
 	pub relayer_manager_address: Option<String>,
 	/// Chainlink usdc/usd aggregator
 	pub chainlink_usdc_usd_address: Option<String>,

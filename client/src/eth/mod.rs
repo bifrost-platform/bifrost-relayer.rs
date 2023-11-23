@@ -273,7 +273,7 @@ impl<T: JsonRpcClient> EthClient<T> {
 	}
 
 	/// Get factor between the block time of native-chain and block time of this chain
-	/// Approximately BIFROST: 3s, Polygon: 2s, BSC: 3s, Ethereum: 12s
+	/// Approximately Bifrost: 3s, Polygon: 2s, BSC: 3s, Ethereum: 12s
 	pub async fn get_bootstrap_offset_height_based_on_block_time(
 		&self,
 		round_offset: u32,

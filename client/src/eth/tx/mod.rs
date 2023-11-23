@@ -109,7 +109,7 @@ where
 		// does not check the txpool if the following condition satisfies
 		// 1. the txpool namespace is disabled for the client
 		// 2. the txpool check flag is false
-		// 3. the client is BIFROST (native)
+		// 3. the client is Bifrost (native)
 		if !self.is_txpool_enabled() || !check_mempool || client.metadata.is_native {
 			return false;
 		}
