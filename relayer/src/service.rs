@@ -111,6 +111,7 @@ fn construct_handlers(
 fn construct_managers(
 	config: &Configuration,
 	bootstrap_shared_data: BootstrapSharedData,
+	task_manager: &TaskManager,
 ) -> ManagerDeps {
 	let prometheus_config = &config.relayer_config.prometheus_config;
 	let evm_providers = &config.relayer_config.evm_providers;
@@ -162,6 +163,7 @@ fn construct_managers(
 					client.clone(),
 					evm_provider.min_priority_fee.unwrap_or(DEFAULT_MIN_PRIORITY_FEE).into(),
 					evm_provider.duplicate_confirm_delay,
+					task_manager.spawn_handle(),
 				);
 				tx_managers.1.push(tx_manager);
 				event_senders.push(Arc::new(EventSender::new(evm_provider.id, sender, is_native)));
@@ -173,6 +175,7 @@ fn construct_managers(
 					evm_provider.min_gas_price,
 					evm_provider.is_initially_escalated.unwrap_or(false),
 					evm_provider.duplicate_confirm_delay,
+					task_manager.spawn_handle(),
 				);
 				tx_managers.0.push(tx_manager);
 				event_senders.push(Arc::new(EventSender::new(evm_provider.id, sender, is_native)));
@@ -396,9 +399,11 @@ fn print_relay_targets(manager_deps: &ManagerDeps) {
 fn new_relay_base(config: Configuration) -> Result<RelayBase, ServiceError> {
 	assert_configuration_validity(&config);
 
+	let task_manager = TaskManager::new(config.clone().tokio_handle, None)?;
+
 	let bootstrap_shared_data = BootstrapSharedData::new(&config);
 
-	let manager_deps = construct_managers(&config, bootstrap_shared_data.clone());
+	let manager_deps = construct_managers(&config, bootstrap_shared_data.clone(), &task_manager);
 	let periodic_deps = construct_periodics(bootstrap_shared_data.clone(), &manager_deps);
 	let handler_deps = construct_handlers(&config, &manager_deps, bootstrap_shared_data.clone());
 
@@ -406,7 +411,7 @@ fn new_relay_base(config: Configuration) -> Result<RelayBase, ServiceError> {
 
 	Ok(RelayBase {
 		task_manager: spawn_relayer_tasks(
-			TaskManager::new(config.clone().tokio_handle, None)?,
+			task_manager,
 			FullDeps { bootstrap_shared_data, manager_deps, periodic_deps, handler_deps },
 			&config,
 		),
