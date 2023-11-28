@@ -1,9 +1,12 @@
-use crate::eth::{EthClient, EventMessage, LegacyGasMiddleware, TransactionManager, TxRequest};
+use crate::eth::{
+	EthClient, EventMessage, LegacyGasMiddleware, TransactionManager, TxRequest, DEFAULT_TX_RETRIES,
+};
 use async_trait::async_trait;
 use br_primitives::{
 	constants::{DEFAULT_ESCALATE_PERCENTAGE, DEFAULT_MIN_GAS_PRICE},
 	eth::ETHEREUM_BLOCK_TIME,
-	sub_display_format, NETWORK_DOES_NOT_SUPPORT_EIP1559, PROVIDER_INTERNAL_ERROR,
+	sub_display_format, INSUFFICIENT_FUNDS, NETWORK_DOES_NOT_SUPPORT_EIP1559,
+	PROVIDER_INTERNAL_ERROR,
 };
 use ethers::{
 	middleware::{
@@ -15,20 +18,21 @@ use ethers::{
 	types::{BlockId, BlockNumber, Transaction, TransactionRequest, U256},
 };
 use sc_service::SpawnTaskHandle;
-use std::sync::Arc;
-use tokio::sync::{
-	mpsc,
-	mpsc::{UnboundedReceiver, UnboundedSender},
+use std::{sync::Arc, time::Duration};
+use tokio::{
+	sync::{
+		mpsc,
+		mpsc::{UnboundedReceiver, UnboundedSender},
+	},
+	time::sleep,
 };
 
-use super::{AsyncTransactionTask, LegacyTransactionTask};
+use super::{generate_delay, AsyncTransactionTask};
 
 const SUB_LOG_TARGET: &str = "legacy-tx-manager";
 
-pub type LegacyMiddleware<T> = Arc<
-	NonceManagerMiddleware<
-		SignerMiddleware<Arc<GasEscalatorMiddleware<Arc<Provider<T>>>>, LocalWallet>,
-	>,
+type LegacyMiddleware<T> = NonceManagerMiddleware<
+	SignerMiddleware<Arc<GasEscalatorMiddleware<Arc<Provider<T>>>>, LocalWallet>,
 >;
 
 /// The essential task that sends legacy transactions asynchronously.
@@ -36,7 +40,7 @@ pub struct LegacyTransactionManager<T> {
 	/// The ethereum client for the connected chain.
 	pub client: Arc<EthClient<T>>,
 	/// The client signs transaction for the connected chain with local nonce manager.
-	middleware: LegacyMiddleware<T>,
+	middleware: Arc<LegacyMiddleware<T>>,
 	/// The receiver connected to the event channel.
 	receiver: UnboundedReceiver<EventMessage>,
 	/// The flag whether the client has enabled txpool namespace.
@@ -202,6 +206,138 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> for LegacyTransactionMana
 			);
 
 			self.spawn_send_transaction(msg).await;
+		}
+	}
+}
+
+/// The transaction task for Legacy transactions.
+pub struct LegacyTransactionTask<T> {
+	/// The ethereum client for the connected chain.
+	pub client: Arc<EthClient<T>>,
+	/// The client signs transaction for the connected chain with local nonce manager.
+	middleware: Arc<LegacyMiddleware<T>>,
+	/// The flag whether the client has enabled txpool namespace.
+	is_txpool_enabled: bool,
+	/// The flag whether if the gas price will be initially escalated. The `escalate_percentage`
+	/// will be used on escalation. This will only have effect on legacy transactions. (default:
+	/// false)
+	is_initially_escalated: bool,
+	/// The coefficient used on transaction gas price escalation (default: 1.15)
+	gas_price_coefficient: f64,
+	/// The minimum value use for gas_price. (default: 0)
+	min_gas_price: U256,
+	/// If first relay transaction is stuck in mempool after waiting for this amount of time(ms),
+	/// ignore duplicate prevent logic. (default: 12s)
+	duplicate_confirm_delay: Option<u64>,
+}
+
+impl<T: JsonRpcClient> LegacyTransactionTask<T> {
+	/// Build an Legacy transaction task.
+	pub fn new(
+		client: Arc<EthClient<T>>,
+		middleware: Arc<LegacyMiddleware<T>>,
+		is_txpool_enabled: bool,
+		is_initially_escalated: bool,
+		gas_price_coefficient: f64,
+		min_gas_price: U256,
+		duplicate_confirm_delay: Option<u64>,
+	) -> Self {
+		Self {
+			client,
+			middleware,
+			is_txpool_enabled,
+			is_initially_escalated,
+			gas_price_coefficient,
+			min_gas_price,
+			duplicate_confirm_delay,
+		}
+	}
+}
+
+#[async_trait::async_trait]
+impl<T: JsonRpcClient> AsyncTransactionTask<T> for LegacyTransactionTask<T> {
+	fn is_txpool_enabled(&self) -> bool {
+		self.is_txpool_enabled
+	}
+
+	fn debug_mode(&self) -> bool {
+		self.client.debug_mode
+	}
+
+	fn get_client(&self) -> Arc<EthClient<T>> {
+		self.client.clone()
+	}
+
+	fn duplicate_confirm_delay(&self) -> Duration {
+		Duration::from_millis(self.duplicate_confirm_delay.unwrap_or(ETHEREUM_BLOCK_TIME * 1000))
+	}
+
+	async fn try_send_transaction(&self, mut msg: EventMessage) {
+		if msg.retries_remaining == 0 {
+			return;
+		}
+
+		// sets a random delay on external chain transactions on first try
+		if msg.give_random_delay && msg.retries_remaining == DEFAULT_TX_RETRIES {
+			sleep(Duration::from_millis(generate_delay())).await;
+		}
+
+		// set transaction `from` field
+		msg.tx_request = msg.tx_request.from(self.client.address());
+
+		// estimate the gas amount to be used
+		let estimated_gas =
+			match self.middleware.estimate_gas(&msg.tx_request.to_typed(), None).await {
+				Ok(estimated_gas) => {
+					br_metrics::increase_rpc_calls(&self.client.get_chain_name());
+					U256::from(
+						(estimated_gas.as_u64() as f64 * msg.gas_coefficient.into_f64()).ceil()
+							as u64,
+					)
+				},
+				Err(error) => {
+					return self.handle_failed_gas_estimation(SUB_LOG_TARGET, msg, &error).await
+				},
+			};
+		msg.tx_request = msg.tx_request.gas(estimated_gas);
+
+		// check the txpool for transaction duplication prevention
+		if !(self.is_duplicate_relay(&msg.tx_request, msg.check_mempool).await) {
+			let mut tx = msg.tx_request.to_legacy();
+			let gas_price = self.client.get_gas_price().await;
+			if !self.is_sufficient_funds(gas_price, estimated_gas).await {
+				panic!(
+					"[{}]-[{}]-[{}] {}",
+					&self.client.get_chain_name(),
+					SUB_LOG_TARGET,
+					self.client.address(),
+					INSUFFICIENT_FUNDS,
+				);
+			}
+
+			if self.is_initially_escalated {
+				tx = tx.gas_price(
+					self.client
+						.get_gas_price_for_escalation(
+							gas_price,
+							self.gas_price_coefficient,
+							self.min_gas_price,
+						)
+						.await,
+				);
+			}
+			let result = self.middleware.send_transaction(tx, None).await;
+			br_metrics::increase_rpc_calls(&self.client.get_chain_name());
+
+			match result {
+				Ok(pending_tx) => match pending_tx.await {
+					Ok(receipt) => {
+						self.handle_success_tx_receipt(SUB_LOG_TARGET, receipt, msg.metadata)
+					},
+					Err(error) => self.handle_failed_tx_request(SUB_LOG_TARGET, msg, &error).await,
+				},
+				Err(error) => self.handle_failed_tx_request(SUB_LOG_TARGET, msg, &error).await,
+			}
 		}
 	}
 }
