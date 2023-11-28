@@ -109,17 +109,16 @@ where
 	T: JsonRpcClient,
 	ExecutionFilter: CCCPFilter<T>,
 {
-	async fn process_confirmed_log(
+	async fn filter_and_request_send_transaction(
 		&self,
 		metadata: &SocketRelayMetadata,
-		is_bootstrap: bool,
 	) -> SocketEventStatus {
 		if let Some(client) = self.system_clients.get(&metadata.dst_chain_id) {
 			// Only handle V2 requests on Inbound::Requested or Outbound::Accepted
 			if (metadata.is_inbound && matches!(metadata.status, SocketEventStatus::Requested))
 				|| (!metadata.is_inbound && matches!(metadata.status, SocketEventStatus::Accepted))
 			{
-				if !is_bootstrap {
+				if !metadata.is_bootstrap {
 					log::info!(
 						target: &self.client.get_chain_name(),
 						"-[{}] ⛓️ Run ExecutionFilter: {}",
@@ -226,7 +225,7 @@ where
 		{
 			if receipt.status.unwrap().is_zero() && receipt.from == self.client.address() {
 				// only handles owned transactions
-				self.process_reverted_transaction(receipt).await;
+				self.process_reverted_transaction(receipt, is_bootstrap).await;
 				return;
 			}
 			match decode_logs::<SocketEvents>(&[RawLog::from(log.clone())]) {
@@ -240,9 +239,10 @@ where
 							ChainID::from_be_bytes(msg.req_id.chain),
 							ChainID::from_be_bytes(msg.ins_code.chain),
 							msg.params.to,
+							is_bootstrap,
 						);
 
-						if !is_bootstrap {
+						if !metadata.is_bootstrap {
 							log::info!(
 								target: &self.client.get_chain_name(),
 								"-[{}] 🔖 Detected socket event: {}, {:?}-{:?}",
@@ -266,7 +266,7 @@ where
 							metadata.variants =
 								V2Handler::decode_msg_variants(self, &msg.params.variants);
 							msg.status =
-								V2Handler::process_confirmed_log(self, &metadata, is_bootstrap)
+								V2Handler::filter_and_request_send_transaction(self, &metadata)
 									.await
 									.into();
 						}
@@ -479,7 +479,7 @@ where
 	/// (Re-)Handle the reverted relay transaction. This method only handles if it was an
 	/// Inbound-Requested or Outbound-Accepted sequence. This will let the sequence follow the
 	/// fail-case flow.
-	async fn process_reverted_transaction(&self, receipt: TransactionReceipt) {
+	async fn process_reverted_transaction(&self, receipt: TransactionReceipt, is_bootstrap: bool) {
 		if let Some(tx) = self.client.get_transaction(receipt.transaction_hash).await {
 			// the reverted transaction must be execution of `poll()`
 			let tx_selector = &tx.input[0..4];
@@ -503,6 +503,7 @@ where
 							ChainID::from_be_bytes(sig_msg.req_id.chain),
 							ChainID::from_be_bytes(sig_msg.ins_code.chain),
 							sig_msg.params.to,
+							is_bootstrap,
 						);
 
 						if metadata.is_inbound

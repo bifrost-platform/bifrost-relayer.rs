@@ -69,14 +69,14 @@ impl<T: JsonRpcClient> CCCPExecutionFilter<T> {
 			if client.debug_mode {
 				log::warn!(
 					target: &client.get_chain_name(),
-					"-[{}] ⚠️  Warning! Error encountered during get gas price, Retries left: {:?}, Error: {}",
+					"-[{}] ⚠️  Warning! Error encountered gas estimation, Retries left: {:?}, Error: {}",
 					sub_display_format(SUB_LOG_TARGET),
 					retries - 1,
 					last_error
 				);
 				sentry::capture_message(
 					format!(
-						"[{}]-[{}]-[{}] ⚠️  Warning! Error encountered during get gas price, Retries left: {:?}, Error: {}",
+						"[{}]-[{}]-[{}] ⚠️  Warning! Error encountered during gas estimation, Retries left: {:?}, Error: {}",
 						&client.get_chain_name(),
 						SUB_LOG_TARGET,
 						client.address(),

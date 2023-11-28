@@ -48,6 +48,8 @@ pub struct SocketRelayMetadata {
 	pub receiver: Address,
 	/// The socket variants requested for V2 logic.
 	pub variants: SocketVariants,
+	/// The flag whether this relay is processed on bootstrap.
+	pub is_bootstrap: bool,
 }
 
 impl SocketRelayMetadata {
@@ -58,6 +60,7 @@ impl SocketRelayMetadata {
 		src_chain_id: ChainID,
 		dst_chain_id: ChainID,
 		receiver: Address,
+		is_bootstrap: bool,
 	) -> Self {
 		Self {
 			is_inbound,
@@ -67,6 +70,7 @@ impl SocketRelayMetadata {
 			dst_chain_id,
 			receiver,
 			variants: SocketVariants::default(),
+			is_bootstrap,
 		}
 	}
 }
