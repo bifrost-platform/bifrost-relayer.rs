@@ -2,7 +2,7 @@ use std::{str::FromStr, sync::Arc};
 
 use ethers::{
 	providers::{JsonRpcClient, Provider},
-	types::{Address, Bytes, Signature, TransactionRequest, H160, U256, U64},
+	types::{Address, Signature, TransactionRequest, H160, U64},
 };
 
 use crate::{
@@ -284,17 +284,4 @@ impl BuiltRelayTransaction {
 	pub fn new(tx_request: TransactionRequest, is_external: bool) -> Self {
 		Self { tx_request, is_external }
 	}
-}
-
-#[derive(Default, Clone, Debug)]
-/// The variants of a single Socket message.
-pub struct SocketVariants {
-	/// The source chain ID in bytes.
-	pub source_chain: Bytes,
-	/// The request sender address.
-	pub sender: Address,
-	/// The maximum execution fee allowed for the request.
-	pub max_fee: U256,
-	/// The callData in bytes.
-	pub data: Bytes,
 }

@@ -5,7 +5,6 @@ pub use socket_relay_handler::*;
 
 mod roundup_relay_handler;
 mod socket_relay_handler;
-pub mod v2;
 
 #[async_trait::async_trait]
 pub trait Handler {

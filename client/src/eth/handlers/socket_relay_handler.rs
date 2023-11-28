@@ -1,7 +1,7 @@
-use std::{collections::BTreeMap, marker::PhantomData, str::FromStr, sync::Arc, time::Duration};
+use std::{collections::BTreeMap, str::FromStr, sync::Arc, time::Duration};
 
 use ethers::{
-	abi::{ParamType, RawLog, Token},
+	abi::{RawLog, Token},
 	prelude::decode_logs,
 	providers::JsonRpcClient,
 	types::{Bytes, Filter, Log, Signature, TransactionReceipt, TransactionRequest, H256, U256},
@@ -15,7 +15,7 @@ use br_primitives::{
 	constants::DEFAULT_BOOTSTRAP_ROUND_OFFSET,
 	eth::{
 		BootstrapState, BuiltRelayTransaction, ChainID, GasCoefficient, RecoveredSignature,
-		RelayDirection, SocketEventStatus, SocketVariants, BOOTSTRAP_BLOCK_CHUNK_SIZE,
+		RelayDirection, SocketEventStatus, BOOTSTRAP_BLOCK_CHUNK_SIZE,
 	},
 	socket::{
 		PollSubmit, RequestID, SerializedPoll, Signatures, SocketEvents, SocketMessage,
@@ -29,12 +29,10 @@ use crate::eth::{
 	SocketRelayMetadata, TxRequest,
 };
 
-use super::v2::{CCCPFilter, V2Handler};
-
 const SUB_LOG_TARGET: &str = "socket-handler";
 
 /// The essential task that handles `socket relay` related events.
-pub struct SocketRelayHandler<T, ExecutionFilter> {
+pub struct SocketRelayHandler<T> {
 	/// The `EthClient` to interact with the connected blockchain.
 	pub client: Arc<EthClient<T>>,
 	/// The event senders that sends messages to the event channel. <chain_id, Arc<EventSender>>
@@ -49,10 +47,9 @@ pub struct SocketRelayHandler<T, ExecutionFilter> {
 	poll_selector: [u8; 4],
 	/// The bootstrap shared data.
 	bootstrap_shared_data: Arc<BootstrapSharedData>,
-	_phantom_data: PhantomData<ExecutionFilter>,
 }
 
-impl<T, ExecutionFilter> SocketRelayHandler<T, ExecutionFilter>
+impl<T> SocketRelayHandler<T>
 where
 	Self: Send + Sync,
 	T: JsonRpcClient,
@@ -97,100 +94,15 @@ where
 			client,
 			system_clients,
 			bootstrap_shared_data,
-			_phantom_data: Default::default(),
 		}
 	}
 }
 
 #[async_trait::async_trait]
-impl<T, ExecutionFilter> V2Handler for SocketRelayHandler<T, ExecutionFilter>
+impl<T> Handler for SocketRelayHandler<T>
 where
 	Self: Send + Sync,
 	T: JsonRpcClient,
-	ExecutionFilter: CCCPFilter<T>,
-{
-	async fn filter_and_request_send_transaction(
-		&self,
-		metadata: &SocketRelayMetadata,
-	) -> SocketEventStatus {
-		if let Some(client) = self.system_clients.get(&metadata.dst_chain_id) {
-			// Only handle V2 requests on Inbound::Requested or Outbound::Accepted
-			if (metadata.is_inbound && matches!(metadata.status, SocketEventStatus::Requested))
-				|| (!metadata.is_inbound && matches!(metadata.status, SocketEventStatus::Accepted))
-			{
-				if !metadata.is_bootstrap {
-					log::info!(
-						target: &self.client.get_chain_name(),
-						"-[{}] ⛓️ Run ExecutionFilter: {}",
-						sub_display_format(SUB_LOG_TARGET),
-						metadata
-					);
-				}
-				return ExecutionFilter::try_filter(client, metadata.clone()).await;
-			}
-		}
-		metadata.status
-	}
-
-	fn is_version2(&self, msg: &SocketMessage) -> bool {
-		let v1_variants = Bytes::from_str("0x00").unwrap();
-		let raw_variants = &msg.params.variants;
-		if raw_variants == &v1_variants {
-			return false;
-		}
-		true
-	}
-
-	fn decode_msg_variants(&self, raw_variants: &Bytes) -> SocketVariants {
-		match ethers::abi::decode(
-			&[ParamType::FixedBytes(4), ParamType::Address, ParamType::Uint(256), ParamType::Bytes],
-			raw_variants,
-		) {
-			Ok(variants) => {
-				let mut result = SocketVariants::default();
-				variants.into_iter().for_each(|variant| match variant {
-					Token::FixedBytes(source_chain) => {
-						result.source_chain = Bytes::from(source_chain);
-					},
-					Token::Address(sender) => {
-						result.sender = sender;
-					},
-					Token::Uint(max_fee) => result.max_fee = max_fee,
-					Token::Bytes(data) => {
-						result.data = Bytes::from(data);
-					},
-					_ => {
-						panic!(
-							"[{}]-[{}]-[{}] Invalid Socket::variants received: {:?}",
-							&self.client.get_chain_name(),
-							SUB_LOG_TARGET,
-							self.client.address(),
-							raw_variants,
-						);
-					},
-				});
-				result
-			},
-			Err(error) => {
-				panic!(
-					"[{}]-[{}]-[{}] Invalid Socket::variants received: {:?}, Error: {}",
-					&self.client.get_chain_name(),
-					SUB_LOG_TARGET,
-					self.client.address(),
-					raw_variants,
-					error
-				)
-			},
-		}
-	}
-}
-
-#[async_trait::async_trait]
-impl<T, ExecutionFilter> Handler for SocketRelayHandler<T, ExecutionFilter>
-where
-	Self: Send + Sync,
-	T: JsonRpcClient,
-	ExecutionFilter: CCCPFilter<T>,
 {
 	async fn run(&mut self) {
 		loop {
@@ -212,7 +124,7 @@ where
 				let mut stream = tokio_stream::iter(block_msg.target_logs);
 				while let Some(log) = stream.next().await {
 					if self.is_target_contract(&log) && self.is_target_event(log.topics[0]) {
-						Handler::process_confirmed_log(self, &log, false).await;
+						self.process_confirmed_log(&log, false).await;
 					}
 				}
 			}
@@ -231,8 +143,8 @@ where
 			match decode_logs::<SocketEvents>(&[RawLog::from(log.clone())]) {
 				Ok(decoded) => match &decoded[0] {
 					SocketEvents::Socket(socket) => {
-						let mut msg = socket.clone().msg;
-						let mut metadata = SocketRelayMetadata::new(
+						let msg = socket.clone().msg;
+						let metadata = SocketRelayMetadata::new(
 							self.is_inbound_sequence(ChainID::from_be_bytes(msg.ins_code.chain)),
 							SocketEventStatus::from_u8(msg.status),
 							msg.req_id.sequence,
@@ -260,15 +172,6 @@ where
 						if self.is_sequence_ended(&msg.req_id, metadata.src_chain_id).await {
 							// do nothing if protocol sequence ended
 							return;
-						}
-
-						if V2Handler::is_version2(self, &msg) {
-							metadata.variants =
-								V2Handler::decode_msg_variants(self, &msg.params.variants);
-							msg.status =
-								V2Handler::filter_and_request_send_transaction(self, &metadata)
-									.await
-									.into();
 						}
 
 						self.send_socket_message(
@@ -304,11 +207,10 @@ where
 }
 
 #[async_trait::async_trait]
-impl<T, ExecutionFilter> SocketRelayBuilder for SocketRelayHandler<T, ExecutionFilter>
+impl<T> SocketRelayBuilder for SocketRelayHandler<T>
 where
 	Self: Send + Sync,
 	T: JsonRpcClient,
-	ExecutionFilter: CCCPFilter<T>,
 {
 	fn build_poll_call_data(&self, msg: SocketMessage, sigs: Signatures) -> Bytes {
 		let poll_submit = PollSubmit { msg, sigs, option: U256::default() };
@@ -470,11 +372,10 @@ where
 	}
 }
 
-impl<T, ExecutionFilter> SocketRelayHandler<T, ExecutionFilter>
+impl<T> SocketRelayHandler<T>
 where
 	Self: Send + Sync,
 	T: JsonRpcClient,
-	ExecutionFilter: CCCPFilter<T>,
 {
 	/// (Re-)Handle the reverted relay transaction. This method only handles if it was an
 	/// Inbound-Requested or Outbound-Accepted sequence. This will let the sequence follow the
@@ -764,11 +665,10 @@ where
 }
 
 #[async_trait::async_trait]
-impl<T, ExecutionFilter> BootstrapHandler for SocketRelayHandler<T, ExecutionFilter>
+impl<T> BootstrapHandler for SocketRelayHandler<T>
 where
 	Self: Send + Sync,
 	T: JsonRpcClient,
-	ExecutionFilter: CCCPFilter<T>,
 {
 	async fn bootstrap(&self) {
 		log::info!(
@@ -781,7 +681,7 @@ where
 
 		let mut stream = tokio_stream::iter(logs);
 		while let Some(log) = stream.next().await {
-			Handler::process_confirmed_log(self, &log, true).await;
+			self.process_confirmed_log(&log, true).await;
 		}
 
 		let mut bootstrap_count = self.bootstrap_shared_data.socket_bootstrap_count.lock().await;
@@ -879,6 +779,7 @@ mod tests {
 	use std::{str::FromStr, sync::Arc};
 
 	use ethers::{
+		abi::ParamType,
 		providers::{Http, Provider},
 		types::H160,
 	};
@@ -940,41 +841,6 @@ mod tests {
 			&data,
 		) {
 			Ok(socket) => println!("socket -> {:?}", socket[0].to_string()),
-			Err(error) => {
-				panic!("decode failed -> {}", error);
-			},
-		}
-	}
-
-	#[test]
-	fn test_socket_variants_decode() {
-		println!("default -> {}", Bytes::default());
-		println!("zero -> {}", Bytes::from_str("0x00").unwrap());
-		let raw_variants = Bytes::from_str("0x00000005000000000000000000000000000000000000000000000000000000000000000000000000000000005b38da6a701c568545dcfcb03fcb875f56beddc400000000000000000000000000000000000000000000000000000000000001c8000000000000000000000000000000000000000000000000000000000000008000000000000000000000000000000000000000000000000000000000000000012300000000000000000000000000000000000000000000000000000000000000").unwrap();
-		match ethers::abi::decode(
-			&[ParamType::FixedBytes(4), ParamType::Address, ParamType::Uint(256), ParamType::Bytes],
-			&raw_variants,
-		) {
-			Ok(variants) => {
-				log::info!("variants -> {:?}", variants);
-				let mut result = SocketVariants::default();
-				variants.into_iter().for_each(|variant| match variant {
-					Token::FixedBytes(source_chain) => {
-						result.source_chain = Bytes::from(source_chain);
-					},
-					Token::Address(sender) => {
-						result.sender = sender;
-					},
-					Token::Uint(max_fee) => result.max_fee = max_fee,
-					Token::Bytes(data) => {
-						result.data = Bytes::from(data);
-					},
-					_ => {
-						panic!("decode failed");
-					},
-				});
-				println!("variants -> {:?}", result);
-			},
 			Err(error) => {
 				panic!("decode failed -> {}", error);
 			},
