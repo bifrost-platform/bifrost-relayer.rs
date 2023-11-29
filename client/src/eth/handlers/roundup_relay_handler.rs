@@ -105,6 +105,7 @@ impl<T: JsonRpcClient> Handler for RoundupRelayHandler<T> {
 										serialized_log.roundup.new_relayers,
 									)
 									.await,
+								is_bootstrap,
 							)
 							.await;
 						},
@@ -281,7 +282,7 @@ impl<T: JsonRpcClient> RoundupRelayHandler<T> {
 	}
 
 	/// Check roundup submitted before. If not, call `round_control_relay`.
-	async fn broadcast_roundup(&self, roundup_submit: &RoundUpSubmit) {
+	async fn broadcast_roundup(&self, roundup_submit: &RoundUpSubmit, is_bootstrap: bool) {
 		if self.external_clients.is_empty() {
 			return;
 		}
@@ -312,6 +313,7 @@ impl<T: JsonRpcClient> RoundupRelayHandler<T> {
 							true,
 							true,
 							GasCoefficient::Low,
+							is_bootstrap,
 						))
 						.unwrap()
 				}

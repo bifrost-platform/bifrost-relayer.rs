@@ -326,6 +326,9 @@ pub struct EventMessage {
 	pub give_random_delay: bool,
 	/// The gas coefficient that will be multiplied to the estimated gas amount.
 	pub gas_coefficient: GasCoefficient,
+	/// The flag that represents whether the event is requested by a bootstrap process.
+	/// If true, the event will be processed by a asynchronous task.
+	pub is_bootstrap: bool,
 }
 
 impl EventMessage {
@@ -336,6 +339,7 @@ impl EventMessage {
 		check_mempool: bool,
 		give_random_delay: bool,
 		gas_coefficient: GasCoefficient,
+		is_bootstrap: bool,
 	) -> Self {
 		Self {
 			retries_remaining: DEFAULT_TX_RETRIES,
@@ -345,6 +349,7 @@ impl EventMessage {
 			check_mempool,
 			give_random_delay,
 			gas_coefficient,
+			is_bootstrap,
 		}
 	}
 

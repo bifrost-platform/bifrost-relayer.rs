@@ -628,6 +628,7 @@ where
 				true,
 				give_random_delay,
 				gas_coefficient,
+				metadata.is_bootstrap,
 			)) {
 				Ok(()) => log::info!(
 					target: &self.client.get_chain_name(),

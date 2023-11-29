@@ -105,7 +105,6 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> for Eip1559TransactionMan
 	}
 
 	async fn spawn_send_transaction(&self, msg: EventMessage) {
-		let spawn_handle = self.get_spawn_handle();
 		let task = Eip1559TransactionTask::new(
 			self.get_client(),
 			self.middleware.clone(),
@@ -113,8 +112,13 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> for Eip1559TransactionMan
 			self.min_priority_fee,
 			self.duplicate_confirm_delay,
 		);
-		spawn_handle
-			.spawn("send_transaction", None, async move { task.try_send_transaction(msg).await });
+		if msg.is_bootstrap {
+			task.try_send_transaction(msg).await;
+		} else {
+			self.get_spawn_handle().spawn("send_transaction", None, async move {
+				task.try_send_transaction(msg).await
+			});
+		}
 	}
 
 	async fn stuck_transaction_to_transaction_request(
@@ -196,7 +200,7 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> for Eip1559TransactionMan
 /// The transaction task for Eip1559 transactions.
 pub struct Eip1559TransactionTask<T> {
 	/// The ethereum client for the connected chain.
-	pub client: Arc<EthClient<T>>,
+	client: Arc<EthClient<T>>,
 	/// The client signs transaction for the connected chain with local nonce manager.
 	middleware: Arc<Eip1559Middleware<T>>,
 	/// The flag whether the client has enabled txpool namespace.
