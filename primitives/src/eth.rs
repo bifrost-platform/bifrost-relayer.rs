@@ -114,8 +114,6 @@ pub struct ProtocolContracts<T> {
 	pub authority: AuthorityContract<Provider<T>>,
 	/// RelayerManagerContract (Bifrost only)
 	pub relayer_manager: Option<RelayerManagerContract<Provider<T>>>,
-	/// Router contract address
-	pub router_address: Address,
 }
 
 impl<T: JsonRpcClient> ProtocolContracts<T> {
@@ -123,7 +121,6 @@ impl<T: JsonRpcClient> ProtocolContracts<T> {
 		provider: Arc<Provider<T>>,
 		socket_address: String,
 		authority_address: String,
-		router_address: String,
 		relayer_manager_address: Option<String>,
 	) -> Self {
 		Self {
@@ -141,7 +138,6 @@ impl<T: JsonRpcClient> ProtocolContracts<T> {
 					provider.clone(),
 				)
 			}),
-			router_address: H160::from_str(&router_address).expect(INVALID_CONTRACT_ADDRESS),
 		}
 	}
 }
