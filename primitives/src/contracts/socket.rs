@@ -6,8 +6,6 @@ use ethers::{
 	types::{Bytes, Signature, U256},
 };
 
-use crate::eth::{BuiltRelayTransaction, ChainID};
-
 abigen!(
 	SocketContract,
 	"../abi/abi.socket.merged.json",
@@ -157,41 +155,4 @@ impl From<Signature> for Signatures {
 		let v: [u8; 1] = [signature.v as u8];
 		Signatures { r: vec![r], s: vec![s], v: Bytes::from(v) }
 	}
-}
-
-#[async_trait::async_trait]
-/// The client to interact with the `Socket` contract instance.
-pub trait SocketRelayBuilder {
-	/// Builds the `poll()` function call data.
-	fn build_poll_call_data(&self, msg: SocketMessage, sigs: Signatures) -> Bytes;
-
-	/// Builds the `poll()` transaction request. `submit_msg` is the `Socket` event message used for transaction submission
-	/// and `sig_msg` is the `Socket` event message used for signature construction.
-	///
-	/// This method returns an `Option` in order to bypass unknown chain events.
-	/// Possibly can happen when a new chain definition hasn't been added to the operator's config.
-	async fn build_transaction(
-		&self,
-		submit_msg: SocketMessage,
-		sig_msg: SocketMessage,
-		is_inbound: bool,
-		relay_tx_chain_id: ChainID,
-	) -> Option<BuiltRelayTransaction>;
-
-	/// Build the signatures required to request an inbound `poll()` and returns a flag which represents
-	/// whether the relay transaction should be processed to an external chain.
-	async fn build_inbound_signatures(&self, msg: SocketMessage) -> (Signatures, bool);
-
-	/// Build the signatures required to request an outbound `poll()` and returns a flag which represents
-	/// whether the relay transaction should be processed to an external chain.
-	async fn build_outbound_signatures(&self, msg: SocketMessage) -> (Signatures, bool);
-
-	/// Encodes the given socket message to bytes.
-	fn encode_socket_message(&self, msg: SocketMessage) -> Vec<u8>;
-
-	/// Signs the given socket message.
-	fn sign_socket_message(&self, msg: SocketMessage) -> Signature;
-
-	/// Get the signatures of the given message.
-	async fn get_sorted_signatures(&self, msg: SocketMessage) -> Signatures;
 }

@@ -187,6 +187,46 @@ impl Display for FlushMetadata {
 }
 
 #[derive(Clone, Debug)]
+pub struct RollbackMetadata {
+	/// The socket relay direction flag.
+	pub is_inbound: bool,
+	/// The socket event status.
+	pub status: SocketEventStatus,
+	/// The socket request sequence ID.
+	pub sequence: u128,
+	/// The source chain ID.
+	pub src_chain_id: ChainID,
+	/// The destination chain ID.
+	pub dst_chain_id: ChainID,
+}
+
+impl RollbackMetadata {
+	pub fn new(
+		is_inbound: bool,
+		status: SocketEventStatus,
+		sequence: u128,
+		src_chain_id: ChainID,
+		dst_chain_id: ChainID,
+	) -> Self {
+		Self { is_inbound, status, sequence, src_chain_id, dst_chain_id }
+	}
+}
+
+impl Display for RollbackMetadata {
+	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		write!(
+			f,
+			"Relay({}-{:?}-{:?}, {:?} -> {:?})",
+			if self.is_inbound { "Inbound".to_string() } else { "Outbound".to_string() },
+			self.status,
+			self.sequence,
+			self.src_chain_id,
+			self.dst_chain_id,
+		)
+	}
+}
+
+#[derive(Clone, Debug)]
 pub enum EventMetadata {
 	SocketRelay(SocketRelayMetadata),
 	PriceFeed(PriceFeedMetadata),
@@ -194,6 +234,7 @@ pub enum EventMetadata {
 	VSPPhase2(VSPPhase2Metadata),
 	Heartbeat(HeartbeatMetadata),
 	Flush(FlushMetadata),
+	Rollback(RollbackMetadata),
 }
 
 impl Display for EventMetadata {
@@ -208,6 +249,7 @@ impl Display for EventMetadata {
 				EventMetadata::VSPPhase2(metadata) => metadata.to_string(),
 				EventMetadata::Heartbeat(metadata) => metadata.to_string(),
 				EventMetadata::Flush(metadata) => metadata.to_string(),
+				EventMetadata::Rollback(metadata) => metadata.to_string(),
 			}
 		)
 	}

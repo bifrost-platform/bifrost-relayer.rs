@@ -228,7 +228,7 @@ pub struct LegacyTransactionTask<T> {
 	is_initially_escalated: bool,
 	/// The coefficient used on transaction gas price escalation (default: 1.15)
 	gas_price_coefficient: f64,
-	/// The minimum value use for gas_price. (default: 0)
+	/// The minimum value used for gas_price. (default: 0)
 	min_gas_price: U256,
 	/// If first relay transaction is stuck in mempool after waiting for this amount of time(ms),
 	/// ignore duplicate prevent logic. (default: 12s)
