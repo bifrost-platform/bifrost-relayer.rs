@@ -6,7 +6,7 @@ use br_client::eth::{
 };
 use br_primitives::{
 	eth::{ChainID, GasCoefficient, SocketEventStatus},
-	socket::{PollSubmit, Signatures, SocketMessage},
+	socket::{Signatures, SocketMessage},
 	sub_display_format, PeriodicWorker, RawRequestID, RollbackableMessage, INVALID_CHAIN_ID,
 	INVALID_PERIODIC_SCHEDULE, ROLLBACK_CHECK_MINIMUM_INTERVAL, ROLLBACK_CHECK_SCHEDULE,
 };
@@ -104,17 +104,9 @@ impl<T: JsonRpcClient> SocketRollbackHandler<T> {
 	async fn try_rollback_inbound(&self, socket_msg: &SocketMessage) {
 		let mut submit_sig = socket_msg.clone();
 		submit_sig.status = SocketEventStatus::Failed.into();
-		let poll_submit = PollSubmit {
-			msg: submit_sig.clone(),
-			sigs: Signatures::default(),
-			option: U256::default(),
-		};
-		let call_data = self.client.protocol_contracts.socket.poll(poll_submit).calldata().unwrap();
-		let tx_request = TransactionRequest::default().data(call_data).to(self
-			.client
-			.protocol_contracts
-			.socket
-			.address());
+		let tx_request = TransactionRequest::default()
+			.data(self.build_poll_call_data(submit_sig.clone(), Signatures::default()))
+			.to(self.client.protocol_contracts.socket.address());
 
 		let metadata = RollbackMetadata::new(
 			true,
@@ -124,6 +116,8 @@ impl<T: JsonRpcClient> SocketRollbackHandler<T> {
 			ChainID::from_be_bytes(socket_msg.ins_code.chain),
 		);
 
+		// transaction executed on Bifrost so no random delay required.
+		// due to majority checks, higher gas coefficient required.
 		self.request_send_transaction(tx_request, metadata, false, GasCoefficient::Mid);
 	}
 
@@ -148,13 +142,17 @@ impl<T: JsonRpcClient> SocketRollbackHandler<T> {
 			ChainID::from_be_bytes(socket_msg.ins_code.chain),
 		);
 
+		// transaction executed on External chain's so random delay required.
+		// aggregated relay typed transactions are good with low gas coefficient.
 		self.request_send_transaction(tx_request, metadata, true, GasCoefficient::Low);
 	}
 
 	/// Tries to receive any new rollbackable messages and store's it locally.
+	/// The timestamp will be set to the current highest block's timestamp.
 	fn receive(&mut self, current_timestamp: U256) {
 		while let Ok(msg) = self.rollback_receiver.try_recv() {
 			let req_id = msg.req_id.sequence;
+			// ignore if the request already exists.
 			if self.rollback_msgs.contains_key(&req_id) {
 				continue;
 			}
@@ -171,6 +169,8 @@ impl<T: JsonRpcClient> SocketRollbackHandler<T> {
 		give_random_delay: bool,
 		gas_coefficient: GasCoefficient,
 	) {
+		// asynchronous transaction tasks will work fine for rollback transactions,
+		// so `is_bootstrap` parameter is set to `false`.
 		match self.event_sender.send(EventMessage::new(
 			TxRequest::Legacy(tx_request),
 			EventMetadata::Rollback(metadata.clone()),
@@ -236,11 +236,12 @@ impl<T: JsonRpcClient> PeriodicWorker for SocketRollbackHandler<T> {
 				self.receive(latest_block.timestamp);
 
 				for (req_id, rollback_msg) in self.rollback_msgs.clone() {
+					// ignore if the required interval didn't pass.
 					if !self.is_interval_passed(rollback_msg.timestamp, latest_block.timestamp) {
 						continue;
 					}
 					if !self.is_request_executed(&rollback_msg.socket_msg).await {
-						// the pending request has not been processed through the schedule. rollback should be handled.
+						// the pending request has not been processed in the waiting period. rollback should be handled.
 						self.try_rollback(&rollback_msg.socket_msg).await;
 					}
 					handled_req_ids.push(req_id);
