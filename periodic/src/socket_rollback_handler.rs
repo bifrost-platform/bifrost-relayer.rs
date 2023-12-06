@@ -158,6 +158,13 @@ impl<T: JsonRpcClient> SocketRollbackHandler<T> {
 			}
 			self.rollback_msgs
 				.insert(req_id, RollbackableMessage::new(current_timestamp, msg));
+
+			log::info!(
+				target: &self.client.get_chain_name(),
+				"-[{}] 🔃 Received Rollbackable Socket message: {}",
+				sub_display_format(SUB_LOG_TARGET),
+				req_id,
+			);
 		}
 	}
 
@@ -227,6 +234,15 @@ impl<T: JsonRpcClient> PeriodicWorker for SocketRollbackHandler<T> {
 
 	async fn run(&mut self) {
 		loop {
+			self.wait_until_next_time().await;
+
+			log::info!(
+				target: &self.client.get_chain_name(),
+				"-[{}] 🔃 Start Rollback::Socket process. Rollbackable entries: {}",
+				sub_display_format(SUB_LOG_TARGET),
+				self.rollback_msgs.len()
+			);
+
 			// executed or rollback handled request ID's.
 			let mut handled_req_ids = vec![];
 
@@ -236,22 +252,31 @@ impl<T: JsonRpcClient> PeriodicWorker for SocketRollbackHandler<T> {
 				self.receive(latest_block.timestamp);
 
 				for (req_id, rollback_msg) in self.rollback_msgs.clone() {
+					// ignore if the request has already been processed.
+					// it should be removed from the local storage.
+					if self.is_request_executed(&rollback_msg.socket_msg).await {
+						handled_req_ids.push(req_id);
+						continue;
+					}
 					// ignore if the required interval didn't pass.
 					if !self.is_interval_passed(rollback_msg.timestamp, latest_block.timestamp) {
 						continue;
 					}
-					if !self.is_request_executed(&rollback_msg.socket_msg).await {
-						// the pending request has not been processed in the waiting period. rollback should be handled.
-						self.try_rollback(&rollback_msg.socket_msg).await;
-					}
+					// the pending request has not been processed in the waiting period. rollback should be handled.
+					self.try_rollback(&rollback_msg.socket_msg).await;
 					handled_req_ids.push(req_id);
 				}
-				for req_id in handled_req_ids {
-					self.rollback_msgs.remove(&req_id);
-				}
+			}
+			for req_id in handled_req_ids {
+				self.rollback_msgs.remove(&req_id);
 			}
 
-			self.wait_until_next_time().await;
+			log::info!(
+				target: &self.client.get_chain_name(),
+				"-[{}] 🔃 End Rollback::Socket process. Rollbackable entries: {}",
+				sub_display_format(SUB_LOG_TARGET),
+				self.rollback_msgs.len()
+			);
 		}
 	}
 }

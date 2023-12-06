@@ -30,6 +30,8 @@ impl<T: JsonRpcClient> PeriodicWorker for HeartbeatSender<T> {
 
 	async fn run(&mut self) {
 		loop {
+			self.wait_until_next_time().await;
+
 			let address = self.client.address();
 
 			let relayer_manager = self.client.protocol_contracts.relayer_manager.as_ref().unwrap();
@@ -65,8 +67,6 @@ impl<T: JsonRpcClient> PeriodicWorker for HeartbeatSender<T> {
 				)
 				.await;
 			}
-
-			self.wait_until_next_time().await;
 		}
 	}
 }
