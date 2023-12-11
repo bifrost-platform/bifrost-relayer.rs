@@ -1,11 +1,12 @@
-use std::{collections::BTreeMap, sync::Arc, time::Duration};
+use std::{collections::BTreeMap, str::FromStr, sync::Arc, time::Duration};
 
 use ethers::{
-	abi::RawLog,
+	abi::{ParamType, RawLog, Token},
 	prelude::decode_logs,
 	providers::JsonRpcClient,
-	types::{Filter, Log, TransactionRequest, H256, U256},
+	types::{Bytes, Filter, Log, TransactionRequest, H256, U256},
 };
+use sc_service::SpawnTaskHandle;
 use tokio::{sync::broadcast::Receiver, time::sleep};
 use tokio_stream::StreamExt;
 
@@ -15,7 +16,7 @@ use br_primitives::{
 	constants::DEFAULT_BOOTSTRAP_ROUND_OFFSET,
 	eth::{
 		BootstrapState, BuiltRelayTransaction, ChainID, GasCoefficient, RelayDirection,
-		SocketEventStatus, BOOTSTRAP_BLOCK_CHUNK_SIZE,
+		SocketEventStatus, SocketVariants, SocketVersion, BOOTSTRAP_BLOCK_CHUNK_SIZE,
 	},
 	socket::{RequestID, Signatures, SocketEvents, SocketMessage},
 	sub_display_format, RollbackSender, INVALID_BIFROST_NATIVENESS, INVALID_CHAIN_ID,
@@ -27,7 +28,7 @@ use crate::eth::{
 	SocketRelayMetadata, TxRequest,
 };
 
-use super::SocketRelayBuilder;
+use super::{ExecutionFilter, SocketRelayBuilder};
 
 const SUB_LOG_TARGET: &str = "socket-handler";
 
@@ -47,10 +48,12 @@ pub struct SocketRelayHandler<T> {
 	socket_signature: H256,
 	/// The bootstrap shared data.
 	bootstrap_shared_data: Arc<BootstrapSharedData>,
+	/// A handle for spawning execution filter tasks.
+	execute_spawn_handle: SpawnTaskHandle,
 }
 
 #[async_trait::async_trait]
-impl<T: JsonRpcClient> Handler for SocketRelayHandler<T> {
+impl<T: 'static + JsonRpcClient> Handler for SocketRelayHandler<T> {
 	async fn run(&mut self) {
 		loop {
 			if self.is_bootstrap_state_synced_as(BootstrapState::BootstrapSocketRelay).await {
@@ -83,7 +86,7 @@ impl<T: JsonRpcClient> Handler for SocketRelayHandler<T> {
 			Ok(decoded) => match &decoded[0] {
 				SocketEvents::Socket(socket) => {
 					let msg = socket.clone().msg;
-					let metadata = SocketRelayMetadata::new(
+					let mut metadata = SocketRelayMetadata::new(
 						self.is_inbound_sequence(ChainID::from_be_bytes(msg.ins_code.chain)),
 						SocketEventStatus::from_u8(msg.status),
 						msg.req_id.sequence,
@@ -92,6 +95,7 @@ impl<T: JsonRpcClient> Handler for SocketRelayHandler<T> {
 						msg.params.to,
 						is_bootstrap,
 					);
+					metadata.variants = self.decode_msg_variants(&msg.params.variants);
 
 					if !metadata.is_bootstrap {
 						log::info!(
@@ -220,9 +224,61 @@ impl<T: JsonRpcClient> SocketRelayBuilder<T> for SocketRelayHandler<T> {
 		};
 		(signatures, is_external)
 	}
+
+	fn decode_msg_variants(&self, raw_variants: &Bytes) -> SocketVariants {
+		if raw_variants != &Bytes::from_str("0x00").unwrap() {
+			match ethers::abi::decode(
+				&[
+					ParamType::FixedBytes(4),
+					ParamType::Address,
+					ParamType::Uint(256),
+					ParamType::Bytes,
+				],
+				&raw_variants,
+			) {
+				Ok(variants) => {
+					let mut result = SocketVariants::default();
+					variants.into_iter().for_each(|variant| match variant {
+						Token::FixedBytes(source_chain) => {
+							result.source_chain = Bytes::from(source_chain);
+						},
+						Token::Address(receiver) => {
+							result.receiver = receiver;
+						},
+						Token::Uint(max_fee) => result.max_fee = max_fee,
+						Token::Bytes(data) => {
+							result.data = Bytes::from(data);
+						},
+						_ => {
+							panic!(
+								"[{}]-[{}]-[{}] Invalid Socket::variants received: {:?}",
+								&self.client.get_chain_name(),
+								SUB_LOG_TARGET,
+								self.client.address(),
+								raw_variants,
+							);
+						},
+					});
+					result.version = SocketVersion::V2;
+					return result;
+				},
+				Err(error) => {
+					panic!(
+						"[{}]-[{}]-[{}] Invalid Socket::variants received: {:?}, Error: {}",
+						&self.client.get_chain_name(),
+						SUB_LOG_TARGET,
+						self.client.address(),
+						raw_variants,
+						error
+					)
+				},
+			}
+		}
+		SocketVariants::default()
+	}
 }
 
-impl<T: JsonRpcClient> SocketRelayHandler<T> {
+impl<T: 'static + JsonRpcClient> SocketRelayHandler<T> {
 	/// Instantiates a new `SocketRelayHandler` instance.
 	pub fn new(
 		id: ChainID,
@@ -231,6 +287,7 @@ impl<T: JsonRpcClient> SocketRelayHandler<T> {
 		block_receiver: Receiver<BlockMessage>,
 		system_clients_vec: Vec<Arc<EthClient<T>>>,
 		bootstrap_shared_data: Arc<BootstrapSharedData>,
+		execute_spawn_handle: SpawnTaskHandle,
 	) -> Self {
 		let mut system_clients = BTreeMap::new();
 		system_clients_vec.iter().for_each(|client| {
@@ -263,6 +320,7 @@ impl<T: JsonRpcClient> SocketRelayHandler<T> {
 			client,
 			system_clients,
 			bootstrap_shared_data,
+			execute_spawn_handle,
 		}
 	}
 
@@ -285,25 +343,23 @@ impl<T: JsonRpcClient> SocketRelayHandler<T> {
 			)
 		};
 
-		if self.is_rollbackable(is_inbound, metadata.status) {
-			self.send_rollbackable_request(relay_tx_chain_id, metadata.clone(), socket_msg.clone());
-		}
-
 		// build and send transaction request
 		if let Some(built_transaction) =
-			self.build_transaction(socket_msg, is_inbound, relay_tx_chain_id).await
+			self.build_transaction(socket_msg.clone(), is_inbound, relay_tx_chain_id).await
 		{
 			self.request_send_transaction(
 				relay_tx_chain_id,
 				built_transaction.tx_request,
 				metadata,
+				socket_msg,
 				built_transaction.is_external,
 				if built_transaction.is_external {
 					GasCoefficient::Low
 				} else {
 					GasCoefficient::Mid
 				},
-			);
+			)
+			.await;
 		}
 	}
 
@@ -377,8 +433,8 @@ impl<T: JsonRpcClient> SocketRelayHandler<T> {
 		)
 	}
 
-	/// Verifies whether the socket event is on a rollbackable state.
-	fn is_rollbackable(&self, is_inbound: bool, status: SocketEventStatus) -> bool {
+	/// Verifies whether the socket event is on a executable(=rollbackable) state.
+	fn is_executable(&self, is_inbound: bool, status: SocketEventStatus) -> bool {
 		matches!(
 			(is_inbound, status),
 			(true, SocketEventStatus::Requested) | (false, SocketEventStatus::Accepted)
@@ -421,15 +477,38 @@ impl<T: JsonRpcClient> SocketRelayHandler<T> {
 	}
 
 	/// Request send socket relay transaction to the target event channel.
-	fn request_send_transaction(
+	async fn request_send_transaction(
 		&self,
 		chain_id: ChainID,
 		tx_request: TransactionRequest,
 		metadata: SocketRelayMetadata,
+		socket_msg: SocketMessage,
 		give_random_delay: bool,
 		gas_coefficient: GasCoefficient,
 	) {
 		if let Some(event_sender) = self.event_senders.get(&chain_id) {
+			if self.is_executable(metadata.is_inbound, metadata.status) {
+				self.send_rollbackable_request(chain_id, metadata.clone(), socket_msg);
+
+				match metadata.variants.version {
+					SocketVersion::V1 => {
+						// nothing to do on version 1.
+					},
+					SocketVersion::V2 => {
+						let task = ExecutionFilter::new(
+							self.get_client(),
+							event_sender.clone(),
+							metadata.clone(),
+						);
+						self.execute_spawn_handle.spawn("execution_filter", None, async move {
+							task.try_filter_and_send(tx_request, give_random_delay, gas_coefficient)
+								.await
+						});
+						return;
+					},
+				}
+			}
+
 			match event_sender.send(EventMessage::new(
 				TxRequest::Legacy(tx_request),
 				EventMetadata::SocketRelay(metadata.clone()),
@@ -515,7 +594,7 @@ impl<T: JsonRpcClient> SocketRelayHandler<T> {
 }
 
 #[async_trait::async_trait]
-impl<T: JsonRpcClient> BootstrapHandler for SocketRelayHandler<T> {
+impl<T: 'static + JsonRpcClient> BootstrapHandler for SocketRelayHandler<T> {
 	async fn bootstrap(&self) {
 		log::info!(
 			target: &self.client.get_chain_name(),

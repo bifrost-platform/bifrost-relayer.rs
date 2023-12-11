@@ -70,6 +70,8 @@ impl<T: JsonRpcClient> SocketRollbackHandler<T> {
 			)
 			.await;
 
+		// TODO: check both source & dst chain request status. none= 0
+
 		// If the state has changed, we consider that it has been executed (or rejected).
 		// `socket_msg.status` will either be `Inbound::Requested` or `Outbound::Accepted`.
 		if SocketEventStatus::from_u8(socket_msg.status)

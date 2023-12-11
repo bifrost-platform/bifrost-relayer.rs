@@ -10,7 +10,7 @@ use ethers::types::{
 use tokio::sync::mpsc::{error::SendError, UnboundedSender};
 
 use br_primitives::{
-	eth::{ChainID, GasCoefficient, SocketEventStatus},
+	eth::{ChainID, GasCoefficient, SocketEventStatus, SocketVariants},
 	PriceResponse,
 };
 
@@ -48,6 +48,8 @@ pub struct SocketRelayMetadata {
 	pub receiver: Address,
 	/// The flag whether this relay is processed on bootstrap.
 	pub is_bootstrap: bool,
+	/// The variants this request contains.
+	pub variants: SocketVariants,
 }
 
 impl SocketRelayMetadata {
@@ -60,7 +62,16 @@ impl SocketRelayMetadata {
 		receiver: Address,
 		is_bootstrap: bool,
 	) -> Self {
-		Self { is_inbound, status, sequence, src_chain_id, dst_chain_id, receiver, is_bootstrap }
+		Self {
+			is_inbound,
+			status,
+			sequence,
+			src_chain_id,
+			dst_chain_id,
+			receiver,
+			is_bootstrap,
+			variants: SocketVariants::default(),
+		}
 	}
 }
 

@@ -1,5 +1,5 @@
 use br_primitives::{
-	eth::{BuiltRelayTransaction, ChainID, RecoveredSignature},
+	eth::{BuiltRelayTransaction, ChainID, RecoveredSignature, SocketVariants},
 	socket::{PollSubmit, Signatures, SocketMessage},
 };
 use ethers::{
@@ -9,11 +9,13 @@ use ethers::{
 };
 use std::{str::FromStr, sync::Arc};
 
+pub use execution_filter::*;
 pub use roundup_relay_handler::*;
 pub use socket_relay_handler::*;
 
 use super::EthClient;
 
+mod execution_filter;
 mod roundup_relay_handler;
 mod socket_relay_handler;
 
@@ -104,6 +106,11 @@ pub trait SocketRelayBuilder<T> {
 			ins_code_token,
 			params_token,
 		])])
+	}
+
+	/// Decodes the raw variants in the socket message.
+	fn decode_msg_variants(&self, _raw_variants: &Bytes) -> SocketVariants {
+		SocketVariants::default()
 	}
 
 	/// Signs the given socket message.
