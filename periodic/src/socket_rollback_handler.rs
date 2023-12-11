@@ -5,8 +5,8 @@ use br_client::eth::{
 	TxRequest,
 };
 use br_primitives::{
-	eth::{ChainID, GasCoefficient, SocketEventStatus},
-	socket::{Signatures, SocketMessage},
+	eth::{ChainID, GasCoefficient, RelayDirection, SocketEventStatus},
+	socket::{RequestID, RequestInfo, Signatures, SocketMessage},
 	sub_display_format, PeriodicWorker, RawRequestID, RollbackableMessage, INVALID_CHAIN_ID,
 	INVALID_PERIODIC_SCHEDULE, ROLLBACK_CHECK_MINIMUM_INTERVAL, ROLLBACK_CHECK_SCHEDULE,
 };
@@ -25,6 +25,8 @@ const SUB_LOG_TARGET: &str = "rollback-handler";
 pub struct SocketRollbackHandler<T> {
 	/// The `EthClient` to interact with the connected blockchain.
 	pub client: Arc<EthClient<T>>,
+	/// The entire clients instantiated in the system. <chain_id, Arc<EthClient>>
+	system_clients: BTreeMap<ChainID, Arc<EthClient<T>>>,
 	/// The receiver connected to the socket rollback channel.
 	rollback_receiver: UnboundedReceiver<SocketMessage>,
 	/// The local storage saving emitted `Socket` event messages.
@@ -39,17 +41,19 @@ impl<T: JsonRpcClient> SocketRollbackHandler<T> {
 	/// Instantiates a new `SocketRollbackHandler`.
 	pub fn new(
 		event_sender: Arc<EventSender>,
-		system_clients: Vec<Arc<EthClient<T>>>,
+		system_clients_vec: Vec<Arc<EthClient<T>>>,
 	) -> (Self, UnboundedSender<SocketMessage>) {
 		let (sender, rollback_receiver) = mpsc::unbounded_channel::<SocketMessage>();
 
+		let mut system_clients = BTreeMap::new();
+		system_clients_vec.iter().for_each(|client| {
+			system_clients.insert(client.get_chain_id(), client.clone());
+		});
+
 		(
 			Self {
-				client: system_clients
-					.iter()
-					.find(|client| client.get_chain_id() == event_sender.id)
-					.expect(INVALID_CHAIN_ID)
-					.clone(),
+				client: system_clients.get(&event_sender.id).expect(INVALID_CHAIN_ID).clone(),
+				system_clients,
 				rollback_receiver,
 				rollback_msgs: BTreeMap::new(),
 				event_sender,
@@ -60,24 +64,48 @@ impl<T: JsonRpcClient> SocketRollbackHandler<T> {
 		)
 	}
 
-	/// Verifies whether the given socket message has been executed or reverted.
+	/// Verifies whether the given socket message has been executed.
 	async fn is_request_executed(&self, socket_msg: &SocketMessage) -> bool {
-		let request = self
-			.client
-			.contract_call(
-				self.client.protocol_contracts.socket.get_request(socket_msg.req_id.clone()),
-				"socket.get_request",
+		let src_request = self
+			.get_socket_request(&socket_msg.req_id, ChainID::from_be_bytes(socket_msg.req_id.chain))
+			.await;
+		let dst_request = self
+			.get_socket_request(
+				&socket_msg.req_id,
+				ChainID::from_be_bytes(socket_msg.ins_code.chain),
 			)
 			.await;
 
-		// TODO: check both source & dst chain request status. none= 0
+		if let (Some(src_request), Some(dst_request)) = (src_request, dst_request) {
+			let src_status = SocketEventStatus::from_u8(src_request.field[0].clone().into());
+			let dst_status = SocketEventStatus::from_u8(dst_request.field[0].clone().into());
 
-		// If the state has changed, we consider that it has been executed (or rejected).
-		// `socket_msg.status` will either be `Inbound::Requested` or `Outbound::Accepted`.
-		if SocketEventStatus::from_u8(socket_msg.status)
-			!= SocketEventStatus::from_u8(request.field[0].clone().into())
-		{
-			return true;
+			match src_status {
+				SocketEventStatus::Committed | SocketEventStatus::Rollbacked => return true,
+				_ => (),
+			}
+			if self.is_inbound_sequence(ChainID::from_be_bytes(socket_msg.ins_code.chain)) {
+				match dst_status {
+					SocketEventStatus::Executed
+					| SocketEventStatus::Reverted
+					| SocketEventStatus::Accepted
+					| SocketEventStatus::Rejected => return true,
+					_ => (),
+				}
+			} else {
+				match dst_status {
+					SocketEventStatus::Executed | SocketEventStatus::Reverted => return true,
+					_ => (),
+				}
+			}
+		}
+		false
+	}
+
+	/// Verifies whether the socket event is an inbound sequence.
+	fn is_inbound_sequence(&self, dst_chain_id: ChainID) -> bool {
+		if let Some(client) = &self.system_clients.get(&dst_chain_id) {
+			return matches!(client.metadata.if_destination_chain, RelayDirection::Inbound);
 		}
 		false
 	}
@@ -90,6 +118,25 @@ impl<T: JsonRpcClient> SocketRollbackHandler<T> {
 			return true;
 		}
 		false
+	}
+
+	/// Get the current state of the socket request on the target chain.
+	async fn get_socket_request(
+		&self,
+		req_id: &RequestID,
+		chain_id: ChainID,
+	) -> Option<RequestInfo> {
+		if let Some(client) = &self.system_clients.get(&chain_id) {
+			return Some(
+				client
+					.contract_call(
+						client.protocol_contracts.socket.get_request(req_id.clone()),
+						"socket.get_request",
+					)
+					.await,
+			);
+		}
+		None
 	}
 
 	/// Tries to rollback the given socket message.

@@ -197,7 +197,8 @@ impl RoundUpEventStatus {
 #[derive(Clone, Copy, Debug, PartialEq, PartialOrd)]
 /// The socket event status.
 pub enum SocketEventStatus {
-	Requested = 1,
+	None,
+	Requested,
 	Failed,
 	Executed,
 	Reverted,
@@ -210,6 +211,7 @@ pub enum SocketEventStatus {
 impl SocketEventStatus {
 	pub fn from_u8(status: u8) -> Self {
 		match status {
+			0 => SocketEventStatus::None,
 			1 => SocketEventStatus::Requested,
 			2 => SocketEventStatus::Failed,
 			3 => SocketEventStatus::Executed,
@@ -226,6 +228,7 @@ impl SocketEventStatus {
 impl From<SocketEventStatus> for u8 {
 	fn from(status: SocketEventStatus) -> Self {
 		match status {
+			SocketEventStatus::None => 0,
 			SocketEventStatus::Requested => 1,
 			SocketEventStatus::Failed => 2,
 			SocketEventStatus::Executed => 3,

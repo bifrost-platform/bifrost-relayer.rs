@@ -234,7 +234,7 @@ impl<T: JsonRpcClient> SocketRelayBuilder<T> for SocketRelayHandler<T> {
 					ParamType::Uint(256),
 					ParamType::Bytes,
 				],
-				&raw_variants,
+				raw_variants,
 			) {
 				Ok(variants) => {
 					let mut result = SocketVariants::default();
