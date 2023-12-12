@@ -15,14 +15,15 @@ use crate::{eth::ChainID, socket::SocketMessage};
 /// The channel message that contains a rollbackable socket message.
 pub struct RollbackableMessage {
 	/// The timestamp that this relayer has tried to process the socket event.
-	pub timestamp: U256,
+	/// If time passed as long as `ROLLBACK_CHECK_MINIMUM_INTERVAL`, this request will be rollbacked.
+	pub timeout_started_at: U256,
 	/// The rollbackable socket message. This will be either `Inbound::Requested` or `Outbound::Accepted`.
 	pub socket_msg: SocketMessage,
 }
 
 impl RollbackableMessage {
 	pub fn new(timestamp: U256, socket_msg: SocketMessage) -> Self {
-		Self { timestamp, socket_msg }
+		Self { timeout_started_at: timestamp, socket_msg }
 	}
 }
 

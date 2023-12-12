@@ -111,8 +111,8 @@ impl<T: JsonRpcClient> SocketRollbackHandler<T> {
 	}
 
 	/// Verifies whether a certain socket message has been waited for at least the required minimum time.
-	fn is_interval_passed(&self, requested_timestamp: U256, current_timestamp: U256) -> bool {
-		if current_timestamp.saturating_sub(requested_timestamp)
+	fn is_request_timeout(&self, timeout_started_at: U256, current_timestamp: U256) -> bool {
+		if current_timestamp.saturating_sub(timeout_started_at)
 			>= ROLLBACK_CHECK_MINIMUM_INTERVAL.into()
 		{
 			return true;
@@ -308,7 +308,9 @@ impl<T: JsonRpcClient> PeriodicWorker for SocketRollbackHandler<T> {
 						continue;
 					}
 					// ignore if the required interval didn't pass.
-					if !self.is_interval_passed(rollback_msg.timestamp, latest_block.timestamp) {
+					if !self
+						.is_request_timeout(rollback_msg.timeout_started_at, latest_block.timestamp)
+					{
 						continue;
 					}
 					// the pending request has not been processed in the waiting period. rollback should be handled.
