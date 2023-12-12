@@ -27,7 +27,7 @@ use tokio::{
 	time::sleep,
 };
 
-use super::{generate_delay, AsyncTransactionTask};
+use super::{generate_delay, TransactionTask};
 
 const SUB_LOG_TARGET: &str = "eip1559-tx-manager";
 
@@ -226,7 +226,7 @@ impl<T: JsonRpcClient> Eip1559TransactionTask<T> {
 }
 
 #[async_trait::async_trait]
-impl<T: JsonRpcClient> AsyncTransactionTask<T> for Eip1559TransactionTask<T> {
+impl<T: JsonRpcClient> TransactionTask<T> for Eip1559TransactionTask<T> {
 	fn is_txpool_enabled(&self) -> bool {
 		self.is_txpool_enabled
 	}

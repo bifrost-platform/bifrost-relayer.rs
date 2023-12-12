@@ -27,7 +27,7 @@ use tokio::{
 	time::sleep,
 };
 
-use super::{generate_delay, AsyncTransactionTask};
+use super::{generate_delay, TransactionTask};
 
 const SUB_LOG_TARGET: &str = "legacy-tx-manager";
 
@@ -259,7 +259,7 @@ impl<T: JsonRpcClient> LegacyTransactionTask<T> {
 }
 
 #[async_trait::async_trait]
-impl<T: JsonRpcClient> AsyncTransactionTask<T> for LegacyTransactionTask<T> {
+impl<T: JsonRpcClient> TransactionTask<T> for LegacyTransactionTask<T> {
 	fn is_txpool_enabled(&self) -> bool {
 		self.is_txpool_enabled
 	}
