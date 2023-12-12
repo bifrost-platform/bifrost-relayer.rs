@@ -227,7 +227,7 @@ impl Display for RollbackMetadata {
 	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
 		write!(
 			f,
-			"Relay({}-{:?}-{:?}, {:?} -> {:?})",
+			"Rollback({}-{:?}-{:?}, {:?} -> {:?})",
 			if self.is_inbound { "Inbound".to_string() } else { "Outbound".to_string() },
 			self.status,
 			self.sequence,
