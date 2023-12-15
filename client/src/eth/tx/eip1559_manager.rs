@@ -244,6 +244,8 @@ impl<T: JsonRpcClient> TransactionTask<T> for Eip1559TransactionTask<T> {
 	}
 
 	async fn try_send_transaction(&self, mut msg: EventMessage) {
+		msg.tx_request = TxRequest::Eip1559(msg.tx_request.to_eip1559());
+
 		if msg.retries_remaining == 0 {
 			return;
 		}
