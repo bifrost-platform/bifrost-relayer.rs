@@ -1,4 +1,4 @@
-use std::{collections::BTreeMap, str::FromStr, sync::Arc, time::Duration};
+use std::{collections::BTreeMap, sync::Arc, time::Duration};
 
 use ethers::{
 	abi::{ParamType, RawLog, Token},
@@ -104,7 +104,7 @@ impl<T: 'static + JsonRpcClient> Handler for SocketRelayHandler<T> {
 							sub_display_format(SUB_LOG_TARGET),
 							metadata,
 							log.block_number.unwrap(),
-							log.transaction_hash,
+							log.transaction_hash.unwrap(),
 						);
 					}
 
@@ -226,7 +226,7 @@ impl<T: JsonRpcClient> SocketRelayBuilder<T> for SocketRelayHandler<T> {
 	}
 
 	fn decode_msg_variants(&self, raw_variants: &Bytes) -> SocketVariants {
-		if raw_variants != &Bytes::from_str("0x00").unwrap() {
+		if raw_variants != &Bytes::default() {
 			match ethers::abi::decode(
 				&[
 					ParamType::FixedBytes(4),
@@ -501,8 +501,12 @@ impl<T: 'static + JsonRpcClient> SocketRelayHandler<T> {
 							metadata.clone(),
 						);
 						self.execute_spawn_handle.spawn("execution_filter", None, async move {
-							task.try_filter_and_send(tx_request, give_random_delay, gas_coefficient)
-								.await
+							task.try_filter_and_send(
+								tx_request,
+								give_random_delay,
+								GasCoefficient::Mid,
+							)
+							.await
 						});
 						return;
 					},
@@ -766,6 +770,40 @@ mod tests {
 			&data,
 		) {
 			Ok(socket) => println!("socket -> {:?}", socket[0].to_string()),
+			Err(error) => {
+				panic!("decode failed -> {}", error);
+			},
+		}
+	}
+
+	#[test]
+	fn test_socket_variants_decode() {
+		println!("default byte -> {}", Bytes::default());
+		let raw_variants = Bytes::from_str("0x00000005000000000000000000000000000000000000000000000000000000000000000000000000000000005b38da6a701c568545dcfcb03fcb875f56beddc400000000000000000000000000000000000000000000000000000000000001c8000000000000000000000000000000000000000000000000000000000000008000000000000000000000000000000000000000000000000000000000000000012300000000000000000000000000000000000000000000000000000000000000").unwrap();
+		match ethers::abi::decode(
+			&[ParamType::FixedBytes(4), ParamType::Address, ParamType::Uint(256), ParamType::Bytes],
+			&raw_variants,
+		) {
+			Ok(variants) => {
+				log::info!("variants -> {:?}", variants);
+				let mut result = SocketVariants::default();
+				variants.into_iter().for_each(|variant| match variant {
+					Token::FixedBytes(source_chain) => {
+						result.source_chain = Bytes::from(source_chain);
+					},
+					Token::Address(receiver) => {
+						result.receiver = receiver;
+					},
+					Token::Uint(max_fee) => result.max_fee = max_fee,
+					Token::Bytes(data) => {
+						result.data = Bytes::from(data);
+					},
+					_ => {
+						panic!("decode failed");
+					},
+				});
+				println!("variants -> {:?}", result);
+			},
 			Err(error) => {
 				panic!("decode failed -> {}", error);
 			},

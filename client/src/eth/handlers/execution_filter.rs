@@ -56,7 +56,7 @@ impl<T: JsonRpcClient> ExecutionFilter<T> {
 		if let Some(executor_adddress) = self.client.protocol_contracts.executor_address {
 			log::info!(
 				target: &self.client.get_chain_name(),
-				"-[{}] ⛓️ Start Execution::Filter: {}",
+				"-[{}] ⛓️  Start Execution::Filter: {}",
 				sub_display_format(SUB_LOG_TARGET),
 				self.metadata
 			);
@@ -73,7 +73,7 @@ impl<T: JsonRpcClient> ExecutionFilter<T> {
 				EstimationResult::NonExecutable(error) => {
 					log::warn!(
 						target: &self.client.get_chain_name(),
-						"-[{}] ⛓️ Execution::Filter Result → ❗️ Failure::Error({}): {}",
+						"-[{}] ⛓️  Execution::Filter Result → ❗️ Failure::Error({}): {}",
 						sub_display_format(SUB_LOG_TARGET),
 						error,
 						self.metadata
@@ -84,7 +84,7 @@ impl<T: JsonRpcClient> ExecutionFilter<T> {
 
 			log::info!(
 				target: &self.client.get_chain_name(),
-				"-[{}] ⛓️ Execution::Filter Result → ✅ Success::EstimatedGas({}): {}",
+				"-[{}] ⛓️  Execution::Filter Result → ✅ Success::EstimatedGas({}): {}",
 				sub_display_format(SUB_LOG_TARGET),
 				estimated_gas,
 				self.metadata

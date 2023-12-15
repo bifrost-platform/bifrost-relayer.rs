@@ -7,8 +7,9 @@ use br_client::eth::{
 use br_primitives::{
 	eth::{ChainID, GasCoefficient, RelayDirection, SocketEventStatus},
 	socket::{RequestID, RequestInfo, Signatures, SocketMessage},
-	sub_display_format, PeriodicWorker, RawRequestID, RollbackableMessage, INVALID_CHAIN_ID,
-	INVALID_PERIODIC_SCHEDULE, ROLLBACK_CHECK_MINIMUM_INTERVAL, ROLLBACK_CHECK_SCHEDULE,
+	sub_display_format, PeriodicWorker, RawRequestID, RollbackableMessage,
+	INVALID_BIFROST_NATIVENESS, INVALID_CHAIN_ID, INVALID_PERIODIC_SCHEDULE,
+	ROLLBACK_CHECK_MINIMUM_INTERVAL, ROLLBACK_CHECK_SCHEDULE,
 };
 use cron::Schedule;
 use ethers::{
@@ -271,7 +272,14 @@ impl<T: JsonRpcClient> SocketRollbackHandler<T> {
 #[async_trait::async_trait]
 impl<T: JsonRpcClient> SocketRelayBuilder<T> for SocketRollbackHandler<T> {
 	fn get_client(&self) -> Arc<EthClient<T>> {
-		self.client.clone()
+		// This will always return the Bifrost client.
+		// Used only for `get_sorted_signatures()` on `Outbound::Accepted` rollbacks.
+		self.system_clients
+			.iter()
+			.find(|(_id, client)| client.metadata.is_native)
+			.expect(INVALID_BIFROST_NATIVENESS)
+			.1
+			.clone()
 	}
 }
 
@@ -284,13 +292,6 @@ impl<T: JsonRpcClient> PeriodicWorker for SocketRollbackHandler<T> {
 	async fn run(&mut self) {
 		loop {
 			self.wait_until_next_time().await;
-
-			log::info!(
-				target: &self.client.get_chain_name(),
-				"-[{}] 🔃 Start Rollback::Socket process. Rollbackable entries: {}",
-				sub_display_format(SUB_LOG_TARGET),
-				self.rollback_msgs.len()
-			);
 
 			// executed or rollback handled request ID's.
 			let mut handled_req_ids = vec![];
@@ -324,7 +325,7 @@ impl<T: JsonRpcClient> PeriodicWorker for SocketRollbackHandler<T> {
 
 			log::info!(
 				target: &self.client.get_chain_name(),
-				"-[{}] 🔃 End Rollback::Socket process. Rollbackable entries: {}",
+				"-[{}] 🔃 Checked Rollbackable::Socket entries: {}",
 				sub_display_format(SUB_LOG_TARGET),
 				self.rollback_msgs.len()
 			);

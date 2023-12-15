@@ -79,12 +79,13 @@ impl Display for SocketRelayMetadata {
 	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
 		write!(
 			f,
-			"Relay({}-{:?}-{:?}, {:?} -> {:?})",
+			"Relay({}-{:?}-{:?}, {:?} -> {:?}, {:?})",
 			if self.is_inbound { "Inbound".to_string() } else { "Outbound".to_string() },
 			self.status,
 			self.sequence,
 			self.src_chain_id,
 			self.dst_chain_id,
+			self.variants.version
 		)
 	}
 }
@@ -316,6 +317,42 @@ impl TxRequest {
 			TxRequest::Eip1559(tx_request) => {
 				TxRequest::Eip1559(tx_request.clone().gas(estimated_gas))
 			},
+		}
+	}
+
+	/// Sets the `max_fee_per_gas` field in the transaction request.
+	/// This method will only have effect when the type is EIP-1559.
+	/// It will be ignored if the type is legacy.
+	pub fn max_fee_per_gas(&self, max_fee_per_gas: U256) -> Self {
+		match self {
+			TxRequest::Legacy(tx_request) => TxRequest::Legacy(tx_request.clone()),
+			TxRequest::Eip1559(tx_request) => {
+				TxRequest::Eip1559(tx_request.clone().max_fee_per_gas(max_fee_per_gas))
+			},
+		}
+	}
+
+	/// Sets the `max_priority_fee_per_gas` field in the transaction request.
+	/// This method will only have effect when the type is EIP-1559.
+	/// It will be ignored if the type is legacy.
+	pub fn max_priority_fee_per_gas(&self, max_priority_fee_per_gas: U256) -> Self {
+		match self {
+			TxRequest::Legacy(tx_request) => TxRequest::Legacy(tx_request.clone()),
+			TxRequest::Eip1559(tx_request) => TxRequest::Eip1559(
+				tx_request.clone().max_priority_fee_per_gas(max_priority_fee_per_gas),
+			),
+		}
+	}
+
+	/// Sets the `gas_price` field in the transaction request.
+	/// This method will only have effect when the type is legacy.
+	/// It will be ignored if the type is EIP-1559.
+	pub fn gas_price(&self, gas_price: U256) -> Self {
+		match self {
+			TxRequest::Legacy(tx_request) => {
+				TxRequest::Legacy(tx_request.clone().gas_price(gas_price))
+			},
+			TxRequest::Eip1559(tx_request) => TxRequest::Eip1559(tx_request.clone()),
 		}
 	}
 
