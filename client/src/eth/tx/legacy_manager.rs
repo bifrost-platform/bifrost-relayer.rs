@@ -289,6 +289,20 @@ impl<T: JsonRpcClient> TransactionTask<T> for LegacyTransactionTask<T> {
 		// set transaction `from` field
 		msg.tx_request = msg.tx_request.from(self.client.address());
 
+		// set transaction `gas_price` field
+		let mut gas_price = self.client.get_gas_price().await;
+		if self.is_initially_escalated {
+			gas_price = self
+				.client
+				.get_gas_price_for_escalation(
+					gas_price,
+					self.gas_price_coefficient,
+					self.min_gas_price,
+				)
+				.await;
+		}
+		msg.tx_request = msg.tx_request.gas_price(gas_price);
+
 		// estimate the gas amount to be used
 		let estimated_gas =
 			match self.middleware.estimate_gas(&msg.tx_request.to_typed(), None).await {
@@ -307,8 +321,6 @@ impl<T: JsonRpcClient> TransactionTask<T> for LegacyTransactionTask<T> {
 
 		// check the txpool for transaction duplication prevention
 		if !(self.is_duplicate_relay(&msg.tx_request, msg.check_mempool).await) {
-			let mut tx = msg.tx_request.to_legacy();
-			let gas_price = self.client.get_gas_price().await;
 			if !self.is_sufficient_funds(gas_price, estimated_gas).await {
 				panic!(
 					"[{}]-[{}]-[{}] {}",
@@ -319,18 +331,7 @@ impl<T: JsonRpcClient> TransactionTask<T> for LegacyTransactionTask<T> {
 				);
 			}
 
-			if self.is_initially_escalated {
-				tx = tx.gas_price(
-					self.client
-						.get_gas_price_for_escalation(
-							gas_price,
-							self.gas_price_coefficient,
-							self.min_gas_price,
-						)
-						.await,
-				);
-			}
-			let result = self.middleware.send_transaction(tx, None).await;
+			let result = self.middleware.send_transaction(msg.tx_request.to_legacy(), None).await;
 			br_metrics::increase_rpc_calls(&self.client.get_chain_name());
 
 			match result {
