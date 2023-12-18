@@ -63,7 +63,7 @@ impl<T: JsonRpcClient> ExecutionFilter<T> {
 
 			let general_msg = TxRequest::Legacy(
 				TransactionRequest::default()
-					.data(self.metadata.variants.clone().data)
+					.data(self.metadata.variants.data.clone())
 					.to(self.metadata.variants.receiver)
 					.from(executor_adddress)
 					.gas_price(self.client.get_gas_price().await),
