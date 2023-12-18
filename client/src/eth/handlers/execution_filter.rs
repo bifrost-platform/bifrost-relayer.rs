@@ -53,7 +53,7 @@ impl<T: JsonRpcClient> ExecutionFilter<T> {
 		give_random_delay: bool,
 		gas_coefficient: GasCoefficient,
 	) {
-		if let Some(executor_adddress) = self.client.protocol_contracts.executor_address {
+		if let Some(executor_address) = self.client.protocol_contracts.executor_address {
 			log::info!(
 				target: &self.client.get_chain_name(),
 				"-[{}] ⛓️  Start Execution::Filter: {}",
