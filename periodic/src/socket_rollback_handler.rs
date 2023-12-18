@@ -46,10 +46,10 @@ impl<T: JsonRpcClient> SocketRollbackHandler<T> {
 	) -> (Self, UnboundedSender<SocketMessage>) {
 		let (sender, rollback_receiver) = mpsc::unbounded_channel::<SocketMessage>();
 
-		let mut system_clients = BTreeMap::new();
-		system_clients_vec.iter().for_each(|client| {
-			system_clients.insert(client.get_chain_id(), client.clone());
-		});
+		let system_clients: BTreeMap<_, _> = system_clients_vec
+			.iter()
+			.map(|client| (client.get_chain_id(), client.clone()))
+			.collect();
 
 		(
 			Self {
