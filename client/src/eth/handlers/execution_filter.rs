@@ -65,13 +65,13 @@ impl<T: JsonRpcClient> ExecutionFilter<T> {
 				TransactionRequest::default()
 					.data(self.metadata.variants.data.clone())
 					.to(self.metadata.variants.receiver)
-					.from(executor_adddress)
+					.from(executor_address)
 					.gas_price(self.client.get_gas_price().await),
 			);
 
 			let estimated_gas = match self.try_gas_estimation(general_msg).await {
-				EstimationResult::Executable(estimated_gas) => estimated_gas,
-				EstimationResult::NonExecutable(error) => {
+				EstimationResult::Success(estimated_gas) => estimated_gas,
+				EstimationResult::Revert(error) => {
 					log::warn!(
 						target: &self.client.get_chain_name(),
 						"-[{}] ⛓️  Execution::Filter Result → ❗️ Failure::Error({}): {}",
@@ -150,7 +150,7 @@ impl<T: JsonRpcClient> ExecutionFilter<T> {
 		match self.client.provider.estimate_gas(&general_msg.to_typed(), None).await {
 			Ok(estimated_gas) => {
 				// this request is executable. now try to send the relay transaction.
-				EstimationResult::Executable(estimated_gas)
+				EstimationResult::Success(estimated_gas)
 			},
 			Err(error) => {
 				// this request is not executable. first, it'll be retried several times.
@@ -195,7 +195,7 @@ impl<T: JsonRpcClient> ExecutionFilter<T> {
 			}
 
 			match self.client.provider.estimate_gas(&tx_request.to_typed(), None).await {
-				Ok(estimated_gas) => return EstimationResult::Executable(estimated_gas),
+				Ok(estimated_gas) => return EstimationResult::Success(estimated_gas),
 				Err(error) => {
 					sleep(Duration::from_millis(DEFAULT_CALL_RETRY_INTERVAL_MS)).await;
 					retries -= 1;
@@ -203,7 +203,7 @@ impl<T: JsonRpcClient> ExecutionFilter<T> {
 				},
 			}
 		}
-		EstimationResult::NonExecutable(last_error)
+		EstimationResult::Revert(last_error)
 	}
 }
 
