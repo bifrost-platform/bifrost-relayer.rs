@@ -7,8 +7,8 @@ use std::{sync::Arc, time::Duration};
 use tokio::time::sleep;
 
 use crate::eth::{
-	EthClient, EventMessage, EventMetadata, EventSender, SocketRelayMetadata, TxRequest,
-	DEFAULT_CALL_RETRIES, DEFAULT_CALL_RETRY_INTERVAL_MS,
+	EthClient, EventMessage, EventMetadata, EventSender, LegacyGasMiddleware, SocketRelayMetadata,
+	TxRequest, DEFAULT_CALL_RETRIES, DEFAULT_CALL_RETRY_INTERVAL_MS,
 };
 
 use super::SocketRelayBuilder;
@@ -65,7 +65,8 @@ impl<T: JsonRpcClient> ExecutionFilter<T> {
 				TransactionRequest::default()
 					.data(self.metadata.variants.clone().data)
 					.to(self.metadata.variants.receiver)
-					.from(executor_adddress),
+					.from(executor_adddress)
+					.gas_price(self.client.get_gas_price().await),
 			);
 
 			let estimated_gas = match self.try_gas_estimation(general_msg).await {
