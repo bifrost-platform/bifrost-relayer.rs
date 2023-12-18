@@ -127,7 +127,7 @@ impl<T: JsonRpcClient> SocketRollbackHandler<T> {
 		req_id: &RequestID,
 		chain_id: ChainID,
 	) -> Option<RequestInfo> {
-		if let Some(client) = &self.system_clients.get(&chain_id) {
+		if let Some(client) = self.system_clients.get(&chain_id) {
 			return Some(
 				client
 					.contract_call(
