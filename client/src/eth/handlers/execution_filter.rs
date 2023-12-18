@@ -18,9 +18,9 @@ const SUB_LOG_TARGET: &str = "execution-filter";
 /// The gas estimation result of the general message.
 enum EstimationResult {
 	/// The general message is executable. This contains the estimated gas amount.
-	Executable(U256),
+	Success(U256),
 	/// The general message is non-executable. This contains the error message.
-	NonExecutable(String),
+	Revert(String),
 }
 
 /// The task that tries to pre-gasEstimate the general message.
