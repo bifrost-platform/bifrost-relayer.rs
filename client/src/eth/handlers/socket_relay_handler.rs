@@ -283,7 +283,7 @@ impl<T: 'static + JsonRpcClient> SocketRelayHandler<T> {
 	pub fn new(
 		id: ChainID,
 		event_senders_vec: Vec<Arc<EventSender>>,
-		rollback_senders_vec: Vec<Arc<RollbackSender>>,
+		rollback_senders: BTreeMap<ChainID, Arc<RollbackSender>>,
 		block_receiver: Receiver<BlockMessage>,
 		system_clients_vec: Vec<Arc<EthClient<T>>>,
 		bootstrap_shared_data: Arc<BootstrapSharedData>,
@@ -299,11 +299,6 @@ impl<T: 'static + JsonRpcClient> SocketRelayHandler<T> {
 		let event_senders: BTreeMap<ChainID, Arc<EventSender>> = event_senders_vec
 			.iter()
 			.map(|event_sender| (event_sender.id, event_sender.clone()))
-			.collect();
-
-		let rollback_senders: BTreeMap<ChainID, Arc<RollbackSender>> = rollback_senders_vec
-			.iter()
-			.map(|rollback_sender| (rollback_sender.id, rollback_sender.clone()))
 			.collect();
 
 		Self {

@@ -47,7 +47,7 @@ fn construct_periodics(
 	let event_senders = &relayer_deps.event_senders;
 
 	let mut rollback_handlers = vec![];
-	let mut rollback_senders = vec![];
+	let mut rollback_senders = BTreeMap::new();
 
 	// initialize the heartbeat sender
 	let heartbeat_sender = HeartbeatSender::new(event_senders.clone(), clients.clone());
@@ -67,7 +67,10 @@ fn construct_periodics(
 		let (rollback_handler, rollback_sender) =
 			SocketRollbackHandler::new(event_sender.clone(), clients.clone());
 		rollback_handlers.push(rollback_handler);
-		rollback_senders.push(Arc::new(RollbackSender::new(event_sender.id, rollback_sender)));
+		rollback_senders.insert(
+			event_sender.id,
+			Arc::new(RollbackSender::new(event_sender.id, rollback_sender)),
+		);
 	});
 
 	PeriodicDeps {
@@ -473,7 +476,7 @@ struct PeriodicDeps {
 	/// The `SocketRollbackHandler`'s for each specified chain.
 	rollback_handlers: Vec<SocketRollbackHandler<Http>>,
 	/// The `RollbackSender`'s for each specified chain.
-	rollback_senders: Vec<Arc<RollbackSender>>,
+	rollback_senders: BTreeMap<ChainID, Arc<RollbackSender>>,
 }
 
 struct HandlerDeps {
