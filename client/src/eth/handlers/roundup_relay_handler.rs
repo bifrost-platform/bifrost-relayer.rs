@@ -157,10 +157,10 @@ impl<T: JsonRpcClient> RoundupRelayHandler<T> {
 		// Only broadcast to external chains
 		event_senders_vec.retain(|channel| !channel.is_native);
 
-		let mut event_senders = BTreeMap::new();
-		event_senders_vec.iter().for_each(|event_sender| {
-			event_senders.insert(event_sender.id, event_sender.clone());
-		});
+		let event_senders: BTreeMap<ChainID, Arc<EventSender>> = event_senders_vec
+			.iter()
+			.map(|event_sender| (event_sender.id, event_sender.clone()))
+			.collect();
 
 		let client = clients
 			.iter()

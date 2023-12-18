@@ -289,22 +289,22 @@ impl<T: 'static + JsonRpcClient> SocketRelayHandler<T> {
 		bootstrap_shared_data: Arc<BootstrapSharedData>,
 		execute_spawn_handle: SpawnTaskHandle,
 	) -> Self {
-		let mut system_clients = BTreeMap::new();
-		system_clients_vec.iter().for_each(|client| {
-			system_clients.insert(client.get_chain_id(), client.clone());
-		});
+		let system_clients: BTreeMap<ChainID, Arc<EthClient<T>>> = system_clients_vec
+			.iter()
+			.map(|client| (client.get_chain_id(), client.clone()))
+			.collect();
 
 		let client = system_clients.get(&id).expect(INVALID_CHAIN_ID).clone();
 
-		let mut event_senders = BTreeMap::new();
-		event_senders_vec.iter().for_each(|event_sender| {
-			event_senders.insert(event_sender.id, event_sender.clone());
-		});
+		let event_senders: BTreeMap<ChainID, Arc<EventSender>> = event_senders_vec
+			.iter()
+			.map(|event_sender| (event_sender.id, event_sender.clone()))
+			.collect();
 
-		let mut rollback_senders = BTreeMap::new();
-		rollback_senders_vec.iter().for_each(|rollback_sender| {
-			rollback_senders.insert(rollback_sender.id, rollback_sender.clone());
-		});
+		let rollback_senders: BTreeMap<ChainID, Arc<RollbackSender>> = rollback_senders_vec
+			.iter()
+			.map(|rollback_sender| (rollback_sender.id, rollback_sender.clone()))
+			.collect();
 
 		Self {
 			event_senders,

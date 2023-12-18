@@ -46,7 +46,7 @@ impl<T: JsonRpcClient> SocketRollbackHandler<T> {
 	) -> (Self, UnboundedSender<SocketMessage>) {
 		let (sender, rollback_receiver) = mpsc::unbounded_channel::<SocketMessage>();
 
-		let system_clients: BTreeMap<_, _> = system_clients_vec
+		let system_clients: BTreeMap<ChainID, Arc<EthClient<T>>> = system_clients_vec
 			.iter()
 			.map(|client| (client.get_chain_id(), client.clone()))
 			.collect();
