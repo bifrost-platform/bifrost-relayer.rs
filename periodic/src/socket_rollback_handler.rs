@@ -105,7 +105,7 @@ impl<T: JsonRpcClient> SocketRollbackHandler<T> {
 
 	/// Verifies whether the socket event is an inbound sequence.
 	fn is_inbound_sequence(&self, dst_chain_id: ChainID) -> bool {
-		if let Some(client) = &self.system_clients.get(&dst_chain_id) {
+		if let Some(client) = self.system_clients.get(&dst_chain_id) {
 			return matches!(client.metadata.if_destination_chain, RelayDirection::Inbound);
 		}
 		false
