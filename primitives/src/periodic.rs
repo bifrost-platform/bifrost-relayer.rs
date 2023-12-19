@@ -4,7 +4,12 @@ use async_trait::async_trait;
 use cron::Schedule;
 use ethers::types::U256;
 use serde::Deserialize;
-use tokio::time::sleep;
+use tokio::{
+	sync::mpsc::{error::SendError, UnboundedSender},
+	time::sleep,
+};
+
+use crate::{eth::ChainID, socket::SocketMessage};
 
 /// The schedule definition for oracle price feeding. This will trigger on every 5th minute.
 pub const PRICE_FEEDER_SCHEDULE: &str = "0 */5 * * * * *";
@@ -12,8 +17,14 @@ pub const PRICE_FEEDER_SCHEDULE: &str = "0 */5 * * * * *";
 /// The schedule definition for roundup emissions. This will trigger on every 15th second.
 pub const ROUNDUP_EMITTER_SCHEDULE: &str = "*/15 * * * * * *";
 
-/// The scedule definition for heartbeats. This will trigger on every minute.
+/// The schedule definition for heartbeats. This will trigger on every minute.
 pub const HEARTBEAT_SCHEDULE: &str = "0 * * * * * *";
+
+/// The schedule definition for rollback checks. This will trigger on every minute.
+pub const ROLLBACK_CHECK_SCHEDULE: &str = "0 * * * * * *";
+
+/// The minimum interval that should be passed in order to handle rollback checks. (=3 minutes)
+pub const ROLLBACK_CHECK_MINIMUM_INTERVAL: u32 = 3 * 60;
 
 #[async_trait]
 pub trait PeriodicWorker {
@@ -60,4 +71,41 @@ pub trait PriceFetcher {
 
 	/// Get all prices of support coin/token.
 	async fn get_tickers(&self) -> Result<BTreeMap<String, PriceResponse>, Error>;
+}
+
+#[derive(Clone, Debug)]
+/// The channel message that contains a rollbackable socket message.
+pub struct RollbackableMessage {
+	/// The timestamp that this relayer has tried to process the socket event.
+	/// If time passed as long as `ROLLBACK_CHECK_MINIMUM_INTERVAL`, this request will be rollbacked.
+	pub timeout_started_at: U256,
+	/// The rollbackable socket message. This will be either `Inbound::Requested` or `Outbound::Accepted`.
+	pub socket_msg: SocketMessage,
+}
+
+impl RollbackableMessage {
+	pub fn new(timestamp: U256, socket_msg: SocketMessage) -> Self {
+		Self { timeout_started_at: timestamp, socket_msg }
+	}
+}
+
+/// The primitive sequence ID of a single socket request.
+pub type RawRequestID = u128;
+
+/// The channel message sender for rollbackable socket messages.
+pub struct RollbackSender {
+	/// The unique chain ID for this sender.
+	pub id: ChainID,
+	/// The channel message sender.
+	pub sender: UnboundedSender<SocketMessage>,
+}
+
+impl RollbackSender {
+	pub fn new(id: ChainID, sender: UnboundedSender<SocketMessage>) -> Self {
+		Self { id, sender }
+	}
+
+	pub fn send(&self, message: SocketMessage) -> Result<(), SendError<SocketMessage>> {
+		self.sender.send(message)
+	}
 }

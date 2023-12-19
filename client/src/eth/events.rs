@@ -10,7 +10,7 @@ use ethers::types::{
 use tokio::sync::mpsc::{error::SendError, UnboundedSender};
 
 use br_primitives::{
-	eth::{ChainID, GasCoefficient, SocketEventStatus},
+	eth::{ChainID, GasCoefficient, SocketEventStatus, SocketVariants},
 	PriceResponse,
 };
 
@@ -21,13 +21,10 @@ pub const DEFAULT_CALL_RETRIES: u8 = 3;
 pub const DEFAULT_CALL_RETRY_INTERVAL_MS: u64 = 3000;
 
 /// The default retries of a single transaction request.
-pub const DEFAULT_TX_RETRIES: u8 = 6;
+pub const DEFAULT_TX_RETRIES: u8 = 3;
 
 /// The default transaction retry interval in milliseconds.
 pub const DEFAULT_TX_RETRY_INTERVAL_MS: u64 = 3000;
-
-/// The coefficient that will be multiplied to the retry interval on every new retry.
-pub const RETRY_TX_COEFFICIENT: u64 = 2;
 
 /// The coefficient that will be multiplied on the max fee.
 pub const MAX_FEE_COEFFICIENT: u64 = 2;
@@ -36,41 +33,59 @@ pub const MAX_FEE_COEFFICIENT: u64 = 2;
 pub const MAX_PRIORITY_FEE_COEFFICIENT: u64 = 2;
 
 #[derive(Clone, Debug)]
-pub struct BridgeRelayMetadata {
-	/// The bridge direction flag.
+pub struct SocketRelayMetadata {
+	/// The socket relay direction flag.
 	pub is_inbound: bool,
-	/// The bridge request status.
+	/// The socket event status.
 	pub status: SocketEventStatus,
-	/// The bridge request sequence ID.
+	/// The socket request sequence ID.
 	pub sequence: u128,
 	/// The source chain ID.
 	pub src_chain_id: ChainID,
 	/// The destination chain ID.
 	pub dst_chain_id: ChainID,
+	/// The receiver address for this request.
+	pub receiver: Address,
+	/// The flag whether this relay is processed on bootstrap.
+	pub is_bootstrap: bool,
+	/// The variants this request contains.
+	pub variants: SocketVariants,
 }
 
-impl BridgeRelayMetadata {
+impl SocketRelayMetadata {
 	pub fn new(
 		is_inbound: bool,
 		status: SocketEventStatus,
 		sequence: u128,
 		src_chain_id: ChainID,
 		dst_chain_id: ChainID,
+		receiver: Address,
+		is_bootstrap: bool,
 	) -> Self {
-		Self { is_inbound, status, sequence, src_chain_id, dst_chain_id }
+		Self {
+			is_inbound,
+			status,
+			sequence,
+			src_chain_id,
+			dst_chain_id,
+			receiver,
+			is_bootstrap,
+			variants: SocketVariants::default(),
+		}
 	}
 }
 
-impl Display for BridgeRelayMetadata {
+impl Display for SocketRelayMetadata {
 	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
 		write!(
 			f,
-			"Relay({}-{:?}-{:?}, {:?} -> {:?})",
+			"Relay({}-{:?}-{:?}, {:?} -> {:?}, {:?})",
 			if self.is_inbound { "Inbound".to_string() } else { "Outbound".to_string() },
 			self.status,
 			self.sequence,
 			self.src_chain_id,
-			self.dst_chain_id
+			self.dst_chain_id,
+			self.variants.version
 		)
 	}
 }
@@ -184,13 +199,54 @@ impl Display for FlushMetadata {
 }
 
 #[derive(Clone, Debug)]
+pub struct RollbackMetadata {
+	/// The socket relay direction flag.
+	pub is_inbound: bool,
+	/// The socket event status.
+	pub status: SocketEventStatus,
+	/// The socket request sequence ID.
+	pub sequence: u128,
+	/// The source chain ID.
+	pub src_chain_id: ChainID,
+	/// The destination chain ID.
+	pub dst_chain_id: ChainID,
+}
+
+impl RollbackMetadata {
+	pub fn new(
+		is_inbound: bool,
+		status: SocketEventStatus,
+		sequence: u128,
+		src_chain_id: ChainID,
+		dst_chain_id: ChainID,
+	) -> Self {
+		Self { is_inbound, status, sequence, src_chain_id, dst_chain_id }
+	}
+}
+
+impl Display for RollbackMetadata {
+	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		write!(
+			f,
+			"Rollback({}-{:?}-{:?}, {:?} -> {:?})",
+			if self.is_inbound { "Inbound".to_string() } else { "Outbound".to_string() },
+			self.status,
+			self.sequence,
+			self.src_chain_id,
+			self.dst_chain_id,
+		)
+	}
+}
+
+#[derive(Clone, Debug)]
 pub enum EventMetadata {
-	BridgeRelay(BridgeRelayMetadata),
+	SocketRelay(SocketRelayMetadata),
 	PriceFeed(PriceFeedMetadata),
 	VSPPhase1(VSPPhase1Metadata),
 	VSPPhase2(VSPPhase2Metadata),
 	Heartbeat(HeartbeatMetadata),
 	Flush(FlushMetadata),
+	Rollback(RollbackMetadata),
 }
 
 impl Display for EventMetadata {
@@ -199,12 +255,13 @@ impl Display for EventMetadata {
 			f,
 			"{}",
 			match self {
-				EventMetadata::BridgeRelay(metadata) => metadata.to_string(),
+				EventMetadata::SocketRelay(metadata) => metadata.to_string(),
 				EventMetadata::PriceFeed(metadata) => metadata.to_string(),
 				EventMetadata::VSPPhase1(metadata) => metadata.to_string(),
 				EventMetadata::VSPPhase2(metadata) => metadata.to_string(),
 				EventMetadata::Heartbeat(metadata) => metadata.to_string(),
 				EventMetadata::Flush(metadata) => metadata.to_string(),
+				EventMetadata::Rollback(metadata) => metadata.to_string(),
 			}
 		)
 	}
@@ -260,6 +317,42 @@ impl TxRequest {
 			TxRequest::Eip1559(tx_request) => {
 				TxRequest::Eip1559(tx_request.clone().gas(estimated_gas))
 			},
+		}
+	}
+
+	/// Sets the `max_fee_per_gas` field in the transaction request.
+	/// This method will only have effect when the type is EIP-1559.
+	/// It will be ignored if the type is legacy.
+	pub fn max_fee_per_gas(&self, max_fee_per_gas: U256) -> Self {
+		match self {
+			TxRequest::Legacy(tx_request) => TxRequest::Legacy(tx_request.clone()),
+			TxRequest::Eip1559(tx_request) => {
+				TxRequest::Eip1559(tx_request.clone().max_fee_per_gas(max_fee_per_gas))
+			},
+		}
+	}
+
+	/// Sets the `max_priority_fee_per_gas` field in the transaction request.
+	/// This method will only have effect when the type is EIP-1559.
+	/// It will be ignored if the type is legacy.
+	pub fn max_priority_fee_per_gas(&self, max_priority_fee_per_gas: U256) -> Self {
+		match self {
+			TxRequest::Legacy(tx_request) => TxRequest::Legacy(tx_request.clone()),
+			TxRequest::Eip1559(tx_request) => TxRequest::Eip1559(
+				tx_request.clone().max_priority_fee_per_gas(max_priority_fee_per_gas),
+			),
+		}
+	}
+
+	/// Sets the `gas_price` field in the transaction request.
+	/// This method will only have effect when the type is legacy.
+	/// It will be ignored if the type is EIP-1559.
+	pub fn gas_price(&self, gas_price: U256) -> Self {
+		match self {
+			TxRequest::Legacy(tx_request) => {
+				TxRequest::Legacy(tx_request.clone().gas_price(gas_price))
+			},
+			TxRequest::Eip1559(tx_request) => TxRequest::Eip1559(tx_request.clone()),
 		}
 	}
 
@@ -323,6 +416,9 @@ pub struct EventMessage {
 	pub give_random_delay: bool,
 	/// The gas coefficient that will be multiplied to the estimated gas amount.
 	pub gas_coefficient: GasCoefficient,
+	/// The flag that represents whether the event is requested by a bootstrap process.
+	/// If true, the event will be processed by a asynchronous task.
+	pub is_bootstrap: bool,
 }
 
 impl EventMessage {
@@ -333,6 +429,7 @@ impl EventMessage {
 		check_mempool: bool,
 		give_random_delay: bool,
 		gas_coefficient: GasCoefficient,
+		is_bootstrap: bool,
 	) -> Self {
 		Self {
 			retries_remaining: DEFAULT_TX_RETRIES,
@@ -342,16 +439,13 @@ impl EventMessage {
 			check_mempool,
 			give_random_delay,
 			gas_coefficient,
+			is_bootstrap,
 		}
 	}
 
 	/// Builds a new `EventMessage` to use on transaction retry. This will reduce the remaining
 	/// retry counter and increase the retry interval.
 	pub fn build_retry_event(&mut self) {
-		// do not multiply the coefficient on the first retry
-		if self.retries_remaining != DEFAULT_TX_RETRIES {
-			self.retry_interval = self.retry_interval.saturating_mul(RETRY_TX_COEFFICIENT);
-		}
 		self.retries_remaining = self.retries_remaining.saturating_sub(1);
 	}
 }
