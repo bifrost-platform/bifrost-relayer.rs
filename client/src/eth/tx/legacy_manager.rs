@@ -111,8 +111,25 @@ impl<T: 'static + JsonRpcClient> LegacyTransactionManager<T> {
 
 #[async_trait]
 impl<T: 'static + JsonRpcClient> TransactionManager<T> for LegacyTransactionManager<T> {
-	fn is_txpool_enabled(&self) -> bool {
-		self.is_txpool_enabled
+	async fn run(&mut self) {
+		self.initialize().await;
+
+		while let Some(msg) = self.receiver.recv().await {
+			log::info!(
+				target: &self.client.get_chain_name(),
+				"-[{}] 🔖 Received transaction request: {}",
+				sub_display_format(SUB_LOG_TARGET),
+				msg.metadata,
+			);
+
+			self.spawn_send_transaction(msg).await;
+		}
+	}
+
+	async fn initialize(&mut self) {
+		self.is_txpool_enabled = self.client.provider.txpool_content().await.is_ok();
+
+		self.flush_stuck_transaction().await;
 	}
 
 	fn get_client(&self) -> Arc<EthClient<T>> {
@@ -142,10 +159,8 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> for LegacyTransactionMana
 		}
 	}
 
-	async fn initialize(&mut self) {
-		self.is_txpool_enabled = self.client.provider.txpool_content().await.is_ok();
-
-		self.flush_stuck_transaction().await;
+	fn is_txpool_enabled(&self) -> bool {
+		self.is_txpool_enabled
 	}
 
 	async fn stuck_transaction_to_transaction_request(
@@ -196,21 +211,6 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> for LegacyTransactionMana
 				);
 			}
 		};
-	}
-
-	async fn run(&mut self) {
-		self.initialize().await;
-
-		while let Some(msg) = self.receiver.recv().await {
-			log::info!(
-				target: &self.client.get_chain_name(),
-				"-[{}] 🔖 Received transaction request: {}",
-				sub_display_format(SUB_LOG_TARGET),
-				msg.metadata,
-			);
-
-			self.spawn_send_transaction(msg).await;
-		}
 	}
 }
 
@@ -264,16 +264,16 @@ impl<T: JsonRpcClient> TransactionTask<T> for LegacyTransactionTask<T> {
 		self.is_txpool_enabled
 	}
 
-	fn debug_mode(&self) -> bool {
-		self.client.debug_mode
-	}
-
 	fn get_client(&self) -> Arc<EthClient<T>> {
 		self.client.clone()
 	}
 
 	fn duplicate_confirm_delay(&self) -> Duration {
 		Duration::from_millis(self.duplicate_confirm_delay.unwrap_or(ETHEREUM_BLOCK_TIME * 1000))
+	}
+
+	fn debug_mode(&self) -> bool {
+		self.client.debug_mode
 	}
 
 	async fn try_send_transaction(&self, mut msg: EventMessage) {
@@ -320,7 +320,7 @@ impl<T: JsonRpcClient> TransactionTask<T> for LegacyTransactionTask<T> {
 		msg.tx_request = msg.tx_request.gas(estimated_gas);
 
 		// check the txpool for transaction duplication prevention
-		if !(self.is_duplicate_relay(&msg.tx_request, msg.check_mempool).await) {
+		if !self.is_duplicate_relay(&msg.tx_request, msg.check_mempool).await {
 			if !self.is_sufficient_funds(gas_price, estimated_gas).await {
 				panic!(
 					"[{}]-[{}]-[{}] {}",
