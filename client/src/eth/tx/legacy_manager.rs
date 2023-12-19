@@ -73,10 +73,6 @@ impl<T: 'static + JsonRpcClient> LegacyTransactionManager<T> {
 		tx_spawn_handle: SpawnTaskHandle,
 	) -> (Self, UnboundedSender<TxRequestMessage>) {
 		let (sender, receiver) = mpsc::unbounded_channel::<TxRequestMessage>();
-
-		let gas_price_coefficient = {
-			if let Some(escalate_percentage) = escalate_percentage {
-				1.0 + (escalate_percentage / 100.0)
 			} else {
 				1.0 + (DEFAULT_ESCALATE_PERCENTAGE / 100.0)
 			}

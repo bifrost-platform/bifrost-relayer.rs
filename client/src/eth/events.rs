@@ -21,13 +21,10 @@ use super::{traits::BootstrapHandler, EthClient};
 pub const DEFAULT_CALL_RETRY_INTERVAL_MS: u64 = 3000;
 
 /// The default retries of a single transaction request.
-pub const DEFAULT_TX_RETRIES: u8 = 6;
+pub const DEFAULT_TX_RETRIES: u8 = 3;
 
 /// The default transaction retry interval in milliseconds.
 pub const DEFAULT_TX_RETRY_INTERVAL_MS: u64 = 3000;
-
-/// The coefficient that will be multiplied to the retry interval on every new retry.
-pub const RETRY_TX_COEFFICIENT: u64 = 2;
 
 /// The coefficient that will be multiplied on the max fee.
 pub const MAX_FEE_COEFFICIENT: u64 = 2;
