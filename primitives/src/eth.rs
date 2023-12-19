@@ -224,6 +224,13 @@ impl From<&GasCoefficient> for f64 {
 	}
 }
 
+#[derive(Clone, Debug)]
+/// The protocol version of the CCCP Socket message.
+pub enum SocketVersion {
+	V1,
+	V2,
+}
+
 /// The metadata of the EVM provider.
 pub struct ProviderMetadata {
 	pub name: String,
@@ -236,8 +243,8 @@ pub struct ProviderMetadata {
 	pub get_logs_batch_size: U64,
 	/// The `get_block` request interval in milliseconds.
 	pub call_interval: u64,
-	/// Bridge direction when bridge event points this chain as destination.
-	pub if_destination_chain: BridgeDirection,
+	/// Relay direction when CCCP event points this chain as destination.
+	pub if_destination_chain: RelayDirection,
 	/// The flag whether the chain is Bifrost(native) or an external chain.
 	pub is_native: bool,
 }
@@ -259,8 +266,8 @@ impl ProviderMetadata {
 			call_interval,
 			is_native,
 			if_destination_chain: match is_native {
-				true => BridgeDirection::Inbound,
-				false => BridgeDirection::Outbound,
+				true => RelayDirection::Inbound,
+				false => RelayDirection::Outbound,
 			},
 		}
 	}
@@ -309,29 +316,25 @@ impl<T: JsonRpcClient> AggregatorContracts<T> {
 pub struct ProtocolContracts<T> {
 	/// SocketContract
 	pub socket: SocketContract<Provider<T>>,
-	/// VaultContract
-	pub vault: VaultContract<Provider<T>>,
 	/// AuthorityContract
 	pub authority: AuthorityContract<Provider<T>>,
 	/// RelayerManagerContract (Bifrost only)
 	pub relayer_manager: Option<RelayerManagerContract<Provider<T>>>,
+	/// The CCCP v2 Execution contract address.
+	pub executor_address: Option<Address>,
 }
 
 impl<T: JsonRpcClient> ProtocolContracts<T> {
 	pub fn new(
 		provider: Arc<Provider<T>>,
 		socket_address: String,
-		vault_address: String,
 		authority_address: String,
 		relayer_manager_address: Option<String>,
+		executor_address: Option<String>,
 	) -> Self {
 		Self {
 			socket: SocketContract::new(
 				H160::from_str(&socket_address).expect(INVALID_CONTRACT_ADDRESS),
-				provider.clone(),
-			),
-			vault: VaultContract::new(
-				H160::from_str(&vault_address).expect(INVALID_CONTRACT_ADDRESS),
 				provider.clone(),
 			),
 			authority: AuthorityContract::new(
@@ -344,6 +347,8 @@ impl<T: JsonRpcClient> ProtocolContracts<T> {
 					provider.clone(),
 				)
 			}),
+			executor_address: executor_address
+				.map(|address| Address::from_str(&address).expect(INVALID_CONTRACT_ADDRESS)),
 		}
 	}
 }
@@ -448,6 +453,27 @@ impl From<SocketEventStatus> for u8 {
 			SocketEventStatus::Rejected => 6,
 			SocketEventStatus::Committed => 7,
 			SocketEventStatus::Rollbacked => 8,
+		}
+	}
+}
+
+#[derive(Clone, Debug)]
+pub struct SocketVariants {
+	pub source_chain: Bytes,
+	pub receiver: Address,
+	pub max_fee: U256,
+	pub data: Bytes,
+	pub version: SocketVersion,
+}
+
+impl Default for SocketVariants {
+	fn default() -> Self {
+		Self {
+			source_chain: Bytes::default(),
+			receiver: Address::default(),
+			max_fee: U256::default(),
+			data: Bytes::default(),
+			version: SocketVersion::V1,
 		}
 	}
 }
