@@ -291,12 +291,8 @@ fn spawn_relayer_tasks(
 
 		task_manager.spawn_essential_handle().spawn(
 			Box::leak(
-				format!(
-					"{}-{}-handler",
-					handler.client.get_chain_name(),
-					HandlerType::Socket.to_string(),
-				)
-				.into_boxed_str(),
+				format!("{}-{}-handler", handler.client.get_chain_name(), HandlerType::Socket,)
+					.into_boxed_str(),
 			),
 			Some("handlers"),
 			async move {
@@ -320,12 +316,8 @@ fn spawn_relayer_tasks(
 	roundup_relay_handlers.into_iter().for_each(|mut handler| {
 		task_manager.spawn_essential_handle().spawn(
 			Box::leak(
-				format!(
-					"{}-{}-handler",
-					handler.client.get_chain_name(),
-					HandlerType::Roundup.to_string(),
-				)
-				.into_boxed_str(),
+				format!("{}-{}-handler", handler.client.get_chain_name(), HandlerType::Roundup)
+					.into_boxed_str(),
 			),
 			Some("handlers"),
 			async move { handler.run().await },

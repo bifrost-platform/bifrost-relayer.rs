@@ -1,5 +1,6 @@
 use serde::Deserialize;
 use std::borrow::Cow;
+use std::fmt::Display;
 
 use crate::eth::ChainID;
 
@@ -123,12 +124,13 @@ pub enum HandlerType {
 	Roundup,
 }
 
-impl ToString for HandlerType {
-	fn to_string(&self) -> String {
-		match *self {
-			HandlerType::Socket => "Socket".to_string(),
-			HandlerType::Roundup => "Roundup".to_string(),
-		}
+impl Display for HandlerType {
+	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		let str = match *self {
+			HandlerType::Socket => "Socket",
+			HandlerType::Roundup => "Roundup",
+		};
+		write!(f, "{}", str)
 	}
 }
 
