@@ -285,7 +285,7 @@ impl<T: JsonRpcClient> TransactionTask<T> for Eip1559TransactionTask<T> {
 		msg.tx_request = msg.tx_request.gas(estimated_gas);
 
 		// check the txpool for transaction duplication prevention
-		if !(self.is_duplicate_relay(&msg.tx_request, msg.check_mempool).await) {
+		if !self.is_duplicate_relay(&msg.tx_request, msg.check_mempool).await {
 			// no duplication found
 			if !self.is_sufficient_funds(max_fee_per_gas, estimated_gas).await {
 				panic!(
