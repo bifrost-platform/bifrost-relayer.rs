@@ -73,7 +73,10 @@ impl<T: JsonRpcClient> PeriodicWorker for HeartbeatSender<T> {
 
 impl<T: JsonRpcClient> HeartbeatSender<T> {
 	/// Instantiates a new `HeartbeatSender` instance.
-	pub fn new(client: Arc<EthClient<T>>, event_senders: Vec<Arc<EventSender>>) -> Self {
+	pub fn new(
+		event_senders: Vec<Arc<EventSender>>,
+		system_clients: Vec<Arc<EthClient<T>>>,
+	) -> Self {
 		Self {
 			schedule: Schedule::from_str(HEARTBEAT_SCHEDULE).expect(INVALID_PERIODIC_SCHEDULE),
 			event_sender: event_senders
@@ -81,7 +84,11 @@ impl<T: JsonRpcClient> HeartbeatSender<T> {
 				.find(|channel| channel.is_native)
 				.expect(INVALID_BIFROST_NATIVENESS)
 				.clone(),
-			client,
+			client: system_clients
+				.iter()
+				.find(|client| client.metadata.is_native)
+				.expect(INVALID_BIFROST_NATIVENESS)
+				.clone(),
 		}
 	}
 

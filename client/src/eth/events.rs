@@ -10,7 +10,7 @@ use ethers::types::{
 use tokio::sync::mpsc::{error::SendError, UnboundedSender};
 
 use br_primitives::{
-	eth::{ChainID, GasCoefficient, SocketEventStatus},
+	eth::{ChainID, GasCoefficient, SocketEventStatus, SocketVariants},
 	PriceResponse,
 };
 
@@ -48,6 +48,8 @@ pub struct SocketRelayMetadata {
 	pub receiver: Address,
 	/// The flag whether this relay is processed on bootstrap.
 	pub is_bootstrap: bool,
+	/// The variants this request contains.
+	pub variants: SocketVariants,
 }
 
 impl SocketRelayMetadata {
@@ -60,7 +62,16 @@ impl SocketRelayMetadata {
 		receiver: Address,
 		is_bootstrap: bool,
 	) -> Self {
-		Self { is_inbound, status, sequence, src_chain_id, dst_chain_id, receiver, is_bootstrap }
+		Self {
+			is_inbound,
+			status,
+			sequence,
+			src_chain_id,
+			dst_chain_id,
+			receiver,
+			is_bootstrap,
+			variants: SocketVariants::default(),
+		}
 	}
 }
 
@@ -68,12 +79,13 @@ impl Display for SocketRelayMetadata {
 	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
 		write!(
 			f,
-			"Relay({}-{:?}-{:?}, {:?} -> {:?})",
+			"Relay({}-{:?}-{:?}, {:?} -> {:?}, {:?})",
 			if self.is_inbound { "Inbound".to_string() } else { "Outbound".to_string() },
 			self.status,
 			self.sequence,
 			self.src_chain_id,
 			self.dst_chain_id,
+			self.variants.version
 		)
 	}
 }
@@ -187,6 +199,46 @@ impl Display for FlushMetadata {
 }
 
 #[derive(Clone, Debug)]
+pub struct RollbackMetadata {
+	/// The socket relay direction flag.
+	pub is_inbound: bool,
+	/// The socket event status.
+	pub status: SocketEventStatus,
+	/// The socket request sequence ID.
+	pub sequence: u128,
+	/// The source chain ID.
+	pub src_chain_id: ChainID,
+	/// The destination chain ID.
+	pub dst_chain_id: ChainID,
+}
+
+impl RollbackMetadata {
+	pub fn new(
+		is_inbound: bool,
+		status: SocketEventStatus,
+		sequence: u128,
+		src_chain_id: ChainID,
+		dst_chain_id: ChainID,
+	) -> Self {
+		Self { is_inbound, status, sequence, src_chain_id, dst_chain_id }
+	}
+}
+
+impl Display for RollbackMetadata {
+	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		write!(
+			f,
+			"Rollback({}-{:?}-{:?}, {:?} -> {:?})",
+			if self.is_inbound { "Inbound".to_string() } else { "Outbound".to_string() },
+			self.status,
+			self.sequence,
+			self.src_chain_id,
+			self.dst_chain_id,
+		)
+	}
+}
+
+#[derive(Clone, Debug)]
 pub enum EventMetadata {
 	SocketRelay(SocketRelayMetadata),
 	PriceFeed(PriceFeedMetadata),
@@ -194,6 +246,7 @@ pub enum EventMetadata {
 	VSPPhase2(VSPPhase2Metadata),
 	Heartbeat(HeartbeatMetadata),
 	Flush(FlushMetadata),
+	Rollback(RollbackMetadata),
 }
 
 impl Display for EventMetadata {
@@ -208,6 +261,7 @@ impl Display for EventMetadata {
 				EventMetadata::VSPPhase2(metadata) => metadata.to_string(),
 				EventMetadata::Heartbeat(metadata) => metadata.to_string(),
 				EventMetadata::Flush(metadata) => metadata.to_string(),
+				EventMetadata::Rollback(metadata) => metadata.to_string(),
 			}
 		)
 	}
@@ -263,6 +317,42 @@ impl TxRequest {
 			TxRequest::Eip1559(tx_request) => {
 				TxRequest::Eip1559(tx_request.clone().gas(estimated_gas))
 			},
+		}
+	}
+
+	/// Sets the `max_fee_per_gas` field in the transaction request.
+	/// This method will only have effect when the type is EIP-1559.
+	/// It will be ignored if the type is legacy.
+	pub fn max_fee_per_gas(&self, max_fee_per_gas: U256) -> Self {
+		match self {
+			TxRequest::Legacy(tx_request) => TxRequest::Legacy(tx_request.clone()),
+			TxRequest::Eip1559(tx_request) => {
+				TxRequest::Eip1559(tx_request.clone().max_fee_per_gas(max_fee_per_gas))
+			},
+		}
+	}
+
+	/// Sets the `max_priority_fee_per_gas` field in the transaction request.
+	/// This method will only have effect when the type is EIP-1559.
+	/// It will be ignored if the type is legacy.
+	pub fn max_priority_fee_per_gas(&self, max_priority_fee_per_gas: U256) -> Self {
+		match self {
+			TxRequest::Legacy(tx_request) => TxRequest::Legacy(tx_request.clone()),
+			TxRequest::Eip1559(tx_request) => TxRequest::Eip1559(
+				tx_request.clone().max_priority_fee_per_gas(max_priority_fee_per_gas),
+			),
+		}
+	}
+
+	/// Sets the `gas_price` field in the transaction request.
+	/// This method will only have effect when the type is legacy.
+	/// It will be ignored if the type is EIP-1559.
+	pub fn gas_price(&self, gas_price: U256) -> Self {
+		match self {
+			TxRequest::Legacy(tx_request) => {
+				TxRequest::Legacy(tx_request.clone().gas_price(gas_price))
+			},
+			TxRequest::Eip1559(tx_request) => TxRequest::Eip1559(tx_request.clone()),
 		}
 	}
 

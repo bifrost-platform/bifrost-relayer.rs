@@ -2,7 +2,7 @@ use std::{str::FromStr, sync::Arc};
 
 use ethers::{
 	providers::{JsonRpcClient, Provider},
-	types::{Address, Signature, TransactionRequest, H160, U64},
+	types::{Address, Bytes, Signature, TransactionRequest, H160, U256, U64},
 };
 
 use crate::{
@@ -24,6 +24,13 @@ pub const BOOTSTRAP_BLOCK_CHUNK_SIZE: u64 = 2000;
 
 /// The block offset used to measure the average block time at bootstrap.
 pub const BOOTSTRAP_BLOCK_OFFSET: u32 = 100;
+
+#[derive(Clone, Debug)]
+/// The protocol version of the CCCP Socket message.
+pub enum SocketVersion {
+	V1,
+	V2,
+}
 
 /// The metadata of the EVM provider.
 pub struct ProviderMetadata {
@@ -114,6 +121,8 @@ pub struct ProtocolContracts<T> {
 	pub authority: AuthorityContract<Provider<T>>,
 	/// RelayerManagerContract (Bifrost only)
 	pub relayer_manager: Option<RelayerManagerContract<Provider<T>>>,
+	/// The CCCP v2 Execution contract address.
+	pub executor_address: Option<Address>,
 }
 
 impl<T: JsonRpcClient> ProtocolContracts<T> {
@@ -122,6 +131,7 @@ impl<T: JsonRpcClient> ProtocolContracts<T> {
 		socket_address: String,
 		authority_address: String,
 		relayer_manager_address: Option<String>,
+		executor_address: Option<String>,
 	) -> Self {
 		Self {
 			socket: SocketContract::new(
@@ -138,6 +148,8 @@ impl<T: JsonRpcClient> ProtocolContracts<T> {
 					provider.clone(),
 				)
 			}),
+			executor_address: executor_address
+				.map(|address| Address::from_str(&address).expect(INVALID_CONTRACT_ADDRESS)),
 		}
 	}
 }
@@ -185,7 +197,8 @@ impl RoundUpEventStatus {
 #[derive(Clone, Copy, Debug, PartialEq, PartialOrd)]
 /// The socket event status.
 pub enum SocketEventStatus {
-	Requested = 1,
+	None,
+	Requested,
 	Failed,
 	Executed,
 	Reverted,
@@ -198,6 +211,7 @@ pub enum SocketEventStatus {
 impl SocketEventStatus {
 	pub fn from_u8(status: u8) -> Self {
 		match status {
+			0 => SocketEventStatus::None,
 			1 => SocketEventStatus::Requested,
 			2 => SocketEventStatus::Failed,
 			3 => SocketEventStatus::Executed,
@@ -214,6 +228,7 @@ impl SocketEventStatus {
 impl From<SocketEventStatus> for u8 {
 	fn from(status: SocketEventStatus) -> Self {
 		match status {
+			SocketEventStatus::None => 0,
 			SocketEventStatus::Requested => 1,
 			SocketEventStatus::Failed => 2,
 			SocketEventStatus::Executed => 3,
@@ -222,6 +237,27 @@ impl From<SocketEventStatus> for u8 {
 			SocketEventStatus::Rejected => 6,
 			SocketEventStatus::Committed => 7,
 			SocketEventStatus::Rollbacked => 8,
+		}
+	}
+}
+
+#[derive(Clone, Debug)]
+pub struct SocketVariants {
+	pub source_chain: Bytes,
+	pub receiver: Address,
+	pub max_fee: U256,
+	pub data: Bytes,
+	pub version: SocketVersion,
+}
+
+impl Default for SocketVariants {
+	fn default() -> Self {
+		Self {
+			source_chain: Bytes::default(),
+			receiver: Address::default(),
+			max_fee: U256::default(),
+			data: Bytes::default(),
+			version: SocketVersion::V1,
 		}
 	}
 }

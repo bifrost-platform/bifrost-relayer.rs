@@ -27,7 +27,7 @@ use tokio::{
 	time::sleep,
 };
 
-use super::{generate_delay, AsyncTransactionTask};
+use super::{generate_delay, TransactionTask};
 
 const SUB_LOG_TARGET: &str = "eip1559-tx-manager";
 
@@ -226,7 +226,7 @@ impl<T: JsonRpcClient> Eip1559TransactionTask<T> {
 }
 
 #[async_trait::async_trait]
-impl<T: JsonRpcClient> AsyncTransactionTask<T> for Eip1559TransactionTask<T> {
+impl<T: JsonRpcClient> TransactionTask<T> for Eip1559TransactionTask<T> {
 	fn is_txpool_enabled(&self) -> bool {
 		self.is_txpool_enabled
 	}
@@ -244,6 +244,8 @@ impl<T: JsonRpcClient> AsyncTransactionTask<T> for Eip1559TransactionTask<T> {
 	}
 
 	async fn try_send_transaction(&self, mut msg: EventMessage) {
+		msg.tx_request = TxRequest::Eip1559(msg.tx_request.to_eip1559());
+
 		if msg.retries_remaining == 0 {
 			return;
 		}
@@ -255,6 +257,16 @@ impl<T: JsonRpcClient> AsyncTransactionTask<T> for Eip1559TransactionTask<T> {
 
 		// set transaction `from` field
 		msg.tx_request = msg.tx_request.from(self.client.address());
+
+		// set transaction gas fee parameters
+		let fees = self.client.get_estimated_eip1559_fees().await;
+		let priority_fee = max(fees.1, self.min_priority_fee);
+		let max_fee_per_gas =
+			fees.0.saturating_add(priority_fee).saturating_mul(MAX_FEE_COEFFICIENT.into());
+		msg.tx_request = msg
+			.tx_request
+			.max_fee_per_gas(max_fee_per_gas)
+			.max_priority_fee_per_gas(priority_fee);
 
 		// estimate the gas amount to be used
 		let estimated_gas =
@@ -275,11 +287,6 @@ impl<T: JsonRpcClient> AsyncTransactionTask<T> for Eip1559TransactionTask<T> {
 		// check the txpool for transaction duplication prevention
 		if !(self.is_duplicate_relay(&msg.tx_request, msg.check_mempool).await) {
 			// no duplication found
-			let fees = self.client.get_estimated_eip1559_fees().await;
-			let priority_fee = max(fees.1, self.min_priority_fee);
-			let max_fee_per_gas =
-				fees.0.saturating_add(priority_fee).saturating_mul(MAX_FEE_COEFFICIENT.into());
-
 			if !self.is_sufficient_funds(max_fee_per_gas, estimated_gas).await {
 				panic!(
 					"[{}]-[{}]-[{}] {}",
@@ -290,16 +297,7 @@ impl<T: JsonRpcClient> AsyncTransactionTask<T> for Eip1559TransactionTask<T> {
 				);
 			}
 
-			let result = self
-				.middleware
-				.send_transaction(
-					msg.tx_request
-						.to_eip1559()
-						.max_fee_per_gas(max_fee_per_gas)
-						.max_priority_fee_per_gas(priority_fee),
-					None,
-				)
-				.await;
+			let result = self.middleware.send_transaction(msg.tx_request.to_eip1559(), None).await;
 			br_metrics::increase_rpc_calls(&self.client.get_chain_name());
 
 			match result {

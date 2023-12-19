@@ -11,7 +11,7 @@ use tokio::time::sleep;
 use crate::eth::{EthClient, EventMessage, EventMetadata, TxRequest};
 
 #[async_trait::async_trait]
-pub trait AsyncTransactionTask<T>
+pub trait TransactionTask<T>
 where
 	T: JsonRpcClient,
 {
