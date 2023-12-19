@@ -1,6 +1,5 @@
 use crate::eth::{
-	generate_delay, EthClient, EventMessage, TransactionManager, TxRequest, DEFAULT_CALL_RETRIES,
-	DEFAULT_CALL_RETRY_INTERVAL_MS, DEFAULT_TX_RETRIES,
+	EthClient, EventMessage, LegacyGasMiddleware, TransactionManager, TxRequest, DEFAULT_TX_RETRIES,
 };
 use async_trait::async_trait;
 use br_primitives::{
@@ -18,7 +17,8 @@ use ethers::{
 	signers::LocalWallet,
 	types::{BlockId, BlockNumber, Transaction, TransactionRequest, U256},
 };
-use std::{cmp::max, sync::Arc, time::Duration};
+use sc_service::SpawnTaskHandle;
+use std::{sync::Arc, time::Duration};
 use tokio::{
 	sync::{
 		mpsc,
@@ -26,6 +26,8 @@ use tokio::{
 	},
 	time::sleep,
 };
+
+use super::{generate_delay, TransactionTask};
 
 const SUB_LOG_TARGET: &str = "legacy-tx-manager";
 
@@ -38,7 +40,7 @@ pub struct LegacyTransactionManager<T> {
 	/// The ethereum client for the connected chain.
 	pub client: Arc<EthClient<T>>,
 	/// The client signs transaction for the connected chain with local nonce manager.
-	middleware: LegacyMiddleware<T>,
+	middleware: Arc<LegacyMiddleware<T>>,
 	/// The receiver connected to the event channel.
 	receiver: UnboundedReceiver<EventMessage>,
 	/// The flag whether the client has enabled txpool namespace.
@@ -51,24 +53,23 @@ pub struct LegacyTransactionManager<T> {
 	gas_price_coefficient: f64,
 	/// The minimum value use for gas_price. (default: 0)
 	min_gas_price: U256,
-	/// The flag whether debug mode is enabled. If enabled, certain errors will be logged such as
-	/// gas estimation failures.
-	debug_mode: bool,
 	/// If first relay transaction is stuck in mempool after waiting for this amount of time(ms),
 	/// ignore duplicate prevent logic. (default: 12s)
 	duplicate_confirm_delay: Option<u64>,
+	/// A handle for spawning transaction tasks in the service.
+	tx_spawn_handle: SpawnTaskHandle,
 }
 
 impl<T: 'static + JsonRpcClient> LegacyTransactionManager<T> {
 	/// Instantiates a new `LegacyTransactionManager` instance.
 	pub fn new(
 		client: Arc<EthClient<T>>,
-		debug_mode: bool,
 		escalate_interval: Option<u64>,
 		escalate_percentage: Option<f64>,
 		min_gas_price: Option<u64>,
 		is_initially_escalated: bool,
 		duplicate_confirm_delay: Option<u64>,
+		tx_spawn_handle: SpawnTaskHandle,
 	) -> (Self, UnboundedSender<EventMessage>) {
 		let (sender, receiver) = mpsc::unbounded_channel::<EventMessage>();
 
@@ -94,126 +95,72 @@ impl<T: 'static + JsonRpcClient> LegacyTransactionManager<T> {
 		(
 			Self {
 				client,
-				middleware,
+				middleware: Arc::new(middleware),
 				receiver,
 				is_txpool_enabled: false,
 				is_initially_escalated,
 				gas_price_coefficient,
 				min_gas_price: U256::from(min_gas_price.unwrap_or(DEFAULT_MIN_GAS_PRICE)),
-				debug_mode,
 				duplicate_confirm_delay,
+				tx_spawn_handle,
 			},
 			sender,
 		)
-	}
-
-	/// Get the current gas price of the network.
-	async fn get_gas_price(&self) -> U256 {
-		match self.middleware.get_gas_price().await {
-			Ok(gas_price) => {
-				br_metrics::increase_rpc_calls(&self.client.get_chain_name());
-				gas_price
-			},
-			Err(error) => {
-				self.handle_failed_get_gas_price(DEFAULT_CALL_RETRIES, error.to_string()).await
-			},
-		}
-	}
-
-	/// Get gas_price for legacy retry transaction request.
-	/// returns `max(current_network_gas_price,escalated_gas_price)`
-	async fn get_gas_price_for_retry(&self, previous_gas_price: U256) -> U256 {
-		let previous_gas_price = previous_gas_price.as_u64() as f64;
-
-		let current_gas_price = self.get_gas_price().await;
-		let escalated_gas_price =
-			U256::from((previous_gas_price * self.gas_price_coefficient).ceil() as u64);
-
-		max(max(current_gas_price, escalated_gas_price), self.min_gas_price)
-	}
-
-	/// Get gas_price for escalated legacy transaction request. This will be only used when
-	/// `is_initially_escalated` is enabled.
-	async fn get_gas_price_for_escalation(&self, gas_price: U256) -> U256 {
-		max(
-			U256::from((gas_price.as_u64() as f64 * self.gas_price_coefficient).ceil() as u64),
-			self.min_gas_price,
-		)
-	}
-
-	/// Handles the failed gas price rpc request.
-	async fn handle_failed_get_gas_price(&self, retries_remaining: u8, error: String) -> U256 {
-		let mut retries = retries_remaining;
-		let mut last_error = error;
-
-		while retries > 0 {
-			br_metrics::increase_rpc_calls(&self.client.get_chain_name());
-
-			if self.debug_mode {
-				log::warn!(
-					target: &self.client.get_chain_name(),
-					"-[{}] ⚠️  Warning! Error encountered during get gas price, Retries left: {:?}, Error: {}",
-					sub_display_format(SUB_LOG_TARGET),
-					retries - 1,
-					last_error
-				);
-				sentry::capture_message(
-					format!(
-						"[{}]-[{}]-[{}] ⚠️  Warning! Error encountered during get gas price, Retries left: {:?}, Error: {}",
-						&self.client.get_chain_name(),
-						SUB_LOG_TARGET,
-						self.client.address(),
-						retries - 1,
-						last_error
-					)
-					.as_str(),
-					sentry::Level::Warning,
-				);
-			}
-
-			match self.middleware.get_gas_price().await {
-				Ok(gas_price) => return gas_price,
-				Err(error) => {
-					sleep(Duration::from_millis(DEFAULT_CALL_RETRY_INTERVAL_MS)).await;
-					retries -= 1;
-					last_error = error.to_string();
-				},
-			}
-		}
-
-		panic!(
-			"[{}]-[{}]-[{}] {} [method: get_gas_price]: {}",
-			&self.client.get_chain_name(),
-			SUB_LOG_TARGET,
-			self.client.address(),
-			PROVIDER_INTERNAL_ERROR,
-			last_error
-		);
 	}
 }
 
 #[async_trait]
 impl<T: 'static + JsonRpcClient> TransactionManager<T> for LegacyTransactionManager<T> {
-	fn is_txpool_enabled(&self) -> bool {
-		self.is_txpool_enabled
-	}
+	async fn run(&mut self) {
+		self.initialize().await;
 
-	fn debug_mode(&self) -> bool {
-		self.debug_mode
-	}
+		while let Some(msg) = self.receiver.recv().await {
+			log::info!(
+				target: &self.client.get_chain_name(),
+				"-[{}] 🔖 Received transaction request: {}",
+				sub_display_format(SUB_LOG_TARGET),
+				msg.metadata,
+			);
 
-	fn get_client(&self) -> Arc<EthClient<T>> {
-		self.client.clone()
-	}
-
-	fn duplicate_confirm_delay(&self) -> Duration {
-		Duration::from_millis(self.duplicate_confirm_delay.unwrap_or(ETHEREUM_BLOCK_TIME * 1000))
+			self.spawn_send_transaction(msg).await;
+		}
 	}
 
 	async fn initialize(&mut self) {
 		self.is_txpool_enabled = self.client.provider.txpool_content().await.is_ok();
 
 		self.flush_stuck_transaction().await;
+	}
+
+	fn get_client(&self) -> Arc<EthClient<T>> {
+		self.client.clone()
+	}
+
+	fn get_spawn_handle(&self) -> SpawnTaskHandle {
+		self.tx_spawn_handle.clone()
+	}
+
+	async fn spawn_send_transaction(&self, msg: EventMessage) {
+		let task = LegacyTransactionTask::new(
+			self.get_client(),
+			self.middleware.clone(),
+			self.is_txpool_enabled(),
+			self.is_initially_escalated,
+			self.gas_price_coefficient,
+			self.min_gas_price,
+			self.duplicate_confirm_delay,
+		);
+		if msg.is_bootstrap {
+			task.try_send_transaction(msg).await;
+		} else {
+			self.get_spawn_handle().spawn("send_transaction", None, async move {
+				task.try_send_transaction(msg).await
+			});
+		}
+	}
+
+	fn is_txpool_enabled(&self) -> bool {
+		self.is_txpool_enabled
 	}
 
 	async fn stuck_transaction_to_transaction_request(
@@ -223,7 +170,17 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> for LegacyTransactionMana
 		let request: TransactionRequest = transaction.into();
 
 		return if let Some(gas_price) = transaction.gas_price {
-			TxRequest::Legacy(request.gas_price(self.get_gas_price_for_retry(gas_price).await))
+			TxRequest::Legacy(
+				request.gas_price(
+					self.client
+						.get_gas_price_for_retry(
+							gas_price,
+							self.gas_price_coefficient,
+							self.min_gas_price,
+						)
+						.await,
+				),
+			)
 		} else {
 			let prev_priority_fee_per_gas = transaction.max_priority_fee_per_gas.unwrap();
 
@@ -235,7 +192,12 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> for LegacyTransactionMana
 
 				TxRequest::Legacy(
 					request.gas_price(
-						self.get_gas_price_for_retry(prev_priority_fee_per_gas + pending_base_fee)
+						self.client
+							.get_gas_price_for_retry(
+								prev_priority_fee_per_gas + pending_base_fee,
+								self.gas_price_coefficient,
+								self.min_gas_price,
+							)
 							.await,
 					),
 				)
@@ -250,20 +212,68 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> for LegacyTransactionMana
 			}
 		};
 	}
+}
 
-	async fn run(&mut self) {
-		self.initialize().await;
+/// The transaction task for Legacy transactions.
+pub struct LegacyTransactionTask<T> {
+	/// The ethereum client for the connected chain.
+	client: Arc<EthClient<T>>,
+	/// The client signs transaction for the connected chain with local nonce manager.
+	middleware: Arc<LegacyMiddleware<T>>,
+	/// The flag whether the client has enabled txpool namespace.
+	is_txpool_enabled: bool,
+	/// The flag whether if the gas price will be initially escalated. The `escalate_percentage`
+	/// will be used on escalation. This will only have effect on legacy transactions. (default:
+	/// false)
+	is_initially_escalated: bool,
+	/// The coefficient used on transaction gas price escalation (default: 1.15)
+	gas_price_coefficient: f64,
+	/// The minimum value used for gas_price. (default: 0)
+	min_gas_price: U256,
+	/// If first relay transaction is stuck in mempool after waiting for this amount of time(ms),
+	/// ignore duplicate prevent logic. (default: 12s)
+	duplicate_confirm_delay: Option<u64>,
+}
 
-		while let Some(msg) = self.receiver.recv().await {
-			log::info!(
-				target: &self.client.get_chain_name(),
-				"-[{}] 🔖 Received transaction request: {}",
-				sub_display_format(SUB_LOG_TARGET),
-				msg.metadata,
-			);
-
-			self.try_send_transaction(msg).await;
+impl<T: JsonRpcClient> LegacyTransactionTask<T> {
+	/// Build an Legacy transaction task.
+	pub fn new(
+		client: Arc<EthClient<T>>,
+		middleware: Arc<LegacyMiddleware<T>>,
+		is_txpool_enabled: bool,
+		is_initially_escalated: bool,
+		gas_price_coefficient: f64,
+		min_gas_price: U256,
+		duplicate_confirm_delay: Option<u64>,
+	) -> Self {
+		Self {
+			client,
+			middleware,
+			is_txpool_enabled,
+			is_initially_escalated,
+			gas_price_coefficient,
+			min_gas_price,
+			duplicate_confirm_delay,
 		}
+	}
+}
+
+#[async_trait::async_trait]
+impl<T: JsonRpcClient> TransactionTask<T> for LegacyTransactionTask<T> {
+	fn is_txpool_enabled(&self) -> bool {
+		self.is_txpool_enabled
+	}
+
+	fn get_client(&self) -> Arc<EthClient<T>> {
+		self.client.clone()
+	}
+
+	fn duplicate_confirm_delay(&self) -> Duration {
+		Duration::from_millis(self.duplicate_confirm_delay.unwrap_or(ETHEREUM_BLOCK_TIME * 1000))
+	}
+
+	fn debug_mode(&self) -> bool {
+		self.client.debug_mode
 	}
 
 	async fn try_send_transaction(&self, mut msg: EventMessage) {
@@ -278,6 +288,20 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> for LegacyTransactionMana
 
 		// set transaction `from` field
 		msg.tx_request = msg.tx_request.from(self.client.address());
+
+		// set transaction `gas_price` field
+		let mut gas_price = self.client.get_gas_price().await;
+		if self.is_initially_escalated {
+			gas_price = self
+				.client
+				.get_gas_price_for_escalation(
+					gas_price,
+					self.gas_price_coefficient,
+					self.min_gas_price,
+				)
+				.await;
+		}
+		msg.tx_request = msg.tx_request.gas_price(gas_price);
 
 		// estimate the gas amount to be used
 		let estimated_gas =
@@ -296,9 +320,7 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> for LegacyTransactionMana
 		msg.tx_request = msg.tx_request.gas(estimated_gas);
 
 		// check the txpool for transaction duplication prevention
-		if !(self.is_duplicate_relay(&msg.tx_request, msg.check_mempool).await) {
-			let mut tx = msg.tx_request.to_legacy();
-			let gas_price = self.get_gas_price().await;
+		if !self.is_duplicate_relay(&msg.tx_request, msg.check_mempool).await {
 			if !self.is_sufficient_funds(gas_price, estimated_gas).await {
 				panic!(
 					"[{}]-[{}]-[{}] {}",
@@ -309,10 +331,7 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> for LegacyTransactionMana
 				);
 			}
 
-			if self.is_initially_escalated {
-				tx = tx.gas_price(self.get_gas_price_for_escalation(gas_price).await);
-			}
-			let result = self.middleware.send_transaction(tx, None).await;
+			let result = self.middleware.send_transaction(msg.tx_request.to_legacy(), None).await;
 			br_metrics::increase_rpc_calls(&self.client.get_chain_name());
 
 			match result {

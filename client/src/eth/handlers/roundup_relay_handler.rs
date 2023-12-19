@@ -105,6 +105,7 @@ impl<T: JsonRpcClient> Handler for RoundupRelayHandler<T> {
 										serialized_log.roundup.new_relayers,
 									)
 									.await,
+								is_bootstrap,
 							)
 							.await;
 						},
@@ -156,10 +157,10 @@ impl<T: JsonRpcClient> RoundupRelayHandler<T> {
 		// Only broadcast to external chains
 		event_senders_vec.retain(|channel| !channel.is_native);
 
-		let mut event_senders = BTreeMap::new();
-		event_senders_vec.iter().for_each(|event_sender| {
-			event_senders.insert(event_sender.id, event_sender.clone());
-		});
+		let event_senders: BTreeMap<ChainID, Arc<EventSender>> = event_senders_vec
+			.iter()
+			.map(|event_sender| (event_sender.id, event_sender.clone()))
+			.collect();
 
 		let client = clients
 			.iter()
@@ -281,7 +282,7 @@ impl<T: JsonRpcClient> RoundupRelayHandler<T> {
 	}
 
 	/// Check roundup submitted before. If not, call `round_control_relay`.
-	async fn broadcast_roundup(&self, roundup_submit: &RoundUpSubmit) {
+	async fn broadcast_roundup(&self, roundup_submit: &RoundUpSubmit, is_bootstrap: bool) {
 		if self.external_clients.is_empty() {
 			return;
 		}
@@ -312,6 +313,7 @@ impl<T: JsonRpcClient> RoundupRelayHandler<T> {
 							true,
 							true,
 							GasCoefficient::Low,
+							is_bootstrap,
 						))
 						.unwrap()
 				}
@@ -373,7 +375,7 @@ impl<T: JsonRpcClient> BootstrapHandler for RoundupRelayHandler<T> {
 		{
 			// set all of state to BootstrapSocket
 			for state in bootstrap_guard.iter_mut() {
-				*state = BootstrapState::BootstrapBridgeRelay;
+				*state = BootstrapState::BootstrapSocketRelay;
 			}
 		}
 
