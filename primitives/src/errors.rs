@@ -14,7 +14,7 @@ pub const INVALID_CHAIN_ID: &str =
 	"Invalid chain ID provided. Please check your provider's or contract's chain ID.";
 
 pub const INVALID_BIFROST_NATIVENESS: &str =
-	"BIFROST Network is not initialized as native. Please check your provider's `is_native` field.";
+	"Bifrost Network is not initialized as native. Please check your provider's `is_native` field.";
 
 pub const INVALID_PERIODIC_SCHEDULE: &str =
 	"Invalid periodic schedule format provided. Please check your schedule format.";

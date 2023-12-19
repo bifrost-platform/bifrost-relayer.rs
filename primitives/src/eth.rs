@@ -2,13 +2,12 @@ use std::{str::FromStr, sync::Arc};
 
 use ethers::{
 	providers::{JsonRpcClient, Provider},
-	types::{Address, Signature, TransactionRequest, H160, U64},
+	types::{Address, Bytes, Signature, TransactionRequest, H160, U256, U64},
 };
 
 use crate::{
 	authority::AuthorityContract, chainlink_aggregator::ChainlinkContract,
-	relayer_manager::RelayerManagerContract, socket::SocketContract, vault::VaultContract,
-	INVALID_CONTRACT_ADDRESS,
+	relayer_manager::RelayerManagerContract, socket::SocketContract, INVALID_CONTRACT_ADDRESS,
 };
 
 /// The type of EVM chain ID's.
@@ -26,6 +25,13 @@ pub const BOOTSTRAP_BLOCK_CHUNK_SIZE: u64 = 2000;
 /// The block offset used to measure the average block time at bootstrap.
 pub const BOOTSTRAP_BLOCK_OFFSET: u32 = 100;
 
+#[derive(Clone, Debug)]
+/// The protocol version of the CCCP Socket message.
+pub enum SocketVersion {
+	V1,
+	V2,
+}
+
 /// The metadata of the EVM provider.
 pub struct ProviderMetadata {
 	pub name: String,
@@ -38,8 +44,8 @@ pub struct ProviderMetadata {
 	pub get_logs_batch_size: U64,
 	/// The `get_block` request interval in milliseconds.
 	pub call_interval: u64,
-	/// Bridge direction when bridge event points this chain as destination.
-	pub if_destination_chain: BridgeDirection,
+	/// Relay direction when CCCP event points this chain as destination.
+	pub if_destination_chain: RelayDirection,
 	/// The flag whether the chain is Bifrost(native) or an external chain.
 	pub is_native: bool,
 }
@@ -61,8 +67,8 @@ impl ProviderMetadata {
 			call_interval,
 			is_native,
 			if_destination_chain: match is_native {
-				true => BridgeDirection::Inbound,
-				false => BridgeDirection::Outbound,
+				true => RelayDirection::Inbound,
+				false => RelayDirection::Outbound,
 			},
 		}
 	}
@@ -111,29 +117,25 @@ impl<T: JsonRpcClient> AggregatorContracts<T> {
 pub struct ProtocolContracts<T> {
 	/// SocketContract
 	pub socket: SocketContract<Provider<T>>,
-	/// VaultContract
-	pub vault: VaultContract<Provider<T>>,
 	/// AuthorityContract
 	pub authority: AuthorityContract<Provider<T>>,
 	/// RelayerManagerContract (Bifrost only)
 	pub relayer_manager: Option<RelayerManagerContract<Provider<T>>>,
+	/// The CCCP v2 Execution contract address.
+	pub executor_address: Option<Address>,
 }
 
 impl<T: JsonRpcClient> ProtocolContracts<T> {
 	pub fn new(
 		provider: Arc<Provider<T>>,
 		socket_address: String,
-		vault_address: String,
 		authority_address: String,
 		relayer_manager_address: Option<String>,
+		executor_address: Option<String>,
 	) -> Self {
 		Self {
 			socket: SocketContract::new(
 				H160::from_str(&socket_address).expect(INVALID_CONTRACT_ADDRESS),
-				provider.clone(),
-			),
-			vault: VaultContract::new(
-				H160::from_str(&vault_address).expect(INVALID_CONTRACT_ADDRESS),
 				provider.clone(),
 			),
 			authority: AuthorityContract::new(
@@ -146,6 +148,8 @@ impl<T: JsonRpcClient> ProtocolContracts<T> {
 					provider.clone(),
 				)
 			}),
+			executor_address: executor_address
+				.map(|address| Address::from_str(&address).expect(INVALID_CONTRACT_ADDRESS)),
 		}
 	}
 }
@@ -193,7 +197,8 @@ impl RoundUpEventStatus {
 #[derive(Clone, Copy, Debug, PartialEq, PartialOrd)]
 /// The socket event status.
 pub enum SocketEventStatus {
-	Requested = 1,
+	None,
+	Requested,
 	Failed,
 	Executed,
 	Reverted,
@@ -206,6 +211,7 @@ pub enum SocketEventStatus {
 impl SocketEventStatus {
 	pub fn from_u8(status: u8) -> Self {
 		match status {
+			0 => SocketEventStatus::None,
 			1 => SocketEventStatus::Requested,
 			2 => SocketEventStatus::Failed,
 			3 => SocketEventStatus::Executed,
@@ -222,6 +228,7 @@ impl SocketEventStatus {
 impl From<SocketEventStatus> for u8 {
 	fn from(status: SocketEventStatus) -> Self {
 		match status {
+			SocketEventStatus::None => 0,
 			SocketEventStatus::Requested => 1,
 			SocketEventStatus::Failed => 2,
 			SocketEventStatus::Executed => 3,
@@ -234,9 +241,30 @@ impl From<SocketEventStatus> for u8 {
 	}
 }
 
+#[derive(Clone, Debug)]
+pub struct SocketVariants {
+	pub source_chain: Bytes,
+	pub receiver: Address,
+	pub max_fee: U256,
+	pub data: Bytes,
+	pub version: SocketVersion,
+}
+
+impl Default for SocketVariants {
+	fn default() -> Self {
+		Self {
+			source_chain: Bytes::default(),
+			receiver: Address::default(),
+			max_fee: U256::default(),
+			data: Bytes::default(),
+			version: SocketVersion::V1,
+		}
+	}
+}
+
 #[derive(Clone, Copy, Debug)]
-/// The CCCP protocols bridge direction.
-pub enum BridgeDirection {
+/// The CCCP protocols relay direction.
+pub enum RelayDirection {
 	/// From external network, to bifrost network.
 	Inbound,
 	/// From bifrost network, to external network.
@@ -252,8 +280,8 @@ pub enum BootstrapState {
 	BootstrapRoundUpPhase1,
 	/// phase 1-2. bootstrap for RoundUp event
 	BootstrapRoundUpPhase2,
-	/// phase 2. bootstrap for Bridge event
-	BootstrapBridgeRelay,
+	/// phase 2. bootstrap for Socket event
+	BootstrapSocketRelay,
 	/// phase 3. process for latest block as normal
 	NormalStart,
 }

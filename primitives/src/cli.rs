@@ -1,5 +1,6 @@
 use serde::Deserialize;
 use std::borrow::Cow;
+use std::fmt::Display;
 
 use crate::eth::ChainID;
 
@@ -72,7 +73,7 @@ pub struct EVMProvider {
 	pub call_interval: u64,
 	/// The number of confirmations required for a block to be processed.
 	pub block_confirmations: u64,
-	/// The flag whether the chain is BIFROST(native) or an external chain.
+	/// The flag whether the chain is Bifrost(native) or an external chain.
 	pub is_native: Option<bool>,
 	/// The flag whether it will handle relay transactions to the current chain.
 	pub is_relay_target: bool,
@@ -101,12 +102,12 @@ pub struct EVMProvider {
 	pub get_logs_batch_size: Option<u64>,
 	/// Socket contract address
 	pub socket_address: String,
-	/// Vault contract address
-	pub vault_address: String,
 	/// Authority contract address
 	pub authority_address: String,
-	/// Relayer manager contract address (BIFROST only)
+	/// Relayer manager contract address (Bifrost only)
 	pub relayer_manager_address: Option<String>,
+	/// The executor contract address for CCCP version 2.
+	pub executor_address: Option<String>,
 	/// Chainlink usdc/usd aggregator
 	pub chainlink_usdc_usd_address: Option<String>,
 	/// Chainlink usdt/usd aggregator
@@ -117,18 +118,19 @@ pub struct EVMProvider {
 
 #[derive(Debug, Clone, Deserialize, PartialEq)]
 pub enum HandlerType {
-	/// BridgeRelay handler
-	BridgeRelay,
+	/// Socket handler
+	Socket,
 	/// Roundup handler
 	Roundup,
 }
 
-impl ToString for HandlerType {
-	fn to_string(&self) -> String {
-		match *self {
-			HandlerType::BridgeRelay => "BridgeRelay".to_string(),
-			HandlerType::Roundup => "Roundup".to_string(),
-		}
+impl Display for HandlerType {
+	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		let str = match *self {
+			HandlerType::Socket => "Socket",
+			HandlerType::Roundup => "Roundup",
+		};
+		write!(f, "{}", str)
 	}
 }
 
