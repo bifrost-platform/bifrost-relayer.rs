@@ -1,4 +1,4 @@
-use std::{collections::BTreeMap, sync::Arc, time::Duration};
+use std::{collections::BTreeMap, str::FromStr, sync::Arc, time::Duration};
 
 use ethers::{
 	abi::{ParamType, RawLog, Token},
@@ -226,7 +226,7 @@ impl<T: JsonRpcClient> SocketRelayBuilder<T> for SocketRelayHandler<T> {
 	}
 
 	fn decode_msg_variants(&self, raw_variants: &Bytes) -> SocketVariants {
-		if raw_variants != &Bytes::default() {
+		if raw_variants != &Bytes::default() || raw_variants != &Bytes::from_str("0x00").unwrap() {
 			match ethers::abi::decode(
 				&[
 					ParamType::FixedBytes(4),
