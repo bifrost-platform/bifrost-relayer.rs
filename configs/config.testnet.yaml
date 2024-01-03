@@ -3,9 +3,9 @@ system:
   debug_mode: false
 
 evm_providers:
-  - name: "bifrost"
+  - name: "bifrost-testnet"
     id: 49088
-    provider: "<YOUR_BIFROST_RPC_ENDPOINT>"
+    provider: "<YOUR_BIFROST_TESTNET_RPC_ENDPOINT>"
     call_interval: 3000
     block_confirmations: 5
     is_native: true
@@ -14,19 +14,19 @@ evm_providers:
     vault_address: "0x90381bB369D4F8069fdA9246b23637a78c5d1c83"
     authority_address: "0x0000000000000000000000000000000000000400"
     relayer_manager_address: "0x0000000000000000000000000000000000002000"
-  - name: "ethereum"
-    id: 5
-    provider: "<YOUR_GOERLI_RPC_ENDPOINT>"
+  - name: "sepolia"
+    id: 11155111
+    provider: "<YOUR_SEPOLIA_RPC_ENDPOINT>"
     call_interval: 12000
     block_confirmations: 1
     is_relay_target: false
     eip1559: true
-    socket_address: "0xeF5260Db045200142a6B5DDB297e860099ffd51d"
-    vault_address: "0x7EB02c73349B3De1406e6b433c5bA1a526CBF253"
-    authority_address: "0xF51f7e267D2D966f8d3Ff2fea42B410bB14800e1"
-  - name: "bsc"
+    socket_address: "0xdAcc4aeea580F782bB991eA862e1a57827Ea9D68"
+    vault_address: "0x9070e3a291B96D156f361A850410d656880540D2"
+    authority_address: "0xC96971f6F5A1D20EFcD465B1163812a955b414A3"
+  - name: "bsc-testnet"
     id: 97
-    provider: "<YOUR_BSC_RPC_ENDPOINT>"
+    provider: "<YOUR_BSC_TESTNET_RPC_ENDPOINT>"
     call_interval: 3000
     block_confirmations: 5
     is_relay_target: false
@@ -37,7 +37,7 @@ evm_providers:
     chainlink_usdc_usd_address: "0x90c069C4538adAc136E051052E14c1cD799C41B7"
     chainlink_usdt_usd_address: "0xEca2605f0BCF2BA5966372C99837b1F182d3D620"
     chainlink_dai_usd_address: "0xE4eE17114774713d2De0eC0f035d4F7665fc025D"
-  - name: "polygon"
+  - name: "mumbai"
     id: 80001
     provider: "<YOUR_MUMBAI_RPC_ENDPOINT>"
     call_interval: 2000
@@ -50,31 +50,31 @@ evm_providers:
     chainlink_usdc_usd_address: "0x572dDec9087154dC5dfBB1546Bb62713147e0Ab0"
     chainlink_usdt_usd_address: "0x92C09849638959196E976289418e5973CC96d645"
     chainlink_dai_usd_address: "0x0FCAa9c899EC5A91eBc3D5Dd869De833b06fB046"
-  - name: "base"
-    id: 84531
-    provider: "<YOUR_BASE_GOERLI_RPC_ENDPOINT>"
+  - name: "base-sepolia"
+    id: 84532
+    provider: "<YOUR_BASE_SEPOLIA_RPC_ENDPOINT>"
     call_interval: 2000
     block_confirmations: 7
     is_relay_target: false
     eip1559: true
-    socket_address: "0x9c8B701961C20d006cb7c4B5B91c6cb93EdB44Ac"
-    vault_address: "0x6EeE91b7c69e3576C13cE7a9C7C0E305dF6996F9"
-    authority_address: "0xb3f5C3a2237Df09F94dDAC32F63E5D962Ae66a42"
-  - name: "arbitrum"
-    id: 421613
-    provider: "<YOUR_ARBITRUM_GOERLI_RPC_ENDPOINT>"
+    socket_address: "0xdAcc4aeea580F782bB991eA862e1a57827Ea9D68"
+    vault_address: "0x9070e3a291B96D156f361A850410d656880540D2"
+    authority_address: "0x15EDC0c65004548fa787Bc01e533366674946C5F"
+  - name: "arbitrum-sepolia"
+    id: 421614
+    provider: "<YOUR_ARBITRUM_SEPOLIA_RPC_ENDPOINT>"
     call_interval: 2000
     block_confirmations: 5
     get_logs_batch_size: 8
     is_relay_target: false
     eip1559: true
-    socket_address: "0xdD3B4c386729aE16dA6F961d7E0d4775C28ecA09"
-    vault_address: "0x242f67F5A254749c17C24F8826e9b1d3a0cf038B"
-    authority_address: "0x487F36a661C131F6885aBfE5177616daEC959299"
+    socket_address: "0xd1E060FD930B75DA9A709c91E6Ad03B330Fb2950"
+    vault_address: "0x6EeE91b7c69e3576C13cE7a9C7C0E305dF6996F9"
+    authority_address: "0x4dA97eCD85d4EE00E26C5f3aF21e6Da7bc3F71e2"
 
 handler_configs:
   - handler_type: BridgeRelay
-    watch_list: [49088, 5, 97, 80001, 84531, 421613]
+    watch_list: [49088, 11155111, 97, 80001, 84532, 421614]
   - handler_type: Roundup
     watch_list: [49088]
 
