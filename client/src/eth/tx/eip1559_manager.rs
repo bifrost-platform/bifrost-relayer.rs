@@ -304,11 +304,7 @@ impl<T: JsonRpcClient> TransactionTask<T> for Eip1559TransactionTask<T> {
 				Ok(pending_tx) => match pending_tx.await {
 					Ok(receipt) => {
 						if let Some(receipt) = receipt {
-							self.handle_success_tx_receipt(
-								SUB_LOG_TARGET,
-								Some(receipt),
-								msg.metadata,
-							);
+							self.handle_success_tx_receipt(SUB_LOG_TARGET, receipt, msg.metadata);
 						} else {
 							self.handle_failed_tx_receipt(SUB_LOG_TARGET, msg).await;
 						}

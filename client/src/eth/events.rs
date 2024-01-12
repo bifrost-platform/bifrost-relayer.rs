@@ -299,6 +299,13 @@ impl TxRequest {
 			TxRequest::Eip1559(tx_request) => tx_request.from.as_ref().unwrap(),
 		}
 	}
+	/// Get the `gas_price` field of the transaction request.
+	pub fn get_gas_price(&self) -> Option<U256> {
+		match self {
+			TxRequest::Legacy(tx_request) => tx_request.gas_price,
+			TxRequest::Eip1559(_) => None,
+		}
+	}
 
 	/// Sets the `from` field in the transaction to the provided value.
 	pub fn from(&self, address: Address) -> Self {
@@ -353,6 +360,13 @@ impl TxRequest {
 				TxRequest::Legacy(tx_request.clone().gas_price(gas_price))
 			},
 			TxRequest::Eip1559(tx_request) => TxRequest::Eip1559(tx_request.clone()),
+		}
+	}
+
+	pub fn nonce(&self, nonce: U256) -> Self {
+		match self {
+			TxRequest::Legacy(tx_request) => TxRequest::Legacy(tx_request.clone().nonce(nonce)),
+			TxRequest::Eip1559(tx_request) => TxRequest::Eip1559(tx_request.clone().nonce(nonce)),
 		}
 	}
 
