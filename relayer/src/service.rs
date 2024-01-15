@@ -187,7 +187,6 @@ fn construct_managers(
 			} else {
 				let (tx_manager, sender) = LegacyTransactionManager::new(
 					client.clone(),
-					evm_provider.escalate_interval,
 					evm_provider.escalate_percentage,
 					evm_provider.min_gas_price,
 					evm_provider.is_initially_escalated.unwrap_or(false),

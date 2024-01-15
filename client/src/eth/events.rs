@@ -299,23 +299,34 @@ impl TxRequest {
 			TxRequest::Eip1559(tx_request) => tx_request.from.as_ref().unwrap(),
 		}
 	}
+	/// Get the `gas_price` field of the transaction request.
+	pub fn get_gas_price(&self) -> Option<U256> {
+		match self {
+			TxRequest::Legacy(tx_request) => tx_request.gas_price,
+			TxRequest::Eip1559(_) => None,
+		}
+	}
 
 	/// Sets the `from` field in the transaction to the provided value.
-	pub fn from(&self, address: Address) -> Self {
+	pub fn from(&mut self, address: Address) {
 		match self {
-			TxRequest::Legacy(tx_request) => TxRequest::Legacy(tx_request.clone().from(address)),
-			TxRequest::Eip1559(tx_request) => TxRequest::Eip1559(tx_request.clone().from(address)),
+			TxRequest::Legacy(tx_request) => {
+				tx_request.from = Some(address);
+			},
+			TxRequest::Eip1559(tx_request) => {
+				tx_request.from = Some(address);
+			},
 		}
 	}
 
 	/// Sets the `gas` field in the transaction to the provided.
-	pub fn gas(&self, estimated_gas: U256) -> Self {
+	pub fn gas(&mut self, estimated_gas: U256) {
 		match self {
 			TxRequest::Legacy(tx_request) => {
-				TxRequest::Legacy(tx_request.clone().gas(estimated_gas))
+				tx_request.gas = Some(estimated_gas);
 			},
 			TxRequest::Eip1559(tx_request) => {
-				TxRequest::Eip1559(tx_request.clone().gas(estimated_gas))
+				tx_request.gas = Some(estimated_gas);
 			},
 		}
 	}
@@ -323,11 +334,11 @@ impl TxRequest {
 	/// Sets the `max_fee_per_gas` field in the transaction request.
 	/// This method will only have effect when the type is EIP-1559.
 	/// It will be ignored if the type is legacy.
-	pub fn max_fee_per_gas(&self, max_fee_per_gas: U256) -> Self {
+	pub fn max_fee_per_gas(&mut self, max_fee_per_gas: U256) {
 		match self {
-			TxRequest::Legacy(tx_request) => TxRequest::Legacy(tx_request.clone()),
+			TxRequest::Legacy(_) => {},
 			TxRequest::Eip1559(tx_request) => {
-				TxRequest::Eip1559(tx_request.clone().max_fee_per_gas(max_fee_per_gas))
+				tx_request.max_fee_per_gas = Some(max_fee_per_gas);
 			},
 		}
 	}
@@ -335,24 +346,36 @@ impl TxRequest {
 	/// Sets the `max_priority_fee_per_gas` field in the transaction request.
 	/// This method will only have effect when the type is EIP-1559.
 	/// It will be ignored if the type is legacy.
-	pub fn max_priority_fee_per_gas(&self, max_priority_fee_per_gas: U256) -> Self {
+	pub fn max_priority_fee_per_gas(&mut self, max_priority_fee_per_gas: U256) {
 		match self {
-			TxRequest::Legacy(tx_request) => TxRequest::Legacy(tx_request.clone()),
-			TxRequest::Eip1559(tx_request) => TxRequest::Eip1559(
-				tx_request.clone().max_priority_fee_per_gas(max_priority_fee_per_gas),
-			),
+			TxRequest::Legacy(_) => {},
+			TxRequest::Eip1559(tx_request) => {
+				tx_request.max_priority_fee_per_gas = Some(max_priority_fee_per_gas);
+			},
 		}
 	}
 
 	/// Sets the `gas_price` field in the transaction request.
 	/// This method will only have effect when the type is legacy.
 	/// It will be ignored if the type is EIP-1559.
-	pub fn gas_price(&self, gas_price: U256) -> Self {
+	pub fn gas_price(&mut self, gas_price: U256) {
 		match self {
 			TxRequest::Legacy(tx_request) => {
-				TxRequest::Legacy(tx_request.clone().gas_price(gas_price))
+				tx_request.gas_price = Some(gas_price);
 			},
-			TxRequest::Eip1559(tx_request) => TxRequest::Eip1559(tx_request.clone()),
+			TxRequest::Eip1559(_) => {},
+		}
+	}
+
+	/// Sets the `nonce` field in the transaction request.
+	pub fn nonce(&mut self, nonce: Option<U256>) {
+		match self {
+			TxRequest::Legacy(tx_request) => {
+				tx_request.nonce = nonce;
+			},
+			TxRequest::Eip1559(tx_request) => {
+				tx_request.nonce = nonce;
+			},
 		}
 	}
 
@@ -446,6 +469,7 @@ impl EventMessage {
 	/// Builds a new `EventMessage` to use on transaction retry. This will reduce the remaining
 	/// retry counter and increase the retry interval.
 	pub fn build_retry_event(&mut self) {
+		self.tx_request.nonce(None);
 		self.retries_remaining = self.retries_remaining.saturating_sub(1);
 	}
 }
