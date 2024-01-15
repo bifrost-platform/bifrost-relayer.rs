@@ -275,7 +275,7 @@ impl<T: JsonRpcClient> TransactionTask<T> for LegacyTransactionTask<T> {
 		}
 
 		// set transaction `from` field
-		msg.tx_request = msg.tx_request.from(self.client.address());
+		msg.tx_request.from(self.client.address());
 
 		// set transaction `gas_price` field
 		let mut gas_price = self.client.get_gas_price().await;
@@ -292,7 +292,7 @@ impl<T: JsonRpcClient> TransactionTask<T> for LegacyTransactionTask<T> {
 							)
 							.await;
 					}
-					msg.tx_request = msg.tx_request.gas_price(gas_price);
+					msg.tx_request.gas_price(gas_price);
 				}
 			},
 			None => {},
@@ -312,7 +312,7 @@ impl<T: JsonRpcClient> TransactionTask<T> for LegacyTransactionTask<T> {
 					return self.handle_failed_gas_estimation(SUB_LOG_TARGET, msg, &error).await
 				},
 			};
-		msg.tx_request = msg.tx_request.gas(estimated_gas);
+		msg.tx_request.gas(estimated_gas);
 
 		// check the txpool for transaction duplication prevention
 		if !self.is_duplicate_relay(&msg.tx_request, msg.check_mempool).await {
@@ -344,8 +344,8 @@ impl<T: JsonRpcClient> TransactionTask<T> for LegacyTransactionTask<T> {
 								// if 3 blocks passed since send_transaction, but the receipt has not come out,
 								let pending_tx =
 									self.get_client().get_transaction(pending_hash).await.unwrap();
-								msg.tx_request = msg.tx_request.nonce(pending_tx.nonce);
-								msg.tx_request = msg.tx_request.gas_price(U256::from(
+								msg.tx_request.nonce(Some(pending_tx.nonce));
+								msg.tx_request.gas_price(U256::from(
 									(pending_tx.gas_price.unwrap().as_u64() as f64
 										* self.gas_price_coefficient)
 										.ceil() as u64,

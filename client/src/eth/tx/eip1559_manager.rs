@@ -256,17 +256,15 @@ impl<T: JsonRpcClient> TransactionTask<T> for Eip1559TransactionTask<T> {
 		}
 
 		// set transaction `from` field
-		msg.tx_request = msg.tx_request.from(self.client.address());
+		msg.tx_request.from(self.client.address());
 
 		// set transaction gas fee parameters
 		let fees = self.client.get_estimated_eip1559_fees().await;
 		let priority_fee = max(fees.1, self.min_priority_fee);
 		let max_fee_per_gas =
 			fees.0.saturating_add(priority_fee).saturating_mul(MAX_FEE_COEFFICIENT.into());
-		msg.tx_request = msg
-			.tx_request
-			.max_fee_per_gas(max_fee_per_gas)
-			.max_priority_fee_per_gas(priority_fee);
+		msg.tx_request.max_fee_per_gas(max_fee_per_gas);
+		msg.tx_request.max_priority_fee_per_gas(priority_fee);
 
 		// estimate the gas amount to be used
 		let estimated_gas =
@@ -282,7 +280,7 @@ impl<T: JsonRpcClient> TransactionTask<T> for Eip1559TransactionTask<T> {
 					return self.handle_failed_gas_estimation(SUB_LOG_TARGET, msg, &error).await
 				},
 			};
-		msg.tx_request = msg.tx_request.gas(estimated_gas);
+		msg.tx_request.gas(estimated_gas);
 
 		// check the txpool for transaction duplication prevention
 		if !self.is_duplicate_relay(&msg.tx_request, msg.check_mempool).await {
