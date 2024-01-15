@@ -340,11 +340,15 @@ impl<T: JsonRpcClient> TransactionTask<T> for LegacyTransactionTask<T> {
 								let pending_tx =
 									self.get_client().get_transaction(pending_hash).await.unwrap();
 								msg.tx_request.nonce(Some(pending_tx.nonce));
-								msg.tx_request.gas_price(U256::from(
-									(pending_tx.gas_price.unwrap().as_u64() as f64
-										* self.gas_price_coefficient)
-										.ceil() as u64,
-								));
+								msg.tx_request.gas_price(
+									self.client
+										.get_gas_price_for_escalation(
+											pending_tx.gas_price.unwrap(),
+											self.gas_price_coefficient,
+											self.min_gas_price,
+										)
+										.await,
+								);
 								self.handle_stalled_tx(SUB_LOG_TARGET, msg, pending_hash).await;
 							}
 						},
