@@ -9,10 +9,7 @@ use br_primitives::{
 	PROVIDER_INTERNAL_ERROR,
 };
 use ethers::{
-	middleware::{
-		gas_escalator::{Frequency, GasEscalatorMiddleware, GeometricGasPrice},
-		MiddlewareBuilder, NonceManagerMiddleware, SignerMiddleware,
-	},
+	middleware::{MiddlewareBuilder, NonceManagerMiddleware, SignerMiddleware},
 	providers::{JsonRpcClient, Middleware, Provider},
 	signers::LocalWallet,
 	types::{BlockId, BlockNumber, Transaction, TransactionRequest, U256},
@@ -31,9 +28,7 @@ use super::{generate_delay, TransactionTask};
 
 const SUB_LOG_TARGET: &str = "legacy-tx-manager";
 
-type LegacyMiddleware<T> = NonceManagerMiddleware<
-	SignerMiddleware<Arc<GasEscalatorMiddleware<Arc<Provider<T>>>>, LocalWallet>,
->;
+type LegacyMiddleware<T> = NonceManagerMiddleware<SignerMiddleware<Arc<Provider<T>>, LocalWallet>>;
 
 /// The essential task that sends legacy transactions asynchronously.
 pub struct LegacyTransactionManager<T> {
@@ -64,7 +59,6 @@ impl<T: 'static + JsonRpcClient> LegacyTransactionManager<T> {
 	/// Instantiates a new `LegacyTransactionManager` instance.
 	pub fn new(
 		client: Arc<EthClient<T>>,
-		escalate_interval: Option<u64>,
 		escalate_percentage: Option<f64>,
 		min_gas_price: Option<u64>,
 		is_initially_escalated: bool,
@@ -81,14 +75,8 @@ impl<T: 'static + JsonRpcClient> LegacyTransactionManager<T> {
 			}
 		};
 
-		let escalator = GeometricGasPrice::new(
-			gas_price_coefficient,
-			escalate_interval.unwrap_or(ETHEREUM_BLOCK_TIME),
-			None::<u64>,
-		);
 		let middleware = client
 			.get_provider()
-			.wrap_into(|p| Arc::new(GasEscalatorMiddleware::new(p, escalator, Frequency::PerBlock)))
 			.wrap_into(|p| SignerMiddleware::new(p, client.wallet.signer.clone()))
 			.wrap_into(|p| NonceManagerMiddleware::new(p, client.address()));
 
@@ -287,21 +275,23 @@ impl<T: JsonRpcClient> TransactionTask<T> for LegacyTransactionTask<T> {
 		}
 
 		// set transaction `from` field
-		msg.tx_request = msg.tx_request.from(self.client.address());
+		msg.tx_request.from(self.client.address());
 
 		// set transaction `gas_price` field
 		let mut gas_price = self.client.get_gas_price().await;
-		if self.is_initially_escalated {
-			gas_price = self
-				.client
-				.get_gas_price_for_escalation(
-					gas_price,
-					self.gas_price_coefficient,
-					self.min_gas_price,
-				)
-				.await;
+		if msg.tx_request.get_gas_price().unwrap_or(U256::zero()) == U256::zero() {
+			if self.is_initially_escalated {
+				gas_price = self
+					.client
+					.get_gas_price_for_escalation(
+						gas_price,
+						self.gas_price_coefficient,
+						self.min_gas_price,
+					)
+					.await;
+				msg.tx_request.gas_price(gas_price);
+			}
 		}
-		msg.tx_request = msg.tx_request.gas_price(gas_price);
 
 		// estimate the gas amount to be used
 		let estimated_gas =
@@ -317,7 +307,7 @@ impl<T: JsonRpcClient> TransactionTask<T> for LegacyTransactionTask<T> {
 					return self.handle_failed_gas_estimation(SUB_LOG_TARGET, msg, &error).await
 				},
 			};
-		msg.tx_request = msg.tx_request.gas(estimated_gas);
+		msg.tx_request.gas(estimated_gas);
 
 		// check the txpool for transaction duplication prevention
 		if !self.is_duplicate_relay(&msg.tx_request, msg.check_mempool).await {
@@ -335,11 +325,37 @@ impl<T: JsonRpcClient> TransactionTask<T> for LegacyTransactionTask<T> {
 			br_metrics::increase_rpc_calls(&self.client.get_chain_name());
 
 			match result {
-				Ok(pending_tx) => match pending_tx.await {
-					Ok(receipt) => {
-						self.handle_success_tx_receipt(SUB_LOG_TARGET, receipt, msg.metadata)
-					},
-					Err(error) => self.handle_failed_tx_request(SUB_LOG_TARGET, msg, &error).await,
+				Ok(pending_tx) => {
+					let pending_hash = pending_tx.tx_hash();
+					match pending_tx.await {
+						Ok(receipt) => {
+							if let Some(receipt) = receipt {
+								self.handle_success_tx_receipt(
+									SUB_LOG_TARGET,
+									receipt,
+									msg.metadata,
+								)
+							} else {
+								// if 3 blocks passed since send_transaction, but the receipt has not come out,
+								let pending_tx =
+									self.get_client().get_transaction(pending_hash).await.unwrap();
+								msg.tx_request.nonce(Some(pending_tx.nonce));
+								msg.tx_request.gas_price(
+									self.client
+										.get_gas_price_for_escalation(
+											pending_tx.gas_price.unwrap(),
+											self.gas_price_coefficient,
+											self.min_gas_price,
+										)
+										.await,
+								);
+								self.handle_stalled_tx(SUB_LOG_TARGET, msg, pending_hash).await;
+							}
+						},
+						Err(error) => {
+							self.handle_failed_tx_request(SUB_LOG_TARGET, msg, &error).await
+						},
+					}
 				},
 				Err(error) => self.handle_failed_tx_request(SUB_LOG_TARGET, msg, &error).await,
 			}
