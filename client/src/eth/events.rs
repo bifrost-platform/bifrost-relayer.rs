@@ -367,6 +367,7 @@ impl TxRequest {
 		}
 	}
 
+	/// Sets the `nonce` field in the transaction request.
 	pub fn nonce(&mut self, nonce: Option<U256>) {
 		match self {
 			TxRequest::Legacy(tx_request) => {
