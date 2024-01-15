@@ -1,6 +1,7 @@
 use std::{error::Error, time::Duration};
 
 use br_primitives::sub_display_format;
+use ethers::types::TxHash;
 use ethers::{
 	providers::JsonRpcClient,
 	types::{TransactionReceipt, U256},
@@ -73,9 +74,11 @@ where
 
 					sleep(self.duplicate_confirm_delay()).await;
 					return if client.get_transaction_receipt(mempool_tx.hash).await.is_some() {
+						// if others relay processed
 						br_metrics::increase_rpc_calls(&client.get_chain_name());
 						true
 					} else {
+						// if others relay stalled in mempool
 						br_metrics::increase_rpc_calls(&client.get_chain_name());
 						false
 					};
@@ -86,9 +89,11 @@ where
 	}
 
 	/// Retry send_transaction() for failed transaction execution.
-	async fn retry_transaction(&self, mut msg: EventMessage) {
-		msg.build_retry_event();
-		sleep(Duration::from_millis(msg.retry_interval)).await;
+	async fn retry_transaction(&self, mut msg: EventMessage, escalation: bool) {
+		if !escalation {
+			msg.build_retry_event();
+			sleep(Duration::from_millis(msg.retry_interval)).await;
+		}
 		self.try_send_transaction(msg).await;
 	}
 
@@ -100,33 +105,32 @@ where
 	fn handle_success_tx_receipt(
 		&self,
 		sub_target: &str,
-		receipt: Option<TransactionReceipt>,
+		receipt: TransactionReceipt,
 		metadata: EventMetadata,
 	) {
 		let client = self.get_client();
 
-		if let Some(receipt) = receipt {
-			let status = receipt.status.unwrap();
-			log::info!(
+		let status = receipt.status.unwrap();
+		log::info!(
+			target: &client.get_chain_name(),
+			"-[{}] 🎁 The requested transaction has been successfully mined in block: {}, {:?}-{:?}-{:?}",
+			sub_display_format(sub_target),
+			metadata.to_string(),
+			receipt.block_number.unwrap(),
+			status,
+			receipt.transaction_hash
+		);
+		if status.is_zero() && self.debug_mode() {
+			log::warn!(
 				target: &client.get_chain_name(),
-				"-[{}] 🎁 The requested transaction has been successfully mined in block: {}, {:?}-{:?}-{:?}",
+				"-[{}] ⚠️  Warning! Error encountered during contract execution [execution reverted]. A prior transaction might have been already submitted: {}, {:?}-{:?}-{:?}",
 				sub_display_format(sub_target),
-				metadata.to_string(),
+				metadata,
 				receipt.block_number.unwrap(),
 				status,
 				receipt.transaction_hash
 			);
-			if status.is_zero() && self.debug_mode() {
-				log::warn!(
-					target: &client.get_chain_name(),
-					"-[{}] ⚠️  Warning! Error encountered during contract execution [execution reverted]. A prior transaction might have been already submitted: {}, {:?}-{:?}-{:?}",
-					sub_display_format(sub_target),
-					metadata,
-					receipt.block_number.unwrap(),
-					status,
-					receipt.transaction_hash
-				);
-				sentry::capture_message(
+			sentry::capture_message(
 					format!(
 						"[{}]-[{}]-[{}] ⚠️  Warning! Error encountered during contract execution [execution reverted]. A prior transaction might have been already submitted: {}, {:?}-{:?}-{:?}",
 						&client.get_chain_name(),
@@ -140,16 +144,33 @@ where
 						.as_str(),
 					sentry::Level::Warning,
 				);
-			}
-			br_metrics::set_payed_fees(&client.get_chain_name(), &receipt);
-		} else {
-			log::info!(
-				target: &client.get_chain_name(),
-				"-[{}] 🎁 The pending transaction has been successfully replaced and gas-escalated: {}",
-				sub_display_format(sub_target),
-				metadata,
-			);
 		}
+		br_metrics::set_payed_fees(&client.get_chain_name(), &receipt);
+	}
+
+	/// Handles the stalled transaction.
+	async fn handle_stalled_tx(&self, sub_target: &str, msg: EventMessage, pending: TxHash) {
+		let client = self.get_client();
+		log::warn!(
+			target: &client.get_chain_name(),
+			"-[{}] ♻️ The pending transaction has been stalled over 3 blocks. Try gas-escalation: {}-{}",
+			sub_display_format(sub_target),
+			msg.metadata,
+			pending,
+		);
+		sentry::capture_message(
+			format!(
+				"[{}]-[{}]-[{}] ♻️  Unknown error while requesting a transaction request: {}-{}",
+				&client.get_chain_name(),
+				sub_target,
+				client.address(),
+				msg.metadata,
+				pending
+			)
+			.as_str(),
+			sentry::Level::Warning,
+		);
+		self.retry_transaction(msg, true).await;
 	}
 
 	/// Handles the failed transaction receipt generation.
@@ -175,7 +196,7 @@ where
 			.as_str(),
 			sentry::Level::Error,
 		);
-		self.retry_transaction(msg).await;
+		self.retry_transaction(msg, false).await;
 	}
 
 	/// Handles the failed transaction request.
@@ -208,7 +229,7 @@ where
 				.as_str(),
 			sentry::Level::Error,
 		);
-		self.retry_transaction(msg).await;
+		self.retry_transaction(msg, false).await;
 	}
 
 	/// Handles the failed gas estimation.
@@ -243,6 +264,6 @@ where
 				sentry::Level::Warning,
 			);
 		}
-		self.retry_transaction(msg).await;
+		self.retry_transaction(msg, false).await;
 	}
 }
