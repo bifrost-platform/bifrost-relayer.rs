@@ -74,9 +74,11 @@ where
 
 					sleep(self.duplicate_confirm_delay()).await;
 					return if client.get_transaction_receipt(mempool_tx.hash).await.is_some() {
+						// if others relay processed
 						br_metrics::increase_rpc_calls(&client.get_chain_name());
 						true
 					} else {
+						// if others relay stalled in mempool
 						br_metrics::increase_rpc_calls(&client.get_chain_name());
 						false
 					};
