@@ -83,8 +83,6 @@ pub struct EVMProvider {
 	pub min_gas_price: Option<u64>,
 	/// The minimum priority fee required. (default: 0, unit: WEI)
 	pub min_priority_fee: Option<u64>,
-	/// Gas price escalate interval(seconds) when tx stuck in mempool. (default: 12)
-	pub escalate_interval: Option<u64>,
 	/// Gas price increase percentage on gas price escalation such as when handling tx
 	/// replacements. (default: 15.0)
 	pub escalate_percentage: Option<f64>,

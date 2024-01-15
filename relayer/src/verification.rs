@@ -2,10 +2,9 @@ use br_primitives::{
 	cli::Configuration,
 	constants::{
 		DEFAULT_BOOTSTRAP_ROUND_OFFSET, DEFAULT_DUPLICATE_CONFIRM_DELAY_MS,
-		DEFAULT_ESCALATE_INTERVAL_SEC, DEFAULT_ESCALATE_PERCENTAGE, DEFAULT_GET_LOGS_BATCH_SIZE,
-		MAX_BLOCK_CONFIRMATIONS, MAX_BOOTSTRAP_ROUND_OFFSET, MAX_CALL_INTERVAL_MS,
-		MAX_DUPLICATE_CONFIRM_DELAY_MS, MAX_ESCALATE_INTERVAL_SEC, MAX_ESCALATE_PERCENTAGE,
-		MIN_GET_LOGS_BATCH_SIZE,
+		DEFAULT_ESCALATE_PERCENTAGE, DEFAULT_GET_LOGS_BATCH_SIZE, MAX_BLOCK_CONFIRMATIONS,
+		MAX_BOOTSTRAP_ROUND_OFFSET, MAX_CALL_INTERVAL_MS, MAX_DUPLICATE_CONFIRM_DELAY_MS,
+		MAX_ESCALATE_PERCENTAGE, MIN_GET_LOGS_BATCH_SIZE,
 	},
 	PARAMETER_OUT_OF_RANGE,
 };
@@ -54,16 +53,6 @@ pub(super) fn assert_configuration_validity(config: &Configuration) {
 				"evm_provider.escalate_percentage",
 				MAX_ESCALATE_PERCENTAGE,
 				DEFAULT_ESCALATE_PERCENTAGE
-			);
-		}
-		if let Some(escalate_interval) = evm_provider.escalate_interval {
-			assert!(
-				(0..=MAX_ESCALATE_INTERVAL_SEC).contains(&escalate_interval),
-				"{} [parameter: {}, range: 0…{}, default: {}]",
-				PARAMETER_OUT_OF_RANGE,
-				"evm_provider.escalate_interval",
-				MAX_ESCALATE_INTERVAL_SEC,
-				DEFAULT_ESCALATE_INTERVAL_SEC
 			);
 		}
 		if let Some(duplicate_confirm_delay) = evm_provider.duplicate_confirm_delay {
