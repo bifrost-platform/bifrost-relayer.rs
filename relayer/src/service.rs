@@ -170,6 +170,7 @@ fn construct_managers(
 				evm_provider.chainlink_usdc_usd_address.clone(),
 				evm_provider.chainlink_usdt_usd_address.clone(),
 				evm_provider.chainlink_dai_usd_address.clone(),
+				evm_provider.chainlink_btc_usd_address.clone(),
 			),
 			system.debug_mode.unwrap_or(false),
 		));

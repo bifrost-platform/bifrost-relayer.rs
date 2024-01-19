@@ -18,11 +18,12 @@ impl<T: JsonRpcClient + 'static> PriceFetcher for ChainlinkPriceFetcher<T> {
 			let symbol_str = symbol.as_str();
 
 			match symbol_str {
-				"USDC" | "USDT" | "DAI" => {
+				"USDC" | "USDT" | "DAI" | "BTC" => {
 					return if let Some(contract) = match symbol_str {
 						"USDC" => &client.aggregator_contracts.chainlink_usdc_usd,
 						"USDT" => &client.aggregator_contracts.chainlink_usdt_usd,
 						"DAI" => &client.aggregator_contracts.chainlink_dai_usd,
+						"BTC" => &client.aggregator_contracts.chainlink_btc_usd,
 						_ => todo!(),
 					} {
 						let (_, price, _, _, _) = contract.latest_round_data().await.unwrap();
@@ -50,7 +51,9 @@ impl<T: JsonRpcClient + 'static> PriceFetcher for ChainlinkPriceFetcher<T> {
 	async fn get_tickers(&self) -> Result<BTreeMap<String, PriceResponse>, Error> {
 		let mut ret = BTreeMap::new();
 
-		for symbol in vec!["USDC".to_string(), "USDT".to_string(), "DAI".to_string()] {
+		for symbol in
+			vec!["USDC".to_string(), "USDT".to_string(), "DAI".to_string(), "BTC".to_string()]
+		{
 			match self.get_ticker_with_symbol(symbol.clone()).await {
 				Ok(ticker) => ret.insert(symbol, ticker),
 				Err(_) => continue,
