@@ -275,6 +275,8 @@ pub struct AggregatorContracts<T> {
 	pub chainlink_usdt_usd: Option<ChainlinkContract<Provider<T>>>,
 	/// Chainlink dai/usd aggregator
 	pub chainlink_dai_usd: Option<ChainlinkContract<Provider<T>>>,
+	/// Chainlink btc/usd aggregator
+	pub chainlink_btc_usd: Option<ChainlinkContract<Provider<T>>>,
 }
 
 impl<T: JsonRpcClient> AggregatorContracts<T> {
@@ -283,26 +285,20 @@ impl<T: JsonRpcClient> AggregatorContracts<T> {
 		chainlink_usdc_usd_address: Option<String>,
 		chainlink_usdt_usd_address: Option<String>,
 		chainlink_dai_usd_address: Option<String>,
+		chainlink_btc_usd_address: Option<String>,
 	) -> Self {
+		let create_contract_instance = |address: String| {
+			ChainlinkContract::new(
+				H160::from_str(&address).expect(INVALID_CONTRACT_ADDRESS),
+				provider.clone(),
+			)
+		};
+
 		Self {
-			chainlink_usdc_usd: chainlink_usdc_usd_address.map(|address| {
-				ChainlinkContract::new(
-					H160::from_str(&address).expect(INVALID_CONTRACT_ADDRESS),
-					provider.clone(),
-				)
-			}),
-			chainlink_usdt_usd: chainlink_usdt_usd_address.map(|address| {
-				ChainlinkContract::new(
-					H160::from_str(&address).expect(INVALID_CONTRACT_ADDRESS),
-					provider.clone(),
-				)
-			}),
-			chainlink_dai_usd: chainlink_dai_usd_address.map(|address| {
-				ChainlinkContract::new(
-					H160::from_str(&address).expect(INVALID_CONTRACT_ADDRESS),
-					provider.clone(),
-				)
-			}),
+			chainlink_usdc_usd: chainlink_usdc_usd_address.map(create_contract_instance),
+			chainlink_usdt_usd: chainlink_usdt_usd_address.map(create_contract_instance),
+			chainlink_dai_usd: chainlink_dai_usd_address.map(create_contract_instance),
+			chainlink_btc_usd: chainlink_btc_usd_address.map(create_contract_instance),
 		}
 	}
 }
