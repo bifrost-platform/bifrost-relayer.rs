@@ -76,7 +76,7 @@ impl<T: JsonRpcClient> PriceFetcher for CoingeckoPriceFetcher<T> {
 				Ok(ret)
 			},
 			Err(e) => Err(e),
-		}
+		};
 	}
 }
 
@@ -91,6 +91,7 @@ impl<T: JsonRpcClient> CoingeckoPriceFetcher<T> {
 			"bifi".into(),
 			"tether".into(),
 			"dai".into(),
+			"bitcoin".into(),
 		];
 
 		let support_coin_list: Vec<SupportedCoin> = Self::get_all_coin_list()
@@ -116,7 +117,7 @@ impl<T: JsonRpcClient> CoingeckoPriceFetcher<T> {
 				.await
 				.and_then(Response::error_for_status)
 			{
-				Ok(response) =>
+				Ok(response) => {
 					return match response.json::<Vec<SupportedCoin>>().await {
 						Ok(coins) => Ok(coins),
 						Err(e) => {
@@ -129,7 +130,8 @@ impl<T: JsonRpcClient> CoingeckoPriceFetcher<T> {
 							);
 							Err(Error)
 						},
-					},
+					}
+				},
 				Err(e) => {
 					log::warn!(
 						target: LOG_TARGET,
@@ -156,7 +158,7 @@ impl<T: JsonRpcClient> CoingeckoPriceFetcher<T> {
 
 		loop {
 			match reqwest::get(url.clone()).await.and_then(Response::error_for_status) {
-				Ok(response) =>
+				Ok(response) => {
 					return match response.json::<BTreeMap<String, BTreeMap<String, f64>>>().await {
 						Ok(result) => Ok(result),
 						Err(e) => {
@@ -168,10 +170,11 @@ impl<T: JsonRpcClient> CoingeckoPriceFetcher<T> {
 							);
 							Err(Error)
 						},
-					},
+					}
+				},
 				Err(e) => {
 					if retries_remaining == 0 {
-						return Err(Error)
+						return Err(Error);
 					}
 
 					log::warn!(

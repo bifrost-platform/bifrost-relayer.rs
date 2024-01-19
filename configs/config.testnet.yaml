@@ -37,6 +37,7 @@ evm_providers:
     chainlink_usdc_usd_address: "0x90c069C4538adAc136E051052E14c1cD799C41B7"
     chainlink_usdt_usd_address: "0xEca2605f0BCF2BA5966372C99837b1F182d3D620"
     chainlink_dai_usd_address: "0xE4eE17114774713d2De0eC0f035d4F7665fc025D"
+    chainlink_btc_usd_address: "0x5741306c21795FdCBb9b265Ea0255F499DFe515C"
   - name: "mumbai"
     id: 80001
     provider: "<YOUR_MUMBAI_RPC_ENDPOINT>"
@@ -50,6 +51,7 @@ evm_providers:
     chainlink_usdc_usd_address: "0x572dDec9087154dC5dfBB1546Bb62713147e0Ab0"
     chainlink_usdt_usd_address: "0x92C09849638959196E976289418e5973CC96d645"
     chainlink_dai_usd_address: "0x0FCAa9c899EC5A91eBc3D5Dd869De833b06fB046"
+    chainlink_btc_usd_address: "0x007A22900a3B98143368Bd5906f8E17e9867581b"
   - name: "base-sepolia"
     id: 84532
     provider: "<YOUR_BASE_SEPOLIA_RPC_ENDPOINT>"
