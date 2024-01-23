@@ -37,7 +37,7 @@ pub struct OraclePriceFeeder<T> {
 	/// The event sender that sends messages to the event channel.
 	event_sender: Arc<EventSender>,
 	/// The pre-defined oracle ID's for each asset.
-	asset_oid: BTreeMap<String, H256>,
+	asset_oid: BTreeMap<&'static str, H256>,
 	/// The vector that contains each `EthClient`.
 	system_clients: Vec<Arc<EthClient<T>>>,
 }
@@ -250,7 +250,7 @@ impl<T: JsonRpcClient + 'static> OraclePriceFeeder<T> {
 		let mut price_bytes_list: Vec<[u8; 32]> = vec![];
 
 		price_responses.iter().for_each(|(symbol, price_response)| {
-			oid_bytes_list.push(self.asset_oid.get(symbol).unwrap().to_fixed_bytes());
+			oid_bytes_list.push(self.asset_oid.get(symbol.as_str()).unwrap().to_fixed_bytes());
 			price_bytes_list.push(price_response.price.into());
 		});
 
