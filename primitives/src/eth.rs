@@ -277,6 +277,8 @@ pub struct AggregatorContracts<T> {
 	pub chainlink_dai_usd: Option<ChainlinkContract<Provider<T>>>,
 	/// Chainlink btc/usd aggregator
 	pub chainlink_btc_usd: Option<ChainlinkContract<Provider<T>>>,
+	/// Chainlink wbtc/usd aggregator
+	pub chainlink_wbtc_usd: Option<ChainlinkContract<Provider<T>>>,
 }
 
 impl<T: JsonRpcClient> AggregatorContracts<T> {
@@ -286,6 +288,7 @@ impl<T: JsonRpcClient> AggregatorContracts<T> {
 		chainlink_usdt_usd_address: Option<String>,
 		chainlink_dai_usd_address: Option<String>,
 		chainlink_btc_usd_address: Option<String>,
+		chainlink_wbtc_usd_address: Option<String>,
 	) -> Self {
 		let create_contract_instance = |address: String| {
 			ChainlinkContract::new(
@@ -299,6 +302,7 @@ impl<T: JsonRpcClient> AggregatorContracts<T> {
 			chainlink_usdt_usd: chainlink_usdt_usd_address.map(create_contract_instance),
 			chainlink_dai_usd: chainlink_dai_usd_address.map(create_contract_instance),
 			chainlink_btc_usd: chainlink_btc_usd_address.map(create_contract_instance),
+			chainlink_wbtc_usd: chainlink_wbtc_usd_address.map(create_contract_instance),
 		}
 	}
 }
