@@ -46,13 +46,24 @@ impl<T: JsonRpcClient> PriceFetcher for BinancePriceFetcher<T> {
 		match reqwest::get(url).await {
 			Ok(response) => match response.json::<Vec<BinanceResponse>>().await {
 				Ok(binance_response) => binance_response.iter().for_each(|ticker| {
-					ret.insert(
-						ticker.symbol.clone().replace("USDT", ""),
-						PriceResponse {
-							price: parse_ether(&ticker.lastPrice).unwrap(),
-							volume: parse_ether(&ticker.volume).unwrap().into(),
-						},
-					);
+					if ticker.symbol == "BTC" {
+						// BTC ticker from binance is BTCB ticker
+						ret.insert(
+							"BTCB".into(),
+							PriceResponse {
+								price: parse_ether(&ticker.lastPrice).unwrap(),
+								volume: parse_ether(&ticker.volume).unwrap().into(),
+							},
+						);
+					} else {
+						ret.insert(
+							ticker.symbol.clone().replace("USDT", ""),
+							PriceResponse {
+								price: parse_ether(&ticker.lastPrice).unwrap(),
+								volume: parse_ether(&ticker.volume).unwrap().into(),
+							},
+						);
+					}
 				}),
 				Err(_) => return Err(Error),
 			},
@@ -65,7 +76,8 @@ impl<T: JsonRpcClient> PriceFetcher for BinancePriceFetcher<T> {
 
 impl<T: JsonRpcClient> BinancePriceFetcher<T> {
 	pub async fn new() -> Result<BinancePriceFetcher<T>, Error> {
-		let mut symbols: Vec<String> = vec!["ETH".into(), "BNB".into(), "MATIC".into()];
+		let mut symbols: Vec<String> =
+			vec!["ETH".into(), "BNB".into(), "MATIC".into(), "BTC".into()];
 		symbols.iter_mut().for_each(|symbol| symbol.push_str("USDT"));
 
 		Ok(Self {
