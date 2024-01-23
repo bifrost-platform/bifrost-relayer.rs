@@ -18,12 +18,13 @@ impl<T: JsonRpcClient + 'static> PriceFetcher for ChainlinkPriceFetcher<T> {
 			let symbol_str = symbol.as_str();
 
 			match symbol_str {
-				"USDC" | "USDT" | "DAI" | "BTC" => {
+				"USDC" | "USDT" | "DAI" | "BTC" | "WBTC" => {
 					return if let Some(contract) = match symbol_str {
 						"USDC" => &client.aggregator_contracts.chainlink_usdc_usd,
 						"USDT" => &client.aggregator_contracts.chainlink_usdt_usd,
 						"DAI" => &client.aggregator_contracts.chainlink_dai_usd,
 						"BTC" => &client.aggregator_contracts.chainlink_btc_usd,
+						"WBTC" => &client.aggregator_contracts.chainlink_wbtc_usd,
 						_ => todo!(),
 					} {
 						let (_, price, _, _, _) = contract.latest_round_data().await.unwrap();
