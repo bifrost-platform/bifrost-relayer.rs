@@ -1,4 +1,14 @@
-use std::{collections::BTreeMap, str::FromStr, sync::Arc, time::Duration};
+#[cfg(feature = "v2")]
+use {
+	br_primitives::eth::SocketVariants,
+	ethers::{
+		abi::{ParamType, Token},
+		types::Bytes,
+	},
+	std::str::FromStr,
+};
+
+use std::{collections::BTreeMap, sync::Arc, time::Duration};
 
 use ethers::{
 	abi::RawLog,
