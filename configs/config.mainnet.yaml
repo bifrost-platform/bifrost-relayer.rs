@@ -11,7 +11,6 @@ evm_providers:
     is_native: true
     is_relay_target: true
     socket_address: "0xd551F33Ca8eCb0Be83d8799D9C68a368BA36Dd52"
-    vault_address: "0xD85EB87caB9041ad00764b95796702b1104F42D7"
     authority_address: "0x0000000000000000000000000000000000000400"
     relayer_manager_address: "0x0000000000000000000000000000000000002000"
   - name: "ethereum"
@@ -22,7 +21,6 @@ evm_providers:
     is_relay_target: false
     eip1559: true
     socket_address: "0x4A31FfeAc276CC5e508cAC0568d932d398C4DD84"
-    vault_address: "0x2F95C102Cc26875406BC689Fb01aE382B82AA535"
     authority_address: "0xAdcaa90cabDc730855064d5b0f5242c16A9B7E10"
     chainlink_usdc_usd_address: "0x8fFfFfd4AfB6115b954Bd326cbe7B4BA576818f6"
     chainlink_usdt_usd_address: "0x3E7d1eAB13ad0104d2750B8863b489D65364e32D"
@@ -37,7 +35,6 @@ evm_providers:
     is_relay_target: false
     is_initially_escalated: true
     socket_address: "0xb5Fa48E8B9b89760a9f9176388D1B64A8D4968dF"
-    vault_address: "0x78ae4c0FD4f02CA79A2d8738d3369A4Bc5D4E323"
     authority_address: "0xF0500d77d5446665314722b963ab1F71872063E9"
   - name: "polygon"
     id: 137
@@ -48,7 +45,6 @@ evm_providers:
     eip1559: true
     min_priority_fee: 30000000000
     socket_address: "0x050606CC2Bcd9504991Be2c309D6c6c832Bb5bd0"
-    vault_address: "0x5fA7fe5F94f2D15585a3134C1C5d3019c8c1645d"
     authority_address: "0x7F48909fBd1E38f1e05B5E326A44175fc2462B13"
   - name: "base"
     id: 8453
@@ -58,7 +54,6 @@ evm_providers:
     is_relay_target: false
     eip1559: true
     socket_address: "0xAe172D8c5E428D4b7C70f9E593b207F9daC9BF3e"
-    vault_address: "0x4F7aB59b5AC112970F5dD66D8a7ac505c8E5e08B"
     authority_address: "0x4C7a44F3FB37A53F33D3fe3cCdE97A444F105239"
   - name: "arbitrum"
     id: 42161
@@ -69,11 +64,10 @@ evm_providers:
     is_relay_target: false
     eip1559: true
     socket_address: "0xac1552e30857A814a225BAa81145bcB071B46DDd"
-    vault_address: "0xf549E4B5B4Cb7fd4e83b8AA047C742C06D527429"
     authority_address: "0xA069a57426Cd4c53925c1847Bec01aAB832A5118"
 
 handler_configs:
-  - handler_type: BridgeRelay
+  - handler_type: Socket
     watch_list: [3068, 1, 56, 137, 8453, 42161]
   - handler_type: Roundup
     watch_list: [3068]
