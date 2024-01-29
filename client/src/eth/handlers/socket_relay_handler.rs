@@ -1,10 +1,20 @@
-use std::{collections::BTreeMap, str::FromStr, sync::Arc, time::Duration};
+#[cfg(feature = "v2")]
+use {
+	br_primitives::eth::SocketVariants,
+	ethers::{
+		abi::{ParamType, Token},
+		types::Bytes,
+	},
+	std::str::FromStr,
+};
+
+use std::{collections::BTreeMap, sync::Arc, time::Duration};
 
 use ethers::{
-	abi::{ParamType, RawLog, Token},
+	abi::RawLog,
 	prelude::decode_logs,
 	providers::JsonRpcClient,
-	types::{Bytes, Filter, Log, TransactionRequest, H256, U256},
+	types::{Filter, Log, TransactionRequest, H256, U256},
 };
 use sc_service::SpawnTaskHandle;
 use tokio::{sync::broadcast::Receiver, time::sleep};
@@ -16,7 +26,7 @@ use br_primitives::{
 	constants::DEFAULT_BOOTSTRAP_ROUND_OFFSET,
 	eth::{
 		BootstrapState, BuiltRelayTransaction, ChainID, GasCoefficient, RelayDirection,
-		SocketEventStatus, SocketVariants, SocketVersion, BOOTSTRAP_BLOCK_CHUNK_SIZE,
+		SocketEventStatus, SocketVersion, BOOTSTRAP_BLOCK_CHUNK_SIZE,
 	},
 	socket::{RequestID, Signatures, SocketEvents, SocketMessage},
 	sub_display_format, RollbackSender, INVALID_BIFROST_NATIVENESS, INVALID_CHAIN_ID,
@@ -86,6 +96,7 @@ impl<T: 'static + JsonRpcClient> Handler for SocketRelayHandler<T> {
 			Ok(decoded) => match &decoded[0] {
 				SocketEvents::Socket(socket) => {
 					let msg = socket.clone().msg;
+					#[allow(unused_mut)]
 					let mut metadata = SocketRelayMetadata::new(
 						self.is_inbound_sequence(ChainID::from_be_bytes(msg.ins_code.chain)),
 						SocketEventStatus::from_u8(msg.status),
@@ -95,7 +106,11 @@ impl<T: 'static + JsonRpcClient> Handler for SocketRelayHandler<T> {
 						msg.params.to,
 						is_bootstrap,
 					);
-					metadata.variants = self.decode_msg_variants(&msg.params.variants);
+
+					#[cfg(feature = "v2")]
+					{
+						metadata.variants = self.decode_msg_variants(&msg.params.variants);
+					}
 
 					if !metadata.is_bootstrap {
 						log::info!(
@@ -225,6 +240,7 @@ impl<T: JsonRpcClient> SocketRelayBuilder<T> for SocketRelayHandler<T> {
 		(signatures, is_external)
 	}
 
+	#[cfg(feature = "v2")]
 	fn decode_msg_variants(&self, raw_variants: &Bytes) -> SocketVariants {
 		if raw_variants != &Bytes::default() && raw_variants != &Bytes::from_str("0x00").unwrap() {
 			match ethers::abi::decode(
