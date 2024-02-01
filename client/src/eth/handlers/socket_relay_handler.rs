@@ -717,6 +717,7 @@ mod tests {
 		}
 	}
 
+	#[cfg(feature = "v2")]
 	#[test]
 	fn test_socket_msg_decode() {
 		let req_id_chain = array_bytes::bytes2hex("0x", [0, 0, 39, 18]);
