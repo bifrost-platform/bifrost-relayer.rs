@@ -792,6 +792,7 @@ mod tests {
 		}
 	}
 
+	#[cfg(feature = "v2")]
 	#[test]
 	fn test_socket_variants_decode() {
 		println!("default byte -> {}", Bytes::default());
