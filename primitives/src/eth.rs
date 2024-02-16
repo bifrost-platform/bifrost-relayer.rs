@@ -7,7 +7,8 @@ use ethers::{
 
 use crate::{
 	authority::AuthorityContract, chainlink_aggregator::ChainlinkContract,
-	relayer_manager::RelayerManagerContract, socket::SocketContract, INVALID_CONTRACT_ADDRESS,
+	executor::ExecutorContract, relayer_manager::RelayerManagerContract, socket::SocketContract,
+	INVALID_CONTRACT_ADDRESS,
 };
 
 /// The type of EVM chain ID's.
@@ -121,8 +122,8 @@ pub struct ProtocolContracts<T> {
 	pub authority: AuthorityContract<Provider<T>>,
 	/// RelayerManagerContract (Bifrost only)
 	pub relayer_manager: Option<RelayerManagerContract<Provider<T>>>,
-	/// The CCCP v2 Execution contract address.
-	pub executor_address: Option<Address>,
+	/// ExecutorContract
+	pub executor: Option<ExecutorContract<Provider<T>>>,
 }
 
 impl<T: JsonRpcClient> ProtocolContracts<T> {
@@ -148,8 +149,12 @@ impl<T: JsonRpcClient> ProtocolContracts<T> {
 					provider.clone(),
 				)
 			}),
-			executor_address: executor_address
-				.map(|address| Address::from_str(&address).expect(INVALID_CONTRACT_ADDRESS)),
+			executor: executor_address.map(|address| {
+				ExecutorContract::new(
+					H160::from_str(&address).expect(INVALID_CONTRACT_ADDRESS),
+					provider.clone(),
+				)
+			}),
 		}
 	}
 }
@@ -244,9 +249,9 @@ impl From<SocketEventStatus> for u8 {
 #[derive(Clone, Debug)]
 pub struct SocketVariants {
 	pub source_chain: Bytes,
-	pub receiver: Address,
+	pub sender: Address,
 	pub max_fee: U256,
-	pub data: Bytes,
+	pub message: Bytes,
 	pub version: SocketVersion,
 }
 
@@ -254,9 +259,9 @@ impl Default for SocketVariants {
 	fn default() -> Self {
 		Self {
 			source_chain: Bytes::default(),
-			receiver: Address::default(),
+			sender: Address::default(),
 			max_fee: U256::default(),
-			data: Bytes::default(),
+			message: Bytes::default(),
 			version: SocketVersion::V1,
 		}
 	}

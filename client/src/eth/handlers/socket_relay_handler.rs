@@ -109,6 +109,9 @@ impl<T: 'static + JsonRpcClient> Handler for SocketRelayHandler<T> {
 
 					#[cfg(feature = "v2")]
 					{
+						metadata.amount = msg.params.amount;
+						metadata.token_idx0 = msg.params.token_idx0;
+						metadata.token_idx1 = msg.params.token_idx1;
 						metadata.variants = self.decode_msg_variants(&msg.params.variants);
 					}
 
@@ -258,12 +261,12 @@ impl<T: JsonRpcClient> SocketRelayBuilder<T> for SocketRelayHandler<T> {
 						Token::FixedBytes(source_chain) => {
 							result.source_chain = Bytes::from(source_chain);
 						},
-						Token::Address(receiver) => {
-							result.receiver = receiver;
+						Token::Address(sender) => {
+							result.sender = sender;
 						},
 						Token::Uint(max_fee) => result.max_fee = max_fee,
-						Token::Bytes(data) => {
-							result.data = Bytes::from(data);
+						Token::Bytes(message) => {
+							result.message = Bytes::from(message);
 						},
 						_ => {
 							panic!(
@@ -506,19 +509,21 @@ impl<T: 'static + JsonRpcClient> SocketRelayHandler<T> {
 						// nothing to do on version 1.
 					},
 					SocketVersion::V2 => {
-						let task = ExecutionFilter::new(
-							self.get_client(),
-							event_sender.clone(),
-							metadata.clone(),
-						);
-						self.execute_spawn_handle.spawn("execution_filter", None, async move {
-							task.try_filter_and_send(
-								tx_request,
-								give_random_delay,
-								GasCoefficient::Mid,
-							)
-							.await
-						});
+						if let Some(client) = self.system_clients.get(&chain_id) {
+							let task = ExecutionFilter::new(
+								client.clone(),
+								event_sender.clone(),
+								metadata.clone(),
+							);
+							self.execute_spawn_handle.spawn("execution_filter", None, async move {
+								task.try_filter_and_send(
+									tx_request,
+									give_random_delay,
+									GasCoefficient::Mid,
+								)
+								.await
+							});
+						}
 						return;
 					},
 				}

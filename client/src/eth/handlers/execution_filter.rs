@@ -7,8 +7,8 @@ use std::{sync::Arc, time::Duration};
 use tokio::time::sleep;
 
 use crate::eth::{
-	EthClient, EventMessage, EventMetadata, EventSender, LegacyGasMiddleware, SocketRelayMetadata,
-	TxRequest, DEFAULT_CALL_RETRIES, DEFAULT_CALL_RETRY_INTERVAL_MS,
+	EthClient, EventMessage, EventMetadata, EventSender, SocketRelayMetadata, TxRequest,
+	DEFAULT_CALL_RETRIES, DEFAULT_CALL_RETRY_INTERVAL_MS,
 };
 
 use super::SocketRelayBuilder;
@@ -45,6 +45,32 @@ impl<T: JsonRpcClient> ExecutionFilter<T> {
 		Self { client, event_sender, metadata }
 	}
 
+	/// Builds the `safe_execute()` transaction request.
+	async fn build_transaction(&self) -> Option<TransactionRequest> {
+		if let Some(executor) = &self.client.protocol_contracts.executor {
+			let call_data = executor
+				.safe_execute(
+					self.metadata.receiver,                   // params.to
+					self.metadata.amount,                     // params.amount
+					self.metadata.src_chain_id.to_be_bytes(), // req_id.chain
+					self.metadata.variants.sender,            // variants.sender
+					self.metadata.variants.message.clone(),   // variants.message
+					self.metadata.token_idx0,                 // params.token_idx0
+					self.metadata.token_idx1,                 // params.token_idx1
+				)
+				.calldata()
+				.unwrap();
+
+			return Some(
+				TransactionRequest::default()
+					.data(call_data)
+					.to(executor.address())
+					.from(executor.address()),
+			);
+		}
+		None
+	}
+
 	/// Tries to gas estimate the general message and on success cases,
 	/// sends a transaction request to the event channel.
 	pub async fn try_filter_and_send(
@@ -53,7 +79,7 @@ impl<T: JsonRpcClient> ExecutionFilter<T> {
 		give_random_delay: bool,
 		gas_coefficient: GasCoefficient,
 	) {
-		if let Some(executor_address) = self.client.protocol_contracts.executor_address {
+		if let Some(transaction) = self.build_transaction().await {
 			log::info!(
 				target: &self.client.get_chain_name(),
 				"-[{}] ⛓️  Start Execution::Filter: {}",
@@ -61,15 +87,9 @@ impl<T: JsonRpcClient> ExecutionFilter<T> {
 				self.metadata
 			);
 
-			let general_msg = TxRequest::Legacy(
-				TransactionRequest::default()
-					.data(self.metadata.variants.data.clone())
-					.to(self.metadata.variants.receiver)
-					.from(executor_address)
-					.gas_price(self.client.get_gas_price().await),
-			);
+			let safe_execute = TxRequest::Legacy(transaction);
 
-			let estimated_gas = match self.try_gas_estimation(general_msg).await {
+			let estimated_gas = match self.try_gas_estimation(safe_execute).await {
 				EstimationResult::Success(estimated_gas) => estimated_gas,
 				EstimationResult::Revert(error) => {
 					log::warn!(

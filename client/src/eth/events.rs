@@ -46,6 +46,12 @@ pub struct SocketRelayMetadata {
 	pub dst_chain_id: ChainID,
 	/// The receiver address for this request.
 	pub receiver: Address,
+	/// The bridge amount.
+	pub amount: U256,
+	/// The source chain token index.
+	pub token_idx0: [u8; 32],
+	/// The destination chain token index.
+	pub token_idx1: [u8; 32],
 	/// The flag whether this relay is processed on bootstrap.
 	pub is_bootstrap: bool,
 	/// The variants this request contains.
@@ -70,6 +76,9 @@ impl SocketRelayMetadata {
 			dst_chain_id,
 			receiver,
 			is_bootstrap,
+			amount: Default::default(),
+			token_idx0: Default::default(),
+			token_idx1: Default::default(),
 			variants: SocketVariants::default(),
 		}
 	}
