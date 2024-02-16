@@ -279,18 +279,18 @@ impl<T: JsonRpcClient> TransactionTask<T> for LegacyTransactionTask<T> {
 
 		// set transaction `gas_price` field
 		let mut gas_price = self.client.get_gas_price().await;
-		if msg.tx_request.get_gas_price().unwrap_or(U256::zero()) == U256::zero() {
-			if self.is_initially_escalated {
-				gas_price = self
-					.client
-					.get_gas_price_for_escalation(
-						gas_price,
-						self.gas_price_coefficient,
-						self.min_gas_price,
-					)
-					.await;
-				msg.tx_request.gas_price(gas_price);
-			}
+		if msg.tx_request.get_gas_price().unwrap_or(U256::zero()) == U256::zero()
+			&& self.is_initially_escalated
+		{
+			gas_price = self
+				.client
+				.get_gas_price_for_escalation(
+					gas_price,
+					self.gas_price_coefficient,
+					self.min_gas_price,
+				)
+				.await;
+			msg.tx_request.gas_price(gas_price);
 		}
 
 		// estimate the gas amount to be used
