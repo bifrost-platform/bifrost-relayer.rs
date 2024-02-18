@@ -1,7 +1,10 @@
 use br_primitives::{eth::GasCoefficient, sub_display_format};
 use ethers::{
-	providers::{JsonRpcClient, Middleware},
-	types::{TransactionRequest, U256},
+	providers::{JsonRpcClient, RawCall},
+	types::{
+		spoof::{self, State},
+		Bytes, TransactionRequest, H160, H256,
+	},
 };
 use std::{sync::Arc, time::Duration};
 use tokio::time::sleep;
@@ -15,15 +18,18 @@ use super::SocketRelayBuilder;
 
 const SUB_LOG_TARGET: &str = "execution-filter";
 
-/// The gas estimation result of the general message.
-enum EstimationResult {
-	/// The general message is executable. This contains the estimated gas amount.
-	Success(U256),
+/// The slot index for token balances.
+const SLOT_INDEX: u32 = 6;
+
+/// The call result of the general message.
+enum CallResult {
+	/// The general message is executable. This contains the result in bytes.
+	Success(Bytes),
 	/// The general message is non-executable. This contains the error message.
 	Revert(String),
 }
 
-/// The task that tries to pre-gasEstimate the general message.
+/// The task that tries to pre-ethCall the general message.
 /// This only handles requests that are relayed to the target client.
 /// (`client` and `event_sender` are connected to the same chain)
 pub struct ExecutionFilter<T> {
@@ -45,9 +51,21 @@ impl<T: JsonRpcClient> ExecutionFilter<T> {
 		Self { client, event_sender, metadata }
 	}
 
+	/// Return the remote (destination chain's) token index by the source chain's token index.
+	async fn get_remote_token_idx(&self, src_token_idx: [u8; 32]) -> [u8; 32] {
+		self.client
+			.contract_call(
+				self.client.protocol_contracts.vault.remote_asset_pair(src_token_idx),
+				"vault.remote_asset_pair",
+			)
+			.await
+	}
+
 	/// Builds the `safe_execute()` transaction request.
-	async fn build_transaction(&self) -> Option<TransactionRequest> {
+	async fn build_transaction(&mut self) -> Option<TransactionRequest> {
 		if let Some(executor) = &self.client.protocol_contracts.executor {
+			// set the proper destination chain's token index
+			self.metadata.token_idx0 = self.get_remote_token_idx(self.metadata.token_idx0).await;
 			let call_data = executor
 				.safe_execute(
 					self.metadata.receiver,                   // params.to
@@ -55,7 +73,7 @@ impl<T: JsonRpcClient> ExecutionFilter<T> {
 					self.metadata.src_chain_id.to_be_bytes(), // req_id.chain
 					self.metadata.variants.sender,            // variants.sender
 					self.metadata.variants.message.clone(),   // variants.message
-					self.metadata.token_idx0,                 // params.token_idx0
+					self.metadata.token_idx0,                 // get_remote_asset_pair(params.token_idx0)
 					self.metadata.token_idx1,                 // params.token_idx1
 				)
 				.calldata()
@@ -71,10 +89,55 @@ impl<T: JsonRpcClient> ExecutionFilter<T> {
 		None
 	}
 
-	/// Tries to gas estimate the general message and on success cases,
+	/// Builds the state override key.
+	fn build_override_key(&self) -> H256 {
+		let executor_address = &self.client.protocol_contracts.executor.clone().unwrap().address();
+		let mut account_hash = [0u8; 32];
+		account_hash[32 - executor_address.0.len()..].copy_from_slice(&executor_address.0);
+
+		let slot_index = Bytes::from(u32::to_be_bytes(SLOT_INDEX));
+		let mut slot_index_hash = [0u8; 32];
+		slot_index_hash[32 - slot_index.0.len()..].copy_from_slice(&slot_index.0);
+
+		// returns the keccak256 hash of the concatenated account and slot index hashes
+		// this is the key used to override the contract storage
+		H256::from(ethers::utils::keccak256([account_hash, slot_index_hash].concat()))
+	}
+
+	/// Builds the state override object.
+	async fn build_override_state(&self) -> State {
+		// coin? token?
+		// inbound? outbound?
+
+		let unified_token = match self.metadata.is_inbound {
+			true => {
+				// if inbound, fetch the unified token address from the vault contract
+				self.client
+					.contract_call(
+						self.client.protocol_contracts.vault.assets_config(
+							self.get_remote_token_idx(self.metadata.token_idx0).await,
+						),
+						"vault.assets_config",
+					)
+					.await
+					.4
+			},
+			false => {
+				// if outbound, fetch the unified token address by slicing the token index
+				H160::from_slice(&self.metadata.token_idx0[12..])
+			},
+		};
+		spoof::storage(
+			unified_token,
+			self.build_override_key(),
+			H256::from_low_u64_be(self.metadata.amount.as_u64()),
+		)
+	}
+
+	/// Tries to pre-ethCall the general message and on success cases,
 	/// sends a transaction request to the event channel.
 	pub async fn try_filter_and_send(
-		&self,
+		&mut self,
 		tx_request: TransactionRequest,
 		give_random_delay: bool,
 		gas_coefficient: GasCoefficient,
@@ -87,11 +150,9 @@ impl<T: JsonRpcClient> ExecutionFilter<T> {
 				self.metadata
 			);
 
-			let safe_execute = TxRequest::Legacy(transaction);
-
-			let estimated_gas = match self.try_gas_estimation(safe_execute).await {
-				EstimationResult::Success(estimated_gas) => estimated_gas,
-				EstimationResult::Revert(error) => {
+			let result = match self.try_state_override_call(TxRequest::Legacy(transaction)).await {
+				CallResult::Success(result) => result,
+				CallResult::Revert(error) => {
 					log::warn!(
 						target: &self.client.get_chain_name(),
 						"-[{}] ⛓️  Execution::Filter Result → ❗️ Failure::Error({}): {}",
@@ -105,9 +166,9 @@ impl<T: JsonRpcClient> ExecutionFilter<T> {
 
 			log::info!(
 				target: &self.client.get_chain_name(),
-				"-[{}] ⛓️  Execution::Filter Result → ✅ Success::EstimatedGas({}): {}",
+				"-[{}] ⛓️  Execution::Filter Result → ✅ Success::CallResult({}): {}",
 				sub_display_format(SUB_LOG_TARGET),
-				estimated_gas,
+				result,
 				self.metadata
 			);
 
@@ -165,27 +226,29 @@ impl<T: JsonRpcClient> ExecutionFilter<T> {
 		}
 	}
 
-	/// Tries to gas estimate the given general message.
-	async fn try_gas_estimation(&self, general_msg: TxRequest) -> EstimationResult {
-		match self.client.provider.estimate_gas(&general_msg.to_typed(), None).await {
-			Ok(estimated_gas) => {
+	/// Tries to call the given general message with overrided state.
+	async fn try_state_override_call(&self, general_msg: TxRequest) -> CallResult {
+		match self
+			.client
+			.provider
+			.call_raw(&general_msg.to_typed())
+			.state(&self.build_override_state().await)
+			.await
+		{
+			Ok(result) => {
 				// this request is executable. now try to send the relay transaction.
-				EstimationResult::Success(estimated_gas)
+				CallResult::Success(result)
 			},
 			Err(error) => {
 				// this request is not executable. first, it'll be retried several times.
-				// if it still remains as failure, this request will be ignored and the `SocketRollbackHandler` might handle it.
-				self.handle_failed_gas_estimation(&general_msg, error.to_string()).await
+				// if it still remains as failure, this request will be ignored and post-handled by the `SocketRollbackHandler`.
+				self.handle_failed_call(&general_msg, error.to_string()).await
 			},
 		}
 	}
 
-	/// Handles the failed gas estimation.
-	async fn handle_failed_gas_estimation(
-		&self,
-		tx_request: &TxRequest,
-		error: String,
-	) -> EstimationResult {
+	/// Handles the failed eth call.
+	async fn handle_failed_call(&self, tx_request: &TxRequest, error: String) -> CallResult {
 		let mut retries = DEFAULT_CALL_RETRIES;
 		let mut last_error = error;
 
@@ -195,14 +258,14 @@ impl<T: JsonRpcClient> ExecutionFilter<T> {
 			if self.client.debug_mode {
 				log::warn!(
 					target: &self.client.get_chain_name(),
-					"-[{}] ⚠️  Warning! Error encountered during gas estimation, Retries left: {:?}, Error: {}",
+					"-[{}] ⚠️  Warning! Error encountered during state override call, Retries left: {:?}, Error: {}",
 					sub_display_format(SUB_LOG_TARGET),
 					retries - 1,
 					last_error
 				);
 				sentry::capture_message(
 					format!(
-						"[{}]-[{}]-[{}] ⚠️  Warning! Error encountered during gas estimation, Retries left: {:?}, Error: {}",
+						"[{}]-[{}]-[{}] ⚠️  Warning! Error encountered during state override call, Retries left: {:?}, Error: {}",
 						&self.client.get_chain_name(),
 						SUB_LOG_TARGET,
 						self.client.address(),
@@ -214,8 +277,8 @@ impl<T: JsonRpcClient> ExecutionFilter<T> {
 				);
 			}
 
-			match self.client.provider.estimate_gas(&tx_request.to_typed(), None).await {
-				Ok(estimated_gas) => return EstimationResult::Success(estimated_gas),
+			match self.client.provider.call_raw(&tx_request.to_typed()).await {
+				Ok(result) => return CallResult::Success(result),
 				Err(error) => {
 					sleep(Duration::from_millis(DEFAULT_CALL_RETRY_INTERVAL_MS)).await;
 					retries -= 1;
@@ -223,7 +286,7 @@ impl<T: JsonRpcClient> ExecutionFilter<T> {
 				},
 			}
 		}
-		EstimationResult::Revert(last_error)
+		CallResult::Revert(last_error)
 	}
 }
 

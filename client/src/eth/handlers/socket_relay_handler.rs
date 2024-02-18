@@ -510,7 +510,7 @@ impl<T: 'static + JsonRpcClient> SocketRelayHandler<T> {
 					},
 					SocketVersion::V2 => {
 						if let Some(client) = self.system_clients.get(&chain_id) {
-							let task = ExecutionFilter::new(
+							let mut task = ExecutionFilter::new(
 								client.clone(),
 								event_sender.clone(),
 								metadata.clone(),
@@ -721,17 +721,18 @@ impl<T: 'static + JsonRpcClient> BootstrapHandler for SocketRelayHandler<T> {
 
 #[cfg(test)]
 mod tests {
+	use super::*;
 	use std::{str::FromStr, sync::Arc};
 
+	use br_primitives::socket::SocketContract;
 	use ethers::{
 		abi::ParamType,
 		providers::{Http, Provider},
 		types::{Bytes, H160},
 	};
 
-	use br_primitives::socket::SocketContract;
-
-	use super::*;
+	#[cfg(feature = "v2")]
+	use ethers::{providers::RawCall, types::spoof};
 
 	#[tokio::test]
 	async fn test_is_already_done() {
@@ -813,12 +814,12 @@ mod tests {
 					Token::FixedBytes(source_chain) => {
 						result.source_chain = Bytes::from(source_chain);
 					},
-					Token::Address(receiver) => {
-						result.receiver = receiver;
+					Token::Address(sender) => {
+						result.sender = sender;
 					},
 					Token::Uint(max_fee) => result.max_fee = max_fee,
-					Token::Bytes(data) => {
-						result.data = Bytes::from(data);
+					Token::Bytes(message) => {
+						result.message = Bytes::from(message);
 					},
 					_ => {
 						panic!("decode failed");
@@ -830,5 +831,43 @@ mod tests {
 				panic!("decode failed -> {}", error);
 			},
 		}
+	}
+
+	#[cfg(feature = "v2")]
+	#[tokio::test]
+	async fn test_state_override() {
+		let provider = Provider::<Http>::try_from("").unwrap();
+
+		let index = Bytes::from(u32::to_be_bytes(6));
+		let token = H160::from_str("0x28661511cda7119b2185c647f23106a637cc074f").unwrap();
+		let account = H160::from_str("0xeaaa86729a8bdc7b6f62c841d1a1d30a341e1cdb").unwrap();
+
+		let mut account_hash = [0u8; 32];
+		account_hash[32 - account.0.len()..].copy_from_slice(&account.0);
+		let mut slot_id_hash = [0u8; 32];
+		slot_id_hash[32 - index.0.len()..].copy_from_slice(&index.0);
+		let storage_id_hash = [account_hash, slot_id_hash].concat();
+
+		let storage_id = H256::from(ethers::utils::keccak256(storage_id_hash));
+		println!("storage_id -> {:?}", storage_id);
+
+		let prev_balance: U256 = provider
+			.request("eth_getStorageAt", (token, storage_id.clone(), "latest"))
+			.await
+			.unwrap();
+		println!("prev_balance -> {:?}", prev_balance);
+
+		let overrided_balance = H256::from_low_u64_be(1000000000000000000);
+
+		// balanceOf
+		let call_data =
+			"0x70a0823100000000000000000000000081143D1d29B101B84FE87BCB2f684534b20EBaAd";
+		let transaction = TransactionRequest::default()
+			.data(Bytes::from_str(call_data).unwrap())
+			.to(token)
+			.from(account);
+		let state = spoof::storage(token, storage_id, overrided_balance);
+		let result = provider.call_raw(&transaction.into()).state(&state).await.unwrap();
+		println!("result -> {:?}", result);
 	}
 }

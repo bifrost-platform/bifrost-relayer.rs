@@ -8,7 +8,7 @@ use ethers::{
 use crate::{
 	authority::AuthorityContract, chainlink_aggregator::ChainlinkContract,
 	executor::ExecutorContract, relayer_manager::RelayerManagerContract, socket::SocketContract,
-	INVALID_CONTRACT_ADDRESS,
+	vault::VaultContract, INVALID_CONTRACT_ADDRESS,
 };
 
 /// The type of EVM chain ID's.
@@ -118,6 +118,8 @@ impl<T: JsonRpcClient> AggregatorContracts<T> {
 pub struct ProtocolContracts<T> {
 	/// SocketContract
 	pub socket: SocketContract<Provider<T>>,
+	/// VaultContract
+	pub vault: VaultContract<Provider<T>>,
 	/// AuthorityContract
 	pub authority: AuthorityContract<Provider<T>>,
 	/// RelayerManagerContract (Bifrost only)
@@ -130,6 +132,7 @@ impl<T: JsonRpcClient> ProtocolContracts<T> {
 	pub fn new(
 		provider: Arc<Provider<T>>,
 		socket_address: String,
+		vault_address: String,
 		authority_address: String,
 		relayer_manager_address: Option<String>,
 		executor_address: Option<String>,
@@ -137,6 +140,10 @@ impl<T: JsonRpcClient> ProtocolContracts<T> {
 		Self {
 			socket: SocketContract::new(
 				H160::from_str(&socket_address).expect(INVALID_CONTRACT_ADDRESS),
+				provider.clone(),
+			),
+			vault: VaultContract::new(
+				H160::from_str(&vault_address).expect(INVALID_CONTRACT_ADDRESS),
 				provider.clone(),
 			),
 			authority: AuthorityContract::new(
