@@ -6,7 +6,7 @@ use ethers::{
 		Bytes, TransactionRequest, H160, H256,
 	},
 };
-use std::{str::FromStr, sync::Arc, time::Duration};
+use std::{sync::Arc, time::Duration};
 use tokio::time::sleep;
 
 use crate::eth::{
@@ -20,9 +20,6 @@ const SUB_LOG_TARGET: &str = "execution-filter";
 
 /// The slot index for token balances.
 const SLOT_INDEX: u32 = 6;
-
-/// The coin address used for bridge relay.
-const COIN_ASSET_ADDRESS: &str = "0xffffffffffffffffffffffffffffffffffffffff";
 
 /// The call result of the general message.
 enum CallResult {
@@ -129,7 +126,7 @@ impl<T: JsonRpcClient> ExecutionFilter<T> {
 			},
 		};
 		// check if the asset is coin or token
-		if asset_address == H160::from_str(COIN_ASSET_ADDRESS).unwrap() {
+		if asset_address == H160::repeat_byte(255) {
 			spoof::balance(
 				self.client.protocol_contracts.executor.clone().unwrap().address(),
 				self.metadata.amount,
