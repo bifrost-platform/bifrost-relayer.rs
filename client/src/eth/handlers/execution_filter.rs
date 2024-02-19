@@ -6,7 +6,7 @@ use ethers::{
 		Bytes, TransactionRequest, H160, H256,
 	},
 };
-use std::{sync::Arc, time::Duration};
+use std::{str::FromStr, sync::Arc, time::Duration};
 use tokio::time::sleep;
 
 use crate::eth::{
@@ -20,6 +20,9 @@ const SUB_LOG_TARGET: &str = "execution-filter";
 
 /// The slot index for token balances.
 const SLOT_INDEX: u32 = 6;
+
+/// The coin address used for bridge relay.
+const COIN_ASSET_ADDRESS: &str = "0xffffffffffffffffffffffffffffffffffffffff";
 
 /// The call result of the general message.
 enum CallResult {
@@ -106,32 +109,38 @@ impl<T: JsonRpcClient> ExecutionFilter<T> {
 
 	/// Builds the state override object.
 	async fn build_override_state(&self) -> State {
-		// coin? token?
-		// inbound? outbound?
-
-		let unified_token = match self.metadata.is_inbound {
+		let asset_address = match self.metadata.is_inbound {
 			true => {
-				// if inbound, fetch the unified token address from the vault contract
+				// if inbound, fetch the asset address from the vault contract
 				self.client
 					.contract_call(
-						self.client.protocol_contracts.vault.assets_config(
-							self.get_remote_token_idx(self.metadata.token_idx0).await,
-						),
+						self.client
+							.protocol_contracts
+							.vault
+							.assets_config(self.metadata.token_idx0),
 						"vault.assets_config",
 					)
 					.await
 					.4
 			},
 			false => {
-				// if outbound, fetch the unified token address by slicing the token index
+				// if outbound, fetch the asset address by slicing the token index
 				H160::from_slice(&self.metadata.token_idx0[12..])
 			},
 		};
-		spoof::storage(
-			unified_token,
-			self.build_override_key(),
-			H256::from_low_u64_be(self.metadata.amount.as_u64()),
-		)
+		// check if the asset is coin or token
+		if asset_address == H160::from_str(COIN_ASSET_ADDRESS).unwrap() {
+			spoof::balance(
+				self.client.protocol_contracts.executor.clone().unwrap().address(),
+				self.metadata.amount,
+			)
+		} else {
+			spoof::storage(
+				asset_address,
+				self.build_override_key(),
+				H256::from_low_u64_be(self.metadata.amount.as_u64()),
+			)
+		}
 	}
 
 	/// Tries to pre-ethCall the general message and on success cases,
