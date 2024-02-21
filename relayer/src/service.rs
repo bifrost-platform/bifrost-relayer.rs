@@ -88,7 +88,6 @@ fn construct_handlers(
 	periodic_deps: &PeriodicDeps,
 	manager_deps: &ManagerDeps,
 	bootstrap_shared_data: BootstrapSharedData,
-	task_manager: &TaskManager,
 ) -> HandlerDeps {
 	let mut handlers = (vec![], vec![]);
 	let PeriodicDeps { rollback_senders, .. } = periodic_deps;
@@ -104,7 +103,6 @@ fn construct_handlers(
 					block_managers.get(target).expect(INVALID_CHAIN_ID).sender.subscribe(),
 					clients.clone(),
 					Arc::new(bootstrap_shared_data.clone()),
-					task_manager.spawn_handle(),
 				));
 			}),
 			HandlerType::Roundup => {
@@ -163,7 +161,6 @@ fn construct_managers(
 				evm_provider.socket_address.clone(),
 				evm_provider.authority_address.clone(),
 				evm_provider.relayer_manager_address.clone(),
-				evm_provider.executor_address.clone(),
 			),
 			AggregatorContracts::new(
 				Arc::new(provider),
@@ -424,13 +421,8 @@ fn new_relay_base(config: Configuration) -> Result<RelayBase, ServiceError> {
 
 	let manager_deps = construct_managers(&config, bootstrap_shared_data.clone(), &task_manager);
 	let periodic_deps = construct_periodics(bootstrap_shared_data.clone(), &manager_deps);
-	let handler_deps = construct_handlers(
-		&config,
-		&periodic_deps,
-		&manager_deps,
-		bootstrap_shared_data.clone(),
-		&task_manager,
-	);
+	let handler_deps =
+		construct_handlers(&config, &periodic_deps, &manager_deps, bootstrap_shared_data.clone());
 
 	print_relay_targets(&manager_deps);
 

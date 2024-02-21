@@ -104,8 +104,6 @@ pub struct EVMProvider {
 	pub authority_address: String,
 	/// Relayer manager contract address (Bifrost only)
 	pub relayer_manager_address: Option<String>,
-	/// The executor contract address for CCCP version 2.
-	pub executor_address: Option<String>,
 	/// Chainlink usdc/usd aggregator
 	pub chainlink_usdc_usd_address: Option<String>,
 	/// Chainlink usdt/usd aggregator

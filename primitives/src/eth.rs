@@ -29,7 +29,6 @@ pub const BOOTSTRAP_BLOCK_OFFSET: u32 = 100;
 /// The protocol version of the CCCP Socket message.
 pub enum SocketVersion {
 	V1,
-	V2,
 }
 
 /// The metadata of the EVM provider.
@@ -121,8 +120,6 @@ pub struct ProtocolContracts<T> {
 	pub authority: AuthorityContract<Provider<T>>,
 	/// RelayerManagerContract (Bifrost only)
 	pub relayer_manager: Option<RelayerManagerContract<Provider<T>>>,
-	/// The CCCP v2 Execution contract address.
-	pub executor_address: Option<Address>,
 }
 
 impl<T: JsonRpcClient> ProtocolContracts<T> {
@@ -131,7 +128,6 @@ impl<T: JsonRpcClient> ProtocolContracts<T> {
 		socket_address: String,
 		authority_address: String,
 		relayer_manager_address: Option<String>,
-		executor_address: Option<String>,
 	) -> Self {
 		Self {
 			socket: SocketContract::new(
@@ -148,8 +144,6 @@ impl<T: JsonRpcClient> ProtocolContracts<T> {
 					provider.clone(),
 				)
 			}),
-			executor_address: executor_address
-				.map(|address| Address::from_str(&address).expect(INVALID_CONTRACT_ADDRESS)),
 		}
 	}
 }

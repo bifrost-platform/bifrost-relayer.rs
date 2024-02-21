@@ -1,13 +1,3 @@
-#[cfg(feature = "v2")]
-use {
-	br_primitives::eth::SocketVariants,
-	ethers::{
-		abi::{ParamType, Token},
-		types::Bytes,
-	},
-	std::str::FromStr,
-};
-
 use std::{collections::BTreeMap, sync::Arc, time::Duration};
 
 use ethers::{
@@ -16,7 +6,6 @@ use ethers::{
 	providers::JsonRpcClient,
 	types::{Filter, Log, TransactionRequest, H256, U256},
 };
-use sc_service::SpawnTaskHandle;
 use tokio::{sync::broadcast::Receiver, time::sleep};
 use tokio_stream::StreamExt;
 
@@ -26,7 +15,7 @@ use br_primitives::{
 	constants::DEFAULT_BOOTSTRAP_ROUND_OFFSET,
 	eth::{
 		BootstrapState, BuiltRelayTransaction, ChainID, GasCoefficient, RelayDirection,
-		SocketEventStatus, SocketVersion, BOOTSTRAP_BLOCK_CHUNK_SIZE,
+		SocketEventStatus, BOOTSTRAP_BLOCK_CHUNK_SIZE,
 	},
 	socket::{RequestID, Signatures, SocketEvents, SocketMessage},
 	sub_display_format, RollbackSender, INVALID_BIFROST_NATIVENESS, INVALID_CHAIN_ID,
@@ -38,7 +27,7 @@ use crate::eth::{
 	SocketRelayMetadata, TxRequest,
 };
 
-use super::{ExecutionFilter, SocketRelayBuilder};
+use super::SocketRelayBuilder;
 
 const SUB_LOG_TARGET: &str = "socket-handler";
 
@@ -58,8 +47,6 @@ pub struct SocketRelayHandler<T> {
 	socket_signature: H256,
 	/// The bootstrap shared data.
 	bootstrap_shared_data: Arc<BootstrapSharedData>,
-	/// A handle for spawning execution filter tasks.
-	execute_spawn_handle: SpawnTaskHandle,
 }
 
 #[async_trait::async_trait]
@@ -106,11 +93,6 @@ impl<T: 'static + JsonRpcClient> Handler for SocketRelayHandler<T> {
 						msg.params.to,
 						is_bootstrap,
 					);
-
-					#[cfg(feature = "v2")]
-					{
-						metadata.variants = self.decode_msg_variants(&msg.params.variants);
-					}
 
 					if !metadata.is_bootstrap {
 						log::info!(
@@ -239,59 +221,6 @@ impl<T: JsonRpcClient> SocketRelayBuilder<T> for SocketRelayHandler<T> {
 		};
 		(signatures, is_external)
 	}
-
-	#[cfg(feature = "v2")]
-	fn decode_msg_variants(&self, raw_variants: &Bytes) -> SocketVariants {
-		if raw_variants != &Bytes::default() && raw_variants != &Bytes::from_str("0x00").unwrap() {
-			match ethers::abi::decode(
-				&[
-					ParamType::FixedBytes(4),
-					ParamType::Address,
-					ParamType::Uint(256),
-					ParamType::Bytes,
-				],
-				raw_variants,
-			) {
-				Ok(variants) => {
-					let mut result = SocketVariants::default();
-					variants.into_iter().for_each(|variant| match variant {
-						Token::FixedBytes(source_chain) => {
-							result.source_chain = Bytes::from(source_chain);
-						},
-						Token::Address(receiver) => {
-							result.receiver = receiver;
-						},
-						Token::Uint(max_fee) => result.max_fee = max_fee,
-						Token::Bytes(data) => {
-							result.data = Bytes::from(data);
-						},
-						_ => {
-							panic!(
-								"[{}]-[{}]-[{}] Invalid Socket::variants received: {:?}",
-								&self.client.get_chain_name(),
-								SUB_LOG_TARGET,
-								self.client.address(),
-								raw_variants,
-							);
-						},
-					});
-					result.version = SocketVersion::V2;
-					return result;
-				},
-				Err(error) => {
-					panic!(
-						"[{}]-[{}]-[{}] Invalid Socket::variants received: {:?}, Error: {}",
-						&self.client.get_chain_name(),
-						SUB_LOG_TARGET,
-						self.client.address(),
-						raw_variants,
-						error
-					)
-				},
-			}
-		}
-		SocketVariants::default()
-	}
 }
 
 impl<T: 'static + JsonRpcClient> SocketRelayHandler<T> {
@@ -303,7 +232,6 @@ impl<T: 'static + JsonRpcClient> SocketRelayHandler<T> {
 		block_receiver: Receiver<BlockMessage>,
 		system_clients_vec: Vec<Arc<EthClient<T>>>,
 		bootstrap_shared_data: Arc<BootstrapSharedData>,
-		execute_spawn_handle: SpawnTaskHandle,
 	) -> Self {
 		let system_clients: BTreeMap<ChainID, Arc<EthClient<T>>> = system_clients_vec
 			.iter()
@@ -331,7 +259,6 @@ impl<T: 'static + JsonRpcClient> SocketRelayHandler<T> {
 			client,
 			system_clients,
 			bootstrap_shared_data,
-			execute_spawn_handle,
 		}
 	}
 
@@ -500,28 +427,6 @@ impl<T: 'static + JsonRpcClient> SocketRelayHandler<T> {
 		if let Some(event_sender) = self.event_senders.get(&chain_id) {
 			if self.is_executable(metadata.is_inbound, metadata.status) {
 				self.send_rollbackable_request(chain_id, metadata.clone(), socket_msg);
-
-				match metadata.variants.version {
-					SocketVersion::V1 => {
-						// nothing to do on version 1.
-					},
-					SocketVersion::V2 => {
-						let task = ExecutionFilter::new(
-							self.get_client(),
-							event_sender.clone(),
-							metadata.clone(),
-						);
-						self.execute_spawn_handle.spawn("execution_filter", None, async move {
-							task.try_filter_and_send(
-								tx_request,
-								give_random_delay,
-								GasCoefficient::Mid,
-							)
-							.await
-						});
-						return;
-					},
-				}
 			}
 
 			match event_sender.send(EventMessage::new(
@@ -785,41 +690,6 @@ mod tests {
 			Ok(socket) => {
 				println!("socket -> {:?}", socket);
 				println!("socket -> {:?}", socket[0].to_string());
-			},
-			Err(error) => {
-				panic!("decode failed -> {}", error);
-			},
-		}
-	}
-
-	#[cfg(feature = "v2")]
-	#[test]
-	fn test_socket_variants_decode() {
-		println!("default byte -> {}", Bytes::default());
-		let raw_variants = Bytes::from_str("0x00000005000000000000000000000000000000000000000000000000000000000000000000000000000000005b38da6a701c568545dcfcb03fcb875f56beddc400000000000000000000000000000000000000000000000000000000000001c8000000000000000000000000000000000000000000000000000000000000008000000000000000000000000000000000000000000000000000000000000000012300000000000000000000000000000000000000000000000000000000000000").unwrap();
-		match ethers::abi::decode(
-			&[ParamType::FixedBytes(4), ParamType::Address, ParamType::Uint(256), ParamType::Bytes],
-			&raw_variants,
-		) {
-			Ok(variants) => {
-				log::info!("variants -> {:?}", variants);
-				let mut result = SocketVariants::default();
-				variants.into_iter().for_each(|variant| match variant {
-					Token::FixedBytes(source_chain) => {
-						result.source_chain = Bytes::from(source_chain);
-					},
-					Token::Address(receiver) => {
-						result.receiver = receiver;
-					},
-					Token::Uint(max_fee) => result.max_fee = max_fee,
-					Token::Bytes(data) => {
-						result.data = Bytes::from(data);
-					},
-					_ => {
-						panic!("decode failed");
-					},
-				});
-				println!("variants -> {:?}", result);
 			},
 			Err(error) => {
 				panic!("decode failed -> {}", error);

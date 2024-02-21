@@ -12,13 +12,11 @@ use ethers::{
 };
 use std::{str::FromStr, sync::Arc};
 
-pub use execution_filter::*;
 pub use roundup_relay_handler::*;
 pub use socket_relay_handler::*;
 
 use super::EthClient;
 
-mod execution_filter;
 mod roundup_relay_handler;
 mod socket_relay_handler;
 
