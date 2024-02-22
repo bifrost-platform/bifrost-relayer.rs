@@ -1,6 +1,3 @@
-#[cfg(feature = "v2")]
-use br_primitives::eth::SocketVariants;
-
 use br_primitives::{
 	eth::{BuiltRelayTransaction, ChainID, RecoveredSignature},
 	socket::{PollSubmit, Signatures, SocketMessage},
@@ -107,12 +104,6 @@ pub trait SocketRelayBuilder<T> {
 			ins_code_token,
 			params_token,
 		])])
-	}
-
-	#[cfg(feature = "v2")]
-	/// Decodes the raw variants in the socket message.
-	fn decode_msg_variants(&self, _raw_variants: &Bytes) -> SocketVariants {
-		SocketVariants::default()
 	}
 
 	/// Signs the given socket message.
