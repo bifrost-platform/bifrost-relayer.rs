@@ -350,7 +350,16 @@ impl<T: JsonRpcClient> TransactionTask<T> for LegacyTransactionTask<T> {
 											)
 											.await,
 									);
-									self.handle_stalled_tx(SUB_LOG_TARGET, msg, pending_hash).await;
+									self.handle_stalled_tx(SUB_LOG_TARGET, msg, pending_hash, true)
+										.await;
+								} else {
+									self.handle_stalled_tx(
+										SUB_LOG_TARGET,
+										msg,
+										pending_hash,
+										false,
+									)
+									.await;
 								}
 							}
 						},

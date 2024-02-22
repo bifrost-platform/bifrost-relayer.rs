@@ -131,25 +131,31 @@ where
 				receipt.transaction_hash
 			);
 			sentry::capture_message(
-					format!(
-						"[{}]-[{}]-[{}] ⚠️  Warning! Error encountered during contract execution [execution reverted]. A prior transaction might have been already submitted: {}, {:?}-{:?}-{:?}",
-						&client.get_chain_name(),
-						sub_target,
-						client.address(),
-						metadata,
-						receipt.block_number.unwrap(),
-						status,
-						receipt.transaction_hash
-					)
-						.as_str(),
-					sentry::Level::Warning,
-				);
+                format!(
+                    "[{}]-[{}]-[{}] ⚠️  Warning! Error encountered during contract execution [execution reverted]. A prior transaction might have been already submitted: {}, {:?}-{:?}-{:?}",
+                    &client.get_chain_name(),
+                    sub_target,
+                    client.address(),
+                    metadata,
+                    receipt.block_number.unwrap(),
+                    status,
+                    receipt.transaction_hash
+                )
+                    .as_str(),
+                sentry::Level::Warning,
+            );
 		}
 		br_metrics::set_payed_fees(&client.get_chain_name(), &receipt);
 	}
 
 	/// Handles the stalled transaction.
-	async fn handle_stalled_tx(&self, sub_target: &str, msg: EventMessage, pending: TxHash) {
+	async fn handle_stalled_tx(
+		&self,
+		sub_target: &str,
+		msg: EventMessage,
+		pending: TxHash,
+		escalation: bool,
+	) {
 		let client = self.get_client();
 		log::warn!(
 			target: &client.get_chain_name(),
@@ -159,18 +165,18 @@ where
 			pending,
 		);
 		sentry::capture_message(
-			format!(
-				"[{}]-[{}]-[{}] ♻️  Unknown error while requesting a transaction request: {}-{}",
-				&client.get_chain_name(),
-				sub_target,
-				client.address(),
-				msg.metadata,
-				pending
-			)
-			.as_str(),
-			sentry::Level::Warning,
-		);
-		self.retry_transaction(msg, true).await;
+            format!(
+                "[{}]-[{}]-[{}] ♻️  The pending transaction has been stalled over 3 blocks. Try gas-escalation: {}-{}",
+                &client.get_chain_name(),
+                sub_target,
+                client.address(),
+                msg.metadata,
+                pending
+            )
+                .as_str(),
+            sentry::Level::Warning,
+        );
+		self.retry_transaction(msg, escalation).await;
 	}
 
 	/// Handles the failed transaction receipt generation.
@@ -185,17 +191,17 @@ where
 			msg.retries_remaining - 1,
 		);
 		sentry::capture_message(
-			format!(
-				"[{}]-[{}]-[{}] ♻️  The requested transaction failed to generate a receipt: {}, Retries left: {:?}",
-				&client.get_chain_name(),
-				sub_target,
-				client.address(),
-				msg.metadata,
-				msg.retries_remaining - 1,
-			)
-			.as_str(),
-			sentry::Level::Error,
-		);
+            format!(
+                "[{}]-[{}]-[{}] ♻️  The requested transaction failed to generate a receipt: {}, Retries left: {:?}",
+                &client.get_chain_name(),
+                sub_target,
+                client.address(),
+                msg.metadata,
+                msg.retries_remaining - 1,
+            )
+                .as_str(),
+            sentry::Level::Error,
+        );
 		self.retry_transaction(msg, false).await;
 	}
 
@@ -217,18 +223,18 @@ where
 			error.to_string(),
 		);
 		sentry::capture_message(
-			format!(
-				"[{}]-[{}]-[{}] ♻️  Unknown error while requesting a transaction request: {}, Retries left: {:?}, Error: {}",
-				&client.get_chain_name(),
-				sub_target,
-				client.address(),
-				msg.metadata,
-				msg.retries_remaining - 1,
-				error
-			)
-				.as_str(),
-			sentry::Level::Error,
-		);
+            format!(
+                "[{}]-[{}]-[{}] ♻️  Unknown error while requesting a transaction request: {}, Retries left: {:?}, Error: {}",
+                &client.get_chain_name(),
+                sub_target,
+                client.address(),
+                msg.metadata,
+                msg.retries_remaining - 1,
+                error
+            )
+                .as_str(),
+            sentry::Level::Error,
+        );
 		self.retry_transaction(msg, false).await;
 	}
 
@@ -251,18 +257,18 @@ where
 				error.to_string()
 			);
 			sentry::capture_message(
-				format!(
-					"[{}]-[{}]-[{}] ⚠️  Warning! Error encountered during gas estimation: {}, Retries left: {:?}, Error: {}",
-					&client.get_chain_name(),
-					sub_target,
-					client.address(),
-					msg.metadata,
-					msg.retries_remaining - 1,
-					error
-				)
-					.as_str(),
-				sentry::Level::Warning,
-			);
+                format!(
+                    "[{}]-[{}]-[{}] ⚠️  Warning! Error encountered during gas estimation: {}, Retries left: {:?}, Error: {}",
+                    &client.get_chain_name(),
+                    sub_target,
+                    client.address(),
+                    msg.metadata,
+                    msg.retries_remaining - 1,
+                    error
+                )
+                    .as_str(),
+                sentry::Level::Warning,
+            );
 		}
 		self.retry_transaction(msg, false).await;
 	}
