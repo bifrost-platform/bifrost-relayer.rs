@@ -15,8 +15,12 @@ use sha3::{Digest, Keccak256};
 type WalletResult<T = ()> = Result<T, Box<dyn std::error::Error + Send + Sync>>;
 
 #[derive(Debug)]
+/// The component that contains anEthereum private-public key pair
+/// which can be used for signing messages.
 pub struct WalletManager {
+	/// The wallet instantiated with a locally stored private key.
 	pub signer: ethers::signers::Wallet<SigningKey>,
+	/// The ECDSA/secp256k1 signing key.
 	secret_key: Option<K256SigningKey>,
 }
 

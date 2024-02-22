@@ -10,7 +10,7 @@ use ethers::types::{
 use tokio::sync::mpsc::{error::SendError, UnboundedSender};
 
 use br_primitives::{
-	eth::{ChainID, GasCoefficient, SocketEventStatus, SocketVariants},
+	eth::{ChainID, GasCoefficient, SocketEventStatus},
 	PriceResponse,
 };
 
@@ -48,8 +48,6 @@ pub struct SocketRelayMetadata {
 	pub receiver: Address,
 	/// The flag whether this relay is processed on bootstrap.
 	pub is_bootstrap: bool,
-	/// The variants this request contains.
-	pub variants: SocketVariants,
 }
 
 impl SocketRelayMetadata {
@@ -62,16 +60,7 @@ impl SocketRelayMetadata {
 		receiver: Address,
 		is_bootstrap: bool,
 	) -> Self {
-		Self {
-			is_inbound,
-			status,
-			sequence,
-			src_chain_id,
-			dst_chain_id,
-			receiver,
-			is_bootstrap,
-			variants: SocketVariants::default(),
-		}
+		Self { is_inbound, status, sequence, src_chain_id, dst_chain_id, receiver, is_bootstrap }
 	}
 }
 
@@ -79,13 +68,12 @@ impl Display for SocketRelayMetadata {
 	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
 		write!(
 			f,
-			"Relay({}-{:?}-{:?}, {:?} -> {:?}, {:?})",
+			"Relay({}-{:?}-{:?}, {:?} -> {:?})",
 			if self.is_inbound { "Inbound".to_string() } else { "Outbound".to_string() },
 			self.status,
 			self.sequence,
 			self.src_chain_id,
 			self.dst_chain_id,
-			self.variants.version
 		)
 	}
 }

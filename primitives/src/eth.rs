@@ -2,7 +2,7 @@ use std::{str::FromStr, sync::Arc};
 
 use ethers::{
 	providers::{JsonRpcClient, Provider},
-	types::{Address, Bytes, Signature, TransactionRequest, H160, U256, U64},
+	types::{Address, Signature, TransactionRequest, H160, U64},
 };
 
 use crate::{
@@ -24,12 +24,6 @@ pub const BOOTSTRAP_BLOCK_CHUNK_SIZE: u64 = 2000;
 
 /// The block offset used to measure the average block time at bootstrap.
 pub const BOOTSTRAP_BLOCK_OFFSET: u32 = 100;
-
-#[derive(Clone, Debug)]
-/// The protocol version of the CCCP Socket message.
-pub enum SocketVersion {
-	V1,
-}
 
 /// The metadata of the EVM provider.
 pub struct ProviderMetadata {
@@ -191,14 +185,25 @@ impl RoundUpEventStatus {
 #[derive(Clone, Copy, Debug, PartialEq, PartialOrd)]
 /// The socket event status.
 pub enum SocketEventStatus {
+	/// When the `SocketMessage` with given request ID does not exist
+	/// on a certain chain, the status will be `None`.
 	None,
+	/// A bridge request has been successfully initialized on the source chain.
 	Requested,
+	/// The opposite side of `Requested`.
 	Failed,
+	/// A bridge request has been successfully executed on the destination chain.
 	Executed,
+	/// The opposite side of `Executed`.
 	Reverted,
+	/// A bridge request has been accepted on Bifrost.
 	Accepted,
+	/// The opposite side of `Accepted`.
 	Rejected,
+	/// A bridge request has been successfully committed back to the source chain.
 	Committed,
+	/// The opposite side of `Committed`.
+	/// The bridged asset will be refunded to the user.
 	Rollbacked,
 }
 
@@ -231,27 +236,6 @@ impl From<SocketEventStatus> for u8 {
 			SocketEventStatus::Rejected => 6,
 			SocketEventStatus::Committed => 7,
 			SocketEventStatus::Rollbacked => 8,
-		}
-	}
-}
-
-#[derive(Clone, Debug)]
-pub struct SocketVariants {
-	pub source_chain: Bytes,
-	pub receiver: Address,
-	pub max_fee: U256,
-	pub data: Bytes,
-	pub version: SocketVersion,
-}
-
-impl Default for SocketVariants {
-	fn default() -> Self {
-		Self {
-			source_chain: Bytes::default(),
-			receiver: Address::default(),
-			max_fee: U256::default(),
-			data: Bytes::default(),
-			version: SocketVersion::V1,
 		}
 	}
 }
