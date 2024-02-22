@@ -337,19 +337,21 @@ impl<T: JsonRpcClient> TransactionTask<T> for LegacyTransactionTask<T> {
 								)
 							} else {
 								// if 3 blocks passed since send_transaction, but the receipt has not come out,
-								let pending_tx =
-									self.get_client().get_transaction(pending_hash).await.unwrap();
-								msg.tx_request.nonce(Some(pending_tx.nonce));
-								msg.tx_request.gas_price(
-									self.client
-										.get_gas_price_for_escalation(
-											pending_tx.gas_price.unwrap(),
-											self.gas_price_coefficient,
-											self.min_gas_price,
-										)
-										.await,
-								);
-								self.handle_stalled_tx(SUB_LOG_TARGET, msg, pending_hash).await;
+								if let Some(pending_tx) =
+									self.get_client().get_transaction(pending_hash).await
+								{
+									msg.tx_request.nonce(Some(pending_tx.nonce));
+									msg.tx_request.gas_price(
+										self.client
+											.get_gas_price_for_escalation(
+												pending_tx.gas_price.unwrap(),
+												self.gas_price_coefficient,
+												self.min_gas_price,
+											)
+											.await,
+									);
+									self.handle_stalled_tx(SUB_LOG_TARGET, msg, pending_hash).await;
+								}
 							}
 						},
 						Err(error) => {
