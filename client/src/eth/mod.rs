@@ -1,5 +1,15 @@
 use std::{cmp::max, fmt::Debug, sync::Arc};
 
+use br_primitives::{
+	constants::{
+		config::{BOOTSTRAP_BLOCK_OFFSET, NATIVE_BLOCK_TIME},
+		errors::{INSUFFICIENT_FUNDS, INVALID_CHAIN_ID, PROVIDER_INTERNAL_ERROR},
+		tx::{DEFAULT_CALL_RETRIES, DEFAULT_CALL_RETRY_INTERVAL_MS},
+	},
+	contracts::authority::RoundMetaData,
+	eth::{AggregatorContracts, ChainID, ProtocolContracts, ProviderMetadata},
+	sub_display_format,
+};
 use ethers::{
 	abi::Detokenize,
 	prelude::ContractCall,
@@ -13,70 +23,18 @@ use ethers::{
 use serde::{de::DeserializeOwned, Serialize};
 use tokio::time::{sleep, Duration};
 
-pub use blocks::*;
-pub use br_primitives::contracts::*;
-use br_primitives::{
-	authority::RoundMetaData,
-	eth::{
-		AggregatorContracts, ChainID, ProtocolContracts, ProviderMetadata, BOOTSTRAP_BLOCK_OFFSET,
-		NATIVE_BLOCK_TIME,
-	},
-	sub_display_format, INSUFFICIENT_FUNDS, INVALID_CHAIN_ID, PROVIDER_INTERNAL_ERROR,
+use self::{
+	traits::{Eip1559GasMiddleware, LegacyGasMiddleware},
+	wallet::WalletManager,
 };
-pub use events::*;
-pub use handlers::*;
-pub use tx::*;
-pub use wallet::*;
 
-mod blocks;
-mod events;
-mod handlers;
-mod tx;
-mod wallet;
+pub mod events;
+pub mod handlers;
+pub mod traits;
+pub mod tx;
+pub mod wallet;
 
 const SUB_LOG_TARGET: &str = "eth-client";
-
-#[async_trait::async_trait]
-trait LegacyGasMiddleware {
-	/// Get the current gas price of the network.
-	async fn get_gas_price(&self) -> U256;
-
-	/// Get gas_price for legacy retry transaction request.
-	///
-	/// Returns `max(current_network_gas_price,escalated_gas_price)`
-	async fn get_gas_price_for_retry(
-		&self,
-		previous_gas_price: U256,
-		gas_price_coefficient: f64,
-		min_gas_price: U256,
-	) -> U256;
-
-	/// Get gas_price for escalated legacy transaction request. This will be only used when
-	/// `is_initially_escalated` is enabled.
-	async fn get_gas_price_for_escalation(
-		&self,
-		gas_price: U256,
-		gas_price_coefficient: f64,
-		min_gas_price: U256,
-	) -> U256;
-
-	/// Handles the failed gas price rpc request.
-	async fn handle_failed_get_gas_price(&self, retries_remaining: u8, error: String) -> U256;
-}
-
-#[async_trait::async_trait]
-trait Eip1559GasMiddleware {
-	/// Gets a heuristic recommendation of max fee per gas and max priority fee per gas for EIP-1559
-	/// compatible transactions.
-	async fn get_estimated_eip1559_fees(&self) -> (U256, U256);
-
-	/// Handles the failed eip1559 fees rpc request.
-	async fn handle_failed_get_estimated_eip1559_fees(
-		&self,
-		retries_remaining: u8,
-		error: String,
-	) -> (U256, U256);
-}
 
 /// The core client for EVM-based chain interactions.
 pub struct EthClient<T> {

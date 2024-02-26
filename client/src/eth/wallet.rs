@@ -1,4 +1,5 @@
-use br_primitives::{errors::INVALID_PRIVATE_KEY, eth::ChainID};
+use br_primitives::{constants::errors::INVALID_PRIVATE_KEY, eth::ChainID};
+
 use ethers::{
 	prelude::k256::ecdsa::SigningKey,
 	signers::{LocalWallet, Signer},

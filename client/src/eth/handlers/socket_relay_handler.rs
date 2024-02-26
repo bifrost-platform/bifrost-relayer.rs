@@ -10,24 +10,30 @@ use tokio::{sync::broadcast::Receiver, time::sleep};
 use tokio_stream::StreamExt;
 
 use br_primitives::{
-	authority::RoundMetaData,
-	bootstrap::{BootstrapHandler, BootstrapSharedData},
-	constants::DEFAULT_BOOTSTRAP_ROUND_OFFSET,
+	bootstrap::BootstrapSharedData,
+	constants::{
+		cli::DEFAULT_BOOTSTRAP_ROUND_OFFSET,
+		config::BOOTSTRAP_BLOCK_CHUNK_SIZE,
+		errors::{INVALID_BIFROST_NATIVENESS, INVALID_CHAIN_ID, INVALID_CONTRACT_ABI},
+	},
+	contracts::{
+		authority::RoundMetaData,
+		socket::{RequestID, Signatures, SocketEvents, SocketMessage},
+	},
 	eth::{
 		BootstrapState, BuiltRelayTransaction, ChainID, GasCoefficient, RelayDirection,
-		SocketEventStatus, BOOTSTRAP_BLOCK_CHUNK_SIZE,
+		SocketEventStatus,
 	},
-	socket::{RequestID, Signatures, SocketEvents, SocketMessage},
-	sub_display_format, RollbackSender, INVALID_BIFROST_NATIVENESS, INVALID_CHAIN_ID,
-	INVALID_CONTRACT_ABI,
+	periodic::RollbackSender,
+	sub_display_format,
+	tx::{SocketRelayMetadata, TxRequest, TxRequestMessage, TxRequestMetadata, TxRequestSender},
 };
 
 use crate::eth::{
-	BlockMessage, EthClient, EventMessage, EventMetadata, EventSender, Handler,
-	SocketRelayMetadata, TxRequest,
+	events::EventMessage,
+	traits::{BootstrapHandler, Handler, SocketRelayBuilder},
+	EthClient,
 };
-
-use super::SocketRelayBuilder;
 
 const SUB_LOG_TARGET: &str = "socket-handler";
 
@@ -35,12 +41,12 @@ const SUB_LOG_TARGET: &str = "socket-handler";
 pub struct SocketRelayHandler<T> {
 	/// The `EthClient` to interact with the connected blockchain.
 	pub client: Arc<EthClient<T>>,
-	/// The event senders that sends messages to the event channel.
-	event_senders: BTreeMap<ChainID, Arc<EventSender>>,
+	/// The senders that sends messages to the tx request channel.
+	tx_request_senders: BTreeMap<ChainID, Arc<TxRequestSender>>,
 	/// The rollback senders that sends rollbackable socket messages.
 	rollback_senders: BTreeMap<ChainID, Arc<RollbackSender>>,
-	/// The block receiver that consumes new blocks from the block channel.
-	block_receiver: Receiver<BlockMessage>,
+	/// The receiver that consumes new events from the block channel.
+	event_receiver: Receiver<EventMessage>,
 	/// The entire clients instantiated in the system. <chain_id, Arc<EthClient>>
 	system_clients: BTreeMap<ChainID, Arc<EthClient<T>>>,
 	/// Signature of the `Socket` Event.
@@ -58,17 +64,17 @@ impl<T: 'static + JsonRpcClient> Handler for SocketRelayHandler<T> {
 
 				sleep(Duration::from_millis(self.client.metadata.call_interval)).await;
 			} else if self.is_bootstrap_state_synced_as(BootstrapState::NormalStart).await {
-				let block_msg = self.block_receiver.recv().await.unwrap();
+				let msg = self.event_receiver.recv().await.unwrap();
 
 				log::info!(
 					target: &self.client.get_chain_name(),
 					"-[{}] 📦 Imported #{:?} with target logs({:?})",
 					sub_display_format(SUB_LOG_TARGET),
-					block_msg.block_number,
-					block_msg.target_logs.len(),
+					msg.block_number,
+					msg.event_logs.len(),
 				);
 
-				let mut stream = tokio_stream::iter(block_msg.target_logs);
+				let mut stream = tokio_stream::iter(msg.event_logs);
 				while let Some(log) = stream.next().await {
 					if self.is_target_contract(&log) && self.is_target_event(log.topics[0]) {
 						self.process_confirmed_log(&log, false).await;
@@ -83,8 +89,7 @@ impl<T: 'static + JsonRpcClient> Handler for SocketRelayHandler<T> {
 			Ok(decoded) => match &decoded[0] {
 				SocketEvents::Socket(socket) => {
 					let msg = socket.clone().msg;
-					#[allow(unused_mut)]
-					let mut metadata = SocketRelayMetadata::new(
+					let metadata = SocketRelayMetadata::new(
 						self.is_inbound_sequence(ChainID::from_be_bytes(msg.ins_code.chain)),
 						SocketEventStatus::from_u8(msg.status),
 						msg.req_id.sequence,
@@ -227,9 +232,9 @@ impl<T: 'static + JsonRpcClient> SocketRelayHandler<T> {
 	/// Instantiates a new `SocketRelayHandler` instance.
 	pub fn new(
 		id: ChainID,
-		event_senders_vec: Vec<Arc<EventSender>>,
+		tx_request_senders_vec: Vec<Arc<TxRequestSender>>,
 		rollback_senders: BTreeMap<ChainID, Arc<RollbackSender>>,
-		block_receiver: Receiver<BlockMessage>,
+		event_receiver: Receiver<EventMessage>,
 		system_clients_vec: Vec<Arc<EthClient<T>>>,
 		bootstrap_shared_data: Arc<BootstrapSharedData>,
 	) -> Self {
@@ -240,15 +245,15 @@ impl<T: 'static + JsonRpcClient> SocketRelayHandler<T> {
 
 		let client = system_clients.get(&id).expect(INVALID_CHAIN_ID).clone();
 
-		let event_senders: BTreeMap<ChainID, Arc<EventSender>> = event_senders_vec
+		let tx_request_senders: BTreeMap<ChainID, Arc<TxRequestSender>> = tx_request_senders_vec
 			.iter()
-			.map(|event_sender| (event_sender.id, event_sender.clone()))
+			.map(|sender| (sender.id, sender.clone()))
 			.collect();
 
 		Self {
-			event_senders,
+			tx_request_senders,
 			rollback_senders,
-			block_receiver,
+			event_receiver,
 			socket_signature: client
 				.protocol_contracts
 				.socket
@@ -424,14 +429,14 @@ impl<T: 'static + JsonRpcClient> SocketRelayHandler<T> {
 		give_random_delay: bool,
 		gas_coefficient: GasCoefficient,
 	) {
-		if let Some(event_sender) = self.event_senders.get(&chain_id) {
+		if let Some(sender) = self.tx_request_senders.get(&chain_id) {
 			if self.is_executable(metadata.is_inbound, metadata.status) {
 				self.send_rollbackable_request(chain_id, metadata.clone(), socket_msg);
 			}
 
-			match event_sender.send(EventMessage::new(
+			match sender.send(TxRequestMessage::new(
 				TxRequest::Legacy(tx_request),
-				EventMetadata::SocketRelay(metadata.clone()),
+				TxRequestMetadata::SocketRelay(metadata.clone()),
 				true,
 				give_random_delay,
 				gas_coefficient,
@@ -629,7 +634,7 @@ mod tests {
 		types::{Bytes, H160},
 	};
 
-	use br_primitives::socket::SocketContract;
+	use br_primitives::contracts::socket::SocketContract;
 
 	use super::*;
 

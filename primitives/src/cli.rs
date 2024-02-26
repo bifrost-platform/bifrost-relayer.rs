@@ -150,7 +150,7 @@ pub struct BootstrapConfig {
 	pub round_offset: Option<u32>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Default, Debug, Clone, Deserialize)]
 pub struct SentryConfig {
 	/// Identifier for Sentry client
 	pub environment: Option<Cow<'static, str>>,

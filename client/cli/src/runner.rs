@@ -56,10 +56,15 @@ pub struct Runner {
 
 impl Runner {
 	pub fn new(config: Configuration, tokio_runtime: tokio::runtime::Runtime) -> CliResult<Runner> {
+		let sentry_config = config.clone().relayer_config.sentry_config.unwrap_or_default();
 		Ok(Runner {
-			config: config.clone(),
+			config,
 			tokio_runtime,
-			sentry_client: br_metrics::build_sentry_client(config.relayer_config.sentry_config),
+			sentry_client: br_metrics::build_sentry_client(
+				sentry_config.is_enabled,
+				sentry_config.dsn,
+				sentry_config.environment,
+			),
 		})
 	}
 

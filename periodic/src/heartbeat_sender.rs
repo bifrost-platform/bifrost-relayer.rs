@@ -1,14 +1,18 @@
-use br_client::eth::{
-	EthClient, EventMessage, EventMetadata, EventSender, HeartbeatMetadata, TxRequest,
-};
+use br_client::eth::EthClient;
 use br_primitives::{
-	errors::{INVALID_BIFROST_NATIVENESS, INVALID_PERIODIC_SCHEDULE},
+	constants::{
+		errors::{INVALID_BIFROST_NATIVENESS, INVALID_PERIODIC_SCHEDULE},
+		schedule::HEARTBEAT_SCHEDULE,
+	},
 	eth::GasCoefficient,
-	sub_display_format, PeriodicWorker, HEARTBEAT_SCHEDULE,
+	sub_display_format,
+	tx::{HeartbeatMetadata, TxRequest, TxRequestMessage, TxRequestMetadata, TxRequestSender},
 };
 use cron::Schedule;
 use ethers::{providers::JsonRpcClient, types::TransactionRequest};
 use std::{str::FromStr, sync::Arc};
+
+use crate::traits::PeriodicWorker;
 
 const SUB_LOG_TARGET: &str = "heartbeat";
 
@@ -16,8 +20,8 @@ const SUB_LOG_TARGET: &str = "heartbeat";
 pub struct HeartbeatSender<T> {
 	/// The time schedule that represents when to check heartbeat pulsed.
 	schedule: Schedule,
-	/// The event sender that sends messages to the event channel.
-	event_sender: Arc<EventSender>,
+	/// The sender that sends messages to the tx request channel.
+	tx_request_sender: Arc<TxRequestSender>,
 	/// The `EthClient` to interact with the bifrost network.
 	client: Arc<EthClient<T>>,
 }
@@ -74,14 +78,14 @@ impl<T: JsonRpcClient> PeriodicWorker for HeartbeatSender<T> {
 impl<T: JsonRpcClient> HeartbeatSender<T> {
 	/// Instantiates a new `HeartbeatSender` instance.
 	pub fn new(
-		event_senders: Vec<Arc<EventSender>>,
+		tx_request_senders: Vec<Arc<TxRequestSender>>,
 		system_clients: Vec<Arc<EthClient<T>>>,
 	) -> Self {
 		Self {
 			schedule: Schedule::from_str(HEARTBEAT_SCHEDULE).expect(INVALID_PERIODIC_SCHEDULE),
-			event_sender: event_senders
+			tx_request_sender: tx_request_senders
 				.iter()
-				.find(|channel| channel.is_native)
+				.find(|sender| sender.is_native)
 				.expect(INVALID_BIFROST_NATIVENESS)
 				.clone(),
 			client: system_clients
@@ -100,15 +104,15 @@ impl<T: JsonRpcClient> HeartbeatSender<T> {
 			.data(relayer_manager.heartbeat().calldata().unwrap())
 	}
 
-	/// Request send transaction to the target event channel.
+	/// Request send transaction to the target tx request channel.
 	async fn request_send_transaction(
 		&self,
 		tx_request: TransactionRequest,
 		metadata: HeartbeatMetadata,
 	) {
-		match self.event_sender.send(EventMessage::new(
+		match self.tx_request_sender.send(TxRequestMessage::new(
 			TxRequest::Legacy(tx_request),
-			EventMetadata::Heartbeat(metadata.clone()),
+			TxRequestMetadata::Heartbeat(metadata.clone()),
 			false,
 			false,
 			GasCoefficient::Low,

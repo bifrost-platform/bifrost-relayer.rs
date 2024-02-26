@@ -1,17 +1,22 @@
 use crate::eth::{
-	EthClient, EventMessage, LegacyGasMiddleware, TransactionManager, TxRequest, DEFAULT_TX_RETRIES,
+	traits::{TransactionManager, TransactionTask},
+	EthClient, LegacyGasMiddleware,
 };
+
 use async_trait::async_trait;
 use br_primitives::{
-	constants::{DEFAULT_ESCALATE_PERCENTAGE, DEFAULT_MIN_GAS_PRICE},
-	eth::ETHEREUM_BLOCK_TIME,
-	sub_display_format, INSUFFICIENT_FUNDS, NETWORK_DOES_NOT_SUPPORT_EIP1559,
-	PROVIDER_INTERNAL_ERROR,
+	constants::{
+		cli::{DEFAULT_ESCALATE_PERCENTAGE, DEFAULT_MIN_GAS_PRICE},
+		config::ETHEREUM_BLOCK_TIME,
+		errors::{INSUFFICIENT_FUNDS, NETWORK_DOES_NOT_SUPPORT_EIP1559, PROVIDER_INTERNAL_ERROR},
+		tx::DEFAULT_TX_RETRIES,
+	},
+	sub_display_format,
+	tx::{TxRequest, TxRequestMessage},
 };
 use ethers::{
 	middleware::{MiddlewareBuilder, NonceManagerMiddleware, SignerMiddleware},
-	providers::{JsonRpcClient, Middleware, Provider},
-	signers::LocalWallet,
+	providers::{JsonRpcClient, Middleware},
 	types::{BlockId, BlockNumber, Transaction, TransactionRequest, U256},
 };
 use sc_service::SpawnTaskHandle;
@@ -24,20 +29,18 @@ use tokio::{
 	time::sleep,
 };
 
-use super::{generate_delay, TransactionTask};
+use super::{generate_delay, TransactionMiddleware};
 
 const SUB_LOG_TARGET: &str = "legacy-tx-manager";
-
-type LegacyMiddleware<T> = NonceManagerMiddleware<SignerMiddleware<Arc<Provider<T>>, LocalWallet>>;
 
 /// The essential task that sends legacy transactions asynchronously.
 pub struct LegacyTransactionManager<T> {
 	/// The ethereum client for the connected chain.
 	pub client: Arc<EthClient<T>>,
 	/// The client signs transaction for the connected chain with local nonce manager.
-	middleware: Arc<LegacyMiddleware<T>>,
-	/// The receiver connected to the event channel.
-	receiver: UnboundedReceiver<EventMessage>,
+	middleware: Arc<TransactionMiddleware<T>>,
+	/// The receiver connected to the tx request channel.
+	receiver: UnboundedReceiver<TxRequestMessage>,
 	/// The flag whether the client has enabled txpool namespace.
 	is_txpool_enabled: bool,
 	/// The flag whether if the gas price will be initially escalated. The `escalate_percentage`
@@ -64,8 +67,8 @@ impl<T: 'static + JsonRpcClient> LegacyTransactionManager<T> {
 		is_initially_escalated: bool,
 		duplicate_confirm_delay: Option<u64>,
 		tx_spawn_handle: SpawnTaskHandle,
-	) -> (Self, UnboundedSender<EventMessage>) {
-		let (sender, receiver) = mpsc::unbounded_channel::<EventMessage>();
+	) -> (Self, UnboundedSender<TxRequestMessage>) {
+		let (sender, receiver) = mpsc::unbounded_channel::<TxRequestMessage>();
 
 		let gas_price_coefficient = {
 			if let Some(escalate_percentage) = escalate_percentage {
@@ -128,7 +131,7 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> for LegacyTransactionMana
 		self.tx_spawn_handle.clone()
 	}
 
-	async fn spawn_send_transaction(&self, msg: EventMessage) {
+	async fn spawn_send_transaction(&self, msg: TxRequestMessage) {
 		let task = LegacyTransactionTask::new(
 			self.get_client(),
 			self.middleware.clone(),
@@ -207,7 +210,7 @@ pub struct LegacyTransactionTask<T> {
 	/// The ethereum client for the connected chain.
 	client: Arc<EthClient<T>>,
 	/// The client signs transaction for the connected chain with local nonce manager.
-	middleware: Arc<LegacyMiddleware<T>>,
+	middleware: Arc<TransactionMiddleware<T>>,
 	/// The flag whether the client has enabled txpool namespace.
 	is_txpool_enabled: bool,
 	/// The flag whether if the gas price will be initially escalated. The `escalate_percentage`
@@ -227,7 +230,7 @@ impl<T: JsonRpcClient> LegacyTransactionTask<T> {
 	/// Build an Legacy transaction task.
 	pub fn new(
 		client: Arc<EthClient<T>>,
-		middleware: Arc<LegacyMiddleware<T>>,
+		middleware: Arc<TransactionMiddleware<T>>,
 		is_txpool_enabled: bool,
 		is_initially_escalated: bool,
 		gas_price_coefficient: f64,
@@ -264,7 +267,7 @@ impl<T: JsonRpcClient> TransactionTask<T> for LegacyTransactionTask<T> {
 		self.client.debug_mode
 	}
 
-	async fn try_send_transaction(&self, mut msg: EventMessage) {
+	async fn try_send_transaction(&self, mut msg: TxRequestMessage) {
 		if msg.retries_remaining == 0 {
 			return;
 		}

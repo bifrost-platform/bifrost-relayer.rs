@@ -6,24 +6,15 @@ use ethers::{
 };
 
 use crate::{
-	authority::AuthorityContract, chainlink_aggregator::ChainlinkContract,
-	relayer_manager::RelayerManagerContract, socket::SocketContract, INVALID_CONTRACT_ADDRESS,
+	constants::errors::INVALID_CONTRACT_ADDRESS,
+	contracts::{
+		authority::AuthorityContract, chainlink_aggregator::ChainlinkContract,
+		relayer_manager::RelayerManagerContract, socket::SocketContract,
+	},
 };
 
 /// The type of EVM chain ID's.
 pub type ChainID = u32;
-
-/// The native chain's average block time in seconds.
-pub const NATIVE_BLOCK_TIME: u32 = 3u32;
-
-/// Ethereum network's average block time in seconds.
-pub const ETHEREUM_BLOCK_TIME: u64 = 12u64;
-
-/// The block range chunk size for getLogs requests.
-pub const BOOTSTRAP_BLOCK_CHUNK_SIZE: u64 = 2000;
-
-/// The block offset used to measure the average block time at bootstrap.
-pub const BOOTSTRAP_BLOCK_OFFSET: u32 = 100;
 
 /// The metadata of the EVM provider.
 pub struct ProviderMetadata {

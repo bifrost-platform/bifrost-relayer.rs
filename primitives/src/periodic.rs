@@ -1,50 +1,8 @@
-use std::{collections::BTreeMap, fmt::Error};
-
-use async_trait::async_trait;
-use cron::Schedule;
 use ethers::types::U256;
 use serde::Deserialize;
-use tokio::{
-	sync::mpsc::{error::SendError, UnboundedSender},
-	time::sleep,
-};
+use tokio::sync::mpsc::{error::SendError, UnboundedSender};
 
-use crate::{eth::ChainID, socket::SocketMessage};
-
-/// The schedule definition for oracle price feeding. This will trigger on every 5th minute.
-pub const PRICE_FEEDER_SCHEDULE: &str = "0 */5 * * * * *";
-
-/// The schedule definition for roundup emissions. This will trigger on every 15th second.
-pub const ROUNDUP_EMITTER_SCHEDULE: &str = "*/15 * * * * * *";
-
-/// The schedule definition for heartbeats. This will trigger on every minute.
-pub const HEARTBEAT_SCHEDULE: &str = "0 * * * * * *";
-
-/// The schedule definition for rollback checks. This will trigger on every minute.
-pub const ROLLBACK_CHECK_SCHEDULE: &str = "0 * * * * * *";
-
-/// The minimum interval that should be passed in order to handle rollback checks. (=3 minutes)
-pub const ROLLBACK_CHECK_MINIMUM_INTERVAL: u32 = 3 * 60;
-
-#[async_trait]
-pub trait PeriodicWorker {
-	/// Returns the schedule definition.
-	fn schedule(&self) -> Schedule;
-
-	/// Starts the periodic worker.
-	async fn run(&mut self);
-
-	/// Wait until it reaches the next schedule.
-	async fn wait_until_next_time(&self) {
-		let sleep_duration =
-			self.schedule().upcoming(chrono::Utc).next().unwrap() - chrono::Utc::now();
-
-		match sleep_duration.to_std() {
-			Ok(sleep_duration) => sleep(sleep_duration).await,
-			Err(_) => return,
-		}
-	}
-}
+use crate::{contracts::socket::SocketMessage, eth::ChainID};
 
 #[derive(Clone, Debug, Deserialize)]
 pub struct PriceResponse {
@@ -62,15 +20,6 @@ pub enum PriceSource {
 	Gateio,
 	Kucoin,
 	Upbit,
-}
-
-#[async_trait]
-pub trait PriceFetcher {
-	/// Get price with ticker symbol.
-	async fn get_ticker_with_symbol(&self, symbol: String) -> Result<PriceResponse, Error>;
-
-	/// Get all prices of support coin/token.
-	async fn get_tickers(&self) -> Result<BTreeMap<String, PriceResponse>, Error>;
 }
 
 #[derive(Clone, Debug)]

@@ -1,9 +1,11 @@
 use std::{collections::BTreeMap, fmt::Error, sync::Arc};
 
+use br_primitives::periodic::PriceResponse;
 use ethers::{providers::JsonRpcClient, types::U256};
 
 use br_client::eth::EthClient;
-use br_primitives::{PriceFetcher, PriceResponse};
+
+use crate::traits::PriceFetcher;
 
 #[derive(Clone)]
 pub struct ChainlinkPriceFetcher<T> {

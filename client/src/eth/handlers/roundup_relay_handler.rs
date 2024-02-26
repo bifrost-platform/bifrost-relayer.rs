@@ -11,20 +11,27 @@ use tokio::{sync::broadcast::Receiver, time::sleep};
 use tokio_stream::StreamExt;
 
 use br_primitives::{
-	authority::RoundMetaData,
-	bootstrap::{BootstrapHandler, BootstrapSharedData},
-	constants::DEFAULT_BOOTSTRAP_ROUND_OFFSET,
-	eth::{
-		BootstrapState, ChainID, GasCoefficient, RecoveredSignature, RoundUpEventStatus,
-		BOOTSTRAP_BLOCK_CHUNK_SIZE,
+	bootstrap::BootstrapSharedData,
+	constants::{
+		cli::DEFAULT_BOOTSTRAP_ROUND_OFFSET,
+		config::BOOTSTRAP_BLOCK_CHUNK_SIZE,
+		errors::{INVALID_BIFROST_NATIVENESS, INVALID_CONTRACT_ABI},
 	},
-	socket::{RoundUpSubmit, SerializedRoundUp, Signatures, SocketContract, SocketContractEvents},
-	sub_display_format, INVALID_BIFROST_NATIVENESS, INVALID_CONTRACT_ABI,
+	contracts::{
+		authority::RoundMetaData,
+		socket::{
+			RoundUpSubmit, SerializedRoundUp, Signatures, SocketContract, SocketContractEvents,
+		},
+	},
+	eth::{BootstrapState, ChainID, GasCoefficient, RecoveredSignature, RoundUpEventStatus},
+	sub_display_format,
+	tx::{TxRequest, TxRequestMessage, TxRequestMetadata, TxRequestSender, VSPPhase2Metadata},
 };
 
 use crate::eth::{
-	BlockMessage, EthClient, EventMessage, EventMetadata, EventSender, Handler, TxRequest,
-	VSPPhase2Metadata,
+	events::EventMessage,
+	traits::{BootstrapHandler, Handler},
+	EthClient,
 };
 
 const SUB_LOG_TARGET: &str = "roundup-handler";
@@ -33,10 +40,10 @@ const SUB_LOG_TARGET: &str = "roundup-handler";
 pub struct RoundupRelayHandler<T> {
 	/// The `EthClient` to interact with the bifrost network.
 	pub client: Arc<EthClient<T>>,
-	/// The event senders that sends messages to each event channel.
-	event_senders: BTreeMap<ChainID, Arc<EventSender>>,
-	/// The block receiver that consumes new blocks from the block channel.
-	block_receiver: Receiver<BlockMessage>,
+	/// The senders that sends messages to each tx request channel.
+	tx_request_senders: BTreeMap<ChainID, Arc<TxRequestSender>>,
+	/// The receiver that consumes new events from the block channel.
+	event_receiver: Receiver<EventMessage>,
 	/// `EthClient`s to interact with provided networks except bifrost network.
 	external_clients: Vec<Arc<EthClient<T>>>,
 	/// Signature of RoundUp Event.
@@ -54,17 +61,17 @@ impl<T: JsonRpcClient> Handler for RoundupRelayHandler<T> {
 
 				sleep(Duration::from_millis(self.client.metadata.call_interval)).await;
 			} else if self.is_bootstrap_state_synced_as(BootstrapState::NormalStart).await {
-				let block_msg = self.block_receiver.recv().await.unwrap();
+				let msg = self.event_receiver.recv().await.unwrap();
 
 				log::info!(
 					target: &self.client.get_chain_name(),
 					"-[{}] 📦 Imported #{:?} with target logs({:?})",
 					sub_display_format(SUB_LOG_TARGET),
-					block_msg.block_number,
-					block_msg.target_logs.len(),
+					msg.block_number,
+					msg.event_logs.len(),
 				);
 
-				let mut stream = tokio_stream::iter(block_msg.target_logs);
+				let mut stream = tokio_stream::iter(msg.event_logs);
 				while let Some(log) = stream.next().await {
 					if self.is_target_contract(&log) && self.is_target_event(log.topics[0]) {
 						self.process_confirmed_log(&log, false).await;
@@ -149,17 +156,17 @@ impl<T: JsonRpcClient> Handler for RoundupRelayHandler<T> {
 impl<T: JsonRpcClient> RoundupRelayHandler<T> {
 	/// Instantiates a new `RoundupRelayHandler` instance.
 	pub fn new(
-		mut event_senders_vec: Vec<Arc<EventSender>>,
-		block_receiver: Receiver<BlockMessage>,
+		mut tx_request_senders_vec: Vec<Arc<TxRequestSender>>,
+		event_receiver: Receiver<EventMessage>,
 		clients: Vec<Arc<EthClient<T>>>,
 		bootstrap_shared_data: Arc<BootstrapSharedData>,
 	) -> Self {
 		// Only broadcast to external chains
-		event_senders_vec.retain(|channel| !channel.is_native);
+		tx_request_senders_vec.retain(|channel| !channel.is_native);
 
-		let event_senders: BTreeMap<ChainID, Arc<EventSender>> = event_senders_vec
+		let tx_request_senders: BTreeMap<ChainID, Arc<TxRequestSender>> = tx_request_senders_vec
 			.iter()
-			.map(|event_sender| (event_sender.id, event_sender.clone()))
+			.map(|sender| (sender.id, sender.clone()))
 			.collect();
 
 		let client = clients
@@ -180,8 +187,8 @@ impl<T: JsonRpcClient> RoundupRelayHandler<T> {
 			.signature();
 
 		Self {
-			event_senders,
-			block_receiver,
+			tx_request_senders,
+			event_receiver,
 			client,
 			external_clients,
 			roundup_signature,
@@ -302,11 +309,11 @@ impl<T: JsonRpcClient> RoundupRelayHandler<T> {
 					roundup_submit,
 				);
 
-				if let Some(event_sender) = self.event_senders.get(&target_client.get_chain_id()) {
-					event_sender
-						.send(EventMessage::new(
+				if let Some(sender) = self.tx_request_senders.get(&target_client.get_chain_id()) {
+					sender
+						.send(TxRequestMessage::new(
 							TxRequest::Legacy(transaction_request),
-							EventMetadata::VSPPhase2(VSPPhase2Metadata::new(
+							TxRequestMetadata::VSPPhase2(VSPPhase2Metadata::new(
 								roundup_submit.round,
 								target_client.get_chain_id(),
 							)),

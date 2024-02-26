@@ -1,15 +1,16 @@
 use std::{collections::BTreeMap, str::FromStr, sync::Arc};
 
-use br_client::eth::{
-	EthClient, EventMessage, EventMetadata, EventSender, RollbackMetadata, SocketRelayBuilder,
-	TxRequest,
-};
+use br_client::eth::{traits::SocketRelayBuilder, EthClient};
 use br_primitives::{
+	constants::{
+		errors::{INVALID_BIFROST_NATIVENESS, INVALID_CHAIN_ID, INVALID_PERIODIC_SCHEDULE},
+		schedule::{ROLLBACK_CHECK_MINIMUM_INTERVAL, ROLLBACK_CHECK_SCHEDULE},
+	},
+	contracts::socket::{RequestID, RequestInfo, Signatures, SocketMessage},
 	eth::{ChainID, GasCoefficient, RelayDirection, SocketEventStatus},
-	socket::{RequestID, RequestInfo, Signatures, SocketMessage},
-	sub_display_format, PeriodicWorker, RawRequestID, RollbackableMessage,
-	INVALID_BIFROST_NATIVENESS, INVALID_CHAIN_ID, INVALID_PERIODIC_SCHEDULE,
-	ROLLBACK_CHECK_MINIMUM_INTERVAL, ROLLBACK_CHECK_SCHEDULE,
+	periodic::{RawRequestID, RollbackableMessage},
+	sub_display_format,
+	tx::{RollbackMetadata, TxRequest, TxRequestMessage, TxRequestMetadata, TxRequestSender},
 };
 use cron::Schedule;
 use ethers::{
@@ -18,11 +19,13 @@ use ethers::{
 };
 use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
 
+use crate::traits::PeriodicWorker;
+
 const SUB_LOG_TARGET: &str = "rollback-handler";
 
 /// The essential task that handles `Socket` event rollbacks.
 /// This only handles requests that are relayed to the target client.
-/// (`client` and `event_sender` are connected to the same chain)
+/// (`client` and `tx_request_sender` are connected to the same chain)
 pub struct SocketRollbackHandler<T> {
 	/// The `EthClient` to interact with the connected blockchain.
 	pub client: Arc<EthClient<T>>,
@@ -32,8 +35,8 @@ pub struct SocketRollbackHandler<T> {
 	rollback_receiver: UnboundedReceiver<SocketMessage>,
 	/// The local storage saving emitted `Socket` event messages.
 	rollback_msgs: BTreeMap<RawRequestID, RollbackableMessage>,
-	/// The event senders that sends messages to the event channel.
-	event_sender: Arc<EventSender>,
+	/// The sender that sends messages to the tx request channel.
+	tx_request_sender: Arc<TxRequestSender>,
 	/// The time schedule that represents when to check heartbeat pulsed.
 	schedule: Schedule,
 }
@@ -41,7 +44,7 @@ pub struct SocketRollbackHandler<T> {
 impl<T: JsonRpcClient> SocketRollbackHandler<T> {
 	/// Instantiates a new `SocketRollbackHandler`.
 	pub fn new(
-		event_sender: Arc<EventSender>,
+		tx_request_sender: Arc<TxRequestSender>,
 		system_clients_vec: Vec<Arc<EthClient<T>>>,
 	) -> (Self, UnboundedSender<SocketMessage>) {
 		let (sender, rollback_receiver) = mpsc::unbounded_channel::<SocketMessage>();
@@ -53,11 +56,11 @@ impl<T: JsonRpcClient> SocketRollbackHandler<T> {
 
 		(
 			Self {
-				client: system_clients.get(&event_sender.id).expect(INVALID_CHAIN_ID).clone(),
+				client: system_clients.get(&tx_request_sender.id).expect(INVALID_CHAIN_ID).clone(),
 				system_clients,
 				rollback_receiver,
 				rollback_msgs: BTreeMap::new(),
-				event_sender,
+				tx_request_sender,
 				schedule: Schedule::from_str(ROLLBACK_CHECK_SCHEDULE)
 					.expect(INVALID_PERIODIC_SCHEDULE),
 			},
@@ -218,7 +221,7 @@ impl<T: JsonRpcClient> SocketRollbackHandler<T> {
 		}
 	}
 
-	/// Request a socket rollback transaction to the target event channel.
+	/// Request a socket rollback transaction to the target tx request channel.
 	fn request_send_transaction(
 		&self,
 		tx_request: TransactionRequest,
@@ -228,9 +231,9 @@ impl<T: JsonRpcClient> SocketRollbackHandler<T> {
 	) {
 		// asynchronous transaction tasks will work fine for rollback transactions,
 		// so `is_bootstrap` parameter is set to `false`.
-		match self.event_sender.send(EventMessage::new(
+		match self.tx_request_sender.send(TxRequestMessage::new(
 			TxRequest::Legacy(tx_request),
-			EventMetadata::Rollback(metadata.clone()),
+			TxRequestMetadata::Rollback(metadata.clone()),
 			true,
 			give_random_delay,
 			gas_coefficient,

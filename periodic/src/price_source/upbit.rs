@@ -4,9 +4,9 @@ use ethers::{providers::JsonRpcClient, types::U256, utils::parse_ether};
 use reqwest::Url;
 use serde::Deserialize;
 
-use br_primitives::periodic::{PriceFetcher, PriceResponse};
+use br_primitives::periodic::PriceResponse;
 
-use crate::price_source::krw_to_usd;
+use crate::{price_source::krw_to_usd, traits::PriceFetcher};
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct UpbitResponse {
@@ -60,7 +60,7 @@ impl<T: JsonRpcClient> PriceFetcher for UpbitPriceFetcher<T> {
 				Ok(ret)
 			},
 			Err(_) => Err(Error),
-		}
+		};
 	}
 }
 
