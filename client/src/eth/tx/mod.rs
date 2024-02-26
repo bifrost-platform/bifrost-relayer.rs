@@ -6,8 +6,8 @@ use ethers::{
 use rand::Rng;
 use std::sync::Arc;
 
-pub mod eip1559_manager;
-pub mod legacy_manager;
+mod eip1559_manager;
+mod legacy_manager;
 
 pub use eip1559_manager::*;
 pub use legacy_manager::*;

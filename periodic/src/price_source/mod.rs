@@ -16,14 +16,14 @@ use crate::{
 	traits::PriceFetcher,
 };
 
-pub mod binance;
-pub mod chainlink;
-pub mod coingecko;
-pub mod gateio;
-pub mod kucoin;
-pub mod upbit;
+mod binance;
+mod chainlink;
+mod coingecko;
+mod gateio;
+mod kucoin;
+mod upbit;
 
-pub const LOG_TARGET: &str = "price-fetcher";
+const LOG_TARGET: &str = "price-fetcher";
 
 #[derive(Clone)]
 pub enum PriceFetchers<T> {
