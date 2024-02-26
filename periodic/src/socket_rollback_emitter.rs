@@ -21,12 +21,12 @@ use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
 
 use crate::traits::PeriodicWorker;
 
-const SUB_LOG_TARGET: &str = "rollback-handler";
+const SUB_LOG_TARGET: &str = "rollback-emitter";
 
 /// The essential task that handles `Socket` event rollbacks.
 /// This only handles requests that are relayed to the target client.
 /// (`client` and `tx_request_sender` are connected to the same chain)
-pub struct SocketRollbackHandler<T> {
+pub struct SocketRollbackEmitter<T> {
 	/// The `EthClient` to interact with the connected blockchain.
 	pub client: Arc<EthClient<T>>,
 	/// The entire clients instantiated in the system. <chain_id, Arc<EthClient>>
@@ -41,8 +41,8 @@ pub struct SocketRollbackHandler<T> {
 	schedule: Schedule,
 }
 
-impl<T: JsonRpcClient> SocketRollbackHandler<T> {
-	/// Instantiates a new `SocketRollbackHandler`.
+impl<T: JsonRpcClient> SocketRollbackEmitter<T> {
+	/// Instantiates a new `SocketRollbackEmitter`.
 	pub fn new(
 		tx_request_sender: Arc<TxRequestSender>,
 		system_clients_vec: Vec<Arc<EthClient<T>>>,
@@ -273,7 +273,7 @@ impl<T: JsonRpcClient> SocketRollbackHandler<T> {
 }
 
 #[async_trait::async_trait]
-impl<T: JsonRpcClient> SocketRelayBuilder<T> for SocketRollbackHandler<T> {
+impl<T: JsonRpcClient> SocketRelayBuilder<T> for SocketRollbackEmitter<T> {
 	fn get_client(&self) -> Arc<EthClient<T>> {
 		// This will always return the Bifrost client.
 		// Used only for `get_sorted_signatures()` on `Outbound::Accepted` rollbacks.
@@ -287,7 +287,7 @@ impl<T: JsonRpcClient> SocketRelayBuilder<T> for SocketRollbackHandler<T> {
 }
 
 #[async_trait::async_trait]
-impl<T: JsonRpcClient> PeriodicWorker for SocketRollbackHandler<T> {
+impl<T: JsonRpcClient> PeriodicWorker for SocketRollbackEmitter<T> {
 	fn schedule(&self) -> Schedule {
 		self.schedule.clone()
 	}

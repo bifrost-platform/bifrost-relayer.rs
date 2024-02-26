@@ -19,7 +19,7 @@ use br_client::eth::{
 };
 use br_periodic::{
 	traits::PeriodicWorker, HeartbeatSender, OraclePriceFeeder, RoundupEmitter,
-	SocketRollbackHandler,
+	SocketRollbackEmitter,
 };
 use br_primitives::{
 	bootstrap::BootstrapSharedData,
@@ -52,7 +52,7 @@ fn construct_periodics(
 	let clients = &relayer_deps.clients;
 	let tx_request_senders = &relayer_deps.tx_request_senders;
 
-	let mut rollback_handlers = vec![];
+	let mut rollback_emitters = vec![];
 	let mut rollback_senders = BTreeMap::new();
 
 	// initialize the heartbeat sender
@@ -70,9 +70,9 @@ fn construct_periodics(
 
 	// initialize socket rollback handlers
 	tx_request_senders.iter().for_each(|tx_request_sender| {
-		let (rollback_handler, rollback_sender) =
-			SocketRollbackHandler::new(tx_request_sender.clone(), clients.clone());
-		rollback_handlers.push(rollback_handler);
+		let (rollback_emitter, rollback_sender) =
+			SocketRollbackEmitter::new(tx_request_sender.clone(), clients.clone());
+		rollback_emitters.push(rollback_emitter);
 		rollback_senders.insert(
 			tx_request_sender.id,
 			Arc::new(RollbackSender::new(tx_request_sender.id, rollback_sender)),
@@ -83,7 +83,7 @@ fn construct_periodics(
 		heartbeat_sender,
 		oracle_price_feeder,
 		roundup_emitter,
-		rollback_handlers,
+		rollback_emitters,
 		rollback_senders,
 	}
 }
@@ -242,7 +242,7 @@ fn spawn_relayer_tasks(
 		mut heartbeat_sender,
 		mut oracle_price_feeder,
 		mut roundup_emitter,
-		rollback_handlers,
+		rollback_emitters,
 		..
 	} = periodic_deps;
 	let HandlerDeps { socket_relay_handlers, roundup_relay_handlers } = handler_deps;
@@ -284,15 +284,15 @@ fn spawn_relayer_tasks(
 		Some("oracle"),
 		async move { oracle_price_feeder.run().await },
 	);
-	// spawn socket rollback handlers
-	rollback_handlers.into_iter().for_each(|mut handler| {
+	// spawn socket rollback emitters
+	rollback_emitters.into_iter().for_each(|mut emitter| {
 		task_manager.spawn_essential_handle().spawn(
 			Box::leak(
-				format!("{}-socket-rollback-handler", handler.client.get_chain_name())
+				format!("{}-socket-rollback-emitter", emitter.client.get_chain_name())
 					.into_boxed_str(),
 			),
 			Some("rollback"),
-			async move { handler.run().await },
+			async move { emitter.run().await },
 		)
 	});
 
@@ -472,8 +472,8 @@ struct PeriodicDeps {
 	oracle_price_feeder: OraclePriceFeeder<Http>,
 	/// The `RoundupEmitter` used for detecting and emitting new round updates.
 	roundup_emitter: RoundupEmitter<Http>,
-	/// The `SocketRollbackHandler`'s for each specified chain.
-	rollback_handlers: Vec<SocketRollbackHandler<Http>>,
+	/// The `SocketRollbackEmitter`'s for each specified chain.
+	rollback_emitters: Vec<SocketRollbackEmitter<Http>>,
 	/// The `RollbackSender`'s for each specified chain.
 	rollback_senders: BTreeMap<ChainID, Arc<RollbackSender>>,
 }
