@@ -33,7 +33,7 @@ evm_providers:
     call_interval: 3000
     block_confirmations: 5
     is_relay_target: false
-    is_initially_escalated: true
+    eip1559: true
     socket_address: "0xb5Fa48E8B9b89760a9f9176388D1B64A8D4968dF"
     authority_address: "0xF0500d77d5446665314722b963ab1F71872063E9"
   - name: "polygon"
