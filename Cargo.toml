@@ -23,7 +23,7 @@ repository = "https://github.com/bifrost-platform/bifrost-relayer.rs"
 # General
 log = "0.4.20"
 env_logger = "0.10.0"
-sentry = { version = "0.31.7", default-features = false, features = [
+sentry = { version = "0.32.1", default-features = false, features = [
 	"reqwest",
 	"rustls",
 	"backtrace",

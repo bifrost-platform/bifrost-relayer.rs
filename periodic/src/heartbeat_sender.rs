@@ -14,7 +14,7 @@ use std::{str::FromStr, sync::Arc};
 
 use crate::traits::PeriodicWorker;
 
-const SUB_LOG_TARGET: &str = "heartbeat";
+const SUB_LOG_TARGET: &str = "heartbeat-sender";
 
 /// The essential task that sending heartbeat transaction.
 pub struct HeartbeatSender<T> {

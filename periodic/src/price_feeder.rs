@@ -29,7 +29,7 @@ use crate::{
 	traits::{PeriodicWorker, PriceFetcher},
 };
 
-const SUB_LOG_TARGET: &str = "price-oracle";
+const SUB_LOG_TARGET: &str = "price-feeder";
 
 /// The essential task that handles oracle price feedings.
 pub struct OraclePriceFeeder<T> {
