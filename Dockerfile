@@ -1,7 +1,6 @@
 # build stage: where we create binary
-FROM rust:1.71.1 AS builder
+FROM rust:latest AS builder
 
-RUN rustup set profile minimal
 RUN apt update && apt install -y protobuf-compiler
 
 WORKDIR /relayer
