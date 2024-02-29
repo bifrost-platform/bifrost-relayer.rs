@@ -1,13 +1,3 @@
-#[cfg(feature = "v2")]
-use {
-	br_primitives::eth::SocketVariants,
-	ethers::{
-		abi::{ParamType, Token},
-		types::Bytes,
-	},
-	std::str::FromStr,
-};
-
 use std::{collections::BTreeMap, sync::Arc, time::Duration};
 
 use ethers::{
@@ -16,29 +6,34 @@ use ethers::{
 	providers::JsonRpcClient,
 	types::{Filter, Log, TransactionRequest, H256, U256},
 };
-use sc_service::SpawnTaskHandle;
 use tokio::{sync::broadcast::Receiver, time::sleep};
 use tokio_stream::StreamExt;
 
 use br_primitives::{
-	authority::RoundMetaData,
-	bootstrap::{BootstrapHandler, BootstrapSharedData},
-	constants::DEFAULT_BOOTSTRAP_ROUND_OFFSET,
+	bootstrap::BootstrapSharedData,
+	constants::{
+		cli::DEFAULT_BOOTSTRAP_ROUND_OFFSET,
+		config::BOOTSTRAP_BLOCK_CHUNK_SIZE,
+		errors::{INVALID_BIFROST_NATIVENESS, INVALID_CHAIN_ID, INVALID_CONTRACT_ABI},
+	},
+	contracts::{
+		authority::RoundMetaData,
+		socket::{RequestID, Signatures, SocketEvents, SocketMessage},
+	},
 	eth::{
 		BootstrapState, BuiltRelayTransaction, ChainID, GasCoefficient, RelayDirection,
-		SocketEventStatus, SocketVersion, BOOTSTRAP_BLOCK_CHUNK_SIZE,
+		SocketEventStatus,
 	},
-	socket::{RequestID, Signatures, SocketEvents, SocketMessage},
-	sub_display_format, RollbackSender, INVALID_BIFROST_NATIVENESS, INVALID_CHAIN_ID,
-	INVALID_CONTRACT_ABI,
+	periodic::RollbackSender,
+	sub_display_format,
+	tx::{SocketRelayMetadata, TxRequest, TxRequestMessage, TxRequestMetadata, TxRequestSender},
 };
 
 use crate::eth::{
-	BlockMessage, EthClient, EventMessage, EventMetadata, EventSender, Handler,
-	SocketRelayMetadata, TxRequest,
+	events::EventMessage,
+	traits::{BootstrapHandler, Handler, SocketRelayBuilder},
+	EthClient,
 };
-
-use super::{ExecutionFilter, SocketRelayBuilder};
 
 const SUB_LOG_TARGET: &str = "socket-handler";
 
@@ -46,20 +41,18 @@ const SUB_LOG_TARGET: &str = "socket-handler";
 pub struct SocketRelayHandler<T> {
 	/// The `EthClient` to interact with the connected blockchain.
 	pub client: Arc<EthClient<T>>,
-	/// The event senders that sends messages to the event channel.
-	event_senders: BTreeMap<ChainID, Arc<EventSender>>,
+	/// The senders that sends messages to the tx request channel.
+	tx_request_senders: BTreeMap<ChainID, Arc<TxRequestSender>>,
 	/// The rollback senders that sends rollbackable socket messages.
 	rollback_senders: BTreeMap<ChainID, Arc<RollbackSender>>,
-	/// The block receiver that consumes new blocks from the block channel.
-	block_receiver: Receiver<BlockMessage>,
+	/// The receiver that consumes new events from the block channel.
+	event_receiver: Receiver<EventMessage>,
 	/// The entire clients instantiated in the system. <chain_id, Arc<EthClient>>
 	system_clients: BTreeMap<ChainID, Arc<EthClient<T>>>,
 	/// Signature of the `Socket` Event.
 	socket_signature: H256,
 	/// The bootstrap shared data.
 	bootstrap_shared_data: Arc<BootstrapSharedData>,
-	/// A handle for spawning execution filter tasks.
-	execute_spawn_handle: SpawnTaskHandle,
 }
 
 #[async_trait::async_trait]
@@ -71,17 +64,17 @@ impl<T: 'static + JsonRpcClient> Handler for SocketRelayHandler<T> {
 
 				sleep(Duration::from_millis(self.client.metadata.call_interval)).await;
 			} else if self.is_bootstrap_state_synced_as(BootstrapState::NormalStart).await {
-				let block_msg = self.block_receiver.recv().await.unwrap();
+				let msg = self.event_receiver.recv().await.unwrap();
 
 				log::info!(
 					target: &self.client.get_chain_name(),
 					"-[{}] 📦 Imported #{:?} with target logs({:?})",
 					sub_display_format(SUB_LOG_TARGET),
-					block_msg.block_number,
-					block_msg.target_logs.len(),
+					msg.block_number,
+					msg.event_logs.len(),
 				);
 
-				let mut stream = tokio_stream::iter(block_msg.target_logs);
+				let mut stream = tokio_stream::iter(msg.event_logs);
 				while let Some(log) = stream.next().await {
 					if self.is_target_contract(&log) && self.is_target_event(log.topics[0]) {
 						self.process_confirmed_log(&log, false).await;
@@ -96,8 +89,7 @@ impl<T: 'static + JsonRpcClient> Handler for SocketRelayHandler<T> {
 			Ok(decoded) => match &decoded[0] {
 				SocketEvents::Socket(socket) => {
 					let msg = socket.clone().msg;
-					#[allow(unused_mut)]
-					let mut metadata = SocketRelayMetadata::new(
+					let metadata = SocketRelayMetadata::new(
 						self.is_inbound_sequence(ChainID::from_be_bytes(msg.ins_code.chain)),
 						SocketEventStatus::from_u8(msg.status),
 						msg.req_id.sequence,
@@ -106,11 +98,6 @@ impl<T: 'static + JsonRpcClient> Handler for SocketRelayHandler<T> {
 						msg.params.to,
 						is_bootstrap,
 					);
-
-					#[cfg(feature = "v2")]
-					{
-						metadata.variants = self.decode_msg_variants(&msg.params.variants);
-					}
 
 					if !metadata.is_bootstrap {
 						log::info!(
@@ -239,71 +226,17 @@ impl<T: JsonRpcClient> SocketRelayBuilder<T> for SocketRelayHandler<T> {
 		};
 		(signatures, is_external)
 	}
-
-	#[cfg(feature = "v2")]
-	fn decode_msg_variants(&self, raw_variants: &Bytes) -> SocketVariants {
-		if raw_variants != &Bytes::default() && raw_variants != &Bytes::from_str("0x00").unwrap() {
-			match ethers::abi::decode(
-				&[
-					ParamType::FixedBytes(4),
-					ParamType::Address,
-					ParamType::Uint(256),
-					ParamType::Bytes,
-				],
-				raw_variants,
-			) {
-				Ok(variants) => {
-					let mut result = SocketVariants::default();
-					variants.into_iter().for_each(|variant| match variant {
-						Token::FixedBytes(source_chain) => {
-							result.source_chain = Bytes::from(source_chain);
-						},
-						Token::Address(receiver) => {
-							result.receiver = receiver;
-						},
-						Token::Uint(max_fee) => result.max_fee = max_fee,
-						Token::Bytes(data) => {
-							result.data = Bytes::from(data);
-						},
-						_ => {
-							panic!(
-								"[{}]-[{}]-[{}] Invalid Socket::variants received: {:?}",
-								&self.client.get_chain_name(),
-								SUB_LOG_TARGET,
-								self.client.address(),
-								raw_variants,
-							);
-						},
-					});
-					result.version = SocketVersion::V2;
-					return result;
-				},
-				Err(error) => {
-					panic!(
-						"[{}]-[{}]-[{}] Invalid Socket::variants received: {:?}, Error: {}",
-						&self.client.get_chain_name(),
-						SUB_LOG_TARGET,
-						self.client.address(),
-						raw_variants,
-						error
-					)
-				},
-			}
-		}
-		SocketVariants::default()
-	}
 }
 
 impl<T: 'static + JsonRpcClient> SocketRelayHandler<T> {
 	/// Instantiates a new `SocketRelayHandler` instance.
 	pub fn new(
 		id: ChainID,
-		event_senders_vec: Vec<Arc<EventSender>>,
+		tx_request_senders_vec: Vec<Arc<TxRequestSender>>,
 		rollback_senders: BTreeMap<ChainID, Arc<RollbackSender>>,
-		block_receiver: Receiver<BlockMessage>,
+		event_receiver: Receiver<EventMessage>,
 		system_clients_vec: Vec<Arc<EthClient<T>>>,
 		bootstrap_shared_data: Arc<BootstrapSharedData>,
-		execute_spawn_handle: SpawnTaskHandle,
 	) -> Self {
 		let system_clients: BTreeMap<ChainID, Arc<EthClient<T>>> = system_clients_vec
 			.iter()
@@ -312,15 +245,15 @@ impl<T: 'static + JsonRpcClient> SocketRelayHandler<T> {
 
 		let client = system_clients.get(&id).expect(INVALID_CHAIN_ID).clone();
 
-		let event_senders: BTreeMap<ChainID, Arc<EventSender>> = event_senders_vec
+		let tx_request_senders: BTreeMap<ChainID, Arc<TxRequestSender>> = tx_request_senders_vec
 			.iter()
-			.map(|event_sender| (event_sender.id, event_sender.clone()))
+			.map(|sender| (sender.id, sender.clone()))
 			.collect();
 
 		Self {
-			event_senders,
+			tx_request_senders,
 			rollback_senders,
-			block_receiver,
+			event_receiver,
 			socket_signature: client
 				.protocol_contracts
 				.socket
@@ -331,7 +264,6 @@ impl<T: 'static + JsonRpcClient> SocketRelayHandler<T> {
 			client,
 			system_clients,
 			bootstrap_shared_data,
-			execute_spawn_handle,
 		}
 	}
 
@@ -497,36 +429,14 @@ impl<T: 'static + JsonRpcClient> SocketRelayHandler<T> {
 		give_random_delay: bool,
 		gas_coefficient: GasCoefficient,
 	) {
-		if let Some(event_sender) = self.event_senders.get(&chain_id) {
+		if let Some(sender) = self.tx_request_senders.get(&chain_id) {
 			if self.is_executable(metadata.is_inbound, metadata.status) {
 				self.send_rollbackable_request(chain_id, metadata.clone(), socket_msg);
-
-				match metadata.variants.version {
-					SocketVersion::V1 => {
-						// nothing to do on version 1.
-					},
-					SocketVersion::V2 => {
-						let task = ExecutionFilter::new(
-							self.get_client(),
-							event_sender.clone(),
-							metadata.clone(),
-						);
-						self.execute_spawn_handle.spawn("execution_filter", None, async move {
-							task.try_filter_and_send(
-								tx_request,
-								give_random_delay,
-								GasCoefficient::Mid,
-							)
-							.await
-						});
-						return;
-					},
-				}
 			}
 
-			match event_sender.send(EventMessage::new(
+			match sender.send(TxRequestMessage::new(
 				TxRequest::Legacy(tx_request),
-				EventMetadata::SocketRelay(metadata.clone()),
+				TxRequestMetadata::SocketRelay(metadata.clone()),
 				true,
 				give_random_delay,
 				gas_coefficient,
@@ -724,7 +634,7 @@ mod tests {
 		types::{Bytes, H160},
 	};
 
-	use br_primitives::socket::SocketContract;
+	use br_primitives::contracts::socket::SocketContract;
 
 	use super::*;
 
@@ -754,13 +664,7 @@ mod tests {
 
 	#[test]
 	fn test_socket_event_decode() {
-		let topic =
-			H256::from_str("0x918454f530580823dd0d8cf59cacb45a6eb7cc62f222d7129efba5821e77f191")
-				.unwrap();
-		let data = Bytes::from_str("0x000000000000000000000000000000000000000000000000000000000000002000000bfc0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000002a50000000000000000000000000000000000000000000000000000000000000d7600000000000000000000000000000000000000000000000000000000000000010000003800000000000000000000000000000000000000000000000000000000030203010000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000e00000000a0000000300000bfcb6786b5c260c1f98391e3f9230d757a38639fa570000000000000000000000000000000000000000000000000000000000000000000000000000000000000000ff7116560005a341f809bb6405260bbb0f2a1b45000000000000000000000000ff7116560005a341f809bb6405260bbb0f2a1b4500000000000000000000000000000000000000000000000005938a6ebdb6900000000000000000000000000000000000000000000000000000000000000000c000000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000000").unwrap();
-
-		println!("topic -> {:?}", topic);
-		println!("data -> {:?}", data.clone());
+		let data = Bytes::from_str("0x000000000000000000000000000000000000000000000000000000000000002000000bfc00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000032900000000000000000000000000000000000000000000000000000000000010fe00000000000000000000000000000000000000000000000000000000000000080000003800000000000000000000000000000000000000000000000000000000040207030100000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000e0000000050000000300000bfc872b347cd764d46c127ffefbcab605fff3f3a48c00000000000000000000000000000000000000000000000000000000000000000000000000000000000000007ac737b14b926f5fbbfb7bfa1dfcb01659da1e230000000000000000000000007ac737b14b926f5fbbfb7bfa1dfcb01659da1e2300000000000000000000000000000000000000000000000075d86ab5ce70b78000000000000000000000000000000000000000000000000000000000000000c00000000000000000000000000000000000000000000000000000000000000000").unwrap();
 
 		match ethers::abi::decode(
 			&[ParamType::Tuple(vec![
@@ -783,43 +687,45 @@ mod tests {
 			&data,
 		) {
 			Ok(socket) => {
-				println!("socket -> {:?}", socket);
-				println!("socket -> {:?}", socket[0].to_string());
-			},
-			Err(error) => {
-				panic!("decode failed -> {}", error);
-			},
-		}
-	}
+				let socket = socket[0].clone().into_tuple().unwrap();
+				let req_id = socket[0].clone().into_tuple().unwrap();
+				let status = socket[1].clone().into_uint().unwrap();
+				let ins_code = socket[2].clone().into_tuple().unwrap();
+				let params = socket[3].clone().into_tuple().unwrap();
 
-	#[cfg(feature = "v2")]
-	#[test]
-	fn test_socket_variants_decode() {
-		println!("default byte -> {}", Bytes::default());
-		let raw_variants = Bytes::from_str("0x00000005000000000000000000000000000000000000000000000000000000000000000000000000000000005b38da6a701c568545dcfcb03fcb875f56beddc400000000000000000000000000000000000000000000000000000000000001c8000000000000000000000000000000000000000000000000000000000000008000000000000000000000000000000000000000000000000000000000000000012300000000000000000000000000000000000000000000000000000000000000").unwrap();
-		match ethers::abi::decode(
-			&[ParamType::FixedBytes(4), ParamType::Address, ParamType::Uint(256), ParamType::Bytes],
-			&raw_variants,
-		) {
-			Ok(variants) => {
-				log::info!("variants -> {:?}", variants);
-				let mut result = SocketVariants::default();
-				variants.into_iter().for_each(|variant| match variant {
-					Token::FixedBytes(source_chain) => {
-						result.source_chain = Bytes::from(source_chain);
-					},
-					Token::Address(receiver) => {
-						result.receiver = receiver;
-					},
-					Token::Uint(max_fee) => result.max_fee = max_fee,
-					Token::Bytes(data) => {
-						result.data = Bytes::from(data);
-					},
-					_ => {
-						panic!("decode failed");
-					},
-				});
-				println!("variants -> {:?}", result);
+				println!(
+					"req_id.chain -> {:?}",
+					Bytes::from(req_id[0].clone().into_fixed_bytes().unwrap()).to_string()
+				);
+				println!("req_id.round_id -> {:?}", req_id[1].clone().into_uint().unwrap());
+				println!("req_id.sequence -> {:?}", req_id[2].clone().into_uint().unwrap());
+
+				println!("status -> {:?}", status);
+
+				println!(
+					"ins_code.chain -> {:?}",
+					Bytes::from(ins_code[0].clone().into_fixed_bytes().unwrap()).to_string()
+				);
+				println!(
+					"ins_code.method -> {:?}",
+					Bytes::from(ins_code[1].clone().into_fixed_bytes().unwrap()).to_string()
+				);
+
+				println!(
+					"params.tokenIDX0 -> {:?}",
+					Bytes::from(params[0].clone().into_fixed_bytes().unwrap()).to_string()
+				);
+				println!(
+					"params.tokenIDX1 -> {:?}",
+					Bytes::from(params[1].clone().into_fixed_bytes().unwrap()).to_string()
+				);
+				println!("params.refund -> {:?}", params[2].clone().into_address().unwrap());
+				println!("params.to -> {:?}", params[3].clone().into_address().unwrap());
+				println!("params.amount -> {:?}", params[4].clone().into_uint());
+				println!(
+					"params.variants -> {:?}",
+					Bytes::from(params[5].clone().into_bytes().unwrap()).to_string()
+				);
 			},
 			Err(error) => {
 				panic!("decode failed -> {}", error);

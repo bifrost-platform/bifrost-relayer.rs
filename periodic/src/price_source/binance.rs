@@ -4,7 +4,9 @@ use ethers::{providers::JsonRpcClient, utils::parse_ether};
 use reqwest::Url;
 use serde::Deserialize;
 
-use br_primitives::periodic::{PriceFetcher, PriceResponse};
+use br_primitives::periodic::PriceResponse;
+
+use crate::traits::PriceFetcher;
 
 #[allow(non_snake_case)]
 #[derive(Clone, Debug, Deserialize)]

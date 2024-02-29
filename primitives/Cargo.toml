@@ -19,4 +19,9 @@ async-trait = { workspace = true }
 reqwest = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true, features = ["alloc"] }
-tokio = { workspace = true, features = ["signal", "rt-multi-thread", "parking_lot", "macros"] }
+tokio = { workspace = true, features = [
+	"signal",
+	"rt-multi-thread",
+	"parking_lot",
+	"macros",
+] }

@@ -1,9 +1,11 @@
 use std::{collections::BTreeMap, fmt::Error, sync::Arc};
 
+use br_primitives::periodic::PriceResponse;
 use ethers::{providers::JsonRpcClient, types::U256};
 
 use br_client::eth::EthClient;
-use br_primitives::{PriceFetcher, PriceResponse};
+
+use crate::traits::PriceFetcher;
 
 #[derive(Clone)]
 pub struct ChainlinkPriceFetcher<T> {
@@ -52,8 +54,7 @@ impl<T: JsonRpcClient + 'static> PriceFetcher for ChainlinkPriceFetcher<T> {
 	async fn get_tickers(&self) -> Result<BTreeMap<String, PriceResponse>, Error> {
 		let mut ret = BTreeMap::new();
 
-		for symbol in
-			vec!["USDC".to_string(), "USDT".to_string(), "DAI".to_string(), "BTC".to_string()]
+		for symbol in ["USDC".to_string(), "USDT".to_string(), "DAI".to_string(), "BTC".to_string()]
 		{
 			match self.get_ticker_with_symbol(symbol.clone()).await {
 				Ok(ticker) => ret.insert(symbol, ticker),
