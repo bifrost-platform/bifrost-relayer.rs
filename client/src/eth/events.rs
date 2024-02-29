@@ -253,8 +253,12 @@ impl<T: JsonRpcClient> BootstrapHandler for EventManager<T> {
 		vec![]
 	}
 
-	/// Sends a new event message.
-	pub fn send(&self, message: EventMessage) -> Result<(), SendError<EventMessage>> {
-		self.sender.send(message)
+	async fn is_bootstrap_state_synced_as(&self, state: BootstrapState) -> bool {
+		self.bootstrap_shared_data
+			.bootstrap_states
+			.read()
+			.await
+			.iter()
+			.all(|s| *s == state)
 	}
 }
