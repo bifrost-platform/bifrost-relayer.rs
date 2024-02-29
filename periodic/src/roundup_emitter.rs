@@ -9,19 +9,25 @@ use ethers::{
 };
 use tokio::time::sleep;
 
-use br_client::eth::{
-	EthClient, EventMessage, EventMetadata, EventSender, TxRequest, VSPPhase1Metadata,
-};
+use br_client::eth::{traits::BootstrapHandler, EthClient};
 use br_primitives::{
-	authority::RoundMetaData,
-	bootstrap::{BootstrapHandler, BootstrapSharedData},
-	constants::DEFAULT_BOOTSTRAP_ROUND_OFFSET,
-	errors::INVALID_PERIODIC_SCHEDULE,
-	eth::{BootstrapState, GasCoefficient, RoundUpEventStatus, BOOTSTRAP_BLOCK_CHUNK_SIZE},
-	socket::{RoundUpSubmit, SerializedRoundUp, Signatures, SocketContractEvents},
-	sub_display_format, PeriodicWorker, INVALID_BIFROST_NATIVENESS, INVALID_CONTRACT_ABI,
-	ROUNDUP_EMITTER_SCHEDULE,
+	bootstrap::BootstrapSharedData,
+	constants::{
+		cli::DEFAULT_BOOTSTRAP_ROUND_OFFSET,
+		config::BOOTSTRAP_BLOCK_CHUNK_SIZE,
+		errors::{INVALID_BIFROST_NATIVENESS, INVALID_CONTRACT_ABI, INVALID_PERIODIC_SCHEDULE},
+		schedule::ROUNDUP_EMITTER_SCHEDULE,
+	},
+	contracts::{
+		authority::RoundMetaData,
+		socket::{RoundUpSubmit, SerializedRoundUp, Signatures, SocketContractEvents},
+	},
+	eth::{BootstrapState, GasCoefficient, RoundUpEventStatus},
+	sub_display_format,
+	tx::{TxRequest, TxRequestMessage, TxRequestMetadata, TxRequestSender, VSPPhase1Metadata},
 };
+
+use crate::traits::PeriodicWorker;
 
 const SUB_LOG_TARGET: &str = "roundup-emitter";
 
@@ -30,8 +36,8 @@ pub struct RoundupEmitter<T> {
 	current_round: U256,
 	/// The ethereum client for the Bifrost network.
 	client: Arc<EthClient<T>>,
-	/// The event sender that sends messages to the event channel.
-	event_sender: Arc<EventSender>,
+	/// The sender that sends messages to the tx request channel.
+	tx_request_sender: Arc<TxRequestSender>,
 	/// The time schedule that represents when to check round info.
 	schedule: Schedule,
 	/// The bootstrap shared data.
@@ -91,7 +97,7 @@ impl<T: JsonRpcClient> PeriodicWorker for RoundupEmitter<T> {
 impl<T: JsonRpcClient> RoundupEmitter<T> {
 	/// Instantiates a new `RoundupEmitter` instance.
 	pub fn new(
-		event_senders: Vec<Arc<EventSender>>,
+		tx_request_senders: Vec<Arc<TxRequestSender>>,
 		clients: Vec<Arc<EthClient<T>>>,
 		bootstrap_shared_data: Arc<BootstrapSharedData>,
 	) -> Self {
@@ -104,9 +110,9 @@ impl<T: JsonRpcClient> RoundupEmitter<T> {
 		Self {
 			current_round: U256::default(),
 			client,
-			event_sender: event_senders
+			tx_request_sender: tx_request_senders
 				.iter()
-				.find(|event_sender| event_sender.is_native)
+				.find(|sender| sender.is_native)
 				.expect(INVALID_BIFROST_NATIVENESS)
 				.clone(),
 			schedule: Schedule::from_str(ROUNDUP_EMITTER_SCHEDULE)
@@ -173,15 +179,15 @@ impl<T: JsonRpcClient> RoundupEmitter<T> {
 			)
 	}
 
-	/// Request send transaction to the target event channel.
+	/// Request send transaction to the target tx request channel.
 	fn request_send_transaction(
 		&self,
 		tx_request: TransactionRequest,
 		metadata: VSPPhase1Metadata,
 	) {
-		match self.event_sender.send(EventMessage::new(
+		match self.tx_request_sender.send(TxRequestMessage::new(
 			TxRequest::Legacy(tx_request),
-			EventMetadata::VSPPhase1(metadata.clone()),
+			TxRequestMetadata::VSPPhase1(metadata.clone()),
 			false,
 			false,
 			GasCoefficient::Mid,

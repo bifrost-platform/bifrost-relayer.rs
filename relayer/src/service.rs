@@ -10,22 +10,28 @@ use futures::FutureExt;
 use sc_service::{config::PrometheusConfig, Error as ServiceError, TaskManager};
 
 use br_client::eth::{
-	BlockManager, Eip1559TransactionManager, EthClient, EventSender, Handler,
-	LegacyTransactionManager, RoundupRelayHandler, SocketRelayHandler, TransactionManager,
-	WalletManager,
+	events::EventManager,
+	handlers::{RoundupRelayHandler, SocketRelayHandler},
+	traits::{Handler, TransactionManager},
+	tx::{Eip1559TransactionManager, LegacyTransactionManager},
+	wallet::WalletManager,
+	EthClient,
 };
 use br_periodic::{
-	heartbeat_sender::HeartbeatSender, roundup_emitter::RoundupEmitter,
-	socket_rollback_handler::SocketRollbackHandler, OraclePriceFeeder,
+	traits::PeriodicWorker, HeartbeatSender, OraclePriceFeeder, RoundupEmitter,
+	SocketRollbackEmitter,
 };
 use br_primitives::{
 	bootstrap::BootstrapSharedData,
 	cli::{Configuration, HandlerType},
-	constants::{DEFAULT_GET_LOGS_BATCH_SIZE, DEFAULT_MIN_PRIORITY_FEE, DEFAULT_PROMETHEUS_PORT},
-	errors::{INVALID_CHAIN_ID, INVALID_PRIVATE_KEY, INVALID_PROVIDER_URL},
+	constants::{
+		cli::{DEFAULT_GET_LOGS_BATCH_SIZE, DEFAULT_MIN_PRIORITY_FEE, DEFAULT_PROMETHEUS_PORT},
+		errors::{INVALID_CHAIN_ID, INVALID_PRIVATE_KEY, INVALID_PROVIDER_URL},
+	},
 	eth::{AggregatorContracts, BootstrapState, ChainID, ProtocolContracts, ProviderMetadata},
-	periodic::PeriodicWorker,
-	sub_display_format, RollbackSender,
+	periodic::RollbackSender,
+	sub_display_format,
+	tx::TxRequestSender,
 };
 
 use crate::{
@@ -44,32 +50,32 @@ fn construct_periodics(
 	relayer_deps: &ManagerDeps,
 ) -> PeriodicDeps {
 	let clients = &relayer_deps.clients;
-	let event_senders = &relayer_deps.event_senders;
+	let tx_request_senders = &relayer_deps.tx_request_senders;
 
-	let mut rollback_handlers = vec![];
+	let mut rollback_emitters = vec![];
 	let mut rollback_senders = BTreeMap::new();
 
 	// initialize the heartbeat sender
-	let heartbeat_sender = HeartbeatSender::new(event_senders.clone(), clients.clone());
+	let heartbeat_sender = HeartbeatSender::new(tx_request_senders.clone(), clients.clone());
 
 	// initialize the oracle price feeder
-	let oracle_price_feeder = OraclePriceFeeder::new(event_senders.clone(), clients.clone());
+	let oracle_price_feeder = OraclePriceFeeder::new(tx_request_senders.clone(), clients.clone());
 
 	// initialize the roundup emitter
 	let roundup_emitter = RoundupEmitter::new(
-		event_senders.clone(),
+		tx_request_senders.clone(),
 		clients.clone(),
 		Arc::new(bootstrap_shared_data.clone()),
 	);
 
 	// initialize socket rollback handlers
-	event_senders.iter().for_each(|event_sender| {
-		let (rollback_handler, rollback_sender) =
-			SocketRollbackHandler::new(event_sender.clone(), clients.clone());
-		rollback_handlers.push(rollback_handler);
+	tx_request_senders.iter().for_each(|tx_request_sender| {
+		let (rollback_emitter, rollback_sender) =
+			SocketRollbackEmitter::new(tx_request_sender.clone(), clients.clone());
+		rollback_emitters.push(rollback_emitter);
 		rollback_senders.insert(
-			event_sender.id,
-			Arc::new(RollbackSender::new(event_sender.id, rollback_sender)),
+			tx_request_sender.id,
+			Arc::new(RollbackSender::new(tx_request_sender.id, rollback_sender)),
 		);
 	});
 
@@ -77,7 +83,7 @@ fn construct_periodics(
 		heartbeat_sender,
 		oracle_price_feeder,
 		roundup_emitter,
-		rollback_handlers,
+		rollback_emitters,
 		rollback_senders,
 	}
 }
@@ -88,29 +94,27 @@ fn construct_handlers(
 	periodic_deps: &PeriodicDeps,
 	manager_deps: &ManagerDeps,
 	bootstrap_shared_data: BootstrapSharedData,
-	task_manager: &TaskManager,
 ) -> HandlerDeps {
 	let mut handlers = (vec![], vec![]);
 	let PeriodicDeps { rollback_senders, .. } = periodic_deps;
-	let ManagerDeps { clients, block_managers, event_senders, .. } = manager_deps;
+	let ManagerDeps { clients, event_managers, tx_request_senders, .. } = manager_deps;
 
 	config.relayer_config.handler_configs.iter().for_each(|handler_config| {
 		match handler_config.handler_type {
 			HandlerType::Socket => handler_config.watch_list.iter().for_each(|target| {
 				handlers.0.push(SocketRelayHandler::new(
 					*target,
-					event_senders.clone(),
+					tx_request_senders.clone(),
 					rollback_senders.clone(),
-					block_managers.get(target).expect(INVALID_CHAIN_ID).sender.subscribe(),
+					event_managers.get(target).expect(INVALID_CHAIN_ID).sender.subscribe(),
 					clients.clone(),
 					Arc::new(bootstrap_shared_data.clone()),
-					task_manager.spawn_handle(),
 				));
 			}),
 			HandlerType::Roundup => {
 				handlers.1.push(RoundupRelayHandler::new(
-					event_senders.clone(),
-					block_managers
+					tx_request_senders.clone(),
+					event_managers
 						.get(&handler_config.watch_list[0])
 						.expect(INVALID_CHAIN_ID)
 						.sender
@@ -124,7 +128,7 @@ fn construct_handlers(
 	HandlerDeps { socket_relay_handlers: handlers.0, roundup_relay_handlers: handlers.1 }
 }
 
-/// Initializes the `EthClient`, `TransactionManager`, `BlockManager`, `EventSender` for each chain.
+/// Initializes the `EthClient`, `TransactionManager`, `EventManager`, `TxRequestSender` for each chain.
 fn construct_managers(
 	config: &Configuration,
 	bootstrap_shared_data: BootstrapSharedData,
@@ -136,8 +140,8 @@ fn construct_managers(
 
 	let mut clients = vec![];
 	let mut tx_managers = (vec![], vec![]);
-	let mut block_managers = BTreeMap::new();
-	let mut event_senders = vec![];
+	let mut event_managers = BTreeMap::new();
+	let mut tx_request_senders = vec![];
 
 	// iterate each evm provider and construct inner components.
 	evm_providers.iter().for_each(|evm_provider| {
@@ -163,7 +167,6 @@ fn construct_managers(
 				evm_provider.socket_address.clone(),
 				evm_provider.authority_address.clone(),
 				evm_provider.relayer_manager_address.clone(),
-				evm_provider.executor_address.clone(),
 			),
 			AggregatorContracts::new(
 				Arc::new(provider),
@@ -185,7 +188,11 @@ fn construct_managers(
 					task_manager.spawn_handle(),
 				);
 				tx_managers.1.push(tx_manager);
-				event_senders.push(Arc::new(EventSender::new(evm_provider.id, sender, is_native)));
+				tx_request_senders.push(Arc::new(TxRequestSender::new(
+					evm_provider.id,
+					sender,
+					is_native,
+				)));
 			} else {
 				let (tx_manager, sender) = LegacyTransactionManager::new(
 					client.clone(),
@@ -196,10 +203,14 @@ fn construct_managers(
 					task_manager.spawn_handle(),
 				);
 				tx_managers.0.push(tx_manager);
-				event_senders.push(Arc::new(EventSender::new(evm_provider.id, sender, is_native)));
+				tx_request_senders.push(Arc::new(TxRequestSender::new(
+					evm_provider.id,
+					sender,
+					is_native,
+				)));
 			}
 		}
-		let block_manager = BlockManager::new(
+		let event_manager = EventManager::new(
 			client.clone(),
 			Arc::new(bootstrap_shared_data.clone()),
 			match &prometheus_config {
@@ -209,10 +220,10 @@ fn construct_managers(
 		);
 
 		clients.push(client);
-		block_managers.insert(block_manager.client.get_chain_id(), block_manager);
+		event_managers.insert(event_manager.client.get_chain_id(), event_manager);
 	});
 
-	ManagerDeps { clients, tx_managers, block_managers, event_senders }
+	ManagerDeps { clients, tx_managers, event_managers, tx_request_senders }
 }
 
 /// Spawn relayer service tasks by the `TaskManager`.
@@ -226,12 +237,12 @@ fn spawn_relayer_tasks(
 	let FullDeps { bootstrap_shared_data, manager_deps, periodic_deps, handler_deps } = deps;
 
 	let BootstrapSharedData { socket_barrier, bootstrap_states, .. } = bootstrap_shared_data;
-	let ManagerDeps { tx_managers, block_managers, .. } = manager_deps;
+	let ManagerDeps { tx_managers, event_managers, .. } = manager_deps;
 	let PeriodicDeps {
 		mut heartbeat_sender,
 		mut oracle_price_feeder,
 		mut roundup_emitter,
-		rollback_handlers,
+		rollback_emitters,
 		..
 	} = periodic_deps;
 	let HandlerDeps { socket_relay_handlers, roundup_relay_handlers } = handler_deps;
@@ -273,15 +284,15 @@ fn spawn_relayer_tasks(
 		Some("oracle"),
 		async move { oracle_price_feeder.run().await },
 	);
-	// spawn socket rollback handlers
-	rollback_handlers.into_iter().for_each(|mut handler| {
+	// spawn socket rollback emitters
+	rollback_emitters.into_iter().for_each(|mut emitter| {
 		task_manager.spawn_essential_handle().spawn(
 			Box::leak(
-				format!("{}-socket-rollback-handler", handler.client.get_chain_name())
+				format!("{}-socket-rollback-emitter", emitter.client.get_chain_name())
 					.into_boxed_str(),
 			),
 			Some("rollback"),
-			async move { handler.run().await },
+			async move { emitter.run().await },
 		)
 	});
 
@@ -332,17 +343,17 @@ fn spawn_relayer_tasks(
 		async move { roundup_emitter.run().await },
 	);
 
-	// spawn block managers
-	block_managers.into_iter().for_each(|(_chain_id, mut block_manager)| {
+	// spawn event managers
+	event_managers.into_iter().for_each(|(_chain_id, mut event_manager)| {
 		task_manager.spawn_essential_handle().spawn(
 			Box::leak(
-				format!("{}-block-manager", block_manager.client.get_chain_name()).into_boxed_str(),
+				format!("{}-event-manager", event_manager.client.get_chain_name()).into_boxed_str(),
 			),
-			Some("block-managers"),
+			Some("event-managers"),
 			async move {
-				block_manager.wait_provider_sync().await;
+				event_manager.wait_provider_sync().await;
 
-				block_manager.run().await
+				event_manager.run().await
 			},
 		)
 	});
@@ -424,13 +435,8 @@ fn new_relay_base(config: Configuration) -> Result<RelayBase, ServiceError> {
 
 	let manager_deps = construct_managers(&config, bootstrap_shared_data.clone(), &task_manager);
 	let periodic_deps = construct_periodics(bootstrap_shared_data.clone(), &manager_deps);
-	let handler_deps = construct_handlers(
-		&config,
-		&periodic_deps,
-		&manager_deps,
-		bootstrap_shared_data.clone(),
-		&task_manager,
-	);
+	let handler_deps =
+		construct_handlers(&config, &periodic_deps, &manager_deps, bootstrap_shared_data.clone());
 
 	print_relay_targets(&manager_deps);
 
@@ -453,10 +459,10 @@ struct ManagerDeps {
 	clients: Vec<Arc<EthClient<Http>>>,
 	/// The `TransactionManager`'s for each specified chain.
 	tx_managers: (Vec<LegacyTransactionManager<Http>>, Vec<Eip1559TransactionManager<Http>>),
-	/// The `BlockManager`'s for each specified chain.
-	block_managers: BTreeMap<ChainID, BlockManager<Http>>,
-	/// The `EventSender`'s for each specified chain.
-	event_senders: Vec<Arc<EventSender>>,
+	/// The `EventManager`'s for each specified chain.
+	event_managers: BTreeMap<ChainID, EventManager<Http>>,
+	/// The `TxRequestSender`'s for each specified chain.
+	tx_request_senders: Vec<Arc<TxRequestSender>>,
 }
 
 struct PeriodicDeps {
@@ -466,8 +472,8 @@ struct PeriodicDeps {
 	oracle_price_feeder: OraclePriceFeeder<Http>,
 	/// The `RoundupEmitter` used for detecting and emitting new round updates.
 	roundup_emitter: RoundupEmitter<Http>,
-	/// The `SocketRollbackHandler`'s for each specified chain.
-	rollback_handlers: Vec<SocketRollbackHandler<Http>>,
+	/// The `SocketRollbackEmitter`'s for each specified chain.
+	rollback_emitters: Vec<SocketRollbackEmitter<Http>>,
 	/// The `RollbackSender`'s for each specified chain.
 	rollback_senders: BTreeMap<ChainID, Arc<RollbackSender>>,
 }

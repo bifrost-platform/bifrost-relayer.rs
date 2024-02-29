@@ -1,6 +1,5 @@
 use std::sync::Arc;
 
-use ethers::types::Log;
 use tokio::sync::{Barrier, Mutex, RwLock};
 
 use crate::{
@@ -58,16 +57,4 @@ impl BootstrapSharedData {
 			bootstrap_config: bootstrap_config.clone(),
 		}
 	}
-}
-
-#[async_trait::async_trait]
-pub trait BootstrapHandler {
-	/// Starts the bootstrap process.
-	async fn bootstrap(&self);
-
-	/// Fetch the historical events to bootstrap.
-	async fn get_bootstrap_events(&self) -> Vec<Log>;
-
-	/// Verifies whether the bootstrap state has been synced to the given state.
-	async fn is_bootstrap_state_synced_as(&self, state: BootstrapState) -> bool;
 }

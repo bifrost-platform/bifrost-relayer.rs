@@ -1,20 +1,22 @@
-use br_primitives::cli::SentryConfig;
 use sentry::ClientInitGuard;
+use std::borrow::Cow;
 
 /// Builds a sentry client only when the sentry config exists.
-pub fn build_sentry_client(sentry_config: Option<SentryConfig>) -> Option<ClientInitGuard> {
-	if let Some(sentry_config) = sentry_config {
-		if sentry_config.is_enabled && !sentry_config.dsn.is_empty() {
-			let sentry_client = sentry::init((
-				sentry_config.dsn,
-				sentry::ClientOptions {
-					release: sentry::release_name!(),
-					environment: sentry_config.environment,
-					..Default::default()
-				},
-			));
-			return Some(sentry_client)
-		}
+pub fn build_sentry_client(
+	is_enabled: bool,
+	dsn: String,
+	environment: Option<Cow<'static, str>>,
+) -> Option<ClientInitGuard> {
+	if is_enabled && !dsn.is_empty() {
+		let sentry_client = sentry::init((
+			dsn,
+			sentry::ClientOptions {
+				release: sentry::release_name!(),
+				environment,
+				..Default::default()
+			},
+		));
+		return Some(sentry_client);
 	}
 	None
 }

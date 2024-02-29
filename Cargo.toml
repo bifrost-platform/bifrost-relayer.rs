@@ -23,7 +23,7 @@ repository = "https://github.com/bifrost-platform/bifrost-relayer.rs"
 # General
 log = "0.4.20"
 env_logger = "0.10.0"
-sentry = { version = "0.31.7", default-features = false, features = [
+sentry = { version = "0.32.1", default-features = false, features = [
 	"reqwest",
 	"rustls",
 	"backtrace",
@@ -58,14 +58,14 @@ tokio = "1.33.0"
 tokio-stream = "0.1.14"
 
 # Substrate Client
-sc-cli = { git = "https://github.com/bifrost-platform/bifrost-substrate", default-features = false, branch = "bifrost-polkadot-v0.9.43" }
-sc-utils = { git = "https://github.com/bifrost-platform/bifrost-substrate", default-features = false, branch = "bifrost-polkadot-v0.9.43" }
-sc-service = { git = "https://github.com/bifrost-platform/bifrost-substrate", default-features = false, branch = "bifrost-polkadot-v0.9.43" }
-sc-sysinfo = { git = "https://github.com/bifrost-platform/bifrost-substrate", default-features = false, branch = "bifrost-polkadot-v0.9.43" }
-prometheus-endpoint = { package = "substrate-prometheus-endpoint", default-features = false, git = "https://github.com/bifrost-platform/bifrost-substrate", branch = "bifrost-polkadot-v0.9.43" }
+sc-cli = { git = "https://github.com/bifrost-platform/polkadot-sdk", default-features = false, branch = "bifrost-polkadot-v1.3.0" }
+sc-utils = { git = "https://github.com/bifrost-platform/polkadot-sdk", default-features = false, branch = "bifrost-polkadot-v1.3.0" }
+sc-service = { git = "https://github.com/bifrost-platform/polkadot-sdk", default-features = false, branch = "bifrost-polkadot-v1.3.0" }
+sc-sysinfo = { git = "https://github.com/bifrost-platform/polkadot-sdk", default-features = false, branch = "bifrost-polkadot-v1.3.0" }
+prometheus-endpoint = { package = "substrate-prometheus-endpoint", default-features = false, git = "https://github.com/bifrost-platform/polkadot-sdk", branch = "bifrost-polkadot-v1.3.0" }
 
 # Substrate Builds
-substrate-build-script-utils = { git = "https://github.com/bifrost-platform/bifrost-substrate", default-features = false, branch = "bifrost-polkadot-v0.9.43" }
+substrate-build-script-utils = { git = "https://github.com/bifrost-platform/polkadot-sdk", default-features = false, branch = "bifrost-polkadot-v1.3.0" }
 
 [profile.production]
 inherits = "release"

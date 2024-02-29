@@ -5,22 +5,25 @@ use ethers::{providers::JsonRpcClient, types::U256};
 use serde::Deserialize;
 
 use br_client::eth::EthClient;
-use br_primitives::periodic::{PriceFetcher, PriceResponse, PriceSource};
+use br_primitives::periodic::{PriceResponse, PriceSource};
 
-use crate::price_source::{
-	binance::BinancePriceFetcher, chainlink::ChainlinkPriceFetcher,
-	coingecko::CoingeckoPriceFetcher, gateio::GateioPriceFetcher, kucoin::KucoinPriceFetcher,
-	upbit::UpbitPriceFetcher,
+use crate::{
+	price_source::{
+		binance::BinancePriceFetcher, chainlink::ChainlinkPriceFetcher,
+		coingecko::CoingeckoPriceFetcher, gateio::GateioPriceFetcher, kucoin::KucoinPriceFetcher,
+		upbit::UpbitPriceFetcher,
+	},
+	traits::PriceFetcher,
 };
 
-pub mod binance;
-pub mod chainlink;
-pub mod coingecko;
-pub mod gateio;
-pub mod kucoin;
-pub mod upbit;
+mod binance;
+mod chainlink;
+mod coingecko;
+mod gateio;
+mod kucoin;
+mod upbit;
 
-pub const LOG_TARGET: &str = "price-fetcher";
+const LOG_TARGET: &str = "price-fetcher";
 
 #[derive(Clone)]
 pub enum PriceFetchers<T> {
@@ -77,10 +80,12 @@ impl<T: JsonRpcClient> PriceFetchers<T> {
 	) -> Result<Self, Error> {
 		match exchange {
 			PriceSource::Binance => Ok(PriceFetchers::Binance(BinancePriceFetcher::new().await?)),
-			PriceSource::Chainlink =>
-				Ok(PriceFetchers::Chainlink(ChainlinkPriceFetcher::new(client).await)),
-			PriceSource::Coingecko =>
-				Ok(PriceFetchers::CoinGecko(CoingeckoPriceFetcher::new().await?)),
+			PriceSource::Chainlink => {
+				Ok(PriceFetchers::Chainlink(ChainlinkPriceFetcher::new(client).await))
+			},
+			PriceSource::Coingecko => {
+				Ok(PriceFetchers::CoinGecko(CoingeckoPriceFetcher::new().await?))
+			},
 			PriceSource::Gateio => Ok(PriceFetchers::Gateio(GateioPriceFetcher::new().await?)),
 			PriceSource::Kucoin => Ok(PriceFetchers::Kucoin(KucoinPriceFetcher::new().await?)),
 			PriceSource::Upbit => Ok(PriceFetchers::Upbit(UpbitPriceFetcher::new().await?)),

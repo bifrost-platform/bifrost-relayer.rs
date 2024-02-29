@@ -1,6 +1,6 @@
 use br_primitives::{
 	cli::{Configuration, RelayerConfig, Result as CliResult},
-	errors::{INVALID_CONFIG_FILE_PATH, INVALID_CONFIG_FILE_STRUCTURE},
+	constants::errors::{INVALID_CONFIG_FILE_PATH, INVALID_CONFIG_FILE_STRUCTURE},
 };
 
 pub fn create_configuration(

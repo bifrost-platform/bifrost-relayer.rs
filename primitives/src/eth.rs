@@ -2,35 +2,19 @@ use std::{str::FromStr, sync::Arc};
 
 use ethers::{
 	providers::{JsonRpcClient, Provider},
-	types::{Address, Bytes, Signature, TransactionRequest, H160, U256, U64},
+	types::{Address, Signature, TransactionRequest, H160, U64},
 };
 
 use crate::{
-	authority::AuthorityContract, chainlink_aggregator::ChainlinkContract,
-	relayer_manager::RelayerManagerContract, socket::SocketContract, INVALID_CONTRACT_ADDRESS,
+	constants::errors::INVALID_CONTRACT_ADDRESS,
+	contracts::{
+		authority::AuthorityContract, chainlink_aggregator::ChainlinkContract,
+		relayer_manager::RelayerManagerContract, socket::SocketContract,
+	},
 };
 
 /// The type of EVM chain ID's.
 pub type ChainID = u32;
-
-/// The native chain's average block time in seconds.
-pub const NATIVE_BLOCK_TIME: u32 = 3u32;
-
-/// Ethereum network's average block time in seconds.
-pub const ETHEREUM_BLOCK_TIME: u64 = 12u64;
-
-/// The block range chunk size for getLogs requests.
-pub const BOOTSTRAP_BLOCK_CHUNK_SIZE: u64 = 2000;
-
-/// The block offset used to measure the average block time at bootstrap.
-pub const BOOTSTRAP_BLOCK_OFFSET: u32 = 100;
-
-#[derive(Clone, Debug)]
-/// The protocol version of the CCCP Socket message.
-pub enum SocketVersion {
-	V1,
-	V2,
-}
 
 /// The metadata of the EVM provider.
 pub struct ProviderMetadata {
@@ -121,8 +105,6 @@ pub struct ProtocolContracts<T> {
 	pub authority: AuthorityContract<Provider<T>>,
 	/// RelayerManagerContract (Bifrost only)
 	pub relayer_manager: Option<RelayerManagerContract<Provider<T>>>,
-	/// The CCCP v2 Execution contract address.
-	pub executor_address: Option<Address>,
 }
 
 impl<T: JsonRpcClient> ProtocolContracts<T> {
@@ -131,7 +113,6 @@ impl<T: JsonRpcClient> ProtocolContracts<T> {
 		socket_address: String,
 		authority_address: String,
 		relayer_manager_address: Option<String>,
-		executor_address: Option<String>,
 	) -> Self {
 		Self {
 			socket: SocketContract::new(
@@ -148,8 +129,6 @@ impl<T: JsonRpcClient> ProtocolContracts<T> {
 					provider.clone(),
 				)
 			}),
-			executor_address: executor_address
-				.map(|address| Address::from_str(&address).expect(INVALID_CONTRACT_ADDRESS)),
 		}
 	}
 }
@@ -197,14 +176,25 @@ impl RoundUpEventStatus {
 #[derive(Clone, Copy, Debug, PartialEq, PartialOrd)]
 /// The socket event status.
 pub enum SocketEventStatus {
+	/// When the `SocketMessage` with given request ID does not exist
+	/// on a certain chain, the status will be `None`.
 	None,
+	/// A bridge request has been successfully initialized on the source chain.
 	Requested,
+	/// The opposite side of `Requested`.
 	Failed,
+	/// A bridge request has been successfully executed on the destination chain.
 	Executed,
+	/// The opposite side of `Executed`.
 	Reverted,
+	/// A bridge request has been accepted on Bifrost.
 	Accepted,
+	/// The opposite side of `Accepted`.
 	Rejected,
+	/// A bridge request has been successfully committed back to the source chain.
 	Committed,
+	/// The opposite side of `Committed`.
+	/// The bridged asset will be refunded to the user.
 	Rollbacked,
 }
 
@@ -237,27 +227,6 @@ impl From<SocketEventStatus> for u8 {
 			SocketEventStatus::Rejected => 6,
 			SocketEventStatus::Committed => 7,
 			SocketEventStatus::Rollbacked => 8,
-		}
-	}
-}
-
-#[derive(Clone, Debug)]
-pub struct SocketVariants {
-	pub source_chain: Bytes,
-	pub receiver: Address,
-	pub max_fee: U256,
-	pub data: Bytes,
-	pub version: SocketVersion,
-}
-
-impl Default for SocketVariants {
-	fn default() -> Self {
-		Self {
-			source_chain: Bytes::default(),
-			receiver: Address::default(),
-			max_fee: U256::default(),
-			data: Bytes::default(),
-			version: SocketVersion::V1,
 		}
 	}
 }

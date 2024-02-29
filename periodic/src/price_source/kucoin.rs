@@ -1,10 +1,11 @@
 use std::{collections::BTreeMap, fmt::Error, marker::PhantomData};
 
+use br_primitives::periodic::PriceResponse;
 use ethers::{providers::JsonRpcClient, utils::parse_ether};
 use reqwest::Url;
 use serde::Deserialize;
 
-use br_primitives::{PriceFetcher, PriceResponse};
+use crate::traits::PriceFetcher;
 
 #[derive(Debug, Clone, Deserialize)]
 struct Inner {

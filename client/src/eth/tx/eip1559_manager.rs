@@ -1,17 +1,22 @@
 use crate::eth::{
-	Eip1559GasMiddleware, EthClient, EventMessage, TransactionManager, TxRequest,
-	DEFAULT_TX_RETRIES, MAX_FEE_COEFFICIENT, MAX_PRIORITY_FEE_COEFFICIENT,
+	traits::{TransactionManager, TransactionTask},
+	Eip1559GasMiddleware, EthClient,
 };
+
 use async_trait::async_trait;
 use br_primitives::{
-	eth::ETHEREUM_BLOCK_TIME, sub_display_format, INSUFFICIENT_FUNDS,
-	NETWORK_DOES_NOT_SUPPORT_EIP1559, PROVIDER_INTERNAL_ERROR,
+	constants::{
+		config::ETHEREUM_BLOCK_TIME,
+		errors::{INSUFFICIENT_FUNDS, NETWORK_DOES_NOT_SUPPORT_EIP1559, PROVIDER_INTERNAL_ERROR},
+		tx::{DEFAULT_TX_RETRIES, MAX_FEE_COEFFICIENT, MAX_PRIORITY_FEE_COEFFICIENT},
+	},
+	sub_display_format,
+	tx::{TxRequest, TxRequestMessage},
 };
 use ethers::{
 	middleware::{MiddlewareBuilder, NonceManagerMiddleware, SignerMiddleware},
 	prelude::Transaction,
-	providers::{JsonRpcClient, Middleware, Provider},
-	signers::LocalWallet,
+	providers::{JsonRpcClient, Middleware},
 	types::{
 		transaction::eip2718::TypedTransaction, BlockId, BlockNumber, Bytes,
 		Eip1559TransactionRequest, U256,
@@ -27,20 +32,18 @@ use tokio::{
 	time::sleep,
 };
 
-use super::{generate_delay, TransactionTask};
+use super::{generate_delay, TransactionMiddleware};
 
 const SUB_LOG_TARGET: &str = "eip1559-tx-manager";
-
-type Eip1559Middleware<T> = NonceManagerMiddleware<SignerMiddleware<Arc<Provider<T>>, LocalWallet>>;
 
 /// The essential task that sends eip1559 transactions asynchronously.
 pub struct Eip1559TransactionManager<T> {
 	/// The ethereum client for the connected chain.
 	pub client: Arc<EthClient<T>>,
 	/// The client signs transaction for the connected chain with local nonce manager.
-	middleware: Arc<Eip1559Middleware<T>>,
-	/// The receiver connected to the event channel.
-	receiver: UnboundedReceiver<EventMessage>,
+	middleware: Arc<TransactionMiddleware<T>>,
+	/// The receiver connected to the tx request channel.
+	receiver: UnboundedReceiver<TxRequestMessage>,
 	/// The flag whether the client has enabled txpool namespace.
 	is_txpool_enabled: bool,
 	/// The minimum priority fee required.
@@ -59,8 +62,8 @@ impl<T: 'static + JsonRpcClient> Eip1559TransactionManager<T> {
 		min_priority_fee: U256,
 		duplicate_confirm_delay: Option<u64>,
 		tx_spawn_handle: SpawnTaskHandle,
-	) -> (Self, UnboundedSender<EventMessage>) {
-		let (sender, receiver) = mpsc::unbounded_channel::<EventMessage>();
+	) -> (Self, UnboundedSender<TxRequestMessage>) {
+		let (sender, receiver) = mpsc::unbounded_channel::<TxRequestMessage>();
 
 		let middleware = Arc::new(
 			client
@@ -115,7 +118,7 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> for Eip1559TransactionMan
 		self.tx_spawn_handle.clone()
 	}
 
-	async fn spawn_send_transaction(&self, msg: EventMessage) {
+	async fn spawn_send_transaction(&self, msg: TxRequestMessage) {
 		let task = Eip1559TransactionTask::new(
 			self.get_client(),
 			self.middleware.clone(),
@@ -202,7 +205,7 @@ pub struct Eip1559TransactionTask<T> {
 	/// The ethereum client for the connected chain.
 	client: Arc<EthClient<T>>,
 	/// The client signs transaction for the connected chain with local nonce manager.
-	middleware: Arc<Eip1559Middleware<T>>,
+	middleware: Arc<TransactionMiddleware<T>>,
 	/// The flag whether the client has enabled txpool namespace.
 	is_txpool_enabled: bool,
 	/// The minimum priority fee required.
@@ -216,7 +219,7 @@ impl<T: JsonRpcClient> Eip1559TransactionTask<T> {
 	/// Build an Eip1559 transaction task.
 	pub fn new(
 		client: Arc<EthClient<T>>,
-		middleware: Arc<Eip1559Middleware<T>>,
+		middleware: Arc<TransactionMiddleware<T>>,
 		is_txpool_enabled: bool,
 		min_priority_fee: U256,
 		duplicate_confirm_delay: Option<u64>,
@@ -243,7 +246,7 @@ impl<T: JsonRpcClient> TransactionTask<T> for Eip1559TransactionTask<T> {
 		self.client.debug_mode
 	}
 
-	async fn try_send_transaction(&self, mut msg: EventMessage) {
+	async fn try_send_transaction(&self, mut msg: TxRequestMessage) {
 		msg.tx_request = TxRequest::Eip1559(msg.tx_request.to_eip1559());
 
 		if msg.retries_remaining == 0 {

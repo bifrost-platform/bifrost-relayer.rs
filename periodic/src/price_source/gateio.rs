@@ -4,7 +4,9 @@ use ethers::{providers::JsonRpcClient, utils::parse_ether};
 use reqwest::Url;
 use serde::Deserialize;
 
-use br_primitives::periodic::{PriceFetcher, PriceResponse};
+use br_primitives::periodic::PriceResponse;
+
+use crate::traits::PriceFetcher;
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct GateioResponse {
@@ -56,7 +58,7 @@ impl<T: JsonRpcClient> PriceFetcher for GateioPriceFetcher<T> {
 				Ok(ret)
 			},
 			Err(_) => Err(Error),
-		}
+		};
 	}
 }
 

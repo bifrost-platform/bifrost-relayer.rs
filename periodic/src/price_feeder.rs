@@ -11,18 +11,25 @@ use ethers::{
 use rand::Rng;
 use tokio::time::sleep;
 
-use br_client::eth::{
-	EthClient, EventMessage, EventMetadata, EventSender, PriceFeedMetadata, TxRequest,
-};
+use br_client::eth::EthClient;
 use br_primitives::{
-	errors::INVALID_PERIODIC_SCHEDULE, eth::GasCoefficient, periodic::PeriodicWorker,
-	socket::get_asset_oids, sub_display_format, PriceFetcher, PriceResponse, PriceSource,
-	INVALID_BIFROST_NATIVENESS, PRICE_FEEDER_SCHEDULE,
+	constants::{
+		errors::{INVALID_BIFROST_NATIVENESS, INVALID_PERIODIC_SCHEDULE},
+		schedule::PRICE_FEEDER_SCHEDULE,
+	},
+	contracts::socket::get_asset_oids,
+	eth::GasCoefficient,
+	periodic::{PriceResponse, PriceSource},
+	sub_display_format,
+	tx::{PriceFeedMetadata, TxRequest, TxRequestMessage, TxRequestMetadata, TxRequestSender},
 };
 
-use crate::price_source::PriceFetchers;
+use crate::{
+	price_source::PriceFetchers,
+	traits::{PeriodicWorker, PriceFetcher},
+};
 
-const SUB_LOG_TARGET: &str = "price-oracle";
+const SUB_LOG_TARGET: &str = "price-feeder";
 
 /// The essential task that handles oracle price feedings.
 pub struct OraclePriceFeeder<T> {
@@ -34,8 +41,8 @@ pub struct OraclePriceFeeder<T> {
 	primary_source: Vec<PriceFetchers<T>>,
 	/// The secondary source for fetching prices. (aggregated from external sources)
 	secondary_sources: Vec<PriceFetchers<T>>,
-	/// The event sender that sends messages to the event channel.
-	event_sender: Arc<EventSender>,
+	/// The sender that sends messages to the tx request channel.
+	tx_request_sender: Arc<TxRequestSender>,
 	/// The pre-defined oracle ID's for each asset.
 	asset_oid: BTreeMap<&'static str, H256>,
 	/// The vector that contains each `EthClient`.
@@ -75,7 +82,7 @@ impl<T: JsonRpcClient + 'static> PeriodicWorker for OraclePriceFeeder<T> {
 
 impl<T: JsonRpcClient + 'static> OraclePriceFeeder<T> {
 	pub fn new(
-		event_senders: Vec<Arc<EventSender>>,
+		tx_request_senders: Vec<Arc<TxRequestSender>>,
 		system_clients: Vec<Arc<EthClient<T>>>,
 	) -> Self {
 		let asset_oid = get_asset_oids();
@@ -84,9 +91,9 @@ impl<T: JsonRpcClient + 'static> OraclePriceFeeder<T> {
 			schedule: Schedule::from_str(PRICE_FEEDER_SCHEDULE).expect(INVALID_PERIODIC_SCHEDULE),
 			primary_source: vec![],
 			secondary_sources: vec![],
-			event_sender: event_senders
+			tx_request_sender: tx_request_senders
 				.iter()
-				.find(|event_sender| event_sender.is_native)
+				.find(|sender| sender.is_native)
 				.expect(INVALID_BIFROST_NATIVENESS)
 				.clone(),
 			asset_oid,
@@ -279,15 +286,15 @@ impl<T: JsonRpcClient + 'static> OraclePriceFeeder<T> {
 			)
 	}
 
-	/// Request send transaction to the target event channel.
+	/// Request send transaction to the target tx request channel.
 	async fn request_send_transaction(
 		&self,
 		tx_request: TransactionRequest,
 		metadata: PriceFeedMetadata,
 	) {
-		match self.event_sender.send(EventMessage::new(
+		match self.tx_request_sender.send(TxRequestMessage::new(
 			TxRequest::Legacy(tx_request),
-			EventMetadata::PriceFeed(metadata.clone()),
+			TxRequestMetadata::PriceFeed(metadata.clone()),
 			false,
 			false,
 			GasCoefficient::Mid,
