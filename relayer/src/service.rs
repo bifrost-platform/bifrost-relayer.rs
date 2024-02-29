@@ -80,7 +80,7 @@ fn construct_periodics(
 	let mut rollback_emitters = vec![];
 	let mut rollback_senders = BTreeMap::new();
 
-	let mut rollback_handlers = vec![];
+	let mut rollback_emitters = vec![];
 	let mut rollback_senders = BTreeMap::new();
 
 	// initialize the heartbeat sender
@@ -142,7 +142,6 @@ fn construct_handlers(
 	periodic_deps: &PeriodicDeps,
 	manager_deps: &ManagerDeps,
 	bootstrap_shared_data: BootstrapSharedData,
-	task_manager: &TaskManager,
 ) -> HandlerDeps {
 	let mut handlers = (vec![], vec![]);
 	let PeriodicDeps { rollback_senders, .. } = periodic_deps;
@@ -158,7 +157,6 @@ fn construct_handlers(
 					event_managers.get(target).expect(INVALID_CHAIN_ID).sender.subscribe(),
 					clients.clone(),
 					Arc::new(bootstrap_shared_data.clone()),
-					task_manager.spawn_handle(),
 				));
 			}),
 			HandlerType::Roundup => {

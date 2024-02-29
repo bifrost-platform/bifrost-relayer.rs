@@ -8,11 +8,13 @@ use std::sync::Arc;
 
 mod eip1559_manager;
 mod legacy_manager;
-mod task;
 
 pub use eip1559_manager::*;
 pub use legacy_manager::*;
-pub use task::*;
+
+/// The tranaction middleware type used for `TransactionManager`'s.
+pub type TransactionMiddleware<T> =
+	NonceManagerMiddleware<SignerMiddleware<Arc<Provider<T>>, LocalWallet>>;
 
 /// The tranaction middleware type used for `TransactionManager`'s.
 pub type TransactionMiddleware<T> =
