@@ -53,21 +53,11 @@ use br_primitives::{
 	periodic::RollbackSender,
 	substrate::MigrationSequence,
 	tx::{TxRequestSender, XtRequestSender},
-	utils::sub_display_format,
 };
 
 use crate::{
 	cli::{LOG_TARGET, SUB_LOG_TARGET},
 	verification::assert_configuration_validity,
-};
-
-/// Starts the relayer service.
-pub fn relay(config: Configuration) -> Result<TaskManager, ServiceError> {
-	new_relay_base(config).map(|RelayBase { task_manager, .. }| task_manager)
-}
-
-/// Initializes periodic components.
-fn construct_periodics(
 	bootstrap_shared_data: BootstrapSharedData,
 	migration_sequence: Arc<RwLock<MigrationSequence>>,
 	keypair_storage: KeypairStorage,
@@ -79,7 +69,7 @@ fn construct_periodics(
 	let mut rollback_emitters = vec![];
 	let mut rollback_senders = BTreeMap::new();
 
-	let mut rollback_handlers = vec![];
+	let mut rollback_emitters = vec![];
 	let mut rollback_senders = BTreeMap::new();
 
 	// initialize the heartbeat sender
@@ -129,7 +119,6 @@ fn construct_handlers(
 	periodic_deps: &PeriodicDeps,
 	manager_deps: &ManagerDeps,
 	bootstrap_shared_data: BootstrapSharedData,
-	task_manager: &TaskManager,
 ) -> HandlerDeps {
 	let mut handlers = (vec![], vec![]);
 	let PeriodicDeps { rollback_senders, .. } = periodic_deps;
@@ -145,7 +134,6 @@ fn construct_handlers(
 					event_managers.get(target).expect(INVALID_CHAIN_ID).sender.subscribe(),
 					clients.clone(),
 					Arc::new(bootstrap_shared_data.clone()),
-					task_manager.spawn_handle(),
 				));
 			}),
 			HandlerType::Roundup => {
