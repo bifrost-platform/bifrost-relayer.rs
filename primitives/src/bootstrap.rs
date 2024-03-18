@@ -1,11 +1,10 @@
 use std::sync::Arc;
 
-use tokio::sync::{Barrier, Mutex, RwLock};
-
 use crate::{
 	cli::{BootstrapConfig, Configuration},
 	eth::BootstrapState,
 };
+use tokio::sync::{Barrier, Mutex, RwLock};
 
 #[derive(Clone)]
 pub struct BootstrapSharedData {
