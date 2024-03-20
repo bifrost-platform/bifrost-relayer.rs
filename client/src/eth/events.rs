@@ -165,6 +165,7 @@ impl<T: JsonRpcClient> EventManager<T> {
 	}
 
 	/// Verifies if the stored waiting block has waited enough.
+	#[inline]
 	fn is_block_confirmed(&self, latest_block: U64) -> bool {
 		latest_block.saturating_sub(self.waiting_block) >= self.client.metadata.block_confirmations
 	}
