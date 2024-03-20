@@ -91,7 +91,7 @@ impl<T: 'static + JsonRpcClient> Handler for SocketRelayHandler<T> {
 					let msg = socket.clone().msg;
 					let metadata = SocketRelayMetadata::new(
 						self.is_inbound_sequence(ChainID::from_be_bytes(msg.ins_code.chain)),
-						SocketEventStatus::from_u8(msg.status),
+						SocketEventStatus::from(msg.status),
 						msg.req_id.sequence,
 						ChainID::from_be_bytes(msg.req_id.chain),
 						ChainID::from_be_bytes(msg.ins_code.chain),
@@ -176,7 +176,7 @@ impl<T: JsonRpcClient> SocketRelayBuilder<T> for SocketRelayHandler<T> {
 	}
 
 	async fn build_inbound_signatures(&self, mut msg: SocketMessage) -> (Signatures, bool) {
-		let status = SocketEventStatus::from_u8(msg.status);
+		let status = SocketEventStatus::from(msg.status);
 		let mut is_external = false;
 		let signatures = match status {
 			SocketEventStatus::Requested | SocketEventStatus::Failed => Signatures::default(),
@@ -204,7 +204,7 @@ impl<T: JsonRpcClient> SocketRelayBuilder<T> for SocketRelayHandler<T> {
 	}
 
 	async fn build_outbound_signatures(&self, mut msg: SocketMessage) -> (Signatures, bool) {
-		let status = SocketEventStatus::from_u8(msg.status);
+		let status = SocketEventStatus::from(msg.status);
 		let mut is_external = false;
 		let signatures = match status {
 			SocketEventStatus::Requested => {
@@ -274,7 +274,7 @@ impl<T: 'static + JsonRpcClient> SocketRelayHandler<T> {
 		metadata: SocketRelayMetadata,
 		is_inbound: bool,
 	) {
-		let status = SocketEventStatus::from_u8(socket_msg.status);
+		let status = SocketEventStatus::from(socket_msg.status);
 
 		let relay_tx_chain_id = if is_inbound {
 			self.get_inbound_relay_tx_chain_id(status, metadata.src_chain_id, metadata.dst_chain_id)
@@ -361,7 +361,7 @@ impl<T: 'static + JsonRpcClient> SocketRelayHandler<T> {
 				.await;
 
 			return matches!(
-				SocketEventStatus::from_u8(request.field[0].clone().into()),
+				SocketEventStatus::from(&request.field[0]),
 				SocketEventStatus::Committed | SocketEventStatus::Rollbacked
 			);
 		}

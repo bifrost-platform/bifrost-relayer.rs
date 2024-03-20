@@ -81,8 +81,8 @@ impl<T: JsonRpcClient> SocketRollbackEmitter<T> {
 			.await;
 
 		if let (Some(src_request), Some(dst_request)) = (src_request, dst_request) {
-			let src_status = SocketEventStatus::from_u8(src_request.field[0].clone().into());
-			let dst_status = SocketEventStatus::from_u8(dst_request.field[0].clone().into());
+			let src_status = SocketEventStatus::from(&src_request.field[0]);
+			let dst_status = SocketEventStatus::from(&dst_request.field[0]);
 
 			match src_status {
 				SocketEventStatus::Committed | SocketEventStatus::Rollbacked => return true,
@@ -145,7 +145,7 @@ impl<T: JsonRpcClient> SocketRollbackEmitter<T> {
 
 	/// Tries to rollback the given socket message.
 	async fn try_rollback(&self, socket_msg: &SocketMessage) {
-		let status = SocketEventStatus::from_u8(socket_msg.status);
+		let status = SocketEventStatus::from(socket_msg.status);
 		match status {
 			SocketEventStatus::Requested => self.try_rollback_inbound(socket_msg).await,
 			SocketEventStatus::Accepted => self.try_rollback_outbound(socket_msg).await,

@@ -1,5 +1,6 @@
 use std::{str::FromStr, sync::Arc};
 
+use ethers::types::Uint8;
 use ethers::{
 	providers::{JsonRpcClient, Provider},
 	types::{Address, Signature, TransactionRequest, H160, U64},
@@ -146,7 +147,13 @@ pub enum GasCoefficient {
 
 impl GasCoefficient {
 	pub fn into_f64(&self) -> f64 {
-		match self {
+		f64::from(self)
+	}
+}
+
+impl From<&GasCoefficient> for f64 {
+	fn from(value: &GasCoefficient) -> Self {
+		match value {
 			GasCoefficient::Low => 1.2,
 			GasCoefficient::Mid => 7.0,
 			GasCoefficient::High => 10.0,
@@ -198,8 +205,8 @@ pub enum SocketEventStatus {
 	Rollbacked,
 }
 
-impl SocketEventStatus {
-	pub fn from_u8(status: u8) -> Self {
+impl From<u8> for SocketEventStatus {
+	fn from(status: u8) -> Self {
 		match status {
 			0 => SocketEventStatus::None,
 			1 => SocketEventStatus::Requested,
@@ -212,6 +219,12 @@ impl SocketEventStatus {
 			8 => SocketEventStatus::Rollbacked,
 			_ => panic!("Unknown socket event status received: {:?}", status),
 		}
+	}
+}
+
+impl From<&Uint8> for SocketEventStatus {
+	fn from(value: &Uint8) -> Self {
+		Self::from(u8::from(value.clone()))
 	}
 }
 
