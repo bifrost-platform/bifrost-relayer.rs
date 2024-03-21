@@ -29,11 +29,10 @@ impl KeypairStorage {
 	}
 
 	pub fn create_new_keypair(&self) -> PublicKey {
-		let secp = Secp256k1::signing_only();
 		let ret;
 		loop {
 			let private_key = PrivateKey::generate(self.network);
-			let public_key = private_key.public_key(&secp);
+			let public_key = private_key.public_key(&Secp256k1::signing_only());
 			match self.get(&public_key) {
 				Some(_) => continue,
 				None => {
