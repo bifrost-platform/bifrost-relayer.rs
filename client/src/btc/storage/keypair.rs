@@ -2,6 +2,7 @@ use bitcoincore_rpc::bitcoin::key::Secp256k1;
 use bitcoincore_rpc::bitcoin::psbt::{GetKey, GetKeyError, KeyRequest};
 use bitcoincore_rpc::bitcoin::secp256k1::Signing;
 use bitcoincore_rpc::bitcoin::{PrivateKey, PublicKey};
+use miniscript::bitcoin::{Network, Psbt};
 use std::collections::BTreeMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -9,14 +10,15 @@ use tokio::sync::RwLock;
 #[derive(Clone)]
 pub struct KeypairStorage {
 	inner: Arc<RwLock<BTreeMap<PublicKey, PrivateKey>>>,
+	network: Network,
 }
 
 impl KeypairStorage {
-	pub fn new() -> Self {
-		Self { inner: Default::default() }
+	pub fn new(network: Network) -> Self {
+		Self { inner: Default::default(), network }
 	}
 
-	pub fn insert(&self, key: PublicKey, value: PrivateKey) -> Option<PrivateKey> {
+	fn insert(&self, key: PublicKey, value: PrivateKey) -> Option<PrivateKey> {
 		let mut write_lock = self.inner.blocking_write();
 		write_lock.insert(key, value)
 	}
@@ -26,20 +28,44 @@ impl KeypairStorage {
 		read_lock.get(key).cloned()
 	}
 
+	pub fn create_new_keypair(&self) -> PublicKey {
+		let secp = Secp256k1::signing_only();
+		let ret;
+		loop {
+			let private_key = PrivateKey::generate(self.network);
+			let public_key = private_key.public_key(&secp);
+			match self.get(&public_key) {
+				Some(_) => continue,
+				None => {
+					self.insert(public_key.clone(), private_key);
+					ret = public_key;
+					break;
+				},
+			}
+		}
+		ret
+	}
+
+	pub fn sign_psbt(&self, psbt: &mut Psbt) -> bool {
+		let before_sign = psbt.clone();
+		psbt.sign(self, &Secp256k1::signing_only()).unwrap();
+		psbt.inputs != before_sign.inputs
+	}
+
 	async fn sync_db(&self) {
 		todo!()
 	}
 }
 
-impl From<BTreeMap<PublicKey, PrivateKey>> for KeypairStorage {
-	fn from(value: BTreeMap<PublicKey, PrivateKey>) -> Self {
-		Self { inner: Arc::new(RwLock::new(value)) }
+impl From<(BTreeMap<PublicKey, PrivateKey>, Network)> for KeypairStorage {
+	fn from(value: (BTreeMap<PublicKey, PrivateKey>, Network)) -> Self {
+		Self { inner: Arc::new(RwLock::new(value.0)), network: value.1 }
 	}
 }
 
-impl From<&[(PublicKey, PrivateKey)]> for KeypairStorage {
-	fn from(value: &[(PublicKey, PrivateKey)]) -> Self {
-		Self { inner: Arc::new(RwLock::new(value.iter().cloned().collect())) }
+impl From<(&[(PublicKey, PrivateKey)], Network)> for KeypairStorage {
+	fn from(value: (&[(PublicKey, PrivateKey)], Network)) -> Self {
+		Self { inner: Arc::new(RwLock::new(value.0.iter().cloned().collect())), network: value.1 }
 	}
 }
 

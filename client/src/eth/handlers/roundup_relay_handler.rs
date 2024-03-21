@@ -360,7 +360,7 @@ impl<T: JsonRpcClient> RoundupRelayHandler<T> {
 	}
 }
 
-#[async_trait::async_trait]
+#[async_trait]
 impl<T: JsonRpcClient> BootstrapHandler for RoundupRelayHandler<T> {
 	async fn bootstrap(&self) {
 		log::info!(
