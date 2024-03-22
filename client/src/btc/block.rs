@@ -1,4 +1,4 @@
-use crate::btc::storage::pending_outbound::{PendingOutboundPool, PendingOutboundState};
+use crate::btc::storage::pending_outbound::PendingOutboundPool;
 use crate::btc::storage::vault_set::VaultAddressSet;
 use bitcoincore_rpc::bitcoin::Network;
 use bitcoincore_rpc::bitcoincore_rpc_json::GetRawTransactionResultVout;
@@ -165,12 +165,8 @@ impl BlockManager {
 				if self.vault_set.contains(&address).await {
 					inbound_events.push(Event { address: address.clone(), amount: vout.value });
 				}
-				if let Some(pending_outbound) = self.pending_outbounds.get(&address).await {
-					if pending_outbound.state == PendingOutboundState::Accepted
-						&& vout.value == pending_outbound.amount
-					{
-						outbound_events.push(Event { address, amount: vout.value });
-					}
+				if let Some(_) = self.pending_outbounds.get(&address, vout.value).await {
+					outbound_events.push(Event { address, amount: vout.value });
 				}
 			}
 		}
