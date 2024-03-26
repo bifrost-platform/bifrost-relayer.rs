@@ -37,6 +37,7 @@ br-metrics = { path = "../metrics", default-features = false }
 
 # Substrate
 sc-service = { workspace = true }
+subxt = { workspace = true }
 
 [dev-dependencies]
 serde_json = { workspace = true }

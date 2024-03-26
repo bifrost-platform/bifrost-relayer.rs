@@ -394,6 +394,31 @@ impl TxRequest {
 }
 
 #[derive(Clone, Debug)]
+pub struct RegisMetadata {
+	/// The socket event status.
+	pub status: SocketEventStatus,
+	/// The socket request sequence ID.
+	pub sequence: u128,
+	pub user_bfc_address: Address,
+	/// The receiver address for this request.
+	pub refund_address: String,
+	/// The flag whether this relay is processed on bootstrap.
+	pub is_bootstrap: bool,
+}
+
+impl RegisMetadata {
+	pub fn new(
+		status: SocketEventStatus,
+		sequence: u128,
+		user_bfc_address: Address,
+		refund_address: String,
+		is_bootstrap: bool,
+	) -> Self {
+		Self { status, sequence, user_bfc_address, refund_address, is_bootstrap }
+	}
+}
+
+#[derive(Clone, Debug)]
 /// The message format passed through the event channel.
 pub struct TxRequestMessage {
 	/// The remaining retries of the transaction request.
