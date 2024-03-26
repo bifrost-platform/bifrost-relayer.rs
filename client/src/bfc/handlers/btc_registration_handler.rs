@@ -3,26 +3,21 @@ use std::{collections::BTreeMap, sync::Arc, time::Duration};
 use br_primitives::{
 	bootstrap::BootstrapSharedData,
 	constants::{
-		cli::DEFAULT_BOOTSTRAP_ROUND_OFFSET,
-		config::BOOTSTRAP_BLOCK_CHUNK_SIZE,
-		errors::{INVALID_BIFROST_NATIVENESS, INVALID_CHAIN_ID, INVALID_CONTRACT_ABI},
+		cli::DEFAULT_BOOTSTRAP_ROUND_OFFSET, config::BOOTSTRAP_BLOCK_CHUNK_SIZE,
+		errors::INVALID_BIFROST_NATIVENESS,
 	},
 	contracts::{
 		authority::RoundMetaData,
 		btc_registration::{BtcRegisEvents, VaultPending},
-		socket::{RequestID, Signatures, SocketEvents, SocketMessage},
 	},
-	eth::{
-		BootstrapState, BuiltRelayTransaction, ChainID, GasCoefficient, RelayDirection,
-		SocketEventStatus,
-	},
+	eth::{BootstrapState, ChainID},
 	sub_display_format,
 };
 use ethers::{
 	abi::{Detokenize, Tokenize},
 	contract::EthLogDecode,
 	providers::JsonRpcClient,
-	types::{Filter, Log, TransactionRequest, H256, U256},
+	types::{Filter, Log, H256},
 };
 
 use tokio::{sync::broadcast::Receiver, time::sleep};
@@ -32,8 +27,7 @@ use crate::bfc::BfcClient;
 
 use crate::eth::{
 	events::EventMessage,
-	traits::{BootstrapHandler, Handler, SocketRelayBuilder},
-	EthClient,
+	traits::{BootstrapHandler, Handler},
 };
 
 const SUB_LOG_TARGET: &str = "regis-handler";

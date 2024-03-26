@@ -3,17 +3,12 @@ use ethers::{
 	types::{Address, H160},
 };
 use subxt::{blocks::ExtrinsicEvents, OnlineClient};
-use tokio::{sync::broadcast::Receiver, time::sleep};
 
 use crate::btc::storage::keypair::KeypairStorage;
 use crate::eth::EthClient;
-use bitcoincore_rpc::bitcoin::key::Secp256k1;
 use bitcoincore_rpc::bitcoin::psbt::Psbt;
 use bitcoincore_rpc::bitcoin::secp256k1::Signing;
-use bitcoincore_rpc::bitcoin::{PrivateKey, PublicKey};
-use bitcoincore_rpc::Error;
 use ethers::types::Signature as EthSignature;
-use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use generic::{
