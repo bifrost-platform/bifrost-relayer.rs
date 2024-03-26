@@ -153,7 +153,7 @@ impl<T: 'static + JsonRpcClient> BootstrapHandler for RegisHandler<T> {
 	async fn bootstrap(&self) {
 		log::info!(
 			target: &self.bfc_client.eth_client.get_chain_name(),
-			"-[{}] ⚙️  [Bootstrap mode] Bootstrapping Socket events.",
+			"-[{}] ⚙️  [Bootstrap mode] Bootstrapping Registration events.",
 			sub_display_format(SUB_LOG_TARGET),
 		);
 
@@ -272,5 +272,36 @@ impl<T: JsonRpcClient> RegisHandler<T> {
 	/// Verifies whether the current relayer was selected at the given round.
 	async fn is_selected_relayer(&self) -> bool {
 		true
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use std::{str::FromStr, sync::Arc};
+
+	use ethers::{
+		abi::ParamType,
+		providers::{Http, Provider},
+		types::{Bytes, H160},
+	};
+
+	use br_primitives::contracts::btc_registration::RegisContract;
+
+	use super::*;
+
+	#[tokio::test]
+	async fn test_is_already_done() {
+		let src_provider = Arc::new(Provider::<Http>::try_from("").unwrap());
+
+		let src_socket = RegisContract::new(
+			H160::from_str("0xd551F33Ca8eCb0Be83d8799D9C68a368BA36Dd52").unwrap(),
+			src_provider.clone(),
+		);
+
+		let user_bfc_address: H160 = H160([0u8; 20]);
+		println!("user_bfc_address : {:?}", user_bfc_address);
+
+		let src_request = src_socket.refund_address(user_bfc_address).call().await.unwrap();
+		println!("src_request : {:?}", src_request);
 	}
 }
