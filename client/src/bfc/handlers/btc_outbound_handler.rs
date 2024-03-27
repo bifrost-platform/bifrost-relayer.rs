@@ -11,10 +11,9 @@ use subxt::events::EventDetails;
 use tokio::{sync::broadcast::Receiver, time::sleep};
 use tokio_stream::StreamExt;
 
-use crate::bfc::{
-	events::EventMessage, BfcClient, CustomConfig, SignedPsbtSubmitted, UnsignedPsbtSubmitted,
-};
+use crate::bfc::{events::EventMessage, BfcClient, CustomConfig, UnsignedPsbtSubmitted};
 use bitcoincore_rpc::bitcoin::psbt::Psbt;
+use bitcoincore_rpc::bitcoin::secp256k1::All;
 use br_primitives::bootstrap::BootstrapSharedData;
 use subxt::backend::BlockRef;
 
@@ -73,13 +72,15 @@ impl<T: 'static + JsonRpcClient> BtcRelayHandler<T> {
 		ext_events: &EventDetails<CustomConfig>,
 		is_bootstrap: bool,
 	) {
-		let matching_event = ext_events.as_event::<UnsignedPsbtSubmitted>();
+		let matching_event = ext_events.as_event::<UnsignedPsbtSubmitted>().unwrap();
 
 		if matching_event.is_none() {
 			return;
 		}
 
-		match Psbt::deserialize(&matching_event.psbt) {
+		let matching_event_psbt = matching_event.unwrap().psbt;
+
+		match Psbt::deserialize(&matching_event_psbt) {
 			Ok(deserialized_psbt) => {
 				if !is_bootstrap {
 					log::info!(
@@ -87,14 +88,20 @@ impl<T: 'static + JsonRpcClient> BtcRelayHandler<T> {
 						.eth_client.get_chain_name(),
 						"-[{}] 👤 psbt event detected. ({:?})",
 						sub_display_format(SUB_LOG_TARGET),
-						matching_event.psbt.clone()
+						matching_event_psbt.clone()
 					);
 				}
 				if (!self.is_selected_relayer().await) & (!self.is_selected_socket().await) {
 					// do nothing if not selected
 					return;
 				}
-				self.bfc_client.submit_signed_psbt(deserialized_psbt).await.unwrap();
+				self.bfc_client
+					.submit_signed_psbt::<All>(
+						self.bfc_client.eth_client.address(),
+						deserialized_psbt,
+					)
+					.await
+					.unwrap();
 			},
 			Err(e) => {
 				log::error!(
@@ -102,7 +109,7 @@ impl<T: 'static + JsonRpcClient> BtcRelayHandler<T> {
 						.eth_client.get_chain_name(),
 					"-[{}] Error on decoding RoundUp event ({:?}):{}",
 					sub_display_format(SUB_LOG_TARGET),
-					matching_event.psbt.clone(),
+					matching_event_psbt.clone(),
 					e.to_string(),
 				);
 				sentry::capture_message(
@@ -111,7 +118,7 @@ impl<T: 'static + JsonRpcClient> BtcRelayHandler<T> {
 						&self.bfc_client.eth_client.get_chain_name(),
 						SUB_LOG_TARGET,
 						self.bfc_client.eth_client.address(),
-						matching_event.psbt.clone(),
+						matching_event_psbt.clone(),
 						e
 					)
 					.as_str(),

@@ -12,8 +12,9 @@ use ethers::types::Signature as EthSignature;
 use std::sync::Arc;
 
 use generic::{
-	devnet_runtime, mainnet_runtime, testnet_runtime, AccountId20, CustomConfig, EthereumSignature,
-	Public, Signature, SignedPsbtSubmitted, UnsignedPsbtSubmitted, VaultKeySubmission,
+	bifrost_runtime, AccountId20, CustomConfig, EthereumSignature, Public, Signature,
+	SignedPsbtMessage, SignedPsbtSubmitted, UnsignedPsbtMessage, UnsignedPsbtSubmitted,
+	VaultKeySubmission,
 };
 
 pub mod events;
@@ -54,7 +55,7 @@ impl<T: JsonRpcClient> BfcClient<T> {
 			pub_key: Public(pub_key),
 		};
 
-		let payload = devnet_runtime::tx()
+		let payload = bifrost_runtime::tx()
 			.btc_registration_pool()
 			.submit_vault_key(vaultkey_submission, signature);
 
@@ -73,10 +74,24 @@ impl<T: JsonRpcClient> BfcClient<T> {
 
 	pub async fn submit_unsigned_psbt(
 		&self,
+		authority_id: Address,
+		socket_messages: Vec<Vec<u8>>,
 		psbt: Psbt,
 	) -> Result<ExtrinsicEvents<CustomConfig>, Box<dyn std::error::Error>> {
-		let payload =
-			devnet_runtime::tx().btc_socket_queue().submit_unsigned_psbt(psbt.serialize());
+		let pub_key = self.keypair_storage.create_new_keypair().inner.serialize();
+		let signature = self
+			.convert_ethers_to_ecdsa_signature(self.eth_client.wallet.sign_message(&pub_key))
+			.unwrap();
+
+		let unsigned_msg = UnsignedPsbtMessage {
+			authority_id: AccountId20(authority_id.0),
+			socket_messages,
+			psbt: psbt.serialize(),
+		};
+
+		let payload = bifrost_runtime::tx()
+			.btc_socket_queue()
+			.submit_unsigned_psbt(unsigned_msg, signature);
 
 		let events = self
 			.client
@@ -92,14 +107,26 @@ impl<T: JsonRpcClient> BfcClient<T> {
 
 	pub async fn submit_signed_psbt<C: Signing>(
 		&self,
+		authority_id: Address,
 		unsigned_psbt: Psbt,
 	) -> Result<ExtrinsicEvents<CustomConfig>, Box<dyn std::error::Error>> {
+		let pub_key = self.keypair_storage.create_new_keypair().inner.serialize();
+		let signature = self
+			.convert_ethers_to_ecdsa_signature(self.eth_client.wallet.sign_message(&pub_key))
+			.unwrap();
+
 		let mut psbt = unsigned_psbt.clone();
 		self.keypair_storage.sign_psbt(&mut psbt);
 
-		let payload = devnet_runtime::tx()
+		let signed_msg = SignedPsbtMessage {
+			authority_id: AccountId20(authority_id.0),
+			unsigned_psbt: unsigned_psbt.serialize(),
+			signed_psbt: psbt.serialize(),
+		};
+
+		let payload = bifrost_runtime::tx()
 			.btc_socket_queue()
-			.submit_signed_psbt(unsigned_psbt.serialize(), psbt.serialize());
+			.submit_signed_psbt(signed_msg, signature);
 
 		let events = self
 			.client

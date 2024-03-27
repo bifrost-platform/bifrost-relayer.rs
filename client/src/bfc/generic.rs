@@ -1,17 +1,16 @@
-#[subxt::subxt(runtime_metadata_insecure_url = "ws://localhost:9944")]
-pub mod devnet_runtime {}
+// #[subxt::subxt(runtime_metadata_insecure_url = "ws://localhost:9944")]
+#[subxt::subxt(runtime_metadata_path = "../configs/bifrost_metadata.scale")]
+pub mod bifrost_runtime {}
 
-#[subxt::subxt(runtime_metadata_insecure_url = "wss://public-01.testnet.bifrostnetwork.com/wss")]
-pub mod testnet_runtime {}
+pub use bifrost_runtime::btc_socket_queue::events::{SignedPsbtSubmitted, UnsignedPsbtSubmitted};
+use bifrost_runtime::runtime_types;
 
-#[subxt::subxt(runtime_metadata_insecure_url = "wss://public-01.mainnet.bifrostnetwork.com/wss")]
-pub mod mainnet_runtime {}
+pub use runtime_types::pallet_btc_socket_queue::pallet::pallet::Call::submit_unsigned_psbt;
 
-pub use devnet_runtime::btc_socket_queue::events::{SignedPsbtSubmitted, UnsignedPsbtSubmitted};
-use devnet_runtime::runtime_types;
-
+pub use runtime_types::bp_multi_sig::Public;
 pub use runtime_types::fp_account::{AccountId20, EthereumSignature};
-pub use runtime_types::pallet_btc_registration_pool::{Public, VaultKeySubmission};
+pub use runtime_types::pallet_btc_registration_pool::VaultKeySubmission;
+pub use runtime_types::pallet_btc_socket_queue::{SignedPsbtMessage, UnsignedPsbtMessage};
 pub use runtime_types::sp_core::ecdsa::Signature;
 
 use subxt::config::{Config, DefaultExtrinsicParams, PolkadotConfig, SubstrateConfig};
