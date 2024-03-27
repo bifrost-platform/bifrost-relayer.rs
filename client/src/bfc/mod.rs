@@ -60,7 +60,7 @@ impl<T: JsonRpcClient> BfcClient<T> {
 			.submit_vault_key(vaultkey_submission, signature);
 
 		// let api: OnlineClient<CustomConfig> = OnlineClient::<CustomConfig>::new().await?;
-		let events = self
+		let events: ExtrinsicEvents<CustomConfig> = self
 			.client
 			.tx()
 			.create_unsigned(&payload)?
@@ -144,8 +144,6 @@ impl<T: JsonRpcClient> BfcClient<T> {
 		&self,
 		ethers_signature: EthSignature,
 	) -> Result<EthereumSignature, Box<dyn std::error::Error>> {
-		// `ethers::types::Signature`에서 `r`과 `s` 값을 추출합니다.
-
 		let sig: String = format!("0x{}", ethers_signature);
 
 		let bytes = sig.as_bytes();
@@ -171,7 +169,11 @@ mod tests {
 		},
 		eth::{AggregatorContracts, ProtocolContracts, ProviderMetadata},
 	};
-	use ethers::prelude::{Http, Provider};
+	use ethers::{
+		prelude::{Http, Provider},
+		types::H256,
+	};
+	use log::log;
 	use tokio::time::Duration;
 
 	use bitcoincore_rpc::bitcoin::{
@@ -285,7 +287,9 @@ mod tests {
 		let authority_id = test_client.eth_client.address();
 		let who = test_client.eth_client.address();
 
-		test_client.submit_vault_key(authority_id, who).await.unwrap();
+		let ext_event = test_client.submit_vault_key(authority_id, who).await.unwrap();
+
+		assert_ne!(ext_event.extrinsic_hash(), H256::zero());
 	}
 
 	#[tokio::test]
@@ -294,10 +298,12 @@ mod tests {
 		let unsigned_psbt = create_psbt();
 		let socket_messages = vec![vec![0, 1, 2, 3, 4]];
 
-		test_client
+		let ext_event = test_client
 			.submit_unsigned_psbt(test_client.eth_client.address(), socket_messages, unsigned_psbt)
 			.await
 			.unwrap();
+
+		assert_ne!(ext_event.extrinsic_hash(), H256::zero());
 	}
 
 	#[tokio::test]
@@ -305,9 +311,11 @@ mod tests {
 		let test_client = default_bfc_client().await;
 		let unsigned_psbt = create_psbt();
 
-		test_client
+		let ext_event = test_client
 			.submit_signed_psbt::<All>(test_client.eth_client.address(), unsigned_psbt)
 			.await
 			.unwrap();
+
+		assert_ne!(ext_event.extrinsic_hash(), H256::zero());
 	}
 }

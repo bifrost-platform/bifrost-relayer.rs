@@ -130,7 +130,25 @@ impl<T: 'static + JsonRpcClient> BtcRelayHandler<T> {
 
 	/// Verifies whether the current relayer was selected at the given round.
 	async fn is_selected_relayer(&self) -> bool {
-		true
+		let relayer_manager =
+			self.bfc_client.eth_client.protocol_contracts.relayer_manager.as_ref().unwrap();
+
+		let round = self
+			.bfc_client
+			.eth_client
+			.contract_call(relayer_manager.latest_round(), "relayer_manager.latest_round")
+			.await;
+		self.bfc_client
+			.eth_client
+			.contract_call(
+				relayer_manager.is_previous_selected_relayer(
+					round,
+					self.bfc_client.eth_client.address(),
+					false,
+				),
+				"relayer_manager.is_previous_selected_relayer",
+			)
+			.await
 	}
 
 	/// Verifies whether the current relayer was selected at the given round.
