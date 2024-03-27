@@ -4,14 +4,16 @@ use crate::eth::EthClient;
 use bitcoincore_rpc::bitcoin::Transaction;
 use br_primitives::bootstrap::BootstrapSharedData;
 use br_primitives::contracts::socket::RequestID;
-use br_primitives::eth::{BootstrapState, SocketEventStatus};
-use br_primitives::periodic::RollbackSender;
+use br_primitives::eth::{BootstrapState, GasCoefficient, SocketEventStatus};
 use br_primitives::sub_display_format;
-use br_primitives::tx::TxRequestSender;
+use br_primitives::tx::{
+	BitcoinSocketRelayMetadata, TxRequest, TxRequestMessage, TxRequestMetadata, TxRequestSender,
+};
 use ethers::providers::JsonRpcClient;
-use ethers::types::Address as EthAddress;
+use ethers::types::{Address as EthAddress, Address, TransactionRequest};
 use miniscript::bitcoin::address::NetworkUnchecked;
-use miniscript::bitcoin::{Address as BtcAddress, Amount, Network};
+use miniscript::bitcoin::hashes::Hash;
+use miniscript::bitcoin::{Address as BtcAddress, Network};
 use std::sync::Arc;
 use tokio::sync::broadcast::Receiver;
 use tokio_stream::StreamExt;
@@ -23,35 +25,27 @@ pub struct InboundHandler<T> {
 	bfc_client: Arc<EthClient<T>>,
 	/// Sender that sends messages to tx request channel (Bifrost network)
 	tx_request_sender: Arc<TxRequestSender>,
-	/// Rollback sender that sends rollbackable socket messages.
-	rollback_sender: Arc<RollbackSender>,
 	/// The receiver that consumes new events from the block channel.
 	event_receiver: Receiver<BTCEventMessage>,
 	/// Event type which this handler should handle.
 	target_event: EventType,
 	/// The bootstrap shared data.
 	bootstrap_shared_data: Arc<BootstrapSharedData>,
-	/// Bitcoin network (Bitcoin | Testnet | Regtest)
-	network: Network,
 }
 
 impl<T: JsonRpcClient> InboundHandler<T> {
 	fn new(
 		bfc_client: Arc<EthClient<T>>,
 		tx_request_sender: Arc<TxRequestSender>,
-		rollback_sender: Arc<RollbackSender>,
 		event_receiver: Receiver<BTCEventMessage>,
 		bootstrap_shared_data: Arc<BootstrapSharedData>,
-		network: Network,
 	) -> Self {
 		Self {
 			bfc_client,
 			tx_request_sender,
-			rollback_sender,
 			event_receiver,
 			target_event: EventType::Inbound,
 			bootstrap_shared_data,
-			network,
 		}
 	}
 
@@ -95,15 +89,61 @@ impl<T: JsonRpcClient> InboundHandler<T> {
 		todo!()
 	}
 
-	async fn send_socket_message(
+	fn build_transaction(&self, event: &Event, user_bfc_address: Address) -> TransactionRequest {
+		let bitcoin_socket = self.bfc_client.protocol_contracts.bitcoin_socket.as_ref().unwrap();
+		let calldata = bitcoin_socket
+			.poll(
+				event.txid.to_byte_array(),
+				event.index.into(),
+				user_bfc_address,
+				event.amount.to_sat().into(),
+			)
+			.calldata()
+			.unwrap();
+
+		TransactionRequest::default().data(calldata).to(bitcoin_socket.address())
+	}
+
+	async fn request_send_transaction(
 		&self,
-		vault_address: BtcAddress<NetworkUnchecked>,
-		amount: Amount,
+		tx_request: TransactionRequest,
+		metadata: BitcoinSocketRelayMetadata,
 	) {
-		if let Some(user_bfc_address) = self.get_user_bfc_address(&vault_address).await {
-			todo!("Open CCCP vote")
-		} else {
-			todo!("Unmapped vault address? -> is it possible?")
+		match self.tx_request_sender.send(TxRequestMessage::new(
+			TxRequest::Legacy(tx_request),
+			TxRequestMetadata::BitcoinSocketRelay(metadata.clone()),
+			true,
+			false,
+			GasCoefficient::Mid,
+			false,
+		)) {
+			Ok(_) => log::info!(
+				target: LOG_TARGET,
+				"-[{}] 🔖 Request relay transaction: {}",
+				sub_display_format(SUB_LOG_TARGET),
+				metadata
+			),
+			Err(error) => {
+				log::error!(
+					target: LOG_TARGET,
+					"-[{}] ❗️ Failed to send relay transaction: {}, Error: {}",
+					sub_display_format(SUB_LOG_TARGET),
+					metadata,
+					error.to_string()
+				);
+				sentry::capture_message(
+					format!(
+						"[{}]-[{}]-[{}] ❗️ Failed to send relay transaction: {}, Error: {}",
+						LOG_TARGET,
+						SUB_LOG_TARGET,
+						self.bfc_client.address(),
+						metadata,
+						error
+					)
+					.as_str(),
+					sentry::Level::Error,
+				);
+			},
 		}
 	}
 }
@@ -145,7 +185,18 @@ impl<T: JsonRpcClient> Handler for InboundHandler<T> {
 			return;
 		}
 
-		self.send_socket_message(event.address, event.amount).await
+		if let Some(user_bfc_address) = self.get_user_bfc_address(&event.address).await {
+			let tx_request = self.build_transaction(&event, user_bfc_address.clone());
+			let metadata = BitcoinSocketRelayMetadata::new(
+				event.address,
+				user_bfc_address,
+				event.txid,
+				event.index,
+			);
+			self.request_send_transaction(tx_request, metadata).await;
+		} else {
+			todo!("Unmapped vault address? -> erroneous deposit or something")
+		}
 	}
 
 	#[inline]

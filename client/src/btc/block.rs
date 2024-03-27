@@ -6,7 +6,7 @@ use bitcoincore_rpc::{jsonrpc, Client, Error, RpcApi};
 use br_primitives::bootstrap::BootstrapSharedData;
 use br_primitives::eth::BootstrapState;
 use miniscript::bitcoin::address::NetworkUnchecked;
-use miniscript::bitcoin::{Address, Amount};
+use miniscript::bitcoin::{Address, Amount, Txid};
 use serde::Deserialize;
 use serde_json::Value;
 use std::sync::Arc;
@@ -23,6 +23,8 @@ pub enum EventType {
 
 #[derive(Debug, Clone)]
 pub struct Event {
+	pub txid: Txid,
+	pub index: u32,
 	pub address: Address<NetworkUnchecked>,
 	pub amount: Amount,
 }
@@ -143,7 +145,7 @@ impl BlockManager {
 
 			let mut stream = tokio_stream::iter(txs.iter());
 			while let Some(tx) = stream.next().await {
-				self.filter(&tx.vout, &mut inbound.events, &mut outbound.events).await;
+				self.filter(tx.txid, &tx.vout, &mut inbound.events, &mut outbound.events).await;
 			}
 
 			self.sender.send(inbound).unwrap();
@@ -155,6 +157,7 @@ impl BlockManager {
 
 	async fn filter(
 		&self,
+		txid: Txid,
 		vouts: &[GetRawTransactionResultVout],
 		inbound_events: &mut Vec<Event>,
 		outbound_events: &mut Vec<Event>,
@@ -163,10 +166,20 @@ impl BlockManager {
 		while let Some(vout) = stream.next().await {
 			if let Some(address) = vout.script_pub_key.address.clone() {
 				if self.vault_set.contains(&address).await {
-					inbound_events.push(Event { address: address.clone(), amount: vout.value });
+					inbound_events.push(Event {
+						txid,
+						index: vout.n,
+						address: address.clone(),
+						amount: vout.value,
+					});
 				}
 				if let Some(_) = self.pending_outbounds.get(&address, vout.value).await {
-					outbound_events.push(Event { address, amount: vout.value });
+					outbound_events.push(Event {
+						txid,
+						index: vout.n,
+						address,
+						amount: vout.value,
+					});
 				}
 			}
 		}
