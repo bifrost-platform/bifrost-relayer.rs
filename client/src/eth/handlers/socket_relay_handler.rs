@@ -133,6 +133,7 @@ impl<T: 'static + JsonRpcClient> Handler for SocketRelayHandler<T> {
 		}
 	}
 
+	#[inline]
 	fn is_target_contract(&self, log: &Log) -> bool {
 		if log.address == self.client.protocol_contracts.socket.address() {
 			return true;
@@ -140,6 +141,7 @@ impl<T: 'static + JsonRpcClient> Handler for SocketRelayHandler<T> {
 		false
 	}
 
+	#[inline]
 	fn is_target_event(&self, topic: H256) -> bool {
 		topic == self.socket_signature
 	}
