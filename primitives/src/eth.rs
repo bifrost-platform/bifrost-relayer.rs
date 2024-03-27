@@ -9,8 +9,9 @@ use ethers::{
 use crate::{
 	constants::errors::INVALID_CONTRACT_ADDRESS,
 	contracts::{
-		authority::AuthorityContract, chainlink_aggregator::ChainlinkContract,
-		relayer_manager::RelayerManagerContract, socket::SocketContract,
+		authority::AuthorityContract, bitcoin_socket::BitcoinSocketContract,
+		chainlink_aggregator::ChainlinkContract, relayer_manager::RelayerManagerContract,
+		socket::SocketContract,
 	},
 };
 
@@ -106,6 +107,8 @@ pub struct ProtocolContracts<T> {
 	pub authority: AuthorityContract<Provider<T>>,
 	/// RelayerManagerContract (Bifrost only)
 	pub relayer_manager: Option<RelayerManagerContract<Provider<T>>>,
+	/// BitcoinSocketContract (Bifrost only)
+	pub bitcoin_socket: Option<BitcoinSocketContract<Provider<T>>>,
 }
 
 impl<T: JsonRpcClient> ProtocolContracts<T> {
@@ -114,6 +117,7 @@ impl<T: JsonRpcClient> ProtocolContracts<T> {
 		socket_address: String,
 		authority_address: String,
 		relayer_manager_address: Option<String>,
+		bitcoin_socket_address: Option<String>,
 	) -> Self {
 		Self {
 			socket: SocketContract::new(
@@ -126,6 +130,12 @@ impl<T: JsonRpcClient> ProtocolContracts<T> {
 			),
 			relayer_manager: relayer_manager_address.map(|address| {
 				RelayerManagerContract::new(
+					H160::from_str(&address).expect(INVALID_CONTRACT_ADDRESS),
+					provider.clone(),
+				)
+			}),
+			bitcoin_socket: bitcoin_socket_address.map(|address| {
+				BitcoinSocketContract::new(
 					H160::from_str(&address).expect(INVALID_CONTRACT_ADDRESS),
 					provider.clone(),
 				)
