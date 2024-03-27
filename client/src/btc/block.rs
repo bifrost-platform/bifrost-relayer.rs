@@ -1,6 +1,5 @@
 use crate::btc::storage::pending_outbound::PendingOutboundPool;
 use crate::btc::storage::vault_set::VaultAddressSet;
-use bitcoincore_rpc::bitcoin::Network;
 use bitcoincore_rpc::bitcoincore_rpc_json::GetRawTransactionResultVout;
 use bitcoincore_rpc::{jsonrpc, Client, Error, RpcApi};
 use br_primitives::bootstrap::BootstrapSharedData;
@@ -57,8 +56,6 @@ pub struct BlockManager {
 	vault_set: VaultAddressSet,
 	pending_outbounds: PendingOutboundPool,
 	bootstrap_shared_data: Arc<BootstrapSharedData>,
-	/// Bitcoin network (Bitcoin | Testnet | Regtest)
-	network: Network,
 }
 
 const INTERVAL: u64 = 1000;
@@ -92,7 +89,6 @@ impl BlockManager {
 		vault_set: VaultAddressSet,
 		pending_outbounds: PendingOutboundPool,
 		bootstrap_shared_data: Arc<BootstrapSharedData>,
-		network: Network,
 	) -> Self {
 		let (sender, _receiver) = broadcast::channel(512);
 
@@ -104,7 +100,6 @@ impl BlockManager {
 			vault_set,
 			pending_outbounds,
 			bootstrap_shared_data,
-			network,
 		}
 	}
 

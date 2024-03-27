@@ -3,7 +3,8 @@ use crate::btc::handlers::Handler;
 use crate::btc::storage::pending_outbound::PendingOutboundPool;
 use br_primitives::periodic::RollbackSender;
 use br_primitives::tx::TxRequestSender;
-use miniscript::bitcoin::p2p::Address;
+use miniscript::bitcoin::address::NetworkUnchecked;
+use miniscript::bitcoin::Address;
 use std::sync::Arc;
 use tokio::sync::broadcast::Receiver;
 
@@ -13,7 +14,7 @@ pub struct OutboundHandler {
 	event_receiver: Receiver<BTCEventMessage>,
 	pending_outbound: PendingOutboundPool,
 	target_event: EventType,
-	change_address: Address,
+	change_address: Address<NetworkUnchecked>,
 }
 
 impl OutboundHandler {

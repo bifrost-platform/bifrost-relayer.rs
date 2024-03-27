@@ -3,8 +3,7 @@ use crate::btc::handlers::{BootstrapHandler, Handler, LOG_TARGET};
 use crate::eth::EthClient;
 use bitcoincore_rpc::bitcoin::Transaction;
 use br_primitives::bootstrap::BootstrapSharedData;
-use br_primitives::contracts::socket::RequestID;
-use br_primitives::eth::{BootstrapState, GasCoefficient, SocketEventStatus};
+use br_primitives::eth::{BootstrapState, GasCoefficient};
 use br_primitives::sub_display_format;
 use br_primitives::tx::{
 	BitcoinSocketRelayMetadata, TxRequest, TxRequestMessage, TxRequestMetadata, TxRequestSender,
@@ -13,7 +12,7 @@ use ethers::providers::JsonRpcClient;
 use ethers::types::{Address as EthAddress, Address, TransactionRequest};
 use miniscript::bitcoin::address::NetworkUnchecked;
 use miniscript::bitcoin::hashes::Hash;
-use miniscript::bitcoin::{Address as BtcAddress, Network};
+use miniscript::bitcoin::Address as BtcAddress;
 use std::sync::Arc;
 use tokio::sync::broadcast::Receiver;
 use tokio_stream::StreamExt;
@@ -66,20 +65,6 @@ impl<T: JsonRpcClient> InboundHandler<T> {
 				"relayer_manager.is_previous_selected_relayer",
 			)
 			.await
-	}
-
-	async fn is_sequence_ended(&self, rid: &RequestID) -> bool {
-		let request = self
-			.bfc_client
-			.contract_call(
-				self.bfc_client.protocol_contracts.socket.get_request(rid.clone()),
-				"socket.get_request",
-			)
-			.await;
-		matches!(
-			SocketEventStatus::from(&request.field[0]),
-			SocketEventStatus::Committed | SocketEventStatus::Rollbacked
-		)
 	}
 
 	async fn get_user_bfc_address(
