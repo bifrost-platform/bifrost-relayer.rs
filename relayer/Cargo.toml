@@ -19,10 +19,12 @@ ethers = { workspace = true }
 futures = { workspace = true }
 clap = { workspace = true, features = ["derive"] }
 tokio = { workspace = true, features = [
-	"signal",
-	"rt-multi-thread",
-	"parking_lot",
+    "signal",
+    "rt-multi-thread",
+    "parking_lot",
 ] }
+miniscript = { workspace = true }
+bitcoincore-rpc = { workspace = true }
 
 # Bifrost Relayer
 br-cli = { path = "../client/cli", default-features = false }

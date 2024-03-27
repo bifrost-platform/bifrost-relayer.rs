@@ -33,7 +33,7 @@ pub struct InboundHandler<T> {
 }
 
 impl<T: JsonRpcClient> InboundHandler<T> {
-	fn new(
+	pub fn new(
 		bfc_client: Arc<EthClient<T>>,
 		tx_request_sender: Arc<TxRequestSender>,
 		event_receiver: Receiver<BTCEventMessage>,

@@ -5,6 +5,11 @@ use std::{
 	time::Duration,
 };
 
+use bitcoincore_rpc::{Auth, Client as BitcoinClient};
+use br_client::btc::block::BlockManager;
+use br_client::btc::handlers::{Handler as BitcoinHandler, InboundHandler, OutboundHandler};
+use br_client::btc::storage::pending_outbound::PendingOutboundPool;
+use br_client::btc::storage::vault_set::VaultAddressSet;
 use ethers::providers::{Http, Provider};
 use futures::FutureExt;
 use sc_service::{config::PrometheusConfig, Error as ServiceError, TaskManager};
@@ -21,6 +26,7 @@ use br_periodic::{
 	traits::PeriodicWorker, HeartbeatSender, OraclePriceFeeder, RoundupEmitter,
 	SocketRollbackEmitter,
 };
+use br_primitives::constants::errors::INVALID_BIFROST_NATIVENESS;
 use br_primitives::{
 	bootstrap::BootstrapSharedData,
 	cli::{Configuration, HandlerType},
@@ -227,6 +233,61 @@ fn construct_managers(
 	ManagerDeps { clients, tx_managers, event_managers, tx_request_senders }
 }
 
+fn construct_btc_deps(
+	config: &Configuration,
+	bootstrap_shared_data: BootstrapSharedData,
+	vault_set: VaultAddressSet,
+	pending_outbound: PendingOutboundPool,
+	manager_deps: &ManagerDeps,
+) -> BtcDeps {
+	let bootstrap_shared_data = Arc::new(bootstrap_shared_data.clone());
+
+	let auth = match (
+		config.relayer_config.btc_provider.username.clone(),
+		config.relayer_config.btc_provider.password.clone(),
+	) {
+		(Some(username), Some(password)) => Auth::UserPass(username, password),
+		_ => Auth::None,
+	};
+	let btc_client =
+		BitcoinClient::new(&config.relayer_config.btc_provider.provider, auth).unwrap();
+
+	let block_manager = BlockManager::new(
+		btc_client.clone(),
+		vault_set.clone(),
+		pending_outbound.clone(),
+		bootstrap_shared_data.clone(),
+	);
+
+	let bfc_client = manager_deps
+		.clients
+		.iter()
+		.find(|client| client.metadata.is_native)
+		.expect(INVALID_BIFROST_NATIVENESS)
+		.clone();
+	let tx_request_sender = manager_deps
+		.tx_request_senders
+		.iter()
+		.find(|sender| sender.is_native)
+		.expect(INVALID_BIFROST_NATIVENESS)
+		.clone();
+
+	let inbound = InboundHandler::new(
+		bfc_client.clone(),
+		tx_request_sender.clone(),
+		block_manager.subscribe(),
+		bootstrap_shared_data.clone(),
+	);
+
+	let outbound = OutboundHandler::new(
+		tx_request_sender.clone(),
+		block_manager.subscribe(),
+		pending_outbound.clone(),
+	);
+
+	BtcDeps { outbound, inbound, block_manager }
+}
+
 /// Spawn relayer service tasks by the `TaskManager`.
 fn spawn_relayer_tasks(
 	task_manager: TaskManager,
@@ -235,7 +296,8 @@ fn spawn_relayer_tasks(
 ) -> TaskManager {
 	let prometheus_config = &config.relayer_config.prometheus_config;
 
-	let FullDeps { bootstrap_shared_data, manager_deps, periodic_deps, handler_deps } = deps;
+	let FullDeps { bootstrap_shared_data, manager_deps, periodic_deps, handler_deps, btc_deps } =
+		deps;
 
 	let BootstrapSharedData { socket_barrier, bootstrap_states, .. } = bootstrap_shared_data;
 	let ManagerDeps { tx_managers, event_managers, .. } = manager_deps;
@@ -247,6 +309,7 @@ fn spawn_relayer_tasks(
 		..
 	} = periodic_deps;
 	let HandlerDeps { socket_relay_handlers, roundup_relay_handlers } = handler_deps;
+	let BtcDeps { mut outbound, mut inbound, mut block_manager } = btc_deps;
 
 	// spawn legacy transaction managers
 	tx_managers.0.into_iter().for_each(|mut tx_manager| {
@@ -359,6 +422,23 @@ fn spawn_relayer_tasks(
 		)
 	});
 
+	// spawn bitcoin deps
+	task_manager.spawn_essential_handle().spawn(
+		"bitcoin-inbound-handler",
+		Some("handlers"),
+		async move { inbound.run().await },
+	);
+	task_manager.spawn_essential_handle().spawn(
+		"bitcoin-outbound-handler",
+		Some("handlers"),
+		async move { outbound.run().await },
+	);
+	task_manager.spawn_essential_handle().spawn(
+		"bitcoin-block-manager",
+		Some("block-manager"),
+		async move { block_manager.run().await },
+	);
+
 	// spawn prometheus endpoint
 	if let Some(prometheus_config) = prometheus_config {
 		if prometheus_config.is_enabled {
@@ -434,17 +514,27 @@ fn new_relay_base(config: Configuration) -> Result<RelayBase, ServiceError> {
 
 	let bootstrap_shared_data = BootstrapSharedData::new(&config);
 
+	let pending_outbound = PendingOutboundPool::new();
+	let vault_set = VaultAddressSet::new();
+
 	let manager_deps = construct_managers(&config, bootstrap_shared_data.clone(), &task_manager);
 	let periodic_deps = construct_periodics(bootstrap_shared_data.clone(), &manager_deps);
 	let handler_deps =
 		construct_handlers(&config, &periodic_deps, &manager_deps, bootstrap_shared_data.clone());
+	let btc_deps = construct_btc_deps(
+		&config,
+		bootstrap_shared_data.clone(),
+		vault_set,
+		pending_outbound,
+		&manager_deps,
+	);
 
 	print_relay_targets(&manager_deps);
 
 	Ok(RelayBase {
 		task_manager: spawn_relayer_tasks(
 			task_manager,
-			FullDeps { bootstrap_shared_data, manager_deps, periodic_deps, handler_deps },
+			FullDeps { bootstrap_shared_data, manager_deps, periodic_deps, handler_deps, btc_deps },
 			&config,
 		),
 	})
@@ -464,6 +554,12 @@ struct ManagerDeps {
 	event_managers: BTreeMap<ChainID, EventManager<Http>>,
 	/// The `TxRequestSender`'s for each specified chain.
 	tx_request_senders: Vec<Arc<TxRequestSender>>,
+}
+
+struct BtcDeps {
+	outbound: OutboundHandler,
+	inbound: InboundHandler<Http>,
+	block_manager: BlockManager,
 }
 
 struct PeriodicDeps {
@@ -492,4 +588,5 @@ struct FullDeps {
 	manager_deps: ManagerDeps,
 	periodic_deps: PeriodicDeps,
 	handler_deps: HandlerDeps,
+	btc_deps: BtcDeps,
 }

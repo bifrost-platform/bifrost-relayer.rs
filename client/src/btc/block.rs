@@ -103,7 +103,7 @@ impl BlockManager {
 		}
 	}
 
-	fn subscribe(&self) -> Receiver<EventMessage> {
+	pub fn subscribe(&self) -> Receiver<EventMessage> {
 		self.sender.subscribe()
 	}
 
