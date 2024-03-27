@@ -162,20 +162,28 @@ impl<T: JsonRpcClient> BfcClient<T> {
 mod tests {
 
 	use super::*;
-
-	use br_client::btc::storage::keypair::Network::Testnet;
+	use crate::eth::wallet::WalletManager;
 	use br_primitives::{
-		cli::{Configuration, RelayerConfig, Result as CliResult},
-		constants::errors::{INVALID_CONFIG_FILE_PATH, INVALID_CONFIG_FILE_STRUCTURE},
+		cli::{Configuration, EVMProvider, RelayerConfig, Result as CliResult},
+		constants::errors::{
+			INVALID_CONFIG_FILE_PATH, INVALID_CONFIG_FILE_STRUCTURE, INVALID_PRIVATE_KEY,
+			INVALID_PROVIDER_URL,
+		},
+		eth::{AggregatorContracts, ProtocolContracts, ProviderMetadata},
 	};
+	use ethers::prelude::{Http, Provider};
+	use tokio::time::Duration;
 
 	use bitcoincore_rpc::bitcoin::{
-		transaction, Address, Amount, CompressedPublicKey, Network, OutPoint, ScriptBuf, Sequence,
-		Transaction, TxIn, TxOut, Witness,
+		locktime::absolute, secp256k1::All, transaction, Address, Amount, Network, OutPoint,
+		ScriptBuf, Sequence, Transaction, TxIn, TxOut, Witness,
 	};
+
+	use std::str::FromStr;
 
 	const TESTNET_CONFIG_FILE_PATH: &str = "configs/config.testnet.yaml";
 	// Get this from the output of `bt dumpwallet <file>`.
+
 	const EXTENDED_MASTER_PRIVATE_KEY: &str =
 		"701daf3456e8471c4d37cf1752382b5bbfbbd76ea35065e8ec27df6bf4cd926b";
 
@@ -193,63 +201,73 @@ mod tests {
 	const OUTPUT_AMOUNT_BTC: &str = "1 BTC";
 	const CHANGE_AMOUNT_BTC: &str = "48.99999 BTC"; // 1000 sat transaction fee.
 
-	fn default_bfc_client() -> BfcClient {
+	async fn default_bfc_client() -> BfcClient<Http> {
 		let user_config_file =
 			std::fs::File::open(TESTNET_CONFIG_FILE_PATH).expect(INVALID_CONFIG_FILE_PATH);
 		let user_config: RelayerConfig =
 			serde_yaml::from_reader(user_config_file).expect(INVALID_CONFIG_FILE_STRUCTURE);
 
-		BfcClient::new(
-			OnlineClient::<CustomConfig>::new().await?,
+		let evm_provider: EVMProvider = user_config.evm_providers.first().unwrap().clone();
+
+		let is_native = evm_provider.is_native.unwrap_or(false);
+
+		let provider = Provider::<Http>::try_from(evm_provider.provider.clone())
+			.expect(INVALID_PROVIDER_URL)
+			.interval(Duration::from_millis(evm_provider.call_interval));
+
+		let bfc_client = BfcClient::new(
+			OnlineClient::<CustomConfig>::new().await.unwrap(),
 			Arc::new(EthClient::new(
-				WalletManager::from_private_key(
-					EXTENDED_MASTER_PRIVATE_KEY,
-					user_config.evm_provider.id,
-				)
-				.expect(INVALID_PRIVATE_KEY),
+				WalletManager::from_private_key(EXTENDED_MASTER_PRIVATE_KEY, evm_provider.id)
+					.expect(INVALID_PRIVATE_KEY),
 				Arc::new(provider.clone()),
 				ProviderMetadata::new(
-					user_config.evm_provider.name.clone(),
-					user_config.evm_provider.id,
-					user_config.evm_provider.block_confirmations,
-					user_config.evm_provider.call_interval,
-					user_config
-						.evm_provider
-						.get_logs_batch_size
-						.unwrap_or(DEFAULT_GET_LOGS_BATCH_SIZE),
+					evm_provider.name.clone(),
+					evm_provider.id,
+					evm_provider.block_confirmations,
+					evm_provider.call_interval,
+					evm_provider.get_logs_batch_size.unwrap_or(DEFAULT_GET_LOGS_BATCH_SIZE),
 					is_native,
 				),
 				ProtocolContracts::new(
 					Arc::new(provider.clone()),
-					user_config.evm_provider.socket_address.clone(),
-					user_config.evm_provider.authority_address.clone(),
-					user_config.evm_provider.relayer_manager_address.clone(),
+					evm_provider.socket_address.clone(),
+					evm_provider.authority_address.clone(),
+					evm_provider.relayer_manager_address.clone(),
 				),
 				AggregatorContracts::new(
 					Arc::new(provider),
-					user_config.evm_provider.chainlink_usdc_usd_address.clone(),
-					user_config.evm_provider.chainlink_usdt_usd_address.clone(),
-					user_config.evm_provider.chainlink_dai_usd_address.clone(),
-					user_config.evm_provider.chainlink_btc_usd_address.clone(),
-					user_config.evm_provider.chainlink_wbtc_usd_address.clone(),
+					evm_provider.chainlink_usdc_usd_address.clone(),
+					evm_provider.chainlink_usdt_usd_address.clone(),
+					evm_provider.chainlink_dai_usd_address.clone(),
+					evm_provider.chainlink_btc_usd_address.clone(),
+					evm_provider.chainlink_wbtc_usd_address.clone(),
 				),
 				true,
 			)),
-			KeypairStorage::new(Testnet),
+			KeypairStorage::new(Network::Testnet),
 		)
+		.unwrap();
+		bfc_client
 	}
 
 	fn create_psbt() -> Psbt {
-		let to_address = Address::from_str(RECEIVE_ADDRESS)?.require_network(Testnet)?;
-		let to_amount = Amount::from_str(OUTPUT_AMOUNT_BTC)?;
+		let to_address = Address::from_str(RECEIVE_ADDRESS)
+			.unwrap()
+			.require_network(Network::Testnet)
+			.unwrap();
+		let to_amount = Amount::from_str(OUTPUT_AMOUNT_BTC).unwrap();
 
-		let change_amount = Amount::from_str(CHANGE_AMOUNT_BTC)?;
+		let change_amount = Amount::from_str(CHANGE_AMOUNT_BTC).unwrap();
 
 		let tx = Transaction {
 			version: transaction::Version::TWO,
 			lock_time: absolute::LockTime::ZERO,
 			input: vec![TxIn {
-				previous_output: OutPoint { txid: INPUT_UTXO_TXID.parse()?, vout: INPUT_UTXO_VOUT },
+				previous_output: OutPoint {
+					txid: INPUT_UTXO_TXID.parse().unwrap(),
+					vout: INPUT_UTXO_VOUT,
+				},
 				script_sig: ScriptBuf::new(),
 				sequence: Sequence::MAX, // Disable LockTime and RBF.
 				witness: Witness::default(),
@@ -257,33 +275,39 @@ mod tests {
 			output: vec![TxOut { value: to_amount, script_pubkey: to_address.script_pubkey() }],
 		};
 
-		let psbt = Psbt::from_unsigned_tx(tx)?;
+		let psbt = Psbt::from_unsigned_tx(tx).unwrap();
 		psbt
 	}
 
 	#[tokio::test]
-	async fn test_submit_vault_key(
-	) -> Result<ExtrinsicEvents<CustomConfig>, Box<dyn std::error::Error>> {
-		let test_client = default_bfc_client();
+	async fn test_submit_vault_key() {
+		let test_client = default_bfc_client().await;
+		let authority_id = test_client.eth_client.address();
+		let who = test_client.eth_client.address();
 
-		test_client.submit_vault_key(authority_id, who)
+		test_client.submit_vault_key(authority_id, who).await.unwrap();
 	}
 
 	#[tokio::test]
-	async fn test_submit_unsigned_psbt(
-	) -> Result<ExtrinsicEvents<CustomConfig>, Box<dyn std::error::Error>> {
-		let test_client = default_bfc_client();
+	async fn test_submit_unsigned_psbt() {
+		let test_client = default_bfc_client().await;
 		let unsigned_psbt = create_psbt();
+		let socket_messages = vec![vec![0, 1, 2, 3, 4]];
 
-		test_client.submit_unsigned_psbt(unsigned_psbt.serialize())
+		test_client
+			.submit_unsigned_psbt(test_client.eth_client.address(), socket_messages, unsigned_psbt)
+			.await
+			.unwrap();
 	}
 
 	#[tokio::test]
-	async fn test_submit_signed_psbt(
-	) -> Result<ExtrinsicEvents<CustomConfig>, Box<dyn std::error::Error>> {
-		let test_client = default_bfc_client();
+	async fn test_submit_signed_psbt() {
+		let test_client = default_bfc_client().await;
 		let unsigned_psbt = create_psbt();
 
-		test_client.submit_signed_psbt(unsigned_psbt.serialize())
+		test_client
+			.submit_signed_psbt::<All>(test_client.eth_client.address(), unsigned_psbt)
+			.await
+			.unwrap();
 	}
 }

@@ -88,7 +88,7 @@ impl<T: 'static + JsonRpcClient> BtcRelayHandler<T> {
 						.eth_client.get_chain_name(),
 						"-[{}] 👤 psbt event detected. ({:?})",
 						sub_display_format(SUB_LOG_TARGET),
-						matching_event_psbt.clone()
+						&matching_event_psbt,
 					);
 				}
 				if (!self.is_selected_relayer().await) & (!self.is_selected_socket().await) {
@@ -109,7 +109,7 @@ impl<T: 'static + JsonRpcClient> BtcRelayHandler<T> {
 						.eth_client.get_chain_name(),
 					"-[{}] Error on decoding RoundUp event ({:?}):{}",
 					sub_display_format(SUB_LOG_TARGET),
-					matching_event_psbt.clone(),
+					&matching_event_psbt,
 					e.to_string(),
 				);
 				sentry::capture_message(
@@ -118,7 +118,7 @@ impl<T: 'static + JsonRpcClient> BtcRelayHandler<T> {
 						&self.bfc_client.eth_client.get_chain_name(),
 						SUB_LOG_TARGET,
 						self.bfc_client.eth_client.address(),
-						matching_event_psbt.clone(),
+						&matching_event_psbt,
 						e
 					)
 					.as_str(),
