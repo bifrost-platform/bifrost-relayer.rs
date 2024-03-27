@@ -135,10 +135,12 @@ impl<T: 'static + JsonRpcClient> Handler for SocketRelayHandler<T> {
 
 	#[inline]
 	fn is_target_contract(&self, log: &Log) -> bool {
-		if log.address == self.client.protocol_contracts.socket.address() {
-			return true;
+		if let Some(bitcoin_socket) = self.client.protocol_contracts.bitcoin_socket.as_ref() {
+			log.address == self.client.protocol_contracts.socket.address()
+				|| log.address == bitcoin_socket.address()
+		} else {
+			log.address == self.client.protocol_contracts.socket.address()
 		}
-		false
 	}
 
 	#[inline]
