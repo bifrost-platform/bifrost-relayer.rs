@@ -9,7 +9,8 @@ use ethers::{
 };
 use tokio::time::sleep;
 
-use br_client::eth::{traits::BootstrapHandler, EthClient};
+use br_client::eth::traits::BootstrapHandler;
+use br_client::eth::EthClient;
 use br_primitives::{
 	bootstrap::BootstrapSharedData,
 	constants::{

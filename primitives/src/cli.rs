@@ -43,6 +43,8 @@ pub struct RelayerConfig {
 	pub system: SystemConfig,
 	/// EVM configs
 	pub evm_providers: Vec<EVMProvider>,
+	/// BTC configs
+	pub btc_provider: BTCProvider,
 	/// Handler configs
 	pub handler_configs: Vec<HandlerConfig>,
 	/// Bootstrapping configs
@@ -104,6 +106,8 @@ pub struct EVMProvider {
 	pub authority_address: String,
 	/// Relayer manager contract address (Bifrost only)
 	pub relayer_manager_address: Option<String>,
+	/// Bitcoin socket contract address (Bifrost only)
+	pub bitcoin_socket_address: Option<String>,
 	/// Chainlink usdc/usd aggregator
 	pub chainlink_usdc_usd_address: Option<String>,
 	/// Chainlink usdt/usd aggregator
@@ -114,6 +118,13 @@ pub struct EVMProvider {
 	pub chainlink_btc_usd_address: Option<String>,
 	/// Chainlink wbtc/usd aggregator
 	pub chainlink_wbtc_usd_address: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct BTCProvider {
+	pub provider: String,
+	pub username: Option<String>,
+	pub password: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize, PartialEq)]
