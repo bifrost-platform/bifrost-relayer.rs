@@ -1,20 +1,23 @@
-use ethers::{
-	providers::JsonRpcClient,
-	types::{Address, H160},
-};
-use subxt::{blocks::ExtrinsicEvents, OnlineClient};
-
 use crate::btc::storage::keypair::KeypairStorage;
 use crate::eth::EthClient;
 use bitcoincore_rpc::bitcoin::psbt::Psbt;
 use bitcoincore_rpc::bitcoin::secp256k1::Signing;
 use ethers::types::Signature as EthSignature;
+use ethers::{
+	providers::JsonRpcClient,
+	types::{Address, H160, H256, U64},
+};
 use std::sync::Arc;
+use subxt::backend::BlockRef;
+use subxt::{blocks::ExtrinsicEvents, OnlineClient};
+use subxt::{
+	events::{EventDetails, Events},
+	ext::futures::future::ok,
+};
 
 use generic::{
 	bifrost_runtime, AccountId20, CustomConfig, EthereumSignature, Public, Signature,
-	SignedPsbtMessage, SignedPsbtSubmitted, UnsignedPsbtMessage, UnsignedPsbtSubmitted,
-	VaultKeySubmission,
+	SignedPsbtMessage, UnsignedPsbtMessage, UnsignedPsbtSubmitted, VaultKeySubmission,
 };
 
 pub mod events;
@@ -35,6 +38,48 @@ impl<T: JsonRpcClient> BfcClient<T> {
 		keypair_storage: KeypairStorage,
 	) -> Result<Self, Box<dyn std::error::Error>> {
 		Ok(Self { client, eth_client, keypair_storage })
+	}
+
+	pub async fn get_block_hash(&self, block_id: U64) -> Result<H256, Box<dyn std::error::Error>> {
+		let block_hash = self.eth_client.get_block(block_id.into()).await.unwrap().hash.unwrap();
+		Ok(block_hash)
+	}
+
+	pub async fn get_block_event(
+		&self,
+		block_hash: H256,
+	) -> Result<Events<CustomConfig>, Box<dyn std::error::Error>> {
+		let target_block_events = self
+			.client
+			.blocks()
+			.at(BlockRef::from_hash(block_hash))
+			.await
+			.unwrap()
+			.events()
+			.await
+			.unwrap();
+		Ok(target_block_events)
+	}
+
+	pub async fn filter_block_event(
+		&self,
+		mut from_block: U64,
+		to_block: U64,
+	) -> Vec<EventDetails<CustomConfig>> {
+		let mut events: Vec<EventDetails<CustomConfig>> = vec![];
+
+		while from_block <= to_block {
+			let chunk_to_block = std::cmp::min(from_block + 1, to_block);
+
+			let block_hash = self.get_block_hash(chunk_to_block).await.unwrap();
+
+			let target_block_events = self.get_block_event(block_hash).await.unwrap();
+
+			events.extend(target_block_events.iter().filter_map(Result::ok));
+
+			from_block = chunk_to_block;
+		}
+		events
 	}
 
 	pub async fn submit_vault_key(
@@ -59,7 +104,6 @@ impl<T: JsonRpcClient> BfcClient<T> {
 			.btc_registration_pool()
 			.submit_vault_key(vaultkey_submission, signature);
 
-		// let api: OnlineClient<CustomConfig> = OnlineClient::<CustomConfig>::new().await?;
 		let events: ExtrinsicEvents<CustomConfig> = self
 			.client
 			.tx()
@@ -78,9 +122,10 @@ impl<T: JsonRpcClient> BfcClient<T> {
 		socket_messages: Vec<Vec<u8>>,
 		psbt: Psbt,
 	) -> Result<ExtrinsicEvents<CustomConfig>, Box<dyn std::error::Error>> {
-		let pub_key = self.keypair_storage.create_new_keypair().inner.serialize();
 		let signature = self
-			.convert_ethers_to_ecdsa_signature(self.eth_client.wallet.sign_message(&pub_key))
+			.convert_ethers_to_ecdsa_signature(
+				self.eth_client.wallet.sign_message(&psbt.serialize()),
+			)
 			.unwrap();
 
 		let unsigned_msg = UnsignedPsbtMessage {
@@ -110,13 +155,14 @@ impl<T: JsonRpcClient> BfcClient<T> {
 		authority_id: Address,
 		unsigned_psbt: Psbt,
 	) -> Result<ExtrinsicEvents<CustomConfig>, Box<dyn std::error::Error>> {
-		let pub_key = self.keypair_storage.create_new_keypair().inner.serialize();
-		let signature = self
-			.convert_ethers_to_ecdsa_signature(self.eth_client.wallet.sign_message(&pub_key))
-			.unwrap();
-
 		let mut psbt = unsigned_psbt.clone();
 		self.keypair_storage.sign_psbt(&mut psbt);
+
+		let signature = self
+			.convert_ethers_to_ecdsa_signature(
+				self.eth_client.wallet.sign_message(&psbt.serialize()),
+			)
+			.unwrap();
 
 		let signed_msg = SignedPsbtMessage {
 			authority_id: AccountId20(authority_id.0),
@@ -155,6 +201,8 @@ impl<T: JsonRpcClient> BfcClient<T> {
 		Ok(signature)
 	}
 }
+
+/// cargo test --features "bfc-client" -- --nocapture
 
 #[cfg(all(test, feature = "bfc-client"))]
 mod tests {

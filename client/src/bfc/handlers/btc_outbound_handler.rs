@@ -15,7 +15,6 @@ use crate::bfc::{events::EventMessage, BfcClient, CustomConfig, UnsignedPsbtSubm
 use bitcoincore_rpc::bitcoin::psbt::Psbt;
 use bitcoincore_rpc::bitcoin::secp256k1::All;
 use br_primitives::bootstrap::BootstrapSharedData;
-use subxt::backend::BlockRef;
 
 const SUB_LOG_TARGET: &str = "regis-handler";
 
@@ -28,7 +27,6 @@ pub struct BtcRelayHandler<T> {
 	event_receiver: Receiver<EventMessage>,
 }
 
-// #[async_trait::async_trait]
 impl<T: 'static + JsonRpcClient> BtcRelayHandler<T> {
 	async fn run(&mut self) {
 		loop {
@@ -166,8 +164,8 @@ impl<T: 'static + JsonRpcClient> BtcRelayHandler<T> {
 		let events = self.get_bootstrap_events().await;
 
 		let mut stream = tokio_stream::iter(events);
-		while let Some(log) = stream.next().await {
-			self.process_confirmed_event(&log, true).await;
+		while let Some(ext_event) = stream.next().await {
+			self.process_confirmed_event(&ext_event, true).await;
 		}
 
 		let mut bootstrap_count = self.bootstrap_shared_data.socket_bootstrap_count.lock().await;
@@ -190,7 +188,7 @@ impl<T: 'static + JsonRpcClient> BtcRelayHandler<T> {
 	}
 
 	async fn get_bootstrap_events(&self) -> Vec<EventDetails<CustomConfig>> {
-		let mut events = vec![];
+		let mut events: Vec<EventDetails<CustomConfig>> = vec![];
 
 		if let Some(bootstrap_config) = &self.bootstrap_shared_data.bootstrap_config {
 			let round_info: RoundMetaData = if self.bfc_client.eth_client.metadata.is_native {
@@ -233,36 +231,9 @@ impl<T: 'static + JsonRpcClient> BtcRelayHandler<T> {
 
 			let latest_block_number = self.bfc_client.eth_client.get_latest_block_number().await;
 			let mut from_block = latest_block_number.saturating_sub(bootstrap_offset_height);
-			let to_block = latest_block_number;
+			let to_block: ethers::types::U64 = latest_block_number;
 
-			// Split from_block into smaller chunks
-			while from_block <= to_block {
-				let chunk_to_block = std::cmp::min(from_block + 1, to_block);
-
-				let block_hash = self
-					.bfc_client
-					.eth_client
-					.get_block(chunk_to_block.into())
-					.await
-					.unwrap()
-					.hash
-					.unwrap();
-
-				let target_block_events = self
-					.bfc_client
-					.client
-					.blocks()
-					.at(BlockRef::from_hash(block_hash))
-					.await
-					.unwrap()
-					.events()
-					.await
-					.unwrap();
-
-				events.extend(target_block_events.iter().filter_map(Result::ok));
-
-				from_block = chunk_to_block;
-			}
+			events.extend(self.bfc_client.filter_block_event(from_block, to_block).await);
 		}
 
 		events
@@ -277,3 +248,6 @@ impl<T: 'static + JsonRpcClient> BtcRelayHandler<T> {
 			.all(|s| *s == state)
 	}
 }
+
+#[cfg(all(test, feature = "btc-outbound"))]
+mod tests {}
