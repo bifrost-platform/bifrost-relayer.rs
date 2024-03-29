@@ -1,0 +1,9 @@
+version: '0.1'
+services:
+  bifrost-node:
+    image: "munsunout/bifrost-node:99.0"
+    command:
+      
+  # bifrost-relayer:
+  #   image: "munsunouk/bifrost-relayer:353.0"
+  #   command:

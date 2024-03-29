@@ -11,7 +11,10 @@ use subxt::events::EventDetails;
 use tokio::{sync::broadcast::Receiver, time::sleep};
 use tokio_stream::StreamExt;
 
-use crate::bfc::{events::EventMessage, BfcClient, CustomConfig, UnsignedPsbtSubmitted};
+use crate::{
+	bfc::{events::EventMessage, BfcClient, CustomConfig, UnsignedPsbtSubmitted},
+	eth::EthClient,
+};
 use bitcoincore_rpc::bitcoin::psbt::Psbt;
 use bitcoincore_rpc::bitcoin::secp256k1::All;
 use br_primitives::bootstrap::BootstrapSharedData;
@@ -19,18 +22,27 @@ use br_primitives::bootstrap::BootstrapSharedData;
 const SUB_LOG_TARGET: &str = "regis-handler";
 
 /// The essential task that handles `socket relay` related events.
-pub struct BtcRelayHandler<T> {
+pub struct BtcOutboundHandler<T> {
 	/// bfcclient
 	pub bfc_client: Arc<BfcClient<T>>,
 	bootstrap_shared_data: Arc<BootstrapSharedData>,
-	system_clients: BTreeMap<ChainID, Arc<BfcClient<T>>>,
 	event_receiver: Receiver<EventMessage>,
+	system_clients: BTreeMap<ChainID, Arc<EthClient<T>>>,
 }
 
-impl<T: 'static + JsonRpcClient> BtcRelayHandler<T> {
+impl<T: 'static + JsonRpcClient> BtcOutboundHandler<T> {
+	pub fn new(
+		bfc_client: Arc<BfcClient<T>>,
+		bootstrap_shared_data: Arc<BootstrapSharedData>,
+		event_receiver: Receiver<EventMessage>,
+		system_clients: BTreeMap<ChainID, Arc<EthClient<T>>>,
+	) -> Self {
+		Self { bfc_client, bootstrap_shared_data, event_receiver, system_clients }
+	}
+
 	async fn run(&mut self) {
 		loop {
-			if self.is_bootstrap_state_synced_as(BootstrapState::BootstrapSocketRelay).await {
+			if self.is_bootstrap_state_synced_as(BootstrapState::BootstrapBtcOutbound).await {
 				self.bootstrap().await;
 
 				sleep(Duration::from_millis(self.bfc_client.eth_client.metadata.call_interval))
@@ -188,7 +200,7 @@ impl<T: 'static + JsonRpcClient> BtcRelayHandler<T> {
 	}
 
 	async fn get_bootstrap_events(&self) -> Vec<EventDetails<CustomConfig>> {
-		let mut events: Vec<EventDetails<CustomConfig>> = vec![];
+		let mut events = vec![];
 
 		if let Some(bootstrap_config) = &self.bootstrap_shared_data.bootstrap_config {
 			let round_info: RoundMetaData = if self.bfc_client.eth_client.metadata.is_native {
@@ -199,15 +211,12 @@ impl<T: 'static + JsonRpcClient> BtcRelayHandler<T> {
 						"authority.round_info",
 					)
 					.await
-			} else if let Some((_id, native_client)) = self
-				.system_clients
-				.iter()
-				.find(|(_id, bfc_client)| bfc_client.eth_client.metadata.is_native)
+			} else if let Some((_id, native_client)) =
+				self.system_clients.iter().find(|(_id, client)| client.metadata.is_native)
 			{
 				native_client
-					.eth_client
 					.contract_call(
-						native_client.eth_client.protocol_contracts.authority.round_info(),
+						native_client.protocol_contracts.authority.round_info(),
 						"authority.round_info",
 					)
 					.await
@@ -231,7 +240,7 @@ impl<T: 'static + JsonRpcClient> BtcRelayHandler<T> {
 
 			let latest_block_number = self.bfc_client.eth_client.get_latest_block_number().await;
 			let mut from_block = latest_block_number.saturating_sub(bootstrap_offset_height);
-			let to_block: ethers::types::U64 = latest_block_number;
+			let to_block = latest_block_number;
 
 			events.extend(self.bfc_client.filter_block_event(from_block, to_block).await);
 		}

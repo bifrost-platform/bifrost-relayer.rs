@@ -3,8 +3,9 @@ use std::{collections::BTreeMap, sync::Arc, time::Duration};
 use br_primitives::{
 	bootstrap::BootstrapSharedData,
 	constants::{
-		cli::DEFAULT_BOOTSTRAP_ROUND_OFFSET, config::BOOTSTRAP_BLOCK_CHUNK_SIZE,
-		errors::INVALID_BIFROST_NATIVENESS,
+		cli::DEFAULT_BOOTSTRAP_ROUND_OFFSET,
+		config::BOOTSTRAP_BLOCK_CHUNK_SIZE,
+		errors::{INVALID_BIFROST_NATIVENESS, INVALID_CONTRACT_ABI},
 	},
 	contracts::{
 		authority::RoundMetaData,
@@ -28,12 +29,13 @@ use crate::bfc::BfcClient;
 use crate::eth::{
 	events::EventMessage,
 	traits::{BootstrapHandler, Handler},
+	EthClient,
 };
 
 const SUB_LOG_TARGET: &str = "regis-handler";
 
 /// The essential task that handles `socket relay` related events.
-pub struct RegisHandler<T> {
+pub struct BtcRegisHandler<T> {
 	/// bfcclient
 	pub bfc_client: Arc<BfcClient<T>>,
 	/// The bootstrap shared data.
@@ -43,14 +45,14 @@ pub struct RegisHandler<T> {
 	/// Signature of the `Socket` Event.
 	socket_signature: H256,
 	/// The entire clients instantiated in the system. <chain_id, Arc<BfcClient>>
-	system_clients: BTreeMap<ChainID, Arc<BfcClient<T>>>,
+	system_clients: BTreeMap<ChainID, Arc<EthClient<T>>>,
 }
 
 #[async_trait::async_trait]
-impl<T: 'static + JsonRpcClient> Handler for RegisHandler<T> {
+impl<T: 'static + JsonRpcClient> Handler for BtcRegisHandler<T> {
 	async fn run(&mut self) {
 		loop {
-			if self.is_bootstrap_state_synced_as(BootstrapState::BootstrapSocketRelay).await {
+			if self.is_bootstrap_state_synced_as(BootstrapState::BootstrapBtcRegis).await {
 				self.bootstrap().await;
 
 				sleep(Duration::from_millis(self.bfc_client.eth_client.metadata.call_interval))
@@ -149,7 +151,7 @@ impl<T: 'static + JsonRpcClient> Handler for RegisHandler<T> {
 }
 
 #[async_trait::async_trait]
-impl<T: 'static + JsonRpcClient> BootstrapHandler for RegisHandler<T> {
+impl<T: 'static + JsonRpcClient> BootstrapHandler for BtcRegisHandler<T> {
 	async fn bootstrap(&self) {
 		log::info!(
 			target: &self.bfc_client.eth_client.get_chain_name(),
@@ -196,15 +198,12 @@ impl<T: 'static + JsonRpcClient> BootstrapHandler for RegisHandler<T> {
 						"authority.round_info",
 					)
 					.await
-			} else if let Some((_id, native_client)) = self
-				.system_clients
-				.iter()
-				.find(|(_id, bfc_client)| bfc_client.eth_client.metadata.is_native)
+			} else if let Some((_id, native_client)) =
+				self.system_clients.iter().find(|(_id, client)| client.metadata.is_native)
 			{
 				native_client
-					.eth_client
 					.contract_call(
-						native_client.eth_client.protocol_contracts.authority.round_info(),
+						native_client.protocol_contracts.authority.round_info(),
 						"authority.round_info",
 					)
 					.await
@@ -260,7 +259,32 @@ impl<T: 'static + JsonRpcClient> BootstrapHandler for RegisHandler<T> {
 	}
 }
 
-impl<T: JsonRpcClient> RegisHandler<T> {
+impl<T: JsonRpcClient> BtcRegisHandler<T> {
+	/// Instantiates a new `SocketRelayHandler` instance.
+	pub fn new(
+		bfc_client: Arc<BfcClient<T>>,
+		bootstrap_shared_data: Arc<BootstrapSharedData>,
+		event_receiver: Receiver<EventMessage>,
+		system_clients_vec: Vec<Arc<EthClient<T>>>,
+	) -> Self {
+		let system_clients: BTreeMap<ChainID, Arc<EthClient<T>>> = system_clients_vec
+			.iter()
+			.map(|client| (client.get_chain_id(), client.clone()))
+			.collect();
+
+		let socket_signature = bfc_client
+			.clone()
+			.eth_client
+			.protocol_contracts
+			.socket
+			.abi()
+			.event("Socket")
+			.expect(INVALID_CONTRACT_ABI)
+			.signature();
+
+		Self { bfc_client, bootstrap_shared_data, event_receiver, socket_signature, system_clients }
+	}
+
 	/// Decode & Serialize log to `Serialized` struct.
 	async fn decode_log(&self, log: Log) -> Result<VaultPending, ethers::abi::Error> {
 		match BtcRegisEvents::decode_log(&log.into()) {
@@ -274,6 +298,3 @@ impl<T: JsonRpcClient> RegisHandler<T> {
 		true
 	}
 }
-
-#[cfg(all(test, feature = "btc-registration"))]
-mod tests {}

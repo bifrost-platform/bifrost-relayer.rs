@@ -266,6 +266,10 @@ pub enum BootstrapState {
 	BootstrapSocketRelay,
 	/// phase 3. process for latest block as normal
 	NormalStart,
+	/// phase 4. btc registration relay
+	BootstrapBtcRegis,
+	/// phase 4. btc outbound relay
+	BootstrapBtcOutbound,
 }
 
 #[derive(Clone, Debug)]

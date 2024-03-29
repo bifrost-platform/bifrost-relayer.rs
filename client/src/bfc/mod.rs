@@ -251,7 +251,7 @@ mod tests {
 	const OUTPUT_AMOUNT_BTC: &str = "1 BTC";
 	const CHANGE_AMOUNT_BTC: &str = "48.99999 BTC"; // 1000 sat transaction fee.
 
-	async fn default_bfc_client() -> BfcClient<Http> {
+	async fn test_set_bfc_client() -> BfcClient<Http> {
 		let user_config_file =
 			std::fs::File::open(TESTNET_CONFIG_FILE_PATH).expect(INVALID_CONFIG_FILE_PATH);
 		let user_config: RelayerConfig =
@@ -331,7 +331,7 @@ mod tests {
 
 	#[tokio::test]
 	async fn test_submit_vault_key() {
-		let test_client = default_bfc_client().await;
+		let test_client = test_set_bfc_client().await;
 		let authority_id = test_client.eth_client.address();
 		let who = test_client.eth_client.address();
 
@@ -342,7 +342,7 @@ mod tests {
 
 	#[tokio::test]
 	async fn test_submit_unsigned_psbt() {
-		let test_client = default_bfc_client().await;
+		let test_client = test_set_bfc_client().await;
 		let unsigned_psbt = create_psbt();
 		let socket_messages = vec![vec![0, 1, 2, 3, 4]];
 
@@ -356,7 +356,7 @@ mod tests {
 
 	#[tokio::test]
 	async fn test_submit_signed_psbt() {
-		let test_client = default_bfc_client().await;
+		let test_client = test_set_bfc_client().await;
 		let unsigned_psbt = create_psbt();
 
 		let ext_event = test_client

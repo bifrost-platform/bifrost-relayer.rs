@@ -36,9 +36,16 @@ sc-cli = { workspace = true }
 sc-service = { workspace = true }
 sc-sysinfo = { workspace = true }
 prometheus-endpoint = { workspace = true }
+subxt = { workspace = true }
+
+#Bitcoin
+bitcoincore-rpc = { workspace = true }
 
 [build-dependencies]
 substrate-build-script-utils = { workspace = true }
 
 [[bin]]
 name = "bifrost-relayer"
+
+[features]
+btc-registration = []
