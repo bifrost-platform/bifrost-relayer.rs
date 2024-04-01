@@ -1,0 +1,15 @@
+[
+  {
+    "inputs": [],
+    "name": "unsigned_psbts",
+    "outputs": [
+      {
+        "internalType": "bytes[]",
+        "name": "",
+        "type": "bytes[]"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  }
+]

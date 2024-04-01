@@ -108,6 +108,12 @@ pub struct EVMProvider {
 	pub relayer_manager_address: Option<String>,
 	/// Bitcoin socket contract address (Bifrost only)
 	pub bitcoin_socket_address: Option<String>,
+	/// Socket Queue contract address (Bifrost only)
+	pub socket_queue_address: Option<String>,
+	/// Registration Pool contract address (Bifrost only)
+	pub registration_pool_address: Option<String>,
+	/// Relay Executive contract address (Bifrost only)
+	pub relay_executive_address: Option<String>,
 	/// Chainlink usdc/usd aggregator
 	pub chainlink_usdc_usd_address: Option<String>,
 	/// Chainlink usdt/usd aggregator

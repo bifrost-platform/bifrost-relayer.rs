@@ -14,6 +14,9 @@ evm_providers:
     authority_address: "0x0000000000000000000000000000000000000400"
     relayer_manager_address: "0x0000000000000000000000000000000000002000"
     bitcoin_socket_address: "TODO"
+    socket_queue_address: "TODO"
+    registration_pool_address: "TODO"
+    relay_executive_address: "TODO"
   - name: "sepolia"
     id: 11155111
     provider: "<YOUR_SEPOLIA_RPC_ENDPOINT>"
@@ -73,9 +76,9 @@ evm_providers:
 
 handler_configs:
   - handler_type: Socket
-    watch_list: [ 49088, 11155111, 97, 80001, 84532, 421614 ]
+    watch_list: [49088, 11155111, 97, 80001, 84532, 421614]
   - handler_type: Roundup
-    watch_list: [ 49088 ]
+    watch_list: [49088]
 
 ###  The items below are optional. ###
 

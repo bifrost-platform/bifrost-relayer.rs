@@ -172,6 +172,9 @@ fn construct_managers(
 				evm_provider.authority_address.clone(),
 				evm_provider.relayer_manager_address.clone(),
 				evm_provider.bitcoin_socket_address.clone(),
+				evm_provider.socket_queue_address.clone(),
+				evm_provider.registration_pool_address.clone(),
+				evm_provider.relay_executive_address.clone(),
 			),
 			AggregatorContracts::new(
 				Arc::new(provider),

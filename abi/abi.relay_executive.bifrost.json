@@ -1,0 +1,116 @@
+[
+  {
+    "inputs": [
+      {
+        "internalType": "bytes32",
+        "name": "proposal_hash",
+        "type": "bytes32"
+      },
+      {
+        "internalType": "uint256",
+        "name": "proposal_index",
+        "type": "uint256"
+      },
+      {
+        "internalType": "uint256",
+        "name": "proposal_weight_bound",
+        "type": "uint256"
+      },
+      {
+        "internalType": "uint256",
+        "name": "length_bound",
+        "type": "uint256"
+      }
+    ],
+    "name": "close",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "bytes",
+        "name": "proposal",
+        "type": "bytes"
+      }
+    ],
+    "name": "execute",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "address",
+        "name": "who",
+        "type": "address"
+      }
+    ],
+    "name": "is_member",
+    "outputs": [
+      {
+        "internalType": "bool",
+        "name": "",
+        "type": "bool"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [],
+    "name": "members",
+    "outputs": [
+      {
+        "internalType": "address[]",
+        "name": "",
+        "type": "address[]"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint256",
+        "name": "threshold",
+        "type": "uint256"
+      },
+      {
+        "internalType": "bytes",
+        "name": "proposal",
+        "type": "bytes"
+      }
+    ],
+    "name": "propose",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "bytes32",
+        "name": "proposal_hash",
+        "type": "bytes32"
+      },
+      {
+        "internalType": "uint256",
+        "name": "proposal_index",
+        "type": "uint256"
+      },
+      {
+        "internalType": "bool",
+        "name": "approve",
+        "type": "bool"
+      }
+    ],
+    "name": "vote",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  }
+]
