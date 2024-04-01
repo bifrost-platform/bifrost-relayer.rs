@@ -10,8 +10,9 @@ use crate::{
 	constants::errors::INVALID_CONTRACT_ADDRESS,
 	contracts::{
 		authority::AuthorityContract, bitcoin_socket::BitcoinSocketContract,
-		chainlink_aggregator::ChainlinkContract, relayer_manager::RelayerManagerContract,
-		socket::SocketContract,
+		chainlink_aggregator::ChainlinkContract, registration_pool::RegistrationPoolContract,
+		relay_executive::RelayExecutiveContract, relayer_manager::RelayerManagerContract,
+		socket::SocketContract, socket_queue::SocketQueueContract,
 	},
 };
 
@@ -109,6 +110,12 @@ pub struct ProtocolContracts<T> {
 	pub relayer_manager: Option<RelayerManagerContract<Provider<T>>>,
 	/// BitcoinSocketContract (Bifrost only)
 	pub bitcoin_socket: Option<BitcoinSocketContract<Provider<T>>>,
+	/// SocketQueueContract (Bifrost only)
+	pub socket_queue: Option<SocketQueueContract<Provider<T>>>,
+	/// RegistrationPoolContract (Bifrost only)
+	pub registration_pool: Option<RegistrationPoolContract<Provider<T>>>,
+	/// RelayExecutiveContract (Bifrost only)
+	pub relay_executive: Option<RelayExecutiveContract<Provider<T>>>,
 }
 
 impl<T: JsonRpcClient> ProtocolContracts<T> {
@@ -118,6 +125,9 @@ impl<T: JsonRpcClient> ProtocolContracts<T> {
 		authority_address: String,
 		relayer_manager_address: Option<String>,
 		bitcoin_socket_address: Option<String>,
+		socket_queue_address: Option<String>,
+		registration_pool_address: Option<String>,
+		relay_executive_address: Option<String>,
 	) -> Self {
 		Self {
 			socket: SocketContract::new(
@@ -136,6 +146,24 @@ impl<T: JsonRpcClient> ProtocolContracts<T> {
 			}),
 			bitcoin_socket: bitcoin_socket_address.map(|address| {
 				BitcoinSocketContract::new(
+					H160::from_str(&address).expect(INVALID_CONTRACT_ADDRESS),
+					provider.clone(),
+				)
+			}),
+			socket_queue: socket_queue_address.map(|address| {
+				SocketQueueContract::new(
+					H160::from_str(&address).expect(INVALID_CONTRACT_ADDRESS),
+					provider.clone(),
+				)
+			}),
+			registration_pool: registration_pool_address.map(|address| {
+				RegistrationPoolContract::new(
+					H160::from_str(&address).expect(INVALID_CONTRACT_ADDRESS),
+					provider.clone(),
+				)
+			}),
+			relay_executive: relay_executive_address.map(|address| {
+				RelayExecutiveContract::new(
 					H160::from_str(&address).expect(INVALID_CONTRACT_ADDRESS),
 					provider.clone(),
 				)
