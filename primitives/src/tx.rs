@@ -9,12 +9,14 @@ use ethers::types::{
 };
 use miniscript::bitcoin::address::NetworkUnchecked;
 use miniscript::bitcoin::{Address as BtcAddress, Txid};
+use subxt::tx::{SubmittableExtrinsic, TxPayload};
 use tokio::sync::mpsc::{error::SendError, UnboundedSender};
 
 use crate::{
 	constants::tx::{DEFAULT_TX_RETRIES, DEFAULT_TX_RETRY_INTERVAL_MS},
 	eth::{ChainID, GasCoefficient, SocketEventStatus},
 	periodic::PriceResponse,
+	substrate::Public,
 };
 
 #[derive(Clone, Debug)]
@@ -271,6 +273,40 @@ impl Display for TxRequestMetadata {
 	}
 }
 
+pub struct SubmitVaultKeyMetadata {
+	pub who: Address,
+	pub key: Public,
+}
+
+impl SubmitVaultKeyMetadata {
+	pub fn new(who: Address, key: Public) -> Self {
+		Self { who, key }
+	}
+}
+
+impl Display for SubmitVaultKeyMetadata {
+	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		write!(f, "SubmitVaultKey({}:{:?})", self.who, self.key)
+	}
+}
+
+pub enum XtRequestMetadata {
+	SubmitVaultKey(SubmitVaultKeyMetadata),
+	// SubmitSignedPsbt,
+}
+
+impl Display for XtRequestMetadata {
+	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		write!(
+			f,
+			"{}",
+			match self {
+				XtRequestMetadata::SubmitVaultKey(metadata) => metadata.to_string(),
+			}
+		)
+	}
+}
+
 /// Wrapper for TransactionRequest|Eip1559TransactionRequest to support both fee payment in one
 /// relayer
 #[derive(Clone, Debug)]
@@ -449,7 +485,7 @@ pub struct TxRequestMessage {
 }
 
 impl TxRequestMessage {
-	/// Instantiates a new `EventMessage` instance.
+	/// Instantiates a new `TxRequestMessage` instance.
 	pub fn new(
 		tx_request: TxRequest,
 		metadata: TxRequestMetadata,
@@ -470,10 +506,37 @@ impl TxRequestMessage {
 		}
 	}
 
-	/// Builds a new `EventMessage` to use on transaction retry. This will reduce the remaining
+	/// Builds a new `TxRequestMessage` to use on transaction retry. This will reduce the remaining
 	/// retry counter and increase the retry interval.
 	pub fn build_retry_event(&mut self) {
 		self.tx_request.nonce(None);
+		self.retries_remaining = self.retries_remaining.saturating_sub(1);
+	}
+}
+
+pub struct XtRequestMessage<Call> {
+	/// The remaining retries of the transaction request.
+	pub retries_remaining: u8,
+	/// The retry interval in milliseconds.
+	pub retry_interval: u64,
+	pub call: Call,
+	pub metadata: XtRequestMetadata,
+}
+
+impl<Call> XtRequestMessage<Call> {
+	/// Instantiates a new `XtRequestMessage` instance.
+	pub fn new(call: Call, metadata: XtRequestMetadata) -> Self {
+		Self {
+			retries_remaining: DEFAULT_TX_RETRIES,
+			retry_interval: DEFAULT_TX_RETRY_INTERVAL_MS,
+			call,
+			metadata,
+		}
+	}
+
+	/// Builds a new `XtRequestMessage` to use on transaction retry. This will reduce the remaining
+	/// retry counter and increase the retry interval.
+	pub fn build_retry_event(&mut self) {
 		self.retries_remaining = self.retries_remaining.saturating_sub(1);
 	}
 }

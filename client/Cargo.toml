@@ -24,12 +24,13 @@ async-trait = { workspace = true }
 async-recursion = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 tokio = { workspace = true, features = [
-    "signal",
-    "rt-multi-thread",
-    "parking_lot",
+	"signal",
+	"rt-multi-thread",
+	"parking_lot",
 ] }
 k256 = { workspace = true, features = ["ecdsa"] }
 sha3 = { workspace = true }
+subxt = { workspace = true }
 
 # Bifrost Relayer
 br-primitives = { path = "../primitives", default-features = false }
