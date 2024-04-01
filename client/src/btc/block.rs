@@ -1,8 +1,9 @@
-use crate::btc::storage::vault_set::VaultAddressSet;
+use crate::eth::EthClient;
 use bitcoincore_rpc::bitcoincore_rpc_json::GetRawTransactionResultVout;
-use bitcoincore_rpc::{jsonrpc, Client, Error, RpcApi};
+use bitcoincore_rpc::{jsonrpc, Client as BtcClient, Error, RpcApi};
 use br_primitives::bootstrap::BootstrapSharedData;
 use br_primitives::eth::BootstrapState;
+use ethers::providers::JsonRpcClient;
 use miniscript::bitcoin::address::NetworkUnchecked;
 use miniscript::bitcoin::{Address, Amount, Txid};
 use serde::Deserialize;
@@ -47,12 +48,12 @@ impl EventMessage {
 	}
 }
 
-pub struct BlockManager {
-	client: Client,
+pub struct BlockManager<T> {
+	btc_client: BtcClient,
+	bfc_client: Arc<EthClient<T>>,
 	sender: Sender<EventMessage>,
 	block_confirmations: u64,
 	waiting_block: u64,
-	vault_set: VaultAddressSet,
 	bootstrap_shared_data: Arc<BootstrapSharedData>,
 }
 
@@ -60,14 +61,14 @@ const INTERVAL: u64 = 1000;
 const RETRY_ATTEMPTS: u8 = 10;
 
 #[async_trait::async_trait]
-impl RpcApi for BlockManager {
+impl<C: JsonRpcClient> RpcApi for BlockManager<C> {
 	async fn call<T: for<'a> Deserialize<'a> + Send>(
 		&self,
 		cmd: &str,
 		args: &[Value],
 	) -> bitcoincore_rpc::Result<T> {
 		for _ in 0..RETRY_ATTEMPTS {
-			match self.client.call(cmd, args).await {
+			match self.btc_client.call(cmd, args).await {
 				Ok(ret) => return Ok(ret),
 				Err(Error::JsonRpc(jsonrpc::error::Error::Rpc(ref err))) if err.code == -28 => {
 					tokio::time::sleep(Duration::from_millis(INTERVAL)).await;
@@ -76,25 +77,25 @@ impl RpcApi for BlockManager {
 				Err(e) => return Err(e),
 			}
 		}
-		self.client.call(cmd, args).await
+		self.btc_client.call(cmd, args).await
 	}
 }
 
 // TODO: Remove failable .unwrap()
-impl BlockManager {
+impl<T: JsonRpcClient> BlockManager<T> {
 	pub fn new(
-		client: Client,
-		vault_set: VaultAddressSet,
+		btc_client: BtcClient,
+		bfc_client: Arc<EthClient<T>>,
 		bootstrap_shared_data: Arc<BootstrapSharedData>,
 	) -> Self {
 		let (sender, _receiver) = broadcast::channel(512);
 
 		Self {
-			client,
+			btc_client,
+			bfc_client,
 			sender,
 			block_confirmations: 0,
 			waiting_block: 0,
-			vault_set,
 			bootstrap_shared_data,
 		}
 	}
@@ -104,11 +105,11 @@ impl BlockManager {
 	}
 
 	pub async fn run(&mut self) {
-		self.waiting_block = self.client.get_block_count().await.unwrap(); // TODO: should set at bootstrap process in production
+		self.waiting_block = self.btc_client.get_block_count().await.unwrap(); // TODO: should set at bootstrap process in production
 
 		loop {
 			if self.is_bootstrap_state_synced_as(BootstrapState::NormalStart).await {
-				let latest_block_num = self.client.get_block_count().await.unwrap();
+				let latest_block_num = self.btc_client.get_block_count().await.unwrap();
 				while self.is_block_confirmed(latest_block_num) {
 					self.process_confirmed_block(latest_block_num).await;
 				}
@@ -131,8 +132,8 @@ impl BlockManager {
 			let (mut inbound, mut outbound) =
 				(EventMessage::inbound(num, vec![]), EventMessage::outbound(num, vec![]));
 
-			let block_hash = self.client.get_block_hash(num).await.unwrap();
-			let txs = self.client.get_block_info_with_txs(&block_hash).await.unwrap().tx;
+			let block_hash = self.btc_client.get_block_hash(num).await.unwrap();
+			let txs = self.btc_client.get_block_info_with_txs(&block_hash).await.unwrap().tx;
 
 			let mut stream = tokio_stream::iter(txs.iter());
 			while let Some(tx) = stream.next().await {
@@ -156,22 +157,7 @@ impl BlockManager {
 		let mut stream = tokio_stream::iter(vouts.iter());
 		while let Some(vout) = stream.next().await {
 			if let Some(address) = vout.script_pub_key.address.clone() {
-				if self.vault_set.contains(&address).await {
-					inbound_events.push(Event {
-						txid,
-						index: vout.n,
-						address: address.clone(),
-						amount: vout.value,
-					});
-				}
-				if let Some(_) = self.pending_outbounds.get(&address, vout.value).await {
-					outbound_events.push(Event {
-						txid,
-						index: vout.n,
-						address,
-						amount: vout.value,
-					});
-				}
+				todo!("check is address brp related")
 			}
 		}
 	}
