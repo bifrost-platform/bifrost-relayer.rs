@@ -8,6 +8,8 @@ use miniscript::bitcoin::address::NetworkUnchecked;
 use miniscript::bitcoin::{Address, Amount, Txid};
 use serde::Deserialize;
 use serde_json::Value;
+use std::collections::BTreeSet;
+use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::broadcast;
@@ -82,7 +84,7 @@ impl<C: JsonRpcClient> RpcApi for BlockManager<C> {
 }
 
 // TODO: Remove failable .unwrap()
-impl<T: JsonRpcClient> BlockManager<T> {
+impl<T: JsonRpcClient + 'static> BlockManager<T> {
 	pub fn new(
 		btc_client: BtcClient,
 		bfc_client: Arc<EthClient<T>>,
@@ -110,13 +112,38 @@ impl<T: JsonRpcClient> BlockManager<T> {
 		loop {
 			if self.is_bootstrap_state_synced_as(BootstrapState::NormalStart).await {
 				let latest_block_num = self.btc_client.get_block_count().await.unwrap();
+				let (vault_set, refund_set) = self.fetch_registration_sets().await;
 				while self.is_block_confirmed(latest_block_num) {
-					self.process_confirmed_block(latest_block_num).await;
+					self.process_confirmed_block(latest_block_num, &vault_set, &refund_set).await;
 				}
 			}
 
-			tokio::time::sleep(Duration::from_secs(60)).await; // TODO: interval
+			self.btc_client.wait_for_new_block(0).await.unwrap();
 		}
+	}
+
+	#[inline]
+	async fn fetch_registration_sets(
+		&self,
+	) -> (BTreeSet<Address<NetworkUnchecked>>, BTreeSet<Address<NetworkUnchecked>>) {
+		let registration_pool =
+			self.bfc_client.protocol_contracts.registration_pool.as_ref().unwrap();
+		let vault_set: BTreeSet<Address<NetworkUnchecked>> = registration_pool
+			.vault_addresses()
+			.await
+			.unwrap()
+			.iter()
+			.map(|s| Address::from_str(s).unwrap())
+			.collect();
+		let refund_set: BTreeSet<Address<NetworkUnchecked>> = registration_pool
+			.refund_addresses()
+			.await
+			.unwrap()
+			.iter()
+			.map(|s| Address::from_str(s).unwrap())
+			.collect();
+
+		(vault_set, refund_set)
 	}
 
 	/// Verifies if the stored waiting block has waited enough.
@@ -125,7 +152,13 @@ impl<T: JsonRpcClient> BlockManager<T> {
 		latest_block_num.saturating_sub(self.waiting_block) >= self.block_confirmations // TODO: pending block's conf:0, latest block's conf:1. something weird
 	}
 
-	async fn process_confirmed_block(&mut self, to_block: u64) {
+	#[inline]
+	async fn process_confirmed_block(
+		&mut self,
+		to_block: u64,
+		vault_set: &BTreeSet<Address<NetworkUnchecked>>,
+		refund_set: &BTreeSet<Address<NetworkUnchecked>>,
+	) {
 		let from_block = self.waiting_block;
 
 		for num in from_block..=to_block {
@@ -137,7 +170,15 @@ impl<T: JsonRpcClient> BlockManager<T> {
 
 			let mut stream = tokio_stream::iter(txs.iter());
 			while let Some(tx) = stream.next().await {
-				self.filter(tx.txid, &tx.vout, &mut inbound.events, &mut outbound.events).await;
+				self.filter(
+					tx.txid,
+					&tx.vout,
+					&mut inbound.events,
+					&mut outbound.events,
+					vault_set,
+					refund_set,
+				)
+				.await;
 			}
 
 			self.sender.send(inbound).unwrap();
@@ -147,17 +188,35 @@ impl<T: JsonRpcClient> BlockManager<T> {
 		self.increment_waiting_block(to_block);
 	}
 
+	#[inline]
 	async fn filter(
 		&self,
 		txid: Txid,
 		vouts: &[GetRawTransactionResultVout],
 		inbound_events: &mut Vec<Event>,
 		outbound_events: &mut Vec<Event>,
+		vault_set: &BTreeSet<Address<NetworkUnchecked>>,
+		refund_set: &BTreeSet<Address<NetworkUnchecked>>,
 	) {
 		let mut stream = tokio_stream::iter(vouts.iter());
 		while let Some(vout) = stream.next().await {
 			if let Some(address) = vout.script_pub_key.address.clone() {
-				todo!("check is address brp related")
+				if vault_set.contains(&address) {
+					inbound_events.push(Event {
+						txid,
+						index: vout.n,
+						address: address.clone(),
+						amount: vout.value,
+					});
+				}
+				if refund_set.contains(&address) {
+					outbound_events.push(Event {
+						txid,
+						index: vout.n,
+						address,
+						amount: vout.value,
+					});
+				}
 			}
 		}
 	}
@@ -167,6 +226,7 @@ impl<T: JsonRpcClient> BlockManager<T> {
 		self.waiting_block = to.saturating_add(1);
 	}
 
+	#[inline]
 	pub async fn is_bootstrap_state_synced_as(&self, state: BootstrapState) -> bool {
 		self.bootstrap_shared_data
 			.bootstrap_states
