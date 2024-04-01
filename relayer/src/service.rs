@@ -8,7 +8,6 @@ use std::{
 use bitcoincore_rpc::{Auth, Client as BitcoinClient};
 use br_client::btc::block::BlockManager;
 use br_client::btc::handlers::{Handler as BitcoinHandler, InboundHandler, OutboundHandler};
-use br_client::btc::storage::pending_outbound::PendingOutboundPool;
 use br_client::btc::storage::vault_set::VaultAddressSet;
 use ethers::providers::{Http, Provider};
 use futures::FutureExt;
@@ -237,7 +236,6 @@ fn construct_btc_deps(
 	config: &Configuration,
 	bootstrap_shared_data: BootstrapSharedData,
 	vault_set: VaultAddressSet,
-	pending_outbound: PendingOutboundPool,
 	manager_deps: &ManagerDeps,
 ) -> BtcDeps {
 	let bootstrap_shared_data = Arc::new(bootstrap_shared_data.clone());
@@ -252,12 +250,8 @@ fn construct_btc_deps(
 	let btc_client =
 		BitcoinClient::new(&config.relayer_config.btc_provider.provider, auth).unwrap();
 
-	let block_manager = BlockManager::new(
-		btc_client.clone(),
-		vault_set.clone(),
-		pending_outbound.clone(),
-		bootstrap_shared_data.clone(),
-	);
+	let block_manager =
+		BlockManager::new(btc_client.clone(), vault_set.clone(), bootstrap_shared_data.clone());
 
 	let bfc_client = manager_deps
 		.clients
@@ -279,11 +273,7 @@ fn construct_btc_deps(
 		bootstrap_shared_data.clone(),
 	);
 
-	let outbound = OutboundHandler::new(
-		tx_request_sender.clone(),
-		block_manager.subscribe(),
-		pending_outbound.clone(),
-	);
+	let outbound = OutboundHandler::new(tx_request_sender.clone(), block_manager.subscribe());
 
 	BtcDeps { outbound, inbound, block_manager }
 }
@@ -514,20 +504,14 @@ fn new_relay_base(config: Configuration) -> Result<RelayBase, ServiceError> {
 
 	let bootstrap_shared_data = BootstrapSharedData::new(&config);
 
-	let pending_outbound = PendingOutboundPool::new();
 	let vault_set = VaultAddressSet::new();
 
 	let manager_deps = construct_managers(&config, bootstrap_shared_data.clone(), &task_manager);
 	let periodic_deps = construct_periodics(bootstrap_shared_data.clone(), &manager_deps);
 	let handler_deps =
 		construct_handlers(&config, &periodic_deps, &manager_deps, bootstrap_shared_data.clone());
-	let btc_deps = construct_btc_deps(
-		&config,
-		bootstrap_shared_data.clone(),
-		vault_set,
-		pending_outbound,
-		&manager_deps,
-	);
+	let btc_deps =
+		construct_btc_deps(&config, bootstrap_shared_data.clone(), vault_set, &manager_deps);
 
 	print_relay_targets(&manager_deps);
 
