@@ -301,6 +301,7 @@ fn construct_btc_deps(
 	BtcDeps { outbound, inbound, block_manager }
 }
 
+/// Initializes Substrate related instances.
 fn construct_substrate_deps(
 	manager_deps: &ManagerDeps,
 	task_manager: &TaskManager,
@@ -593,7 +594,9 @@ struct BtcDeps {
 }
 
 struct SubstrateDeps {
+	/// The `UnsignedTransactionManager` for Bifrost.
 	unsigned_tx_manager: UnsignedTransactionManager<Http, DynamicPayload>,
+	/// The `XtRequestSender` for Bifrost.
 	xt_request_sender: Arc<XtRequestSender<DynamicPayload>>,
 }
 
