@@ -1,5 +1,3 @@
-use std::{str::FromStr, sync::Arc, time::Duration};
-
 use cron::Schedule;
 use ethers::{
 	abi::{encode, Detokenize, Token, Tokenize},
@@ -7,6 +5,7 @@ use ethers::{
 	providers::JsonRpcClient,
 	types::{Address, Filter, Log, TransactionRequest, U256},
 };
+use std::{str::FromStr, sync::Arc, time::Duration};
 use tokio::time::sleep;
 
 use br_client::eth::{traits::BootstrapHandler, EthClient};

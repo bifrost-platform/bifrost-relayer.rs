@@ -15,33 +15,41 @@ use br_client::btc::{
 use ethers::providers::{Http, Provider};
 use futures::FutureExt;
 use sc_service::{config::PrometheusConfig, Error as ServiceError, TaskManager};
+use subxt::tx::DynamicPayload;
 
-use br_client::eth::{
-	events::EventManager,
-	handlers::{RoundupRelayHandler, SocketRelayHandler},
-	traits::{Handler, TransactionManager},
-	tx::{Eip1559TransactionManager, LegacyTransactionManager},
-	wallet::WalletManager,
-	EthClient,
+use br_client::{
+	btc::{
+		block::BlockManager,
+		handlers::{Handler as BitcoinHandler, InboundHandler, OutboundHandler},
+	},
+	eth::{
+		events::EventManager,
+		handlers::{RoundupRelayHandler, SocketRelayHandler},
+		traits::{Handler, TransactionManager},
+		tx::{Eip1559TransactionManager, LegacyTransactionManager},
+		wallet::WalletManager,
+		EthClient,
+	},
+	substrate::tx::UnsignedTransactionManager,
 };
 use br_periodic::{
 	traits::PeriodicWorker, HeartbeatSender, OraclePriceFeeder, RoundupEmitter,
 	SocketRollbackEmitter,
 };
-use br_primitives::constants::errors::INVALID_BIFROST_NATIVENESS;
 use br_primitives::{
 	bootstrap::BootstrapSharedData,
 	cli::{Configuration, HandlerType},
 	constants::{
 		cli::{DEFAULT_GET_LOGS_BATCH_SIZE, DEFAULT_MIN_PRIORITY_FEE, DEFAULT_PROMETHEUS_PORT},
-		errors::{INVALID_CHAIN_ID, INVALID_PRIVATE_KEY, INVALID_PROVIDER_URL},
+		errors::{
+			INVALID_BIFROST_NATIVENESS, INVALID_CHAIN_ID, INVALID_PRIVATE_KEY, INVALID_PROVIDER_URL,
+		},
 	},
 	eth::{AggregatorContracts, BootstrapState, ChainID, ProtocolContracts, ProviderMetadata},
 	periodic::RollbackSender,
 	sub_display_format,
 	tx::{TxRequestSender, XtRequestSender},
 };
-use subxt::tx::DynamicPayload;
 
 use crate::{
 	cli::{LOG_TARGET, SUB_LOG_TARGET},

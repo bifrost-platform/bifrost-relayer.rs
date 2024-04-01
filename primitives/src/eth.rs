@@ -1,9 +1,8 @@
 use std::{str::FromStr, sync::Arc};
 
-use ethers::types::Uint8;
 use ethers::{
 	providers::{JsonRpcClient, Provider},
-	types::{Address, Signature, TransactionRequest, H160, U64},
+	types::{Address, Signature, TransactionRequest, Uint8, H160, U64},
 };
 
 use crate::{

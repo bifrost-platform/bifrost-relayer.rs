@@ -1,6 +1,5 @@
 use serde::Deserialize;
-use std::borrow::Cow;
-use std::fmt::Display;
+use std::{borrow::Cow, fmt::Display};
 
 use crate::eth::ChainID;
 

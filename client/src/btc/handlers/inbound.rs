@@ -5,13 +5,14 @@ use crate::{
 	},
 	eth::EthClient,
 };
-use bitcoincore_rpc::bitcoin::Transaction;
 use br_primitives::{
 	bootstrap::BootstrapSharedData,
 	eth::BootstrapState,
 	sub_display_format,
 	tx::{BitcoinRelayMetadata, TxRequestSender},
 };
+
+use bitcoincore_rpc::bitcoin::Transaction;
 use ethers::{
 	providers::JsonRpcClient,
 	types::{Address as EthAddress, Address, TransactionRequest},

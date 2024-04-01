@@ -1,8 +1,10 @@
-use crate::btc::{
-	block::{Event, EventMessage as BTCEventMessage, EventType},
-	handlers::{BootstrapHandler, Handler, LOG_TARGET},
+use crate::{
+	btc::{
+		block::{Event, EventMessage as BTCEventMessage, EventType},
+		handlers::{BootstrapHandler, Handler, LOG_TARGET},
+	},
+	eth::{traits::SocketRelayBuilder, EthClient},
 };
-use crate::eth::{traits::SocketRelayBuilder, EthClient};
 use bitcoincore_rpc::bitcoin::Transaction;
 use br_primitives::{
 	bootstrap::BootstrapSharedData,

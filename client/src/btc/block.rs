@@ -1,16 +1,19 @@
-use std::{collections::BTreeSet, str::FromStr, sync::Arc, time::Duration};
+use crate::eth::EthClient;
+
+use br_primitives::{bootstrap::BootstrapSharedData, eth::BootstrapState};
 
 use bitcoincore_rpc::{
 	bitcoincore_rpc_json::GetRawTransactionResultVout, jsonrpc, Client as BtcClient, Error, RpcApi,
 };
 use ethers::providers::JsonRpcClient;
-use miniscript::bitcoin::{
-	address::NetworkUnchecked,
-	{Address, Amount, Txid},
-};
+use miniscript::bitcoin::{address::NetworkUnchecked, Address, Amount, Txid};
 use serde::Deserialize;
 use serde_json::Value;
-use tokio::sync::broadcast::{self, Receiver, Sender};
+use std::{collections::BTreeSet, str::FromStr, sync::Arc, time::Duration};
+use tokio::sync::{
+	broadcast,
+	broadcast::{Receiver, Sender},
+};
 use tokio_stream::StreamExt;
 
 use crate::btc::storage::pending_outbound::PendingOutboundPool;
