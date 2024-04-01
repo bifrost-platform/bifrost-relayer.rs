@@ -115,7 +115,7 @@ impl Cli {
 			"testnet" => TESTNET_CONFIG_FILE_PATH,
 			"mainnet" => MAINNET_CONFIG_FILE_PATH,
 			path => path,
-		}
+		};
 	}
 
 	/// Log information about the relayer itself.
