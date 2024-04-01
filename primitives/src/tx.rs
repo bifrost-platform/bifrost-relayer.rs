@@ -9,7 +9,6 @@ use ethers::types::{
 };
 use miniscript::bitcoin::address::NetworkUnchecked;
 use miniscript::bitcoin::{Address as BtcAddress, Txid};
-use subxt::tx::{SubmittableExtrinsic, TxPayload};
 use tokio::sync::mpsc::{error::SendError, UnboundedSender};
 
 use crate::{

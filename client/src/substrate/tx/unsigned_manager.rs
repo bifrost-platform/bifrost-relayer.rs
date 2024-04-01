@@ -1,114 +1,95 @@
-use br_primitives::{
-	sub_display_format,
-	substrate::CustomConfig,
-	tx::{XtRequestMessage, XtRequestMetadata},
-};
+use br_primitives::{sub_display_format, substrate::CustomConfig, tx::XtRequestMessage};
 use ethers::providers::JsonRpcClient;
-use std::{error::Error, sync::Arc, time::Duration};
-use subxt::{blocks::ExtrinsicEvents, tx::TxPayload, Config, OnlineClient};
-use tokio::time::sleep;
+use sc_service::SpawnTaskHandle;
+use std::sync::Arc;
+use subxt::{tx::TxPayload, OnlineClient};
+use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
 
-use crate::eth::EthClient;
+use crate::{eth::EthClient, substrate::traits::ExtrinsicTask};
 
 const SUB_LOG_TARGET: &str = "unsigned-tx-manager";
 
-pub struct UnsignedTransactionManager<T> {
+pub struct UnsignedTransactionManager<T, Call> {
+	sub_client: Arc<OnlineClient<CustomConfig>>,
+	eth_client: Arc<EthClient<T>>,
+	/// The receiver connected to the tx request channel.
+	receiver: UnboundedReceiver<XtRequestMessage<Call>>,
+	/// A handle for spawning transaction tasks in the service.
+	xt_spawn_handle: SpawnTaskHandle,
+}
+
+impl<T, Call> UnsignedTransactionManager<T, Call>
+where
+	T: 'static + JsonRpcClient,
+	Call: 'static + TxPayload + Send,
+{
+	pub fn new(
+		sub_client: Arc<OnlineClient<CustomConfig>>,
+		eth_client: Arc<EthClient<T>>,
+		xt_spawn_handle: SpawnTaskHandle,
+	) -> (Self, UnboundedSender<XtRequestMessage<Call>>) {
+		let (sender, receiver) = mpsc::unbounded_channel::<XtRequestMessage<Call>>();
+		(Self { sub_client, eth_client, receiver, xt_spawn_handle }, sender)
+	}
+
+	pub async fn run(&mut self) {
+		while let Some(msg) = self.receiver.recv().await {
+			log::info!(
+				target: &self.eth_client.get_chain_name(),
+				"-[{}] 🔖 Received unsigned transaction request: {}",
+				sub_display_format(SUB_LOG_TARGET),
+				msg.metadata,
+			);
+
+			self.spawn_send_transaction(msg).await;
+		}
+	}
+
+	pub async fn spawn_send_transaction(&self, msg: XtRequestMessage<Call>) {
+		let task = UnsignedTransactionTask::new(self.sub_client.clone(), self.eth_client.clone());
+		self.xt_spawn_handle.spawn("send_unsigned_transaction", None, async move {
+			task.try_send_unsigned_transaction(msg).await
+		});
+	}
+}
+
+pub struct UnsignedTransactionTask<T> {
 	sub_client: Arc<OnlineClient<CustomConfig>>,
 	eth_client: Arc<EthClient<T>>,
 }
 
-impl<T: JsonRpcClient> UnsignedTransactionManager<T> {
+impl<T: JsonRpcClient> UnsignedTransactionTask<T> {
+	/// Build an Legacy transaction task.
 	pub fn new(sub_client: Arc<OnlineClient<CustomConfig>>, eth_client: Arc<EthClient<T>>) -> Self {
 		Self { sub_client, eth_client }
 	}
+}
 
-	pub async fn try_send_unsigned_transaction<Call: TxPayload>(
+#[async_trait::async_trait]
+impl<T: JsonRpcClient> ExtrinsicTask<T> for UnsignedTransactionTask<T> {
+	fn get_eth_client(&self) -> Arc<EthClient<T>> {
+		self.eth_client.clone()
+	}
+
+	fn get_sub_client(&self) -> Arc<OnlineClient<CustomConfig>> {
+		self.sub_client.clone()
+	}
+
+	async fn try_send_unsigned_transaction<Call: TxPayload + Send>(
 		&self,
 		msg: XtRequestMessage<Call>,
 	) {
 		match self.sub_client.tx().create_unsigned(&msg.call) {
 			Ok(xt) => match xt.submit_and_watch().await {
 				Ok(progress) => match progress.wait_for_finalized_success().await {
-					Ok(events) => self.handle_success_tx_request(events, msg.metadata).await,
-					Err(error) => self.handle_failed_tx_request(msg, &error).await,
+					Ok(events) => {
+						self.handle_success_tx_request(SUB_LOG_TARGET, events, msg.metadata).await
+					},
+					Err(error) => self.handle_failed_tx_request(SUB_LOG_TARGET, msg, &error).await,
 				},
-				Err(error) => self.handle_failed_tx_request(msg, &error).await,
+				Err(error) => self.handle_failed_tx_request(SUB_LOG_TARGET, msg, &error).await,
 			},
-			Err(error) => self.handle_failed_tx_creation(msg, &error).await,
+			Err(error) => self.handle_failed_tx_creation(SUB_LOG_TARGET, msg, &error).await,
 		}
-	}
-
-	async fn retry_transaction<Call: TxPayload>(&self, mut msg: XtRequestMessage<Call>) {
-		msg.build_retry_event();
-		sleep(Duration::from_millis(msg.retry_interval)).await;
-		self.try_send_unsigned_transaction(msg).await;
-	}
-
-	async fn handle_failed_tx_request<Call, E>(&self, msg: XtRequestMessage<Call>, error: &E)
-	where
-		Call: TxPayload,
-		E: Error + Sync + ?Sized,
-	{
-		log::error!(
-			target: &self.eth_client.get_chain_name(),
-			"-[{}] ♻️  Unknown error while requesting a transaction request: {}, Retries left: {:?}, Error: {}",
-			sub_display_format(SUB_LOG_TARGET),
-			msg.metadata,
-			msg.retries_remaining - 1,
-			error.to_string(),
-		);
-		sentry::capture_message(
-            format!(
-                "[{}]-[{}]-[{}] ♻️  Unknown error while requesting a transaction request: {}, Retries left: {:?}, Error: {}",
-                &self.eth_client.get_chain_name(),
-                SUB_LOG_TARGET,
-                self.eth_client.address(),
-                msg.metadata,
-                msg.retries_remaining - 1,
-                error
-            )
-                .as_str(),
-            sentry::Level::Error,
-        );
-		self.retry_transaction(msg).await;
-	}
-
-	async fn handle_failed_tx_creation<Call, E>(&self, msg: XtRequestMessage<Call>, error: &E)
-	where
-		Call: TxPayload,
-		E: Error + Sync + ?Sized,
-	{
-		log::error!(
-			target: &self.eth_client.get_chain_name(),
-			"-[{}] ♻️  Unknown error while creating a tx request: {}, Retries left: {:?}, Error: {}",
-			sub_display_format(SUB_LOG_TARGET),
-			msg.metadata,
-			msg.retries_remaining - 1,
-			error.to_string(),
-		);
-		sentry::capture_message(
-            format!(
-                "[{}]-[{}]-[{}] ♻️  Unknown error while creating a transaction request: {}, Retries left: {:?}, Error: {}",
-                &self.eth_client.get_chain_name(),
-                SUB_LOG_TARGET,
-                self.eth_client.address(),
-                msg.metadata,
-                msg.retries_remaining - 1,
-                error
-            )
-                .as_str(),
-            sentry::Level::Error,
-        );
-		self.retry_transaction(msg).await;
-	}
-
-	async fn handle_success_tx_request<C>(
-		&self,
-		events: ExtrinsicEvents<C>,
-		metadata: XtRequestMetadata,
-	) where
-		C: Config,
-	{
-		todo!()
 	}
 }
