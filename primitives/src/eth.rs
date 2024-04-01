@@ -22,6 +22,7 @@ pub type ChainID = u32;
 /// The metadata of the EVM provider.
 pub struct ProviderMetadata {
 	pub name: String,
+	pub url: String,
 	/// Id of chain which this client interact with.
 	pub id: ChainID,
 	/// The total number of confirmations required for a block to be processed. (block
@@ -40,6 +41,7 @@ pub struct ProviderMetadata {
 impl ProviderMetadata {
 	pub fn new(
 		name: String,
+		url: String,
 		id: ChainID,
 		block_confirmations: u64,
 		call_interval: u64,
@@ -48,6 +50,7 @@ impl ProviderMetadata {
 	) -> Self {
 		Self {
 			name,
+			url,
 			id,
 			block_confirmations: U64::from(block_confirmations.saturating_add(get_logs_batch_size)),
 			get_logs_batch_size: U64::from(get_logs_batch_size),

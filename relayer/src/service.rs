@@ -10,6 +10,7 @@ use br_client::btc::{
 	block::BlockManager,
 	handlers::{Handler as BitcoinHandler, InboundHandler, OutboundHandler},
 	storage::pending_outbound::PendingOutboundPool,
+	substrate::tx::UnsignedTransactionManager,
 };
 use ethers::providers::{Http, Provider};
 use futures::FutureExt;
@@ -38,8 +39,9 @@ use br_primitives::{
 	eth::{AggregatorContracts, BootstrapState, ChainID, ProtocolContracts, ProviderMetadata},
 	periodic::RollbackSender,
 	sub_display_format,
-	tx::TxRequestSender,
+	tx::{TxRequestSender, XtRequestSender},
 };
+use subxt::tx::DynamicPayload;
 
 use crate::{
 	cli::{LOG_TARGET, SUB_LOG_TARGET},
@@ -163,6 +165,7 @@ fn construct_managers(
 			Arc::new(provider.clone()),
 			ProviderMetadata::new(
 				evm_provider.name.clone(),
+				provider.url().to_string(),
 				evm_provider.id,
 				evm_provider.block_confirmations,
 				evm_provider.call_interval,
@@ -288,6 +291,25 @@ fn construct_btc_deps(
 	);
 
 	BtcDeps { outbound, inbound, block_manager }
+}
+
+fn construct_substrate_deps(
+	manager_deps: &ManagerDeps,
+	task_manager: &TaskManager,
+) -> SubstrateDeps {
+	let bfc_client = manager_deps
+		.clients
+		.iter()
+		.find(|client| client.metadata.is_native)
+		.expect(INVALID_BIFROST_NATIVENESS)
+		.clone();
+
+	let (unsigned_tx_manager, sender) =
+		UnsignedTransactionManager::new(bfc_client.clone(), task_manager.spawn_handle());
+
+	let xt_request_sender = Arc::new(XtRequestSender::new(sender));
+
+	SubstrateDeps { unsigned_tx_manager, xt_request_sender }
 }
 
 /// Spawn relayer service tasks by the `TaskManager`.
@@ -560,6 +582,11 @@ struct BtcDeps {
 	outbound: OutboundHandler<Http>,
 	inbound: InboundHandler<Http>,
 	block_manager: BlockManager<Http>,
+}
+
+struct SubstrateDeps {
+	unsigned_tx_manager: UnsignedTransactionManager<Http, DynamicPayload>,
+	xt_request_sender: Arc<XtRequestSender<DynamicPayload>>,
 }
 
 struct PeriodicDeps {

@@ -10,7 +10,7 @@ use crate::{eth::EthClient, substrate::traits::ExtrinsicTask};
 const SUB_LOG_TARGET: &str = "unsigned-tx-manager";
 
 pub struct UnsignedTransactionManager<T, Call> {
-	sub_client: Arc<OnlineClient<CustomConfig>>,
+	sub_client: Option<OnlineClient<CustomConfig>>,
 	eth_client: Arc<EthClient<T>>,
 	/// The receiver connected to the tx request channel.
 	receiver: UnboundedReceiver<XtRequestMessage<Call>>,
@@ -24,15 +24,24 @@ where
 	Call: 'static + TxPayload + Send,
 {
 	pub fn new(
-		sub_client: Arc<OnlineClient<CustomConfig>>,
 		eth_client: Arc<EthClient<T>>,
 		xt_spawn_handle: SpawnTaskHandle,
 	) -> (Self, UnboundedSender<XtRequestMessage<Call>>) {
 		let (sender, receiver) = mpsc::unbounded_channel::<XtRequestMessage<Call>>();
-		(Self { sub_client, eth_client, receiver, xt_spawn_handle }, sender)
+		(Self { sub_client: None, eth_client, receiver, xt_spawn_handle }, sender)
+	}
+
+	async fn initialize(&mut self) {
+		self.sub_client = Some(
+			OnlineClient::<CustomConfig>::from_url(&self.eth_client.metadata.url)
+				.await
+				.unwrap(),
+		);
 	}
 
 	pub async fn run(&mut self) {
+		self.initialize().await;
+
 		while let Some(msg) = self.receiver.recv().await {
 			log::info!(
 				target: &self.eth_client.get_chain_name(),
@@ -46,10 +55,13 @@ where
 	}
 
 	pub async fn spawn_send_transaction(&self, msg: XtRequestMessage<Call>) {
-		let task = UnsignedTransactionTask::new(self.sub_client.clone(), self.eth_client.clone());
-		self.xt_spawn_handle.spawn("send_unsigned_transaction", None, async move {
-			task.try_send_unsigned_transaction(msg).await
-		});
+		if let Some(sub_client) = &self.sub_client {
+			let task =
+				UnsignedTransactionTask::new(Arc::new(sub_client.clone()), self.eth_client.clone());
+			self.xt_spawn_handle.spawn("send_unsigned_transaction", None, async move {
+				task.try_send_unsigned_transaction(msg).await
+			});
+		}
 	}
 }
 
