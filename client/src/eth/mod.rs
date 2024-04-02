@@ -272,6 +272,16 @@ impl<T: JsonRpcClient> EthClient<T> {
 				.unwrap(),
 		);
 	}
+
+	/// Verifies whether the current relayer was selected at the current round.
+	pub async fn is_selected_relayer(&self) -> bool {
+		let relayer_manager = self.protocol_contracts.relayer_manager.as_ref().unwrap();
+		self.contract_call(
+			relayer_manager.is_selected_relayer(self.address(), false),
+			"relayer_manager.is_selected_relayer",
+		)
+		.await
+	}
 }
 
 #[async_trait::async_trait]

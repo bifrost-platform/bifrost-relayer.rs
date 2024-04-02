@@ -54,25 +54,6 @@ impl<T: JsonRpcClient> InboundHandler<T> {
 		}
 	}
 
-	async fn is_selected_relayer(&self) -> bool {
-		let relayer_manager = self.bfc_client.protocol_contracts.relayer_manager.as_ref().unwrap();
-
-		let round = self
-			.bfc_client
-			.contract_call(relayer_manager.latest_round(), "relayer_manager.latest_round")
-			.await;
-		self.bfc_client
-			.contract_call(
-				relayer_manager.is_previous_selected_relayer(
-					round,
-					self.bfc_client.address(),
-					false,
-				),
-				"relayer_manager.is_previous_selected_relayer",
-			)
-			.await
-	}
-
 	async fn get_user_bfc_address(
 		&self,
 		vault_address: &BtcAddress<NetworkUnchecked>,
