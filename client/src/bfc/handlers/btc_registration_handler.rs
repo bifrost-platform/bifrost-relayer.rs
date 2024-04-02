@@ -24,7 +24,7 @@ use ethers::{
 use tokio::{sync::broadcast::Receiver, time::sleep};
 use tokio_stream::StreamExt;
 
-use crate::bfc::BfcClient;
+use crate::bfc::SubClient;
 
 use crate::eth::{
 	events::EventMessage,
@@ -37,7 +37,7 @@ const SUB_LOG_TARGET: &str = "regis-handler";
 /// The essential task that handles `socket relay` related events.
 pub struct BtcRegisHandler<T> {
 	/// bfcclient
-	pub bfc_client: Arc<BfcClient<T>>,
+	pub sub_client: Arc<SubClient<T>>,
 	/// The bootstrap shared data.
 	bootstrap_shared_data: Arc<BootstrapSharedData>,
 	/// The receiver that consumes new events from the block channel.
@@ -55,13 +55,13 @@ impl<T: 'static + JsonRpcClient> Handler for BtcRegisHandler<T> {
 			if self.is_bootstrap_state_synced_as(BootstrapState::BootstrapBtcRegis).await {
 				self.bootstrap().await;
 
-				sleep(Duration::from_millis(self.bfc_client.eth_client.metadata.call_interval))
+				sleep(Duration::from_millis(self.sub_client.eth_client.metadata.call_interval))
 					.await;
 			} else if self.is_bootstrap_state_synced_as(BootstrapState::NormalStart).await {
 				let msg = self.event_receiver.recv().await.unwrap();
 
 				log::info!(
-					target: &self.bfc_client.eth_client.get_chain_name(),
+					target: &self.sub_client.eth_client.get_chain_name(),
 					"-[{}] 📦 Imported #{:?} with target logs({:?})",
 					sub_display_format(SUB_LOG_TARGET),
 					msg.block_number,
@@ -80,7 +80,7 @@ impl<T: 'static + JsonRpcClient> Handler for BtcRegisHandler<T> {
 
 	async fn process_confirmed_log(&self, log: &Log, is_bootstrap: bool) {
 		if let Some(receipt) = self
-			.bfc_client
+			.sub_client
 			.eth_client
 			.get_transaction_receipt(log.transaction_hash.unwrap())
 			.await
@@ -92,7 +92,7 @@ impl<T: 'static + JsonRpcClient> Handler for BtcRegisHandler<T> {
 				Ok(serialized_log) => {
 					if !is_bootstrap {
 						log::info!(
-							target: &self.bfc_client
+							target: &self.sub_client
 							.eth_client.get_chain_name(),
 							"-[{}] 👤 registration event detected. ({:?}-{:?})",
 							sub_display_format(SUB_LOG_TARGET),
@@ -104,9 +104,9 @@ impl<T: 'static + JsonRpcClient> Handler for BtcRegisHandler<T> {
 						// do nothing if not selected
 						return;
 					}
-					self.bfc_client
+					self.sub_client
 						.submit_vault_key(
-							self.bfc_client.eth_client.address(),
+							self.sub_client.eth_client.address(),
 							serialized_log.user_bfc_address,
 						)
 						.await
@@ -114,7 +114,7 @@ impl<T: 'static + JsonRpcClient> Handler for BtcRegisHandler<T> {
 				},
 				Err(e) => {
 					log::error!(
-						target: &self.bfc_client
+						target: &self.sub_client
 							.eth_client.get_chain_name(),
 						"-[{}] Error on decoding RoundUp event ({:?}):{}",
 						sub_display_format(SUB_LOG_TARGET),
@@ -124,9 +124,9 @@ impl<T: 'static + JsonRpcClient> Handler for BtcRegisHandler<T> {
 					sentry::capture_message(
 						format!(
 							"[{}]-[{}]-[{}] Error on decoding RoundUp event ({:?}):{}",
-							&self.bfc_client.eth_client.get_chain_name(),
+							&self.sub_client.eth_client.get_chain_name(),
 							SUB_LOG_TARGET,
-							self.bfc_client.eth_client.address(),
+							self.sub_client.eth_client.address(),
 							log.transaction_hash,
 							e
 						)
@@ -139,7 +139,7 @@ impl<T: 'static + JsonRpcClient> Handler for BtcRegisHandler<T> {
 	}
 
 	fn is_target_contract(&self, log: &Log) -> bool {
-		if log.address == self.bfc_client.eth_client.protocol_contracts.socket.address() {
+		if log.address == self.sub_client.eth_client.protocol_contracts.socket.address() {
 			return true;
 		}
 		false
@@ -154,7 +154,7 @@ impl<T: 'static + JsonRpcClient> Handler for BtcRegisHandler<T> {
 impl<T: 'static + JsonRpcClient> BootstrapHandler for BtcRegisHandler<T> {
 	async fn bootstrap(&self) {
 		log::info!(
-			target: &self.bfc_client.eth_client.get_chain_name(),
+			target: &self.sub_client.eth_client.get_chain_name(),
 			"-[{}] ⚙️  [Bootstrap mode] Bootstrapping Registration events.",
 			sub_display_format(SUB_LOG_TARGET),
 		);
@@ -190,11 +190,11 @@ impl<T: 'static + JsonRpcClient> BootstrapHandler for BtcRegisHandler<T> {
 		let mut logs = vec![];
 
 		if let Some(bootstrap_config) = &self.bootstrap_shared_data.bootstrap_config {
-			let round_info: RoundMetaData = if self.bfc_client.eth_client.metadata.is_native {
-				self.bfc_client
+			let round_info: RoundMetaData = if self.sub_client.eth_client.metadata.is_native {
+				self.sub_client
 					.eth_client
 					.contract_call(
-						self.bfc_client.eth_client.protocol_contracts.authority.round_info(),
+						self.sub_client.eth_client.protocol_contracts.authority.round_info(),
 						"authority.round_info",
 					)
 					.await
@@ -210,14 +210,14 @@ impl<T: 'static + JsonRpcClient> BootstrapHandler for BtcRegisHandler<T> {
 			} else {
 				panic!(
 					"[{}]-[{}] {}",
-					self.bfc_client.eth_client.get_chain_name(),
+					self.sub_client.eth_client.get_chain_name(),
 					SUB_LOG_TARGET,
 					INVALID_BIFROST_NATIVENESS,
 				);
 			};
 
 			let bootstrap_offset_height = self
-				.bfc_client
+				.sub_client
 				.eth_client
 				.get_bootstrap_offset_height_based_on_block_time(
 					bootstrap_config.round_offset.unwrap_or(DEFAULT_BOOTSTRAP_ROUND_OFFSET),
@@ -225,7 +225,7 @@ impl<T: 'static + JsonRpcClient> BootstrapHandler for BtcRegisHandler<T> {
 				)
 				.await;
 
-			let latest_block_number = self.bfc_client.eth_client.get_latest_block_number().await;
+			let latest_block_number = self.sub_client.eth_client.get_latest_block_number().await;
 			let mut from_block = latest_block_number.saturating_sub(bootstrap_offset_height);
 			let to_block = latest_block_number;
 
@@ -235,11 +235,11 @@ impl<T: 'static + JsonRpcClient> BootstrapHandler for BtcRegisHandler<T> {
 					std::cmp::min(from_block + BOOTSTRAP_BLOCK_CHUNK_SIZE - 1, to_block);
 
 				let filter = Filter::new()
-					.address(self.bfc_client.eth_client.protocol_contracts.socket.address())
+					.address(self.sub_client.eth_client.protocol_contracts.socket.address())
 					.topic0(self.socket_signature)
 					.from_block(from_block)
 					.to_block(chunk_to_block);
-				let target_logs_chunk = self.bfc_client.eth_client.get_logs(&filter).await;
+				let target_logs_chunk = self.sub_client.eth_client.get_logs(&filter).await;
 				logs.extend(target_logs_chunk);
 
 				from_block = chunk_to_block + 1;
@@ -262,7 +262,7 @@ impl<T: 'static + JsonRpcClient> BootstrapHandler for BtcRegisHandler<T> {
 impl<T: JsonRpcClient> BtcRegisHandler<T> {
 	/// Instantiates a new `SocketRelayHandler` instance.
 	pub fn new(
-		bfc_client: Arc<BfcClient<T>>,
+		sub_client: Arc<SubClient<T>>,
 		bootstrap_shared_data: Arc<BootstrapSharedData>,
 		event_receiver: Receiver<EventMessage>,
 		system_clients_vec: Vec<Arc<EthClient<T>>>,
@@ -272,7 +272,7 @@ impl<T: JsonRpcClient> BtcRegisHandler<T> {
 			.map(|client| (client.get_chain_id(), client.clone()))
 			.collect();
 
-		let socket_signature = bfc_client
+		let socket_signature = sub_client
 			.clone()
 			.eth_client
 			.protocol_contracts
@@ -282,7 +282,7 @@ impl<T: JsonRpcClient> BtcRegisHandler<T> {
 			.expect(INVALID_CONTRACT_ABI)
 			.signature();
 
-		Self { bfc_client, bootstrap_shared_data, event_receiver, socket_signature, system_clients }
+		Self { sub_client, bootstrap_shared_data, event_receiver, socket_signature, system_clients }
 	}
 
 	/// Decode & Serialize log to `Serialized` struct.

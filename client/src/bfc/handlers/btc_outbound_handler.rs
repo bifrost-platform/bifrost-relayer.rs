@@ -12,7 +12,7 @@ use tokio::{sync::broadcast::Receiver, time::sleep};
 use tokio_stream::StreamExt;
 
 use crate::{
-	bfc::{events::EventMessage, BfcClient, CustomConfig, UnsignedPsbtSubmitted},
+	bfc::{events::EventMessage, CustomConfig, SubClient, UnsignedPsbtSubmitted},
 	eth::EthClient,
 };
 use bitcoincore_rpc::bitcoin::psbt::Psbt;
@@ -24,7 +24,7 @@ const SUB_LOG_TARGET: &str = "regis-handler";
 /// The essential task that handles `socket relay` related events.
 pub struct BtcOutboundHandler<T> {
 	/// bfcclient
-	pub bfc_client: Arc<BfcClient<T>>,
+	pub sub_client: Arc<SubClient<T>>,
 	bootstrap_shared_data: Arc<BootstrapSharedData>,
 	event_receiver: Receiver<EventMessage>,
 	system_clients: BTreeMap<ChainID, Arc<EthClient<T>>>,
@@ -32,12 +32,12 @@ pub struct BtcOutboundHandler<T> {
 
 impl<T: 'static + JsonRpcClient> BtcOutboundHandler<T> {
 	pub fn new(
-		bfc_client: Arc<BfcClient<T>>,
+		sub_client: Arc<SubClient<T>>,
 		bootstrap_shared_data: Arc<BootstrapSharedData>,
 		event_receiver: Receiver<EventMessage>,
 		system_clients: BTreeMap<ChainID, Arc<EthClient<T>>>,
 	) -> Self {
-		Self { bfc_client, bootstrap_shared_data, event_receiver, system_clients }
+		Self { sub_client, bootstrap_shared_data, event_receiver, system_clients }
 	}
 
 	async fn run(&mut self) {
@@ -45,13 +45,13 @@ impl<T: 'static + JsonRpcClient> BtcOutboundHandler<T> {
 			if self.is_bootstrap_state_synced_as(BootstrapState::BootstrapBtcOutbound).await {
 				self.bootstrap().await;
 
-				sleep(Duration::from_millis(self.bfc_client.eth_client.metadata.call_interval))
+				sleep(Duration::from_millis(self.sub_client.eth_client.metadata.call_interval))
 					.await;
 			} else if self.is_bootstrap_state_synced_as(BootstrapState::NormalStart).await {
 				let msg = self.event_receiver.recv().await.unwrap();
 
 				log::info!(
-					target: &self.bfc_client.eth_client.get_chain_name(),
+					target: &self.sub_client.eth_client.get_chain_name(),
 					"-[{}] 📦 Imported #{:?} with target logs({:?})",
 					sub_display_format(SUB_LOG_TARGET),
 					msg.block_number,
@@ -94,7 +94,7 @@ impl<T: 'static + JsonRpcClient> BtcOutboundHandler<T> {
 			Ok(deserialized_psbt) => {
 				if !is_bootstrap {
 					log::info!(
-						target: &self.bfc_client
+						target: &self.sub_client
 						.eth_client.get_chain_name(),
 						"-[{}] 👤 psbt event detected. ({:?})",
 						sub_display_format(SUB_LOG_TARGET),
@@ -105,9 +105,9 @@ impl<T: 'static + JsonRpcClient> BtcOutboundHandler<T> {
 					// do nothing if not selected
 					return;
 				}
-				self.bfc_client
+				self.sub_client
 					.submit_signed_psbt::<All>(
-						self.bfc_client.eth_client.address(),
+						self.sub_client.eth_client.address(),
 						deserialized_psbt,
 					)
 					.await
@@ -115,7 +115,7 @@ impl<T: 'static + JsonRpcClient> BtcOutboundHandler<T> {
 			},
 			Err(e) => {
 				log::error!(
-					target: &self.bfc_client
+					target: &self.sub_client
 						.eth_client.get_chain_name(),
 					"-[{}] Error on decoding RoundUp event ({:?}):{}",
 					sub_display_format(SUB_LOG_TARGET),
@@ -125,9 +125,9 @@ impl<T: 'static + JsonRpcClient> BtcOutboundHandler<T> {
 				sentry::capture_message(
 					format!(
 						"[{}]-[{}]-[{}] Error on decoding RoundUp event ({:?}):{}",
-						&self.bfc_client.eth_client.get_chain_name(),
+						&self.sub_client.eth_client.get_chain_name(),
 						SUB_LOG_TARGET,
-						self.bfc_client.eth_client.address(),
+						self.sub_client.eth_client.address(),
 						&matching_event_psbt,
 						e
 					)
@@ -141,19 +141,19 @@ impl<T: 'static + JsonRpcClient> BtcOutboundHandler<T> {
 	/// Verifies whether the current relayer was selected at the given round.
 	async fn is_selected_relayer(&self) -> bool {
 		let relayer_manager =
-			self.bfc_client.eth_client.protocol_contracts.relayer_manager.as_ref().unwrap();
+			self.sub_client.eth_client.protocol_contracts.relayer_manager.as_ref().unwrap();
 
 		let round = self
-			.bfc_client
+			.sub_client
 			.eth_client
 			.contract_call(relayer_manager.latest_round(), "relayer_manager.latest_round")
 			.await;
-		self.bfc_client
+		self.sub_client
 			.eth_client
 			.contract_call(
 				relayer_manager.is_previous_selected_relayer(
 					round,
-					self.bfc_client.eth_client.address(),
+					self.sub_client.eth_client.address(),
 					false,
 				),
 				"relayer_manager.is_previous_selected_relayer",
@@ -168,7 +168,7 @@ impl<T: 'static + JsonRpcClient> BtcOutboundHandler<T> {
 
 	async fn bootstrap(&self) {
 		log::info!(
-			target: &self.bfc_client.eth_client.get_chain_name(),
+			target: &self.sub_client.eth_client.get_chain_name(),
 			"-[{}] ⚙️  [Bootstrap mode] Bootstrapping Socket events.",
 			sub_display_format(SUB_LOG_TARGET),
 		);
@@ -203,11 +203,11 @@ impl<T: 'static + JsonRpcClient> BtcOutboundHandler<T> {
 		let mut events = vec![];
 
 		if let Some(bootstrap_config) = &self.bootstrap_shared_data.bootstrap_config {
-			let round_info: RoundMetaData = if self.bfc_client.eth_client.metadata.is_native {
-				self.bfc_client
+			let round_info: RoundMetaData = if self.sub_client.eth_client.metadata.is_native {
+				self.sub_client
 					.eth_client
 					.contract_call(
-						self.bfc_client.eth_client.protocol_contracts.authority.round_info(),
+						self.sub_client.eth_client.protocol_contracts.authority.round_info(),
 						"authority.round_info",
 					)
 					.await
@@ -223,14 +223,14 @@ impl<T: 'static + JsonRpcClient> BtcOutboundHandler<T> {
 			} else {
 				panic!(
 					"[{}]-[{}] {}",
-					self.bfc_client.eth_client.get_chain_name(),
+					self.sub_client.eth_client.get_chain_name(),
 					SUB_LOG_TARGET,
 					INVALID_BIFROST_NATIVENESS,
 				);
 			};
 
 			let bootstrap_offset_height = self
-				.bfc_client
+				.sub_client
 				.eth_client
 				.get_bootstrap_offset_height_based_on_block_time(
 					bootstrap_config.round_offset.unwrap_or(DEFAULT_BOOTSTRAP_ROUND_OFFSET),
@@ -238,11 +238,11 @@ impl<T: 'static + JsonRpcClient> BtcOutboundHandler<T> {
 				)
 				.await;
 
-			let latest_block_number = self.bfc_client.eth_client.get_latest_block_number().await;
+			let latest_block_number = self.sub_client.eth_client.get_latest_block_number().await;
 			let mut from_block = latest_block_number.saturating_sub(bootstrap_offset_height);
 			let to_block = latest_block_number;
 
-			events.extend(self.bfc_client.filter_block_event(from_block, to_block).await);
+			events.extend(self.sub_client.filter_block_event(from_block, to_block).await);
 		}
 
 		events

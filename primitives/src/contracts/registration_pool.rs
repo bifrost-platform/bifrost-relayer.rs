@@ -1,8 +1,8 @@
 use ethers::{abi::RawLog, prelude::abigen, types::Address};
 
 abigen!(
-	RegisContract,
-	"../abi/abi.registration.bifrost.json",
+	RegistrationPoolContract,
+	"../abi/abi.registration_pool.bifrost.json",
 	event_derives(serde::Deserialize, serde::Serialize)
 );
 

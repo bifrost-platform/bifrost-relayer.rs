@@ -10,7 +10,7 @@ use br_client::{
 	bfc::{
 		generic::CustomConfig,
 		handlers::{BtcOutboundHandler, BtcRegisHandler},
-		BfcClient,
+		SubClient,
 	},
 	btc::{
 		block::{BlockManager, EventMessage},
@@ -35,7 +35,7 @@ use br_primitives::{
 		INVALID_CONFIG_FILE_PATH, INVALID_CONFIG_FILE_STRUCTURE, INVALID_PRIVATE_KEY,
 		INVALID_PROVIDER_URL,
 	},
-	contracts::btc_registration::RegisContract,
+	contracts::btc_registration::RegistrationPoolContract,
 	eth::{AggregatorContracts, BootstrapState, ProtocolContracts, ProviderMetadata},
 };
 
@@ -70,7 +70,7 @@ mod tests {
 	}
 
 	async fn test_set_btc_regis_handler(
-	) -> (BtcRegisHandler<Http>, BfcClient<Http>, TaskManager, BootstrapSharedData) {
+	) -> (BtcRegisHandler<Http>, SubClient<Http>, TaskManager, BootstrapSharedData) {
 		const DEFAULT_GET_LOGS_BATCH_SIZE: u64 = 1;
 
 		const TESTNET_CONFIG_FILE_PATH: &str = "configs/config.testnet.yaml";
@@ -127,7 +127,7 @@ mod tests {
 
 		let bootstrap_shared_data = BootstrapSharedData::new(&config);
 
-		let bfc_client = BfcClient::new(
+		let bfc_client = SubClient::new(
 			OnlineClient::<CustomConfig>::new().await.unwrap(),
 			eth_client.clone(),
 			KeypairStorage::new(Network::Testnet),
@@ -155,7 +155,7 @@ mod tests {
 		let (mut btc_regis_handler, bfc_client, task_manager, bootstrap_shared_data) =
 			test_set_btc_regis_handler().await;
 
-		let btc_regis_contract = RegisContract::new(
+		let btc_regis_contract = RegistrationPoolContract::new(
 			bfc_client.eth_client.address(),
 			bfc_client.eth_client.get_provider(),
 		);

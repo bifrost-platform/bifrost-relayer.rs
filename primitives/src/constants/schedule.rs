@@ -12,3 +12,6 @@ pub const ROLLBACK_CHECK_SCHEDULE: &str = "0 * * * * * *";
 
 /// The minimum interval that should be passed in order to handle rollback checks. (=3 minutes)
 pub const ROLLBACK_CHECK_MINIMUM_INTERVAL: u32 = 3 * 60;
+
+/// The schedule definition for roundup emissions. This will trigger on every 15th second.
+pub const REGISTRATION_EMITTER_SCHEDULE: &str = "*/15 * * * * * *";

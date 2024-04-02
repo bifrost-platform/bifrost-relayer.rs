@@ -15,6 +15,12 @@ pub use runtime_types::sp_core::ecdsa::Signature;
 
 use subxt::config::{Config, DefaultExtrinsicParams, PolkadotConfig, SubstrateConfig};
 
+use std::{
+	fs,
+	path::Path,
+	process::{Child, Command},
+};
+
 #[derive(Debug, Clone)]
 pub enum CustomConfig {}
 
@@ -27,4 +33,18 @@ impl Config for CustomConfig {
 	type Header = <SubstrateConfig as Config>::Header;
 	type ExtrinsicParams = DefaultExtrinsicParams<CustomConfig>;
 	type AssetId = u32;
+}
+
+pub async fn generate_metadata() -> anyhow::Result<()> {
+	let output = Command::new("subxt")
+		.arg("metadata")
+		.arg("-f")
+		.arg("bytes")
+		.arg(">")
+		.output()
+		.expect("failed to execute process");
+
+	let metadata_path = Path::new("./configs/bifrost_metadata.scale");
+	fs::write(metadata_path, &output.stdout).unwrap();
+	Ok(())
 }

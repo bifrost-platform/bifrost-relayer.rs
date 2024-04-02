@@ -25,3 +25,4 @@ tokio = { workspace = true, features = [
 	"parking_lot",
 	"macros",
 ] }
+subxt = { workspace = true }

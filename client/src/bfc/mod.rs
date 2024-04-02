@@ -9,6 +9,7 @@ use ethers::{
 };
 use std::sync::Arc;
 use subxt::backend::BlockRef;
+use subxt::tx::TxPayload;
 use subxt::{blocks::ExtrinsicEvents, OnlineClient};
 use subxt::{
 	events::{EventDetails, Events},
@@ -25,13 +26,13 @@ pub mod generic;
 pub mod handlers;
 
 #[derive(Clone)]
-pub struct BfcClient<T> {
+pub struct SubClient<T> {
 	pub client: OnlineClient<CustomConfig>,
 	pub eth_client: Arc<EthClient<T>>,
 	keypair_storage: KeypairStorage,
 }
 
-impl<T: JsonRpcClient> BfcClient<T> {
+impl<T: JsonRpcClient> SubClient<T> {
 	pub fn new(
 		client: OnlineClient<CustomConfig>,
 		eth_client: Arc<EthClient<T>>,
@@ -80,6 +81,30 @@ impl<T: JsonRpcClient> BfcClient<T> {
 			from_block = chunk_to_block;
 		}
 		events
+	}
+
+	pub async fn build_payload(
+		&self,
+		authority_id: Address, // prime relayer eth address
+		who: H160,
+	) -> (Public, TxPayload) {
+		let pub_key = self.keypair_storage.create_new_keypair().inner.serialize();
+		let signature = self
+			.convert_ethers_to_ecdsa_signature(self.eth_client.wallet.sign_message(&pub_key))
+			.unwrap();
+
+		// `VaultKeySubmission` 구조체 인스턴스 생성
+		let vaultkey_submission = VaultKeySubmission {
+			authority_id: AccountId20(authority_id.0),
+			who: AccountId20(who.0),
+			pub_key: Public(pub_key),
+		};
+
+		let payload = bifrost_runtime::tx()
+			.btc_registration_pool()
+			.submit_vault_key(vaultkey_submission, signature);
+
+		(pub_key, payload)
 	}
 
 	pub async fn submit_vault_key(
@@ -251,7 +276,7 @@ mod tests {
 	const OUTPUT_AMOUNT_BTC: &str = "1 BTC";
 	const CHANGE_AMOUNT_BTC: &str = "48.99999 BTC"; // 1000 sat transaction fee.
 
-	async fn test_set_bfc_client() -> BfcClient<Http> {
+	async fn test_set_sub_client() -> SubClient<Http> {
 		let user_config_file =
 			std::fs::File::open(TESTNET_CONFIG_FILE_PATH).expect(INVALID_CONFIG_FILE_PATH);
 		let user_config: RelayerConfig =
@@ -265,7 +290,7 @@ mod tests {
 			.expect(INVALID_PROVIDER_URL)
 			.interval(Duration::from_millis(evm_provider.call_interval));
 
-		let bfc_client = BfcClient::new(
+		let sub_client = SubClient::new(
 			OnlineClient::<CustomConfig>::new().await.unwrap(),
 			Arc::new(EthClient::new(
 				WalletManager::from_private_key(EXTENDED_MASTER_PRIVATE_KEY, evm_provider.id)
@@ -298,7 +323,7 @@ mod tests {
 			KeypairStorage::new(Network::Testnet),
 		)
 		.unwrap();
-		bfc_client
+		sub_client
 	}
 
 	fn create_psbt() -> Psbt {
@@ -331,7 +356,7 @@ mod tests {
 
 	#[tokio::test]
 	async fn test_submit_vault_key() {
-		let test_client = test_set_bfc_client().await;
+		let test_client = test_set_sub_client().await;
 		let authority_id = test_client.eth_client.address();
 		let who = test_client.eth_client.address();
 
@@ -342,7 +367,7 @@ mod tests {
 
 	#[tokio::test]
 	async fn test_submit_unsigned_psbt() {
-		let test_client = test_set_bfc_client().await;
+		let test_client = test_set_sub_client().await;
 		let unsigned_psbt = create_psbt();
 		let socket_messages = vec![vec![0, 1, 2, 3, 4]];
 
@@ -356,7 +381,7 @@ mod tests {
 
 	#[tokio::test]
 	async fn test_submit_signed_psbt() {
-		let test_client = test_set_bfc_client().await;
+		let test_client = test_set_sub_client().await;
 		let unsigned_psbt = create_psbt();
 
 		let ext_event = test_client

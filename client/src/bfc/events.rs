@@ -1,4 +1,4 @@
-use super::{BfcClient, CustomConfig};
+use super::{CustomConfig, SubClient};
 use subxt::events::EventDetails;
 
 use std::sync::Arc;
@@ -54,7 +54,7 @@ impl EventReceiver {
 /// The essential task that listens and handle new events.
 pub struct EventManager<T> {
 	/// The ethereum client for the connected chain.
-	pub bfc_client: Arc<BfcClient<T>>,
+	pub sub_client: Arc<SubClient<T>>,
 	/// The channel sending event messages.
 	pub sender: Sender<EventMessage>,
 	/// The block waiting for enough confirmations.
@@ -68,14 +68,14 @@ pub struct EventManager<T> {
 
 impl<T: JsonRpcClient> EventManager<T> {
 	pub fn new(
-		bfc_client: Arc<BfcClient<T>>,
+		sub_client: Arc<SubClient<T>>,
 		bootstrap_shared_data: Arc<BootstrapSharedData>,
 		is_balance_sync_enabled: bool,
 	) -> Self {
 		let (sender, _receiver) = broadcast::channel(512);
 
 		Self {
-			bfc_client,
+			sub_client,
 			sender,
 			waiting_block: U64::default(),
 			bootstrap_shared_data,
@@ -85,20 +85,20 @@ impl<T: JsonRpcClient> EventManager<T> {
 
 	/// Initialize event manager.
 	async fn initialize(&mut self) {
-		self.bfc_client.eth_client.verify_chain_id().await;
-		self.bfc_client.eth_client.verify_minimum_balance().await;
+		self.sub_client.eth_client.verify_chain_id().await;
+		self.sub_client.eth_client.verify_minimum_balance().await;
 
 		// initialize waiting block to the latest block
-		self.waiting_block = self.bfc_client.eth_client.get_latest_block_number().await;
+		self.waiting_block = self.sub_client.eth_client.get_latest_block_number().await;
 		log::info!(
-			target: &self.bfc_client.eth_client.get_chain_name(),
+			target: &self.sub_client.eth_client.get_chain_name(),
 			"-[{}] 💤 Idle, best: #{:?}",
 			sub_display_format(SUB_LOG_TARGET),
 			self.waiting_block
 		);
 
 		if self.is_balance_sync_enabled {
-			self.bfc_client.eth_client.sync_balance().await;
+			self.sub_client.eth_client.sync_balance().await;
 		}
 	}
 
@@ -109,17 +109,17 @@ impl<T: JsonRpcClient> EventManager<T> {
 
 		loop {
 			if self.is_bootstrap_state_synced_as(BootstrapState::NormalStart).await {
-				let latest_block = self.bfc_client.eth_client.get_latest_block_number().await;
+				let latest_block = self.sub_client.eth_client.get_latest_block_number().await;
 				while self.is_block_confirmed(latest_block) {
 					self.process_confirmed_block().await;
 
 					if self.is_balance_sync_enabled {
-						self.bfc_client.eth_client.sync_balance().await;
+						self.sub_client.eth_client.sync_balance().await;
 					}
 				}
 			}
 
-			sleep(Duration::from_millis(self.bfc_client.eth_client.metadata.call_interval)).await;
+			sleep(Duration::from_millis(self.sub_client.eth_client.metadata.call_interval)).await;
 		}
 	}
 
@@ -128,21 +128,21 @@ impl<T: JsonRpcClient> EventManager<T> {
 	async fn process_confirmed_block(&mut self) {
 		let mut from = self.waiting_block;
 		let to: U64 = from.saturating_add(
-			self.bfc_client
+			self.sub_client
 				.eth_client
 				.metadata
 				.get_logs_batch_size
 				.saturating_sub(U64::from(1u64)),
 		);
 
-		let target_events = self.bfc_client.filter_block_event(from, to).await;
+		let target_events = self.sub_client.filter_block_event(from, to).await;
 		if !target_events.is_empty() {
 			self.sender.send(EventMessage::new(self.waiting_block, target_events)).unwrap();
 		}
 
 		if from < to {
 			log::info!(
-				target: &self.bfc_client.eth_client.get_chain_name(),
+				target: &self.sub_client.eth_client.get_chain_name(),
 				"-[{}] ✨ Imported #({:?} … {:?})",
 				sub_display_format(SUB_LOG_TARGET),
 				from,
@@ -150,7 +150,7 @@ impl<T: JsonRpcClient> EventManager<T> {
 			);
 		} else {
 			log::info!(
-				target: &self.bfc_client.eth_client.get_chain_name(),
+				target: &self.sub_client.eth_client.get_chain_name(),
 				"-[{}] ✨ Imported #{:?}",
 				sub_display_format(SUB_LOG_TARGET),
 				self.waiting_block
@@ -164,7 +164,7 @@ impl<T: JsonRpcClient> EventManager<T> {
 	fn increment_waiting_block(&mut self, to: U64) {
 		self.waiting_block = to.saturating_add(U64::from(1u64));
 		br_metrics::set_block_height(
-			&self.bfc_client.eth_client.get_chain_name(),
+			&self.sub_client.eth_client.get_chain_name(),
 			self.waiting_block.as_u64(),
 		);
 	}
@@ -173,7 +173,7 @@ impl<T: JsonRpcClient> EventManager<T> {
 	#[inline]
 	fn is_block_confirmed(&self, latest_block: U64) -> bool {
 		latest_block.saturating_sub(self.waiting_block)
-			>= self.bfc_client.eth_client.metadata.block_confirmations
+			>= self.sub_client.eth_client.metadata.block_confirmations
 	}
 }
 

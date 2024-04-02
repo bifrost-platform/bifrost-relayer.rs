@@ -13,6 +13,7 @@ use crate::{
 	constants::tx::{DEFAULT_TX_RETRIES, DEFAULT_TX_RETRY_INTERVAL_MS},
 	eth::{ChainID, GasCoefficient, SocketEventStatus},
 	periodic::PriceResponse,
+	substrate::Public,
 };
 
 #[derive(Clone, Debug)]
@@ -488,6 +489,93 @@ impl TxRequestSender {
 
 	/// Sends a new event message.
 	pub fn send(&self, message: TxRequestMessage) -> Result<(), SendError<TxRequestMessage>> {
+		self.sender.send(message)
+	}
+}
+
+/// The metadata used for vault key submission.
+pub struct SubmitVaultKeyMetadata {
+	/// The user's Bifrost address.
+	pub who: Address,
+	/// The generated public key.
+	pub key: Public,
+}
+
+impl SubmitVaultKeyMetadata {
+	pub fn new(who: Address, key: Public) -> Self {
+		Self { who, key }
+	}
+}
+
+impl Display for SubmitVaultKeyMetadata {
+	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		write!(f, "SubmitVaultKey({}:{:?})", self.who, self.key)
+	}
+}
+
+pub enum XtRequestMetadata {
+	SubmitVaultKey(SubmitVaultKeyMetadata),
+	// SubmitSignedPsbt,
+}
+
+impl Display for XtRequestMetadata {
+	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		write!(
+			f,
+			"{}",
+			match self {
+				XtRequestMetadata::SubmitVaultKey(metadata) => metadata.to_string(),
+			}
+		)
+	}
+}
+
+pub struct XtRequestMessage<Call> {
+	/// The remaining retries of the transaction request.
+	pub retries_remaining: u8,
+	/// The retry interval in milliseconds.
+	pub retry_interval: u64,
+	/// The call data of the transaction.
+	pub call: Call,
+	/// The metadata of the transaction.
+	pub metadata: XtRequestMetadata,
+}
+
+impl<Call> XtRequestMessage<Call> {
+	/// Instantiates a new `XtRequestMessage` instance.
+	pub fn new(call: Call, metadata: XtRequestMetadata) -> Self {
+		Self {
+			retries_remaining: DEFAULT_TX_RETRIES,
+			retry_interval: DEFAULT_TX_RETRY_INTERVAL_MS,
+			call,
+			metadata,
+		}
+	}
+
+	/// Builds a new `XtRequestMessage` to use on transaction retry. This will reduce the remaining
+	/// retry counter and increase the retry interval.
+	pub fn build_retry_event(&mut self) {
+		self.retries_remaining = self.retries_remaining.saturating_sub(1);
+	}
+}
+
+/// The message sender connected to the tx request channel.
+pub struct XtRequestSender<Call> {
+	/// The inner sender.
+	pub sender: UnboundedSender<XtRequestMessage<Call>>,
+}
+
+impl<Call> XtRequestSender<Call> {
+	/// Instantiates a new `XtRequestSender` instance.
+	pub fn new(sender: UnboundedSender<XtRequestMessage<Call>>) -> Self {
+		Self { sender }
+	}
+
+	/// Sends a new tx request message.
+	pub fn send(
+		&self,
+		message: XtRequestMessage<Call>,
+	) -> Result<(), SendError<XtRequestMessage<Call>>> {
 		self.sender.send(message)
 	}
 }
