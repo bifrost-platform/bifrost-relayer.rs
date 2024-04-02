@@ -20,6 +20,7 @@ use tokio_stream::StreamExt;
 pub enum EventType {
 	Inbound,
 	Outbound,
+	NewBlock,
 }
 
 #[derive(Debug, Clone)]
@@ -47,6 +48,9 @@ impl EventMessage {
 	}
 	pub fn outbound(block_number: u64, events: Vec<Event>) -> Self {
 		Self::new(block_number, EventType::Outbound, events)
+	}
+	pub fn new_block(block_number: u64) -> Self {
+		Self::new(block_number, EventType::NewBlock, vec![])
 	}
 }
 

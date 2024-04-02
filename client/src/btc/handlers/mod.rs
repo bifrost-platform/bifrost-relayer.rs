@@ -1,20 +1,24 @@
 mod inbound;
 mod outbound;
+mod psbt_signer;
 
-use ethers::prelude::TransactionRequest;
-use ethers::providers::JsonRpcClient;
 pub use inbound::*;
 pub use outbound::*;
-use std::sync::Arc;
+pub use psbt_signer::*;
 
-use crate::btc::block::{Event, EventType};
-use crate::eth::EthClient;
-use br_primitives::eth::{BootstrapState, GasCoefficient};
-use br_primitives::sub_display_format;
-use br_primitives::tx::{
-	BitcoinRelayMetadata, TxRequest, TxRequestMessage, TxRequestMetadata, TxRequestSender,
+use crate::{
+	btc::block::{Event, EventType},
+	eth::EthClient,
 };
+
+use br_primitives::{
+	eth::{BootstrapState, GasCoefficient},
+	sub_display_format,
+	tx::{BitcoinRelayMetadata, TxRequest, TxRequestMessage, TxRequestMetadata, TxRequestSender},
+};
+use ethers::{prelude::TransactionRequest, providers::JsonRpcClient};
 use miniscript::bitcoin::Transaction;
+use std::sync::Arc;
 
 pub const LOG_TARGET: &str = "Bitcoin";
 
