@@ -272,8 +272,11 @@ impl Display for TxRequestMetadata {
 	}
 }
 
+/// The metadata used for vault key submission.
 pub struct SubmitVaultKeyMetadata {
+	/// The user's Bifrost address.
 	pub who: Address,
+	/// The generated public key.
 	pub key: Public,
 }
 
@@ -540,7 +543,9 @@ pub struct XtRequestMessage<Call> {
 	pub retries_remaining: u8,
 	/// The retry interval in milliseconds.
 	pub retry_interval: u64,
+	/// The call data of the transaction.
 	pub call: Call,
+	/// The metadata of the transaction.
 	pub metadata: XtRequestMetadata,
 }
 
@@ -562,15 +567,19 @@ impl<Call> XtRequestMessage<Call> {
 	}
 }
 
+/// The message sender connected to the tx request channel.
 pub struct XtRequestSender<Call> {
+	/// The inner sender.
 	pub sender: UnboundedSender<XtRequestMessage<Call>>,
 }
 
 impl<Call> XtRequestSender<Call> {
+	/// Instantiates a new `XtRequestSender` instance.
 	pub fn new(sender: UnboundedSender<XtRequestMessage<Call>>) -> Self {
 		Self { sender }
 	}
 
+	/// Sends a new tx request message.
 	pub fn send(
 		&self,
 		message: XtRequestMessage<Call>,
