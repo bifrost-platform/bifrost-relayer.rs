@@ -1,20 +1,21 @@
-use crate::eth::EthClient;
-use bitcoincore_rpc::bitcoincore_rpc_json::GetRawTransactionResultVout;
-use bitcoincore_rpc::{jsonrpc, Client as BtcClient, Error, RpcApi};
-use br_primitives::bootstrap::BootstrapSharedData;
-use br_primitives::eth::BootstrapState;
+use std::{collections::BTreeSet, str::FromStr, sync::Arc, time::Duration};
+
+use bitcoincore_rpc::{
+	bitcoincore_rpc_json::GetRawTransactionResultVout, jsonrpc, Client as BtcClient, Error, RpcApi,
+};
 use ethers::providers::JsonRpcClient;
-use miniscript::bitcoin::address::NetworkUnchecked;
-use miniscript::bitcoin::{Address, Amount, Txid};
+use miniscript::bitcoin::{
+	address::NetworkUnchecked,
+	{Address, Amount, Txid},
+};
 use serde::Deserialize;
 use serde_json::Value;
-use std::collections::BTreeSet;
-use std::str::FromStr;
-use std::sync::Arc;
-use std::time::Duration;
-use tokio::sync::broadcast;
-use tokio::sync::broadcast::{Receiver, Sender};
+use tokio::sync::broadcast::{self, Receiver, Sender};
 use tokio_stream::StreamExt;
+
+use br_primitives::{bootstrap::BootstrapSharedData, eth::BootstrapState};
+
+use crate::eth::EthClient;
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub enum EventType {

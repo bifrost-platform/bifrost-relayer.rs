@@ -6,8 +6,10 @@ use std::{
 };
 
 use bitcoincore_rpc::{Auth, Client as BitcoinClient};
-use br_client::btc::block::BlockManager;
-use br_client::btc::handlers::{Handler as BitcoinHandler, InboundHandler, OutboundHandler};
+use br_client::btc::{
+	block::BlockManager,
+	handlers::{Handler as BitcoinHandler, InboundHandler, OutboundHandler},
+};
 use ethers::providers::{Http, Provider};
 use futures::FutureExt;
 use sc_service::{config::PrometheusConfig, Error as ServiceError, TaskManager};

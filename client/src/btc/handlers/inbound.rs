@@ -1,18 +1,24 @@
-use crate::btc::block::{Event, EventMessage as BTCEventMessage, EventType};
-use crate::btc::handlers::{BootstrapHandler, Handler, LOG_TARGET};
-use crate::eth::EthClient;
-use bitcoincore_rpc::bitcoin::Transaction;
-use br_primitives::bootstrap::BootstrapSharedData;
-use br_primitives::eth::{BootstrapState, GasCoefficient};
-use br_primitives::sub_display_format;
-use br_primitives::tx::{
-	BitcoinSocketRelayMetadata, TxRequest, TxRequestMessage, TxRequestMetadata, TxRequestSender,
+use crate::{
+	btc::{
+		block::{Event, EventMessage as BTCEventMessage, EventType},
+		handlers::{BootstrapHandler, Handler, LOG_TARGET},
+	},
+	eth::EthClient,
 };
-use ethers::providers::JsonRpcClient;
-use ethers::types::{Address as EthAddress, Address, TransactionRequest};
-use miniscript::bitcoin::address::NetworkUnchecked;
-use miniscript::bitcoin::hashes::Hash;
-use miniscript::bitcoin::Address as BtcAddress;
+use bitcoincore_rpc::bitcoin::Transaction;
+use br_primitives::{
+	bootstrap::BootstrapSharedData,
+	eth::{BootstrapState, GasCoefficient},
+	sub_display_format,
+	tx::{
+		BitcoinSocketRelayMetadata, TxRequest, TxRequestMessage, TxRequestMetadata, TxRequestSender,
+	},
+};
+use ethers::{
+	providers::JsonRpcClient,
+	types::{Address as EthAddress, Address, TransactionRequest},
+};
+use miniscript::bitcoin::{address::NetworkUnchecked, hashes::Hash, Address as BtcAddress};
 use std::sync::Arc;
 use tokio::sync::broadcast::Receiver;
 use tokio_stream::StreamExt;

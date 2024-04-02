@@ -1,5 +1,7 @@
-use crate::btc::block::{Event, EventMessage as BTCEventMessage, EventType};
-use crate::btc::handlers::Handler;
+use crate::btc::{
+	block::{Event, EventMessage as BTCEventMessage, EventType},
+	handlers::Handler,
+};
 use br_primitives::tx::TxRequestSender;
 use std::sync::Arc;
 use tokio::sync::broadcast::Receiver;

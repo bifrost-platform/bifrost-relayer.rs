@@ -1,10 +1,11 @@
-use bitcoincore_rpc::bitcoin::key::Secp256k1;
-use bitcoincore_rpc::bitcoin::psbt::{GetKey, GetKeyError, KeyRequest};
-use bitcoincore_rpc::bitcoin::secp256k1::Signing;
-use bitcoincore_rpc::bitcoin::{PrivateKey, PublicKey};
+use bitcoincore_rpc::bitcoin::{
+	key::Secp256k1,
+	psbt::{GetKey, GetKeyError, KeyRequest},
+	secp256k1::Signing,
+	PrivateKey, PublicKey,
+};
 use miniscript::bitcoin::{Network, Psbt};
-use std::collections::BTreeMap;
-use std::sync::Arc;
+use std::{collections::BTreeMap, sync::Arc};
 use tokio::sync::RwLock;
 
 #[derive(Clone)]
