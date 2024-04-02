@@ -1,4 +1,4 @@
-use crate::eth::EthClient;
+use crate::{btc::storage::pending_outbound::PendingOutboundPool, eth::EthClient};
 
 use br_primitives::{bootstrap::BootstrapSharedData, eth::BootstrapState};
 
@@ -15,11 +15,6 @@ use tokio::sync::{
 	broadcast::{Receiver, Sender},
 };
 use tokio_stream::StreamExt;
-
-use crate::btc::storage::pending_outbound::PendingOutboundPool;
-use br_primitives::{bootstrap::BootstrapSharedData, eth::BootstrapState};
-
-use crate::eth::EthClient;
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub enum EventType {
