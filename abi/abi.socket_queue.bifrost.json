@@ -1,5 +1,24 @@
 [
   {
+    "inputs": [
+      {
+        "internalType": "bytes32",
+        "name": "txid",
+        "type": "bytes32"
+      }
+    ],
+    "name": "outbound_tx",
+    "outputs": [
+      {
+        "internalType": "bytes[]",
+        "name": "",
+        "type": "bytes[]"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
     "inputs": [],
     "name": "unsigned_psbts",
     "outputs": [
