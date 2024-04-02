@@ -9,6 +9,7 @@ use bitcoincore_rpc::{Auth, Client as BitcoinClient};
 use br_client::btc::{
 	block::BlockManager,
 	handlers::{Handler as BitcoinHandler, InboundHandler, OutboundHandler},
+	storage::pending_outbound::PendingOutboundPool,
 };
 use ethers::providers::{Http, Provider};
 use futures::FutureExt;
@@ -238,6 +239,7 @@ fn construct_managers(
 
 fn construct_btc_deps(
 	config: &Configuration,
+	pending_outbounds: PendingOutboundPool,
 	bootstrap_shared_data: BootstrapSharedData,
 	manager_deps: &ManagerDeps,
 ) -> BtcDeps {
@@ -266,15 +268,23 @@ fn construct_btc_deps(
 		.expect(INVALID_BIFROST_NATIVENESS)
 		.clone();
 
-	let block_manager =
-		BlockManager::new(btc_client.clone(), bfc_client.clone(), bootstrap_shared_data.clone());
+	let block_manager = BlockManager::new(
+		btc_client.clone(),
+		bfc_client.clone(),
+		pending_outbounds.clone(),
+		bootstrap_shared_data.clone(),
+	);
 	let inbound = InboundHandler::new(
 		bfc_client.clone(),
 		tx_request_sender.clone(),
 		block_manager.subscribe(),
 		bootstrap_shared_data.clone(),
 	);
-	let outbound = OutboundHandler::new(tx_request_sender.clone(), block_manager.subscribe());
+	let outbound = OutboundHandler::new(
+		bfc_client.clone(),
+		tx_request_sender.clone(),
+		block_manager.subscribe(),
+	);
 
 	BtcDeps { outbound, inbound, block_manager }
 }
@@ -505,11 +515,18 @@ fn new_relay_base(config: Configuration) -> Result<RelayBase, ServiceError> {
 
 	let bootstrap_shared_data = BootstrapSharedData::new(&config);
 
+	let pending_outbounds = PendingOutboundPool::new();
+
 	let manager_deps = construct_managers(&config, bootstrap_shared_data.clone(), &task_manager);
 	let periodic_deps = construct_periodics(bootstrap_shared_data.clone(), &manager_deps);
 	let handler_deps =
 		construct_handlers(&config, &periodic_deps, &manager_deps, bootstrap_shared_data.clone());
-	let btc_deps = construct_btc_deps(&config, bootstrap_shared_data.clone(), &manager_deps);
+	let btc_deps = construct_btc_deps(
+		&config,
+		pending_outbounds.clone(),
+		bootstrap_shared_data.clone(),
+		&manager_deps,
+	);
 
 	print_relay_targets(&manager_deps);
 
@@ -539,7 +556,7 @@ struct ManagerDeps {
 }
 
 struct BtcDeps {
-	outbound: OutboundHandler,
+	outbound: OutboundHandler<Http>,
 	inbound: InboundHandler<Http>,
 	block_manager: BlockManager<Http>,
 }

@@ -13,6 +13,7 @@ use serde_json::Value;
 use tokio::sync::broadcast::{self, Receiver, Sender};
 use tokio_stream::StreamExt;
 
+use crate::btc::storage::pending_outbound::PendingOutboundPool;
 use br_primitives::{bootstrap::BootstrapSharedData, eth::BootstrapState};
 
 use crate::eth::EthClient;
@@ -54,6 +55,7 @@ impl EventMessage {
 pub struct BlockManager<T> {
 	btc_client: BtcClient,
 	bfc_client: Arc<EthClient<T>>,
+	_pending_outbounds: PendingOutboundPool,
 	sender: Sender<EventMessage>,
 	block_confirmations: u64,
 	waiting_block: u64,
@@ -89,6 +91,7 @@ impl<T: JsonRpcClient + 'static> BlockManager<T> {
 	pub fn new(
 		btc_client: BtcClient,
 		bfc_client: Arc<EthClient<T>>,
+		pending_outbounds: PendingOutboundPool,
 		bootstrap_shared_data: Arc<BootstrapSharedData>,
 	) -> Self {
 		let (sender, _receiver) = broadcast::channel(512);
@@ -96,6 +99,7 @@ impl<T: JsonRpcClient + 'static> BlockManager<T> {
 		Self {
 			btc_client,
 			bfc_client,
+			_pending_outbounds: pending_outbounds,
 			sender,
 			block_confirmations: 0,
 			waiting_block: 0,
