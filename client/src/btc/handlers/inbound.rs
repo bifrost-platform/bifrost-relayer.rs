@@ -38,7 +38,7 @@ pub struct InboundHandler<T> {
 	bootstrap_shared_data: Arc<BootstrapSharedData>,
 }
 
-impl<T: JsonRpcClient> InboundHandler<T> {
+impl<T: JsonRpcClient + 'static> InboundHandler<T> {
 	pub fn new(
 		bfc_client: Arc<EthClient<T>>,
 		tx_request_sender: Arc<TxRequestSender>,
@@ -58,7 +58,22 @@ impl<T: JsonRpcClient> InboundHandler<T> {
 		&self,
 		vault_address: &BtcAddress<NetworkUnchecked>,
 	) -> Option<EthAddress> {
-		todo!()
+		let registration_pool =
+			self.bfc_client.protocol_contracts.registration_pool.as_ref().unwrap();
+		let user_address: EthAddress = self
+			.bfc_client
+			.contract_call(
+				registration_pool
+					.user_address(vault_address.clone().assume_checked().to_string(), true),
+				"registration_pool.user_address",
+			)
+			.await;
+
+		if user_address == EthAddress::zero() {
+			None
+		} else {
+			user_address.into()
+		}
 	}
 
 	fn build_transaction(&self, event: &Event, user_bfc_address: Address) -> TransactionRequest {
@@ -121,7 +136,7 @@ impl<T: JsonRpcClient> InboundHandler<T> {
 }
 
 #[async_trait::async_trait]
-impl<T: JsonRpcClient> Handler for InboundHandler<T> {
+impl<T: JsonRpcClient + 'static> Handler for InboundHandler<T> {
 	async fn run(&mut self) {
 		loop {
 			// TODO: BootstrapState::BootstrapBitcoinInbound
@@ -152,7 +167,7 @@ impl<T: JsonRpcClient> Handler for InboundHandler<T> {
 	async fn process_event(&self, event: Event, is_bootstrap: bool) {
 		// TODO: if is_bootstrap
 
-		if !self.is_selected_relayer().await {
+		if !self.bfc_client.is_selected_relayer().await {
 			// do nothing if not selected
 			return;
 		}
