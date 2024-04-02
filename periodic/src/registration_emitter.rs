@@ -125,7 +125,7 @@ impl<T: JsonRpcClient> RegistrationEmitter<T> {
 				),
 			}
 		}
-		if suceessd_submit == vault_pendings {
+		if suceessd_submit == vault_pendings.len() {
 			log::info!(
 				target: &self.client.get_chain_name(),
 				"-[{}] 👤 Suceessfully submit all pending registration",
