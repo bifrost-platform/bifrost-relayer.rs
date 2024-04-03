@@ -144,7 +144,9 @@ impl<T: JsonRpcClient + 'static> Handler for InboundHandler<T> {
 			if self.is_bootstrap_state_synced_as(BootstrapState::NormalStart).await {
 				let msg = self.event_receiver.recv().await.unwrap();
 
-				if !self.is_target_event(msg.event_type) {
+				if !self.bfc_client.is_selected_relayer().await
+					|| !self.is_target_event(msg.event_type)
+				{
 					continue;
 				}
 
@@ -166,11 +168,6 @@ impl<T: JsonRpcClient + 'static> Handler for InboundHandler<T> {
 
 	async fn process_event(&self, event: Event, is_bootstrap: bool) {
 		// TODO: if is_bootstrap
-
-		if !self.bfc_client.is_selected_relayer().await {
-			// do nothing if not selected
-			return;
-		}
 
 		if let Some(user_bfc_address) = self.get_user_bfc_address(&event.address).await {
 			let tx_request = self.build_transaction(&event, user_bfc_address.clone());
