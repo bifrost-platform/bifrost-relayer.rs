@@ -9,6 +9,7 @@ use ethers::types::{
 };
 use miniscript::bitcoin::address::NetworkUnchecked;
 use miniscript::bitcoin::{Address as BtcAddress, Txid};
+use subxt::tx::TxPayload;
 use tokio::sync::mpsc::{error::SendError, UnboundedSender};
 
 use crate::{
@@ -292,9 +293,18 @@ impl Display for SubmitVaultKeyMetadata {
 	}
 }
 
+/// The metadata used for signed psbt submission.
+pub struct SubmitSignedPsbtMetadata {}
+
+impl Display for SubmitSignedPsbtMetadata {
+	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		write!(f, "SubmitSignedPsbt")
+	}
+}
+
 pub enum XtRequestMetadata {
 	SubmitVaultKey(SubmitVaultKeyMetadata),
-	// SubmitSignedPsbt,
+	SubmitSignedPsbt(SubmitSignedPsbtMetadata),
 }
 
 impl Display for XtRequestMetadata {
@@ -304,6 +314,7 @@ impl Display for XtRequestMetadata {
 			"{}",
 			match self {
 				XtRequestMetadata::SubmitVaultKey(metadata) => metadata.to_string(),
+				XtRequestMetadata::SubmitSignedPsbt(metadata) => metadata.to_string(),
 			}
 		)
 	}
@@ -549,7 +560,7 @@ pub struct XtRequestMessage<Call> {
 	pub metadata: XtRequestMetadata,
 }
 
-impl<Call> XtRequestMessage<Call> {
+impl<Call: TxPayload> XtRequestMessage<Call> {
 	/// Instantiates a new `XtRequestMessage` instance.
 	pub fn new(call: Call, metadata: XtRequestMetadata) -> Self {
 		Self {
