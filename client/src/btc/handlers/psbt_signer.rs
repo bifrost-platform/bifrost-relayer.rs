@@ -27,7 +27,7 @@ const SUB_LOG_TARGET: &str = "psbt-signer";
 /// The essential task that submits signed PSBT's.
 pub struct PsbtSigner<T> {
 	/// The Bifrost client.
-	bfc_client: Arc<EthClient<T>>,
+	client: Arc<EthClient<T>>,
 	/// The unsigned transaction message sender.
 	xt_request_sender: Arc<XtRequestSender<Payload<SubmitSignedPsbt>>>,
 	/// The Bitcoin event receiver.
@@ -41,13 +41,13 @@ pub struct PsbtSigner<T> {
 impl<T: JsonRpcClient> PsbtSigner<T> {
 	/// Instantiates a new `PsbtSigner` instance.
 	pub fn new(
-		bfc_client: Arc<EthClient<T>>,
+		client: Arc<EthClient<T>>,
 		xt_request_sender: Arc<XtRequestSender<Payload<SubmitSignedPsbt>>>,
 		event_receiver: Receiver<BTCEventMessage>,
 		keypair_storage: KeypairStorage,
 	) -> Self {
 		Self {
-			bfc_client,
+			client,
 			xt_request_sender,
 			event_receiver,
 			target_event: EventType::NewBlock,
@@ -57,22 +57,19 @@ impl<T: JsonRpcClient> PsbtSigner<T> {
 
 	/// Get the pending unsigned PSBT's (in bytes)
 	async fn get_unsigned_psbts(&self) -> Vec<Bytes> {
-		let socket_queue = self.bfc_client.protocol_contracts.socket_queue.as_ref().unwrap();
+		let socket_queue = self.client.protocol_contracts.socket_queue.as_ref().unwrap();
 
-		self.bfc_client
+		self.client
 			.contract_call(socket_queue.unsigned_psbts(), "socket_queue.unsigned_psbts")
 			.await
 	}
 
 	/// Verify whether the current relayer is an executive.
 	async fn is_relay_executive(&self) -> bool {
-		let relay_exec = self.bfc_client.protocol_contracts.relay_executive.as_ref().unwrap();
+		let relay_exec = self.client.protocol_contracts.relay_executive.as_ref().unwrap();
 
-		self.bfc_client
-			.contract_call(
-				relay_exec.is_member(self.bfc_client.address()),
-				"relay_executive.is_member",
-			)
+		self.client
+			.contract_call(relay_exec.is_member(self.client.address()), "relay_executive.is_member")
 			.await
 	}
 
@@ -85,15 +82,20 @@ impl<T: JsonRpcClient> PsbtSigner<T> {
 		if self.keypair_storage.sign_psbt(&mut psbt) {
 			let signed_psbt = psbt.serialize();
 			let msg = SignedPsbtMessage {
-				authority_id: AccountId20(self.bfc_client.address().0),
+				authority_id: AccountId20(self.client.address().0),
 				unsigned_psbt: unsigned_psbt.serialize(),
 				signed_psbt: signed_psbt.clone(),
 			};
-			let signature = convert_ethers_to_ecdsa_signature(
-				self.bfc_client.wallet.sign_message(&signed_psbt),
-			);
+			let signature =
+				convert_ethers_to_ecdsa_signature(self.client.wallet.sign_message(&signed_psbt));
 			return Some((msg, signature));
 		}
+		log::warn!(
+			target: LOG_TARGET,
+			"-[{}] 🔐 Unauthorized to sign PSBT: {}",
+			sub_display_format(SUB_LOG_TARGET),
+			hash_bytes(&psbt.serialize())
+		);
 		None
 	}
 
@@ -144,7 +146,7 @@ impl<T: JsonRpcClient> PsbtSigner<T> {
 						"[{}]-[{}]-[{}] ❗️ Failed to send unsigned transaction: {}, Error: {}",
 						LOG_TARGET,
 						SUB_LOG_TARGET,
-						self.bfc_client.address(),
+						self.client.address(),
 						metadata,
 						error
 					)
