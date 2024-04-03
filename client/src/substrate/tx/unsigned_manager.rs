@@ -1,6 +1,6 @@
 use br_primitives::{
-	constants::errors::INVALID_PROVIDER_URL, sub_display_format, substrate::CustomConfig,
-	tx::XtRequestMessage,
+	constants::errors::INVALID_PROVIDER_URL, substrate::CustomConfig, tx::XtRequestMessage,
+	utils::sub_display_format,
 };
 
 use ethers::providers::JsonRpcClient;

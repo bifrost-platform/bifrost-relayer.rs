@@ -25,8 +25,8 @@ use br_primitives::{
 		SocketEventStatus,
 	},
 	periodic::RollbackSender,
-	sub_display_format,
 	tx::{SocketRelayMetadata, TxRequest, TxRequestMessage, TxRequestMetadata, TxRequestSender},
+	utils::sub_display_format,
 };
 
 use crate::eth::{

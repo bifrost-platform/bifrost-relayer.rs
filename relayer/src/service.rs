@@ -42,8 +42,8 @@ use br_primitives::{
 	},
 	eth::{AggregatorContracts, BootstrapState, ChainID, ProtocolContracts, ProviderMetadata},
 	periodic::RollbackSender,
-	sub_display_format,
 	tx::{TxRequestSender, XtRequestSender},
+	utils::sub_display_format,
 };
 
 use crate::{

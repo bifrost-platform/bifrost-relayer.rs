@@ -1,7 +1,7 @@
 use br_primitives::{
-	sub_display_format,
 	substrate::CustomConfig,
 	tx::{XtRequestMessage, XtRequestMetadata},
+	utils::sub_display_format,
 };
 
 use ethers::providers::JsonRpcClient;

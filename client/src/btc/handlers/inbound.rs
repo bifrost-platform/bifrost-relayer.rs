@@ -8,8 +8,8 @@ use crate::{
 use br_primitives::{
 	bootstrap::BootstrapSharedData,
 	eth::BootstrapState,
-	sub_display_format,
 	tx::{BitcoinRelayMetadata, TxRequestSender},
+	utils::sub_display_format,
 };
 
 use bitcoincore_rpc::bitcoin::Transaction;

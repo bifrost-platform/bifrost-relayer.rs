@@ -5,8 +5,8 @@ use br_primitives::{
 		schedule::HEARTBEAT_SCHEDULE,
 	},
 	eth::GasCoefficient,
-	sub_display_format,
 	tx::{HeartbeatMetadata, TxRequest, TxRequestMessage, TxRequestMetadata, TxRequestSender},
+	utils::sub_display_format,
 };
 use cron::Schedule;
 use ethers::{providers::JsonRpcClient, types::TransactionRequest};

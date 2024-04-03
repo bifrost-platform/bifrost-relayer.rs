@@ -8,7 +8,7 @@ use br_primitives::{
 	},
 	contracts::authority::RoundMetaData,
 	eth::{AggregatorContracts, ChainID, ProtocolContracts, ProviderMetadata},
-	sub_display_format,
+	utils::sub_display_format,
 };
 
 use ethers::{

@@ -3,8 +3,8 @@ use std::{error::Error, str::FromStr, sync::Arc, time::Duration};
 use br_primitives::{
 	contracts::socket::{PollSubmit, Signatures, SocketMessage},
 	eth::{BootstrapState, BuiltRelayTransaction, ChainID, GasCoefficient, RecoveredSignature},
-	sub_display_format,
 	tx::{FlushMetadata, TxRequest, TxRequestMessage, TxRequestMetadata},
+	utils::sub_display_format,
 };
 use ethers::{
 	abi::Token,

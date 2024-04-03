@@ -20,8 +20,8 @@ use br_primitives::{
 	contracts::socket::get_asset_oids,
 	eth::GasCoefficient,
 	periodic::{PriceResponse, PriceSource},
-	sub_display_format,
 	tx::{PriceFeedMetadata, TxRequest, TxRequestMessage, TxRequestMetadata, TxRequestSender},
+	utils::sub_display_format,
 };
 
 use crate::{
