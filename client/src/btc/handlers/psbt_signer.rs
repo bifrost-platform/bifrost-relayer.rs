@@ -24,16 +24,22 @@ use crate::{
 
 const SUB_LOG_TARGET: &str = "psbt-signer";
 
+/// The essential task that submits signed PSBT's.
 pub struct PsbtSigner<T> {
 	/// The Bifrost client.
 	bfc_client: Arc<EthClient<T>>,
+	/// The unsigned transaction message sender.
 	xt_request_sender: Arc<XtRequestSender<Payload<SubmitSignedPsbt>>>,
+	/// The Bitcoin event receiver.
 	event_receiver: Receiver<BTCEventMessage>,
+	/// The target Bitcoin event.
 	target_event: EventType,
+	/// The public and private keypair local storage.
 	keypair_storage: KeypairStorage,
 }
 
 impl<T: JsonRpcClient> PsbtSigner<T> {
+	/// Instantiates a new `PsbtSigner` instance.
 	pub fn new(
 		bfc_client: Arc<EthClient<T>>,
 		xt_request_sender: Arc<XtRequestSender<Payload<SubmitSignedPsbt>>>,
@@ -49,6 +55,7 @@ impl<T: JsonRpcClient> PsbtSigner<T> {
 		}
 	}
 
+	/// Get the pending unsigned PSBT's (in bytes)
 	async fn get_unsigned_psbts(&self) -> Vec<Bytes> {
 		let socket_queue = self.bfc_client.protocol_contracts.socket_queue.as_ref().unwrap();
 
@@ -57,6 +64,7 @@ impl<T: JsonRpcClient> PsbtSigner<T> {
 			.await
 	}
 
+	/// Verify whether the current relayer is an executive.
 	async fn is_relay_executive(&self) -> bool {
 		let relay_exec = self.bfc_client.protocol_contracts.relay_executive.as_ref().unwrap();
 
@@ -68,6 +76,7 @@ impl<T: JsonRpcClient> PsbtSigner<T> {
 			.await
 	}
 
+	/// Build the payload for the unsigned transaction. (`submit_signed_psbt()`)
 	fn build_payload(
 		&self,
 		unsigned_psbt: &mut Psbt,
@@ -88,6 +97,7 @@ impl<T: JsonRpcClient> PsbtSigner<T> {
 		None
 	}
 
+	/// Build the calldata for the unsigned transaction. (`submit_signed_psbt()`)
 	fn build_unsigned_tx(
 		&self,
 		unsigned_psbt: &mut Psbt,
@@ -105,6 +115,7 @@ impl<T: JsonRpcClient> PsbtSigner<T> {
 		None
 	}
 
+	/// Send the transaction request message to the channel.
 	fn request_send_transaction(
 		&self,
 		call: Payload<SubmitSignedPsbt>,

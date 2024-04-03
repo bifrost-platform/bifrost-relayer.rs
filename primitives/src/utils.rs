@@ -9,6 +9,7 @@ pub fn sub_display_format(log_target: &str) -> String {
 	format!("{:<019}", log_target)
 }
 
+/// Converts the ethers::Signature to a bifrost_runtime::Signature.
 pub fn convert_ethers_to_ecdsa_signature(ethers_signature: EthersSignature) -> EthereumSignature {
 	let sig: String = format!("0x{}", ethers_signature);
 	let bytes = sig.as_bytes();
@@ -19,6 +20,7 @@ pub fn convert_ethers_to_ecdsa_signature(ethers_signature: EthersSignature) -> E
 	EthereumSignature(Signature(decode_sig))
 }
 
+/// Hash the given bytes.
 pub fn hash_bytes(bytes: &Vec<u8>) -> H256 {
 	H256::from(keccak256(bytes))
 }
