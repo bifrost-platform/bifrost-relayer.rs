@@ -284,6 +284,7 @@ fn construct_btc_deps(
 		bfc_client.clone(),
 		tx_request_sender.clone(),
 		block_manager.subscribe(),
+		bootstrap_shared_data.clone(),
 	);
 
 	BtcDeps { outbound, inbound, block_manager }
