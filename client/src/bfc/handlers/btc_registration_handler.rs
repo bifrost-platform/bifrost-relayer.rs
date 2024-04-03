@@ -9,7 +9,7 @@ use br_primitives::{
 	},
 	contracts::{
 		authority::RoundMetaData,
-		btc_registration::{BtcRegisEvents, VaultPending},
+		registration_pool::{BtcRegisEvents, VaultPending},
 	},
 	eth::{BootstrapState, ChainID},
 	sub_display_format,

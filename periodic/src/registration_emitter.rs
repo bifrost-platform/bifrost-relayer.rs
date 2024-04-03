@@ -98,12 +98,12 @@ impl<T: JsonRpcClient> RegistrationEmitter<T> {
 
 	/// Request send transactions to the xt request channel.
 	async fn request_send_transactions(&self, vault_pendings: Vec<VaultPending>) {
-		let suceessd_submit = 0;
+		let num_suceessd_submit = 0;
 
 		for vault_pending in vault_pendings {
 			let (pub_key, payload) = self
 				.sub_client
-				.build_payload(self.client.address(), vault_pending.user_bfc_address)
+				.build_vault_payload(self.client.address(), vault_pending.user_bfc_address)
 				.await;
 
 			let message: XtRequestMessage<_> = XtRequestMessage::new(
@@ -125,7 +125,7 @@ impl<T: JsonRpcClient> RegistrationEmitter<T> {
 				),
 			}
 		}
-		if suceessd_submit == vault_pendings.len() {
+		if num_suceessd_submit == vault_pendings.len() {
 			log::info!(
 				target: &self.client.get_chain_name(),
 				"-[{}] 👤 Suceessfully submit all pending registration",

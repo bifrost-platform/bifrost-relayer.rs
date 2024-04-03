@@ -2,6 +2,7 @@
 #[subxt::subxt(runtime_metadata_path = "../configs/bifrost_metadata.scale")]
 pub mod bifrost_runtime {}
 
+pub use bifrost_runtime::btc_registration_pool::calls::types::SubmitVaultKey;
 pub use bifrost_runtime::btc_socket_queue::events::{SignedPsbtSubmitted, UnsignedPsbtSubmitted};
 use bifrost_runtime::runtime_types;
 

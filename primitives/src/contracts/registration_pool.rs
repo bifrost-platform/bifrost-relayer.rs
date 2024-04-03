@@ -16,15 +16,13 @@ abigen!(
 	Eq,
 	Hash,
 )]
-#[ethevent(name = "VaultPending", abi = "VaultPending(address[], string)")]
-/// The `Socket` event from the `SocketExternal` contract.
+#[ethevent(name = "VaultPending", abi = "VaultPending(address, string)")]
 pub struct VaultPending {
 	pub user_bfc_address: Address,
 	pub refund_address: String,
 }
 
 #[derive(Clone, ethers::contract::EthAbiType, Debug, PartialEq, Eq, Hash)]
-/// The event enums originated from the `SocketExternal` contract.
 pub enum BtcRegisEvents {
 	Registration(VaultPending),
 }

@@ -9,6 +9,8 @@ use ethers::{
 };
 use std::sync::Arc;
 use subxt::backend::BlockRef;
+use subxt::tx::DynamicPayload;
+use subxt::tx::Payload;
 use subxt::tx::TxPayload;
 use subxt::{blocks::ExtrinsicEvents, OnlineClient};
 use subxt::{
@@ -18,7 +20,8 @@ use subxt::{
 
 use generic::{
 	bifrost_runtime, AccountId20, CustomConfig, EthereumSignature, Public, Signature,
-	SignedPsbtMessage, UnsignedPsbtMessage, UnsignedPsbtSubmitted, VaultKeySubmission,
+	SignedPsbtMessage, SubmitVaultKey, UnsignedPsbtMessage, UnsignedPsbtSubmitted,
+	VaultKeySubmission,
 };
 
 pub mod events;
@@ -27,7 +30,7 @@ pub mod handlers;
 
 #[derive(Clone)]
 pub struct SubClient<T> {
-	pub client: OnlineClient<CustomConfig>,
+	pub client: Arc<OnlineClient<CustomConfig>>,
 	pub eth_client: Arc<EthClient<T>>,
 	keypair_storage: KeypairStorage,
 }
@@ -83,11 +86,11 @@ impl<T: JsonRpcClient> SubClient<T> {
 		events
 	}
 
-	pub async fn build_payload(
+	pub async fn build_vault_payload(
 		&self,
 		authority_id: Address, // prime relayer eth address
 		who: H160,
-	) -> (Public, TxPayload) {
+	) -> (Public, Payload<SubmitVaultKey>) {
 		let pub_key = self.keypair_storage.create_new_keypair().inner.serialize();
 		let signature = self
 			.convert_ethers_to_ecdsa_signature(self.eth_client.wallet.sign_message(&pub_key))
@@ -104,7 +107,7 @@ impl<T: JsonRpcClient> SubClient<T> {
 			.btc_registration_pool()
 			.submit_vault_key(vaultkey_submission, signature);
 
-		(pub_key, payload)
+		(Public(pub_key), payload)
 	}
 
 	pub async fn submit_vault_key(
