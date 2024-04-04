@@ -16,7 +16,7 @@ use std::sync::Arc;
 use crate::{
 	btc::{
 		block::{Event, EventMessage as BTCEventMessage, EventType},
-		handlers::{Handler, LOG_TARGET},
+		handlers::Handler,
 		storage::keypair::KeypairStorage,
 	},
 	eth::EthClient,
@@ -91,7 +91,7 @@ impl<T: JsonRpcClient> PsbtSigner<T> {
 			return Some((msg, signature));
 		}
 		log::warn!(
-			target: LOG_TARGET,
+			target: &self.client.get_chain_name(),
 			"-[{}] 🔐 Unauthorized to sign PSBT: {}",
 			sub_display_format(SUB_LOG_TARGET),
 			hash_bytes(&psbt.serialize())
@@ -128,14 +128,14 @@ impl<T: JsonRpcClient> PsbtSigner<T> {
 			XtRequestMetadata::SubmitSignedPsbt(metadata.clone()),
 		)) {
 			Ok(_) => log::info!(
-				target: LOG_TARGET,
+				target: &self.client.get_chain_name(),
 				"-[{}] 🔖 Request unsigned transaction: {}",
 				sub_display_format(SUB_LOG_TARGET),
 				metadata
 			),
 			Err(error) => {
 				log::error!(
-					target: LOG_TARGET,
+					target: &self.client.get_chain_name(),
 					"-[{}] ❗️ Failed to send unsigned transaction: {}, Error: {}",
 					sub_display_format(SUB_LOG_TARGET),
 					metadata,
@@ -144,7 +144,7 @@ impl<T: JsonRpcClient> PsbtSigner<T> {
 				sentry::capture_message(
 					format!(
 						"[{}]-[{}]-[{}] ❗️ Failed to send unsigned transaction: {}, Error: {}",
-						LOG_TARGET,
+						&self.client.get_chain_name(),
 						SUB_LOG_TARGET,
 						self.client.address(),
 						metadata,
@@ -172,7 +172,7 @@ impl<T: JsonRpcClient> Handler for PsbtSigner<T> {
 			}
 
 			log::info!(
-				target: LOG_TARGET,
+				target: &self.client.get_chain_name(),
 				"-[{}] 📦 Imported #{:?} with target logs({:?})",
 				sub_display_format(SUB_LOG_TARGET),
 				msg.block_number,
