@@ -72,7 +72,7 @@ impl<T: JsonRpcClient> OutboundHandler<T> {
 			for socket_msg_bytes in socket_messages {
 				let socket_msg: SocketMessage = SocketMessage::decode(&socket_msg_bytes).unwrap();
 				if socket_msg.params.to == user_bfc_address
-					&& socket_msg.params.amount == (amount.to_sat() * (10 * 10u64.pow(10))).into()
+					&& socket_msg.params.amount == (amount.to_sat() * 10u64.pow(10)).into()
 				{
 					return (true, socket_msg);
 				}
