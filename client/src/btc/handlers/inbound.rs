@@ -8,11 +8,9 @@ use crate::{
 use bitcoincore_rpc::bitcoin::Transaction;
 use br_primitives::{
 	bootstrap::BootstrapSharedData,
-	eth::{BootstrapState, GasCoefficient},
+	eth::BootstrapState,
 	sub_display_format,
-	tx::{
-		BitcoinSocketRelayMetadata, TxRequest, TxRequestMessage, TxRequestMetadata, TxRequestSender,
-	},
+	tx::{BitcoinRelayMetadata, TxRequestSender},
 };
 use ethers::{
 	providers::JsonRpcClient,
@@ -90,53 +88,18 @@ impl<T: JsonRpcClient + 'static> InboundHandler<T> {
 
 		TransactionRequest::default().data(calldata).to(bitcoin_socket.address())
 	}
-
-	async fn request_send_transaction(
-		&self,
-		tx_request: TransactionRequest,
-		metadata: BitcoinSocketRelayMetadata,
-	) {
-		match self.tx_request_sender.send(TxRequestMessage::new(
-			TxRequest::Legacy(tx_request),
-			TxRequestMetadata::BitcoinSocketRelay(metadata.clone()),
-			true,
-			false,
-			GasCoefficient::Mid,
-			false,
-		)) {
-			Ok(_) => log::info!(
-				target: LOG_TARGET,
-				"-[{}] 🔖 Request relay transaction: {}",
-				sub_display_format(SUB_LOG_TARGET),
-				metadata
-			),
-			Err(error) => {
-				log::error!(
-					target: LOG_TARGET,
-					"-[{}] ❗️ Failed to send relay transaction: {}, Error: {}",
-					sub_display_format(SUB_LOG_TARGET),
-					metadata,
-					error.to_string()
-				);
-				sentry::capture_message(
-					format!(
-						"[{}]-[{}]-[{}] ❗️ Failed to send relay transaction: {}, Error: {}",
-						LOG_TARGET,
-						SUB_LOG_TARGET,
-						self.bfc_client.address(),
-						metadata,
-						error
-					)
-					.as_str(),
-					sentry::Level::Error,
-				);
-			},
-		}
-	}
 }
 
 #[async_trait::async_trait]
-impl<T: JsonRpcClient + 'static> Handler for InboundHandler<T> {
+impl<T: JsonRpcClient + 'static> Handler<T> for InboundHandler<T> {
+	fn tx_request_sender(&self) -> Arc<TxRequestSender> {
+		self.tx_request_sender.clone()
+	}
+
+	fn bfc_client(&self) -> Arc<EthClient<T>> {
+		self.bfc_client.clone()
+	}
+
 	async fn run(&mut self) {
 		loop {
 			// TODO: BootstrapState::BootstrapBitcoinInbound
@@ -171,13 +134,9 @@ impl<T: JsonRpcClient + 'static> Handler for InboundHandler<T> {
 
 		if let Some(user_bfc_address) = self.get_user_bfc_address(&event.address).await {
 			let tx_request = self.build_transaction(&event, user_bfc_address.clone());
-			let metadata = BitcoinSocketRelayMetadata::new(
-				event.address,
-				user_bfc_address,
-				event.txid,
-				event.index,
-			);
-			self.request_send_transaction(tx_request, metadata).await;
+			let metadata =
+				BitcoinRelayMetadata::new(event.address, user_bfc_address, event.txid, event.index);
+			self.request_send_transaction(tx_request, metadata, SUB_LOG_TARGET).await;
 		} else {
 			todo!("Unmapped vault address? -> erroneous deposit or something")
 		}

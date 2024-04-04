@@ -212,14 +212,14 @@ impl Display for RollbackMetadata {
 }
 
 #[derive(Clone, Debug)]
-pub struct BitcoinSocketRelayMetadata {
+pub struct BitcoinRelayMetadata {
 	pub btc_address: BtcAddress<NetworkUnchecked>,
 	pub bfc_address: Address,
 	pub txid: Txid,
 	pub index: u32,
 }
 
-impl BitcoinSocketRelayMetadata {
+impl BitcoinRelayMetadata {
 	pub fn new(
 		btc_address: BtcAddress<NetworkUnchecked>,
 		bfc_address: Address,
@@ -230,7 +230,7 @@ impl BitcoinSocketRelayMetadata {
 	}
 }
 
-impl Display for BitcoinSocketRelayMetadata {
+impl Display for BitcoinRelayMetadata {
 	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
 		write!(
 			f,
@@ -249,7 +249,7 @@ pub enum TxRequestMetadata {
 	Heartbeat(HeartbeatMetadata),
 	Flush(FlushMetadata),
 	Rollback(RollbackMetadata),
-	BitcoinSocketRelay(BitcoinSocketRelayMetadata),
+	BitcoinSocketRelay(BitcoinRelayMetadata),
 }
 
 impl Display for TxRequestMetadata {
