@@ -1,4 +1,7 @@
-#[subxt::subxt(runtime_metadata_path = "../configs/bifrost_metadata.scale")]
+#[subxt::subxt(
+	runtime_metadata_path = "../configs/bifrost_metadata.scale",
+	derive_for_all_types = "Clone"
+)]
 pub mod bifrost_runtime {}
 
 use bifrost_runtime::runtime_types;
@@ -13,6 +16,7 @@ pub use runtime_types::pallet_btc_socket_queue::{
 };
 pub use runtime_types::sp_core::ecdsa::Signature;
 
+pub use bifrost_runtime::btc_registration_pool::calls::types::SubmitVaultKey;
 pub use bifrost_runtime::btc_socket_queue::calls::types::SubmitSignedPsbt;
 
 use subxt::config::{Config, DefaultExtrinsicParams, SubstrateConfig};

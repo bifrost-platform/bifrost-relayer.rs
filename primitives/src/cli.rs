@@ -127,8 +127,13 @@ pub struct EVMProvider {
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct BTCProvider {
+	/// The Bitcoin provider URL.
 	pub provider: String,
+	/// The chain network. (Allowed values: `main`, `test`, `signet`, `regtest`)
+	pub chain: String,
+	/// Optional. The provider username credential.
 	pub username: Option<String>,
+	/// Optional. The provider password credential.
 	pub password: Option<String>,
 }
 

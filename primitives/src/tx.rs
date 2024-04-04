@@ -9,14 +9,17 @@ use ethers::types::{
 };
 use miniscript::bitcoin::address::NetworkUnchecked;
 use miniscript::bitcoin::{Address as BtcAddress, Txid};
-use subxt::tx::TxPayload;
+use subxt::{
+	tx::{Payload, TxPayload},
+	Error, Metadata,
+};
 use tokio::sync::mpsc::{error::SendError, UnboundedSender};
 
 use crate::{
 	constants::tx::{DEFAULT_TX_RETRIES, DEFAULT_TX_RETRY_INTERVAL_MS},
 	eth::{ChainID, GasCoefficient, SocketEventStatus},
 	periodic::PriceResponse,
-	substrate::Public,
+	substrate::{Public, SubmitSignedPsbt, SubmitVaultKey},
 };
 
 #[derive(Clone, Debug)]
@@ -313,7 +316,6 @@ impl Display for SubmitSignedPsbtMetadata {
 	}
 }
 
-#[derive(Debug)]
 pub enum XtRequestMetadata {
 	SubmitVaultKey(SubmitVaultKeyMetadata),
 	SubmitSignedPsbt(SubmitSignedPsbtMetadata),
@@ -329,6 +331,53 @@ impl Display for XtRequestMetadata {
 				XtRequestMetadata::SubmitSignedPsbt(metadata) => metadata.to_string(),
 			}
 		)
+	}
+}
+
+#[derive(Clone)]
+pub enum XtRequest {
+	SubmitSignedPsbt(Payload<SubmitSignedPsbt>),
+	SubmitVaultKey(Payload<SubmitVaultKey>),
+}
+
+impl TxPayload for XtRequest {
+	fn encode_call_data_to(&self, metadata: &Metadata, out: &mut Vec<u8>) -> Result<(), Error> {
+		match self {
+			XtRequest::SubmitSignedPsbt(call) => call.encode_call_data_to(metadata, out),
+			XtRequest::SubmitVaultKey(call) => call.encode_call_data_to(metadata, out),
+		}
+	}
+}
+
+impl TryFrom<XtRequest> for Payload<SubmitSignedPsbt> {
+	type Error = ();
+
+	fn try_from(value: XtRequest) -> Result<Self, Self::Error> {
+		match value {
+			XtRequest::SubmitSignedPsbt(call) => Ok(call),
+			XtRequest::SubmitVaultKey(_) => Err(()),
+		}
+	}
+}
+impl TryFrom<XtRequest> for Payload<SubmitVaultKey> {
+	type Error = ();
+
+	fn try_from(value: XtRequest) -> Result<Self, Self::Error> {
+		match value {
+			XtRequest::SubmitSignedPsbt(_) => Err(()),
+			XtRequest::SubmitVaultKey(call) => Ok(call),
+		}
+	}
+}
+
+impl From<Payload<SubmitSignedPsbt>> for XtRequest {
+	fn from(value: Payload<SubmitSignedPsbt>) -> Self {
+		Self::SubmitSignedPsbt(value)
+	}
+}
+impl From<Payload<SubmitVaultKey>> for XtRequest {
+	fn from(value: Payload<SubmitVaultKey>) -> Self {
+		Self::SubmitVaultKey(value)
 	}
 }
 
@@ -561,20 +610,20 @@ impl TxRequestSender {
 	}
 }
 
-pub struct XtRequestMessage<Call> {
+pub struct XtRequestMessage {
 	/// The remaining retries of the transaction request.
 	pub retries_remaining: u8,
 	/// The retry interval in milliseconds.
 	pub retry_interval: u64,
 	/// The call data of the transaction.
-	pub call: Call,
+	pub call: XtRequest,
 	/// The metadata of the transaction.
 	pub metadata: XtRequestMetadata,
 }
 
-impl<Call: TxPayload> XtRequestMessage<Call> {
+impl XtRequestMessage {
 	/// Instantiates a new `XtRequestMessage` instance.
-	pub fn new(call: Call, metadata: XtRequestMetadata) -> Self {
+	pub fn new(call: XtRequest, metadata: XtRequestMetadata) -> Self {
 		Self {
 			retries_remaining: DEFAULT_TX_RETRIES,
 			retry_interval: DEFAULT_TX_RETRY_INTERVAL_MS,
@@ -591,22 +640,19 @@ impl<Call: TxPayload> XtRequestMessage<Call> {
 }
 
 /// The message sender connected to the tx request channel.
-pub struct XtRequestSender<Call> {
+pub struct XtRequestSender {
 	/// The inner sender.
-	pub sender: UnboundedSender<XtRequestMessage<Call>>,
+	pub sender: UnboundedSender<XtRequestMessage>,
 }
 
-impl<Call> XtRequestSender<Call> {
+impl XtRequestSender {
 	/// Instantiates a new `XtRequestSender` instance.
-	pub fn new(sender: UnboundedSender<XtRequestMessage<Call>>) -> Self {
+	pub fn new(sender: UnboundedSender<XtRequestMessage>) -> Self {
 		Self { sender }
 	}
 
 	/// Sends a new tx request message.
-	pub fn send(
-		&self,
-		message: XtRequestMessage<Call>,
-	) -> Result<(), SendError<XtRequestMessage<Call>>> {
+	pub fn send(&self, message: XtRequestMessage) -> Result<(), SendError<XtRequestMessage>> {
 		self.sender.send(message)
 	}
 }

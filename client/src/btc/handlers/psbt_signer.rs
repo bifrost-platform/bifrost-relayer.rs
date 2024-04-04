@@ -29,22 +29,22 @@ pub struct PsbtSigner<T> {
 	/// The Bifrost client.
 	client: Arc<EthClient<T>>,
 	/// The unsigned transaction message sender.
-	xt_request_sender: Arc<XtRequestSender<Payload<SubmitSignedPsbt>>>,
+	xt_request_sender: Arc<XtRequestSender>,
 	/// The Bitcoin event receiver.
 	event_receiver: Receiver<BTCEventMessage>,
 	/// The target Bitcoin event.
 	target_event: EventType,
 	/// The public and private keypair local storage.
-	keypair_storage: KeypairStorage,
+	keypair_storage: Arc<KeypairStorage>,
 }
 
 impl<T: JsonRpcClient> PsbtSigner<T> {
 	/// Instantiates a new `PsbtSigner` instance.
 	pub fn new(
 		client: Arc<EthClient<T>>,
-		xt_request_sender: Arc<XtRequestSender<Payload<SubmitSignedPsbt>>>,
+		xt_request_sender: Arc<XtRequestSender>,
 		event_receiver: Receiver<BTCEventMessage>,
-		keypair_storage: KeypairStorage,
+		keypair_storage: Arc<KeypairStorage>,
 	) -> Self {
 		Self {
 			client,
@@ -124,7 +124,7 @@ impl<T: JsonRpcClient> PsbtSigner<T> {
 		metadata: SubmitSignedPsbtMetadata,
 	) {
 		match self.xt_request_sender.send(XtRequestMessage::new(
-			call,
+			call.into(),
 			XtRequestMetadata::SubmitSignedPsbt(metadata.clone()),
 		)) {
 			Ok(_) => log::info!(

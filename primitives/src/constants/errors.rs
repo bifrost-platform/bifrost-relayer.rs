@@ -28,6 +28,9 @@ pub const INVALID_CONFIG_FILE_STRUCTURE: &str =
 pub const INVALID_CHAIN_SPECIFICATION: &str =
 	"Invalid --chain specification provided. Please check your CLI options.";
 
+pub const INVALID_BITCOIN_NETWORK: &str =
+	"Invalid Bitcoin network provided. Please check your `btc_provider.chain` field. Allowed values: `main`, `test`, `sigtest`, `regtest`.";
+
 pub const INSUFFICIENT_FUNDS: &str =
 	"Insufficient funds. Please check your relayer's remaining balance.";
 
