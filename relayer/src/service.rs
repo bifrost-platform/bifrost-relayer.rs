@@ -29,7 +29,7 @@ use br_client::{
 	substrate::tx::UnsignedTransactionManager,
 };
 use br_periodic::{
-	traits::PeriodicWorker, HeartbeatSender, OraclePriceFeeder, RoundupEmitter,
+	traits::PeriodicWorker, HeartbeatSender, OraclePriceFeeder, PubKeySubmitter, RoundupEmitter,
 	SocketRollbackEmitter,
 };
 use br_primitives::{
@@ -307,8 +307,13 @@ fn construct_btc_deps(
 		block_manager.subscribe(),
 		keypair_storage.clone(),
 	);
+	let pub_key_submitter = PubKeySubmitter::new(
+		bfc_client.clone(),
+		substrate_deps.xt_request_sender.clone(),
+		keypair_storage.clone(),
+	);
 
-	BtcDeps { outbound, inbound, block_manager, psbt_signer }
+	BtcDeps { outbound, inbound, block_manager, psbt_signer, pub_key_submitter }
 }
 
 /// Initializes Substrate related instances.
@@ -359,7 +364,13 @@ fn spawn_relayer_tasks(
 	} = periodic_deps;
 	let HandlerDeps { socket_relay_handlers, roundup_relay_handlers } = handler_deps;
 	let SubstrateDeps { mut unsigned_tx_manager, .. } = substrate_deps;
-	let BtcDeps { mut outbound, mut inbound, mut block_manager, mut psbt_signer } = btc_deps;
+	let BtcDeps {
+		mut outbound,
+		mut inbound,
+		mut block_manager,
+		mut psbt_signer,
+		mut pub_key_submitter,
+	} = btc_deps;
 
 	// spawn legacy transaction managers
 	tx_managers.0.into_iter().for_each(|mut tx_manager| {
@@ -493,6 +504,11 @@ fn spawn_relayer_tasks(
 		"bitcoin-psbt-signer",
 		Some("handlers"),
 		async move { psbt_signer.run().await },
+	);
+	task_manager.spawn_essential_handle().spawn(
+		"bitcoin-public-key-submitter",
+		Some("pub-key-submitter"),
+		async move { pub_key_submitter.run().await },
 	);
 	task_manager.spawn_essential_handle().spawn(
 		"bitcoin-block-manager",
@@ -634,6 +650,8 @@ struct BtcDeps {
 	block_manager: BlockManager<Http>,
 	/// The Bitcoin PSBT signer.
 	psbt_signer: PsbtSigner<Http>,
+	/// The Bitcoin vault public key submitter.
+	pub_key_submitter: PubKeySubmitter<Http>,
 }
 
 struct SubstrateDeps {
