@@ -3,6 +3,7 @@ use std::{
 	fmt::{Display, Formatter},
 };
 
+use bitcoincore_rpc::bitcoin::PublicKey;
 use ethers::types::{
 	transaction::eip2718::TypedTransaction, Address, Bytes, Eip1559TransactionRequest,
 	NameOrAddress, TransactionRequest, H256, U256,
@@ -19,7 +20,7 @@ use crate::{
 	constants::tx::{DEFAULT_TX_RETRIES, DEFAULT_TX_RETRY_INTERVAL_MS},
 	eth::{ChainID, GasCoefficient, SocketEventStatus},
 	periodic::PriceResponse,
-	substrate::{Public, SubmitSignedPsbt, SubmitVaultKey},
+	substrate::{SubmitSignedPsbt, SubmitVaultKey},
 };
 
 #[derive(Clone, Debug)]
@@ -276,17 +277,17 @@ impl Display for TxRequestMetadata {
 	}
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 /// The metadata used for vault key submission.
 pub struct SubmitVaultKeyMetadata {
 	/// The user's Bifrost address.
 	pub who: Address,
 	/// The generated public key.
-	pub key: Public,
+	pub key: PublicKey,
 }
 
 impl SubmitVaultKeyMetadata {
-	pub fn new(who: Address, key: Public) -> Self {
+	pub fn new(who: Address, key: PublicKey) -> Self {
 		Self { who, key }
 	}
 }

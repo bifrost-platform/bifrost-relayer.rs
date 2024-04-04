@@ -23,6 +23,8 @@ reqwest = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 tokio = { workspace = true, features = ["macros"] }
 tokio-stream = { workspace = true }
+bitcoincore-rpc = { workspace = true }
+subxt = { workspace = true }
 
 # Bifrost Relayer
 br-cli = { path = "../client/cli", default-features = false }

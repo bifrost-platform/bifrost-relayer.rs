@@ -1,13 +1,18 @@
 use std::{str::FromStr, sync::Arc};
 
+use bitcoincore_rpc::bitcoin::PublicKey;
 use br_client::{btc::storage::keypair::KeypairStorage, eth::EthClient};
 use br_primitives::{
 	constants::{errors::INVALID_PERIODIC_SCHEDULE, schedule::PUB_KEY_SUBMITTER_SCHEDULE},
-	tx::XtRequestSender,
-	utils::sub_display_format,
+	substrate::{
+		bifrost_runtime, AccountId20, EthereumSignature, Public, SubmitVaultKey, VaultKeySubmission,
+	},
+	tx::{SubmitVaultKeyMetadata, XtRequestMessage, XtRequestMetadata, XtRequestSender},
+	utils::{convert_ethers_to_ecdsa_signature, sub_display_format},
 };
 use cron::Schedule;
 use ethers::{providers::JsonRpcClient, types::Address};
+use subxt::tx::Payload;
 use tokio_stream::StreamExt;
 
 use crate::traits::PeriodicWorker;
@@ -60,8 +65,9 @@ impl<T: JsonRpcClient + 'static> PeriodicWorker for PubKeySubmitter<T> {
 						continue;
 					}
 
-					// create new keypair
-					// submit pubkey
+					let pub_key = self.keypair_storage.create_new_keypair();
+					let (call, metadata) = self.build_unsigned_tx(who, pub_key);
+					self.request_send_transaction(call, metadata);
 				}
 			}
 
@@ -71,6 +77,7 @@ impl<T: JsonRpcClient + 'static> PeriodicWorker for PubKeySubmitter<T> {
 }
 
 impl<T: JsonRpcClient> PubKeySubmitter<T> {
+	/// Instantiates a new `PubKeySubmitter` instance.
 	pub fn new(
 		client: Arc<EthClient<T>>,
 		xt_request_sender: Arc<XtRequestSender>,
@@ -85,6 +92,78 @@ impl<T: JsonRpcClient> PubKeySubmitter<T> {
 		}
 	}
 
+	/// Build the payload for the unsigned transaction. (`submit_vault_key()`)
+	fn build_payload(
+		&self,
+		who: Address,
+		pub_key: PublicKey,
+	) -> (VaultKeySubmission<AccountId20>, EthereumSignature) {
+		let mut converted_pub_key = [0u8; 33];
+		converted_pub_key.copy_from_slice(&pub_key.to_bytes());
+		// submit public key
+		let msg = VaultKeySubmission {
+			authority_id: AccountId20(self.client.address().0),
+			who: AccountId20(who.0),
+			pub_key: Public(converted_pub_key),
+		};
+		let signature = convert_ethers_to_ecdsa_signature(
+			self.client.wallet.sign_message(&pub_key.to_bytes().as_slice()),
+		);
+		(msg, signature)
+	}
+
+	/// Build the calldata for the unsigned transaction. (`submit_vault_key()`)
+	fn build_unsigned_tx(
+		&self,
+		who: Address,
+		pub_key: PublicKey,
+	) -> (Payload<SubmitVaultKey>, SubmitVaultKeyMetadata) {
+		let (msg, signature) = self.build_payload(who, pub_key);
+		let metadata = SubmitVaultKeyMetadata::new(who, pub_key);
+		(bifrost_runtime::tx().btc_registration_pool().submit_vault_key(msg, signature), metadata)
+	}
+
+	/// Send the transaction request message to the channel.
+	fn request_send_transaction(
+		&self,
+		call: Payload<SubmitVaultKey>,
+		metadata: SubmitVaultKeyMetadata,
+	) {
+		match self.xt_request_sender.send(XtRequestMessage::new(
+			call.into(),
+			XtRequestMetadata::SubmitVaultKey(metadata.clone()),
+		)) {
+			Ok(_) => log::info!(
+				target: &self.client.get_chain_name(),
+				"-[{}] 🔖 Request unsigned transaction: {}",
+				sub_display_format(SUB_LOG_TARGET),
+				metadata
+			),
+			Err(error) => {
+				log::error!(
+					target: &self.client.get_chain_name(),
+					"-[{}] ❗️ Failed to send unsigned transaction: {}, Error: {}",
+					sub_display_format(SUB_LOG_TARGET),
+					metadata,
+					error.to_string()
+				);
+				sentry::capture_message(
+					format!(
+						"[{}]-[{}]-[{}] ❗️ Failed to send unsigned transaction: {}, Error: {}",
+						&self.client.get_chain_name(),
+						SUB_LOG_TARGET,
+						self.client.address(),
+						metadata,
+						error
+					)
+					.as_str(),
+					sentry::Level::Error,
+				);
+			},
+		}
+	}
+
+	/// Get the pending registrations.
 	async fn get_pending_registrations(&self) -> Vec<Address> {
 		let registration_pool = self.client.protocol_contracts.registration_pool.as_ref().unwrap();
 
@@ -97,6 +176,7 @@ impl<T: JsonRpcClient> PubKeySubmitter<T> {
 			.0
 	}
 
+	/// Get the user's registration information.
 	async fn get_registration_info(
 		&self,
 		who: Address,
