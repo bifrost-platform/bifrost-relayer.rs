@@ -72,7 +72,7 @@ impl<T: JsonRpcClient> OutboundHandler<T> {
 			for socket_msg_bytes in socket_messages {
 				let socket_msg: SocketMessage = SocketMessage::decode(&socket_msg_bytes).unwrap();
 				if socket_msg.params.to == user_bfc_address
-					&& socket_msg.params.amount == (amount.to_sat() * 10u64.pow(10)).into()
+					&& socket_msg.params.amount == amount.to_sat().into()
 				{
 					return (true, socket_msg);
 				}
@@ -144,7 +144,7 @@ impl<T: JsonRpcClient + 'static> Handler<T> for OutboundHandler<T> {
 		}
 	}
 
-	async fn process_event(&self, event_tx: Event, is_bootstrap: bool) {
+	async fn process_event(&self, event_tx: Event, _is_bootstrap: bool) {
 		// TODO: if is_bootstrap
 
 		if let Some(user_bfc_address) = self.get_user_bfc_address(&event_tx.address).await {
