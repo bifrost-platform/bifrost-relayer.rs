@@ -13,8 +13,8 @@ use crate::{
 
 use br_primitives::{
 	eth::{BootstrapState, GasCoefficient},
-	sub_display_format,
 	tx::{BitcoinRelayMetadata, TxRequest, TxRequestMessage, TxRequestMetadata, TxRequestSender},
+	utils::sub_display_format,
 };
 use ethers::{prelude::TransactionRequest, providers::JsonRpcClient};
 use miniscript::bitcoin::Transaction;
@@ -23,14 +23,10 @@ use std::sync::Arc;
 pub const LOG_TARGET: &str = "Bitcoin";
 
 #[async_trait::async_trait]
-pub trait Handler<T: JsonRpcClient> {
+pub trait TxRequester<T: JsonRpcClient> {
 	fn tx_request_sender(&self) -> Arc<TxRequestSender>;
 
 	fn bfc_client(&self) -> Arc<EthClient<T>>;
-
-	async fn run(&mut self);
-
-	async fn process_event(&self, event_tx: Event, is_bootstrap: bool);
 
 	async fn request_send_transaction(
 		&self,
@@ -75,6 +71,13 @@ pub trait Handler<T: JsonRpcClient> {
 			},
 		}
 	}
+}
+
+#[async_trait::async_trait]
+pub trait Handler {
+	async fn run(&mut self);
+
+	async fn process_event(&self, event_tx: Event, is_bootstrap: bool);
 
 	fn is_target_event(&self, event_type: EventType) -> bool;
 }

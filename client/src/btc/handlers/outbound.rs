@@ -10,8 +10,8 @@ use br_primitives::{
 	bootstrap::BootstrapSharedData,
 	contracts::{socket::SocketMessage, socket_queue::SocketQueueContract},
 	eth::{BootstrapState, BuiltRelayTransaction, ChainID, SocketEventStatus},
-	sub_display_format,
 	tx::{BitcoinRelayMetadata, TxRequestSender},
+	utils::sub_display_format,
 };
 use ethers::{
 	abi::AbiDecode,
@@ -23,6 +23,8 @@ use miniscript::bitcoin::{address::NetworkUnchecked, Address as BtcAddress, Amou
 use std::sync::Arc;
 use tokio::sync::broadcast::Receiver;
 use tokio_stream::StreamExt;
+
+use super::TxRequester;
 
 const SUB_LOG_TARGET: &str = "Outbound-handler";
 
@@ -108,7 +110,7 @@ impl<T: JsonRpcClient> OutboundHandler<T> {
 }
 
 #[async_trait::async_trait]
-impl<T: JsonRpcClient + 'static> Handler<T> for OutboundHandler<T> {
+impl<T: JsonRpcClient> TxRequester<T> for OutboundHandler<T> {
 	fn tx_request_sender(&self) -> Arc<TxRequestSender> {
 		self.tx_request_sender.clone()
 	}
@@ -116,7 +118,10 @@ impl<T: JsonRpcClient + 'static> Handler<T> for OutboundHandler<T> {
 	fn bfc_client(&self) -> Arc<EthClient<T>> {
 		self.bfc_client.clone()
 	}
+}
 
+#[async_trait::async_trait]
+impl<T: JsonRpcClient + 'static> Handler for OutboundHandler<T> {
 	async fn run(&mut self) {
 		loop {
 			// TODO: BootstrapState::BootstrapBitcoinOutbound
