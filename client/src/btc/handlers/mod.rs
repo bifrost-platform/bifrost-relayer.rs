@@ -13,7 +13,10 @@ use crate::{
 
 use br_primitives::{
 	eth::{BootstrapState, GasCoefficient},
-	tx::{BitcoinRelayMetadata, TxRequest, TxRequestMessage, TxRequestMetadata, TxRequestSender},
+	tx::{
+		BitcoinRelayMetadata, TxRequest, TxRequestMessage, TxRequestMetadata, TxRequestSender,
+		XtRequest, XtRequestMessage, XtRequestMetadata, XtRequestSender,
+	},
 	utils::sub_display_format,
 };
 use ethers::{prelude::TransactionRequest, providers::JsonRpcClient};
@@ -21,6 +24,56 @@ use miniscript::bitcoin::Transaction;
 use std::sync::Arc;
 
 pub const LOG_TARGET: &str = "Bitcoin";
+
+#[async_trait::async_trait]
+pub trait XtRequester<T: JsonRpcClient> {
+	fn xt_request_sender(&self) -> Arc<XtRequestSender>;
+
+	fn bfc_client(&self) -> Arc<EthClient<T>>;
+
+	fn request_send_transaction(
+		&self,
+		xt_request: XtRequest,
+		metadata: XtRequestMetadata,
+		sub_log_target: &str,
+	) {
+		let msg = match xt_request {
+			XtRequest::SubmitSignedPsbt(call) => {
+				XtRequestMessage::new(call.into(), metadata.clone())
+			},
+			XtRequest::SubmitVaultKey(call) => XtRequestMessage::new(call.into(), metadata.clone()),
+		};
+		match self.xt_request_sender().send(msg) {
+			Ok(_) => log::info!(
+				target: &self.bfc_client().get_chain_name(),
+				"-[{}] 🔖 Request unsigned transaction: {}",
+				sub_display_format(sub_log_target),
+				metadata
+			),
+			Err(error) => {
+				log::error!(
+					target: &self.bfc_client().get_chain_name(),
+					"-[{}] ❗️ Failed to send unsigned transaction: {}, Error: {}",
+					sub_display_format(sub_log_target),
+					metadata,
+					error.to_string()
+				);
+				sentry::capture_message(
+					format!(
+						"[{}]-[{}]-[{}] ❗️ Failed to send unsigned transaction: {}, Error: {}",
+						&self.bfc_client().get_chain_name(),
+						sub_log_target,
+						self.bfc_client().address(),
+						metadata,
+						error
+					)
+					.as_str(),
+					sentry::Level::Error,
+				);
+			},
+		}
+	}
+}
 
 #[async_trait::async_trait]
 pub trait TxRequester<T: JsonRpcClient> {

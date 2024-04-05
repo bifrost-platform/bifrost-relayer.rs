@@ -2,7 +2,7 @@ use br_primitives::{
 	substrate::{
 		bifrost_runtime, AccountId20, EthereumSignature, SignedPsbtMessage, SubmitSignedPsbt,
 	},
-	tx::{SubmitSignedPsbtMetadata, XtRequestMessage, XtRequestMetadata, XtRequestSender},
+	tx::{SubmitSignedPsbtMetadata, XtRequest, XtRequestMetadata, XtRequestSender},
 	utils::{convert_ethers_to_ecdsa_signature, hash_bytes, sub_display_format},
 };
 use ethers::{providers::JsonRpcClient, types::Bytes};
@@ -21,6 +21,8 @@ use crate::{
 	},
 	eth::EthClient,
 };
+
+use super::XtRequester;
 
 const SUB_LOG_TARGET: &str = "psbt-signer";
 
@@ -116,45 +118,16 @@ impl<T: JsonRpcClient> PsbtSigner<T> {
 		}
 		None
 	}
+}
 
-	/// Send the transaction request message to the channel.
-	fn request_send_transaction(
-		&self,
-		call: Payload<SubmitSignedPsbt>,
-		metadata: SubmitSignedPsbtMetadata,
-	) {
-		match self.xt_request_sender.send(XtRequestMessage::new(
-			call.into(),
-			XtRequestMetadata::SubmitSignedPsbt(metadata.clone()),
-		)) {
-			Ok(_) => log::info!(
-				target: &self.client.get_chain_name(),
-				"-[{}] 🔖 Request unsigned transaction: {}",
-				sub_display_format(SUB_LOG_TARGET),
-				metadata
-			),
-			Err(error) => {
-				log::error!(
-					target: &self.client.get_chain_name(),
-					"-[{}] ❗️ Failed to send unsigned transaction: {}, Error: {}",
-					sub_display_format(SUB_LOG_TARGET),
-					metadata,
-					error.to_string()
-				);
-				sentry::capture_message(
-					format!(
-						"[{}]-[{}]-[{}] ❗️ Failed to send unsigned transaction: {}, Error: {}",
-						&self.client.get_chain_name(),
-						SUB_LOG_TARGET,
-						self.client.address(),
-						metadata,
-						error
-					)
-					.as_str(),
-					sentry::Level::Error,
-				);
-			},
-		}
+#[async_trait::async_trait]
+impl<T: JsonRpcClient> XtRequester<T> for PsbtSigner<T> {
+	fn xt_request_sender(&self) -> Arc<XtRequestSender> {
+		self.xt_request_sender.clone()
+	}
+
+	fn bfc_client(&self) -> Arc<EthClient<T>> {
+		self.client.clone()
 	}
 }
 
@@ -185,7 +158,11 @@ impl<T: JsonRpcClient> Handler for PsbtSigner<T> {
 				if let Some((call, metadata)) =
 					self.build_unsigned_tx(&mut Psbt::deserialize(&unsigned_psbt).unwrap())
 				{
-					self.request_send_transaction(call, metadata);
+					self.request_send_transaction(
+						XtRequest::SubmitSignedPsbt(call),
+						XtRequestMetadata::SubmitSignedPsbt(metadata),
+						SUB_LOG_TARGET,
+					);
 				}
 			}
 		}

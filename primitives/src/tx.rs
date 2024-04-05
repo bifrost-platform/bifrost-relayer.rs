@@ -317,6 +317,7 @@ impl Display for SubmitSignedPsbtMetadata {
 	}
 }
 
+#[derive(Clone)]
 pub enum XtRequestMetadata {
 	SubmitVaultKey(SubmitVaultKeyMetadata),
 	SubmitSignedPsbt(SubmitSignedPsbtMetadata),

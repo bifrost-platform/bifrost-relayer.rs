@@ -643,7 +643,6 @@ struct ManagerDeps {
 struct BtcDeps {
 	/// The Bitcoin outbound handler.
 	outbound: OutboundHandler<Http>,
-	/// The Bitcoin outbound handler.
 	/// The Bitcoin inbound handler.
 	inbound: InboundHandler<Http>,
 	/// The Bitcoin block manager.
