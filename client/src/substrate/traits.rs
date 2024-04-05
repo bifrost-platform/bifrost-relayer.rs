@@ -6,7 +6,7 @@ use br_primitives::{
 
 use ethers::providers::JsonRpcClient;
 use std::{error::Error, sync::Arc, time::Duration};
-use subxt::{blocks::ExtrinsicEvents, tx::TxPayload, Config, OnlineClient};
+use subxt::{blocks::ExtrinsicEvents, Config, OnlineClient};
 use tokio::time::sleep;
 
 use crate::eth::EthClient;
@@ -23,26 +23,18 @@ where
 	fn get_bfc_client(&self) -> Arc<EthClient<T>>;
 
 	/// Sends the consumed unsigned transaction request to the Bifrost network.
-	async fn try_send_unsigned_transaction<Call: TxPayload + Send>(
-		&self,
-		msg: XtRequestMessage<Call>,
-	);
+	async fn try_send_unsigned_transaction(&self, msg: XtRequestMessage);
 
 	/// Retry try_send_unsigned_transaction() for failed transaction execution.
-	async fn retry_transaction<Call: TxPayload + Send>(&self, mut msg: XtRequestMessage<Call>) {
+	async fn retry_transaction(&self, mut msg: XtRequestMessage) {
 		msg.build_retry_event();
 		sleep(Duration::from_millis(msg.retry_interval)).await;
 		self.try_send_unsigned_transaction(msg).await;
 	}
 
 	/// Handles failed transaction requests.
-	async fn handle_failed_tx_request<Call, E>(
-		&self,
-		sub_target: &str,
-		msg: XtRequestMessage<Call>,
-		error: &E,
-	) where
-		Call: TxPayload + Send,
+	async fn handle_failed_tx_request<E>(&self, sub_target: &str, msg: XtRequestMessage, error: &E)
+	where
 		E: Error + Sync + ?Sized,
 	{
 		log::error!(
@@ -70,13 +62,8 @@ where
 	}
 
 	/// Handles failed transaction creation.
-	async fn handle_failed_tx_creation<Call, E>(
-		&self,
-		sub_target: &str,
-		msg: XtRequestMessage<Call>,
-		error: &E,
-	) where
-		Call: TxPayload + Send,
+	async fn handle_failed_tx_creation<E>(&self, sub_target: &str, msg: XtRequestMessage, error: &E)
+	where
 		E: Error + Sync + ?Sized,
 	{
 		log::error!(
@@ -106,9 +93,9 @@ where
 	/// Handles successful transaction requests.
 	async fn handle_success_tx_request<C>(
 		&self,
-		sub_target: &str,
-		events: ExtrinsicEvents<C>,
-		metadata: XtRequestMetadata,
+		_sub_target: &str,
+		_events: ExtrinsicEvents<C>,
+		_metadata: XtRequestMetadata,
 	) where
 		C: Config,
 	{

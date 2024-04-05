@@ -2,7 +2,7 @@ use br_primitives::{
 	substrate::{
 		bifrost_runtime, AccountId20, EthereumSignature, SignedPsbtMessage, SubmitSignedPsbt,
 	},
-	tx::{SubmitSignedPsbtMetadata, XtRequestMessage, XtRequestMetadata, XtRequestSender},
+	tx::{SubmitSignedPsbtMetadata, XtRequest, XtRequestMetadata, XtRequestSender},
 	utils::{convert_ethers_to_ecdsa_signature, hash_bytes, sub_display_format},
 };
 use ethers::{providers::JsonRpcClient, types::Bytes};
@@ -16,11 +16,13 @@ use std::sync::Arc;
 use crate::{
 	btc::{
 		block::{Event, EventMessage as BTCEventMessage, EventType},
-		handlers::{Handler, LOG_TARGET},
+		handlers::Handler,
 		storage::keypair::KeypairStorage,
 	},
 	eth::EthClient,
 };
+
+use super::XtRequester;
 
 const SUB_LOG_TARGET: &str = "psbt-signer";
 
@@ -29,22 +31,22 @@ pub struct PsbtSigner<T> {
 	/// The Bifrost client.
 	client: Arc<EthClient<T>>,
 	/// The unsigned transaction message sender.
-	xt_request_sender: Arc<XtRequestSender<Payload<SubmitSignedPsbt>>>,
+	xt_request_sender: Arc<XtRequestSender>,
 	/// The Bitcoin event receiver.
 	event_receiver: Receiver<BTCEventMessage>,
 	/// The target Bitcoin event.
 	target_event: EventType,
 	/// The public and private keypair local storage.
-	keypair_storage: KeypairStorage,
+	keypair_storage: Arc<KeypairStorage>,
 }
 
 impl<T: JsonRpcClient> PsbtSigner<T> {
 	/// Instantiates a new `PsbtSigner` instance.
 	pub fn new(
 		client: Arc<EthClient<T>>,
-		xt_request_sender: Arc<XtRequestSender<Payload<SubmitSignedPsbt>>>,
+		xt_request_sender: Arc<XtRequestSender>,
 		event_receiver: Receiver<BTCEventMessage>,
-		keypair_storage: KeypairStorage,
+		keypair_storage: Arc<KeypairStorage>,
 	) -> Self {
 		Self {
 			client,
@@ -91,7 +93,7 @@ impl<T: JsonRpcClient> PsbtSigner<T> {
 			return Some((msg, signature));
 		}
 		log::warn!(
-			target: LOG_TARGET,
+			target: &self.client.get_chain_name(),
 			"-[{}] 🔐 Unauthorized to sign PSBT: {}",
 			sub_display_format(SUB_LOG_TARGET),
 			hash_bytes(&psbt.serialize())
@@ -116,45 +118,16 @@ impl<T: JsonRpcClient> PsbtSigner<T> {
 		}
 		None
 	}
+}
 
-	/// Send the transaction request message to the channel.
-	fn request_send_transaction(
-		&self,
-		call: Payload<SubmitSignedPsbt>,
-		metadata: SubmitSignedPsbtMetadata,
-	) {
-		match self.xt_request_sender.send(XtRequestMessage::new(
-			call,
-			XtRequestMetadata::SubmitSignedPsbt(metadata.clone()),
-		)) {
-			Ok(_) => log::info!(
-				target: LOG_TARGET,
-				"-[{}] 🔖 Request unsigned transaction: {}",
-				sub_display_format(SUB_LOG_TARGET),
-				metadata
-			),
-			Err(error) => {
-				log::error!(
-					target: LOG_TARGET,
-					"-[{}] ❗️ Failed to send unsigned transaction: {}, Error: {}",
-					sub_display_format(SUB_LOG_TARGET),
-					metadata,
-					error.to_string()
-				);
-				sentry::capture_message(
-					format!(
-						"[{}]-[{}]-[{}] ❗️ Failed to send unsigned transaction: {}, Error: {}",
-						LOG_TARGET,
-						SUB_LOG_TARGET,
-						self.client.address(),
-						metadata,
-						error
-					)
-					.as_str(),
-					sentry::Level::Error,
-				);
-			},
-		}
+#[async_trait::async_trait]
+impl<T: JsonRpcClient> XtRequester<T> for PsbtSigner<T> {
+	fn xt_request_sender(&self) -> Arc<XtRequestSender> {
+		self.xt_request_sender.clone()
+	}
+
+	fn bfc_client(&self) -> Arc<EthClient<T>> {
+		self.client.clone()
 	}
 }
 
@@ -172,7 +145,7 @@ impl<T: JsonRpcClient> Handler for PsbtSigner<T> {
 			}
 
 			log::info!(
-				target: LOG_TARGET,
+				target: &self.client.get_chain_name(),
 				"-[{}] 📦 Imported #{:?} with target logs({:?})",
 				sub_display_format(SUB_LOG_TARGET),
 				msg.block_number,
@@ -185,7 +158,11 @@ impl<T: JsonRpcClient> Handler for PsbtSigner<T> {
 				if let Some((call, metadata)) =
 					self.build_unsigned_tx(&mut Psbt::deserialize(&unsigned_psbt).unwrap())
 				{
-					self.request_send_transaction(call, metadata);
+					self.request_send_transaction(
+						XtRequest::SubmitSignedPsbt(call),
+						XtRequestMetadata::SubmitSignedPsbt(metadata),
+						SUB_LOG_TARGET,
+					);
 				}
 			}
 		}
