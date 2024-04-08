@@ -37,7 +37,7 @@ pub struct PsbtSigner<T> {
 	/// The target Bitcoin event.
 	target_event: EventType,
 	/// The public and private keypair local storage.
-	keypair_storage: Arc<KeypairStorage>,
+	keypair_storage: KeypairStorage,
 }
 
 impl<T: JsonRpcClient> PsbtSigner<T> {
@@ -46,7 +46,7 @@ impl<T: JsonRpcClient> PsbtSigner<T> {
 		client: Arc<EthClient<T>>,
 		xt_request_sender: Arc<XtRequestSender>,
 		event_receiver: Receiver<BTCEventMessage>,
-		keypair_storage: Arc<KeypairStorage>,
+		keypair_storage: KeypairStorage,
 	) -> Self {
 		Self {
 			client,

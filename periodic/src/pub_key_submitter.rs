@@ -25,7 +25,7 @@ pub struct PubKeySubmitter<T> {
 	/// The unsigned transaction message sender.
 	xt_request_sender: Arc<XtRequestSender>,
 	/// The public and private keypair local storage.
-	keypair_storage: Arc<KeypairStorage>,
+	keypair_storage: KeypairStorage,
 	/// The time schedule that represents when check pending registrations.
 	schedule: Schedule,
 }
@@ -81,7 +81,7 @@ impl<T: JsonRpcClient> PubKeySubmitter<T> {
 	pub fn new(
 		client: Arc<EthClient<T>>,
 		xt_request_sender: Arc<XtRequestSender>,
-		keypair_storage: Arc<KeypairStorage>,
+		keypair_storage: KeypairStorage,
 	) -> Self {
 		Self {
 			client,
