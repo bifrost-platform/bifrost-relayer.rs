@@ -5,8 +5,9 @@ use bitcoincore_rpc::bitcoin::{
 	PrivateKey, PublicKey,
 };
 use miniscript::bitcoin::{Network, Psbt};
-use sc_keystore::LocalKeystore;
-use sp_core::crypto::SecretString;
+use sc_keystore::{Keystore, LocalKeystore};
+use sp_application_crypto::ecdsa::{AppPair, AppPublic};
+use sp_core::{crypto::SecretString, testing::ECDSA, ByteArray};
 use std::{collections::BTreeMap, str::FromStr, sync::Arc};
 use tokio::sync::RwLock;
 
@@ -19,13 +20,28 @@ pub struct KeypairStorage {
 
 impl KeypairStorage {
 	pub fn new(path: &str, secret: &str, network: Network) -> Self {
-		Self {
-			inner: Default::default(),
-			db: Arc::new(
-				LocalKeystore::open(path, Some(SecretString::from_str(secret).unwrap())).unwrap(),
-			),
-			network,
+		let keystore =
+			LocalKeystore::open(path, Some(SecretString::from_str(secret).unwrap())).unwrap();
+		let mut inner = BTreeMap::new();
+
+		let keys = keystore.keys(ECDSA).unwrap();
+		for key in keys.clone() {
+			match keystore.key_pair::<AppPair>(&AppPublic::from_slice(&key).unwrap()) {
+				Ok(pair) => {
+					if let Some(pair) = pair {
+						let sk =
+							PrivateKey::from_slice(&pair.into_inner().seed(), network).unwrap();
+						let pk = PublicKey::from_private_key(&Secp256k1::signing_only(), &sk);
+						inner.insert(pk, sk);
+					}
+				},
+				Err(e) => {
+					panic!("{e}")
+				},
+			}
 		}
+
+		Self { inner: Arc::new(RwLock::new(inner)), db: Arc::new(keystore), network }
 	}
 
 	fn insert(&self, key: PublicKey, value: PrivateKey) -> Option<PrivateKey> {
@@ -39,46 +55,30 @@ impl KeypairStorage {
 	}
 
 	pub fn create_new_keypair(&self) -> PublicKey {
-		let ret;
-		loop {
-			let private_key = PrivateKey::generate(self.network);
-			let public_key = private_key.public_key(&Secp256k1::signing_only());
-			match self.get(&public_key) {
-				Some(_) => continue,
-				None => {
-					self.insert(public_key.clone(), private_key);
-					ret = public_key;
-					break;
-				},
-			}
+		let key = self.db.ecdsa_generate_new(ECDSA, None).unwrap();
+		let public_key = PublicKey::from_slice(key.as_slice()).unwrap();
+
+		match self.db.key_pair::<AppPair>(&AppPublic::from_slice(&key.as_slice()).unwrap()) {
+			Ok(pair) => {
+				if let Some(pair) = pair {
+					self.insert(
+						public_key,
+						PrivateKey::from_slice(&pair.into_inner().seed(), self.network).unwrap(),
+					);
+				}
+			},
+			Err(e) => {
+				panic!("{e}")
+			},
 		}
-		ret
+
+		public_key
 	}
 
 	pub fn sign_psbt(&self, psbt: &mut Psbt) -> bool {
 		let before_sign = psbt.clone();
 		psbt.sign(self, &Secp256k1::signing_only()).unwrap();
 		psbt.inputs != before_sign.inputs
-	}
-
-	async fn sync_db(&self) {
-		todo!()
-	}
-}
-
-impl From<(BTreeMap<PublicKey, PrivateKey>, Arc<LocalKeystore>, Network)> for KeypairStorage {
-	fn from(value: (BTreeMap<PublicKey, PrivateKey>, Arc<LocalKeystore>, Network)) -> Self {
-		Self { inner: Arc::new(RwLock::new(value.0)), db: value.1, network: value.2 }
-	}
-}
-
-impl From<(&[(PublicKey, PrivateKey)], Arc<LocalKeystore>, Network)> for KeypairStorage {
-	fn from(value: (&[(PublicKey, PrivateKey)], Arc<LocalKeystore>, Network)) -> Self {
-		Self {
-			inner: Arc::new(RwLock::new(value.0.iter().cloned().collect())),
-			db: value.1,
-			network: value.2,
-		}
 	}
 }
 
@@ -100,11 +100,9 @@ impl GetKey for KeypairStorage {
 #[cfg(test)]
 mod tests {
 	use super::KeypairStorage;
-	use miniscript::bitcoin::{secp256k1::Secp256k1, Network, PrivateKey, PublicKey};
+	use miniscript::bitcoin::{Network, PublicKey};
 	use sc_keystore::Keystore;
-	use sp_application_crypto::ecdsa::{AppPair, AppPublic};
 	use sp_core::{crypto::SecretString, testing::ECDSA, ByteArray};
-	use std::sync::Arc;
 
 	#[test]
 	fn test_load_sc_keystore() {
@@ -114,37 +112,18 @@ mod tests {
 		)
 		.unwrap();
 
+		let mut keys = vec![];
 		for i in 0..3 {
 			let key = keystore.ecdsa_generate_new(ECDSA, None).unwrap();
 			println!("key{i} -> {:?}", PublicKey::from_slice(key.as_ref()));
-		}
-
-		let mut vec = vec![];
-		let keys = keystore.keys(ECDSA).unwrap();
-		for key in keys.clone() {
-			match keystore.key_pair::<AppPair>(&AppPublic::from_slice(&key).unwrap()) {
-				Ok(pair) => {
-					if let Some(pair) = pair {
-						let sk =
-							PrivateKey::from_slice(&pair.into_inner().seed(), Network::Regtest)
-								.unwrap();
-						let pk = PublicKey::from_private_key(&Secp256k1::signing_only(), &sk);
-						vec.push((pk, sk));
-					} else {
-						println!("not found");
-					}
-				},
-				Err(e) => {
-					panic!("{e}")
-				},
-			}
+			keys.push(key);
 		}
 
 		let keypair_storage =
-			KeypairStorage::from((vec.as_slice(), Arc::new(keystore), Network::Regtest));
+			KeypairStorage::new("../localkeystore_test", "test", Network::Regtest);
 		for key in keys {
 			let pk = PublicKey::from_slice(key.as_slice()).unwrap();
-			println!("loaded -> {:?}:{:?}", pk, keypair_storage.get(&pk));
+			println!("loaded -> {:?}:{:?}", pk, keypair_storage.get(&pk).unwrap());
 		}
 	}
 

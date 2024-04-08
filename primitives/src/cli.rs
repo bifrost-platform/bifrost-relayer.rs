@@ -58,6 +58,10 @@ pub struct RelayerConfig {
 pub struct SystemConfig {
 	/// The private key of the relayer.
 	pub private_key: String,
+	/// Path of the keystore.
+	pub keystore_path: String,
+	/// Password of the keystore.
+	pub keystore_password: String,
 	/// Debug mode enabled if set to `true`.
 	pub debug_mode: Option<bool>,
 }

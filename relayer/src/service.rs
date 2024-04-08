@@ -297,10 +297,12 @@ fn construct_btc_deps(
 		bootstrap_shared_data.clone(),
 	);
 
-	let keypair_storage = Arc::new(KeypairStorage::new(
+	let keypair_storage = KeypairStorage::new(
+		&config.relayer_config.system.keystore_path,
+		&config.relayer_config.system.keystore_password,
 		Network::from_core_arg(&config.relayer_config.btc_provider.chain)
 			.expect(INVALID_BITCOIN_NETWORK),
-	));
+	);
 	let psbt_signer = PsbtSigner::new(
 		bfc_client.clone(),
 		substrate_deps.xt_request_sender.clone(),
