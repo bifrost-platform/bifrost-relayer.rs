@@ -4,9 +4,10 @@ use ethers::{
 	providers::{JsonRpcClient, Provider},
 	types::{Address, Signature, TransactionRequest, Uint8, H160, U64},
 };
+use url::Url;
 
 use crate::{
-	constants::errors::INVALID_CONTRACT_ADDRESS,
+	constants::errors::{INVALID_CONTRACT_ADDRESS, INVALID_PROVIDER_URL},
 	contracts::{
 		authority::AuthorityContract, bitcoin_socket::BitcoinSocketContract,
 		chainlink_aggregator::ChainlinkContract, registration_pool::RegistrationPoolContract,
@@ -20,8 +21,10 @@ pub type ChainID = u32;
 
 /// The metadata of the EVM provider.
 pub struct ProviderMetadata {
+	/// The name of this provider.
 	pub name: String,
-	pub url: String,
+	/// The provider URL. (Allowed values: `http`, `https`)
+	pub url: Url,
 	/// Id of chain which this client interact with.
 	pub id: ChainID,
 	/// The total number of confirmations required for a block to be processed. (block
@@ -49,7 +52,7 @@ impl ProviderMetadata {
 	) -> Self {
 		Self {
 			name,
-			url,
+			url: Url::parse(&url).expect(INVALID_PROVIDER_URL),
 			id,
 			block_confirmations: U64::from(block_confirmations.saturating_add(get_logs_batch_size)),
 			get_logs_batch_size: U64::from(get_logs_batch_size),

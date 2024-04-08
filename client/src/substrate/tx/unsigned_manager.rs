@@ -39,8 +39,15 @@ impl<T: 'static + JsonRpcClient> UnsignedTransactionManager<T> {
 
 	/// Initialize the substrate client.
 	async fn initialize(&mut self) {
+		let mut url = self.bfc_client.get_url();
+		if url.scheme() == "https" {
+			url.set_scheme("wss").expect(INVALID_PROVIDER_URL);
+		} else {
+			url.set_scheme("ws").expect(INVALID_PROVIDER_URL);
+		}
+
 		self.sub_client = Some(
-			OnlineClient::<CustomConfig>::from_url(&self.bfc_client.metadata.url)
+			OnlineClient::<CustomConfig>::from_url(url.as_str())
 				.await
 				.expect(INVALID_PROVIDER_URL),
 		);

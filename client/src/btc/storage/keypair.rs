@@ -83,3 +83,54 @@ impl GetKey for KeypairStorage {
 		}
 	}
 }
+
+#[cfg(test)]
+mod tests {
+	use sc_keystore::Keystore;
+	use sp_application_crypto::ecdsa::AppPublic;
+	use sp_core::crypto::SecretString;
+
+	#[test]
+	fn test_sc_keystore() {
+		let keystore = sc_keystore::LocalKeystore::open(
+			"../keys",
+			Some(SecretString::new("test".to_string())),
+		)
+		.unwrap();
+
+		let key = keystore.ecdsa_generate_new(sp_core::testing::ECDSA, None).unwrap();
+		println!("key -> {:?}", key);
+
+		let keys = keystore.keys(sp_core::testing::ECDSA).unwrap();
+		println!("keys -> {:?}", keys);
+
+		let app = AppPublic::from(key);
+		println!("app -> {:?}", app);
+
+		match keystore.key_pair::<sp_application_crypto::ecdsa::AppPair>(&AppPublic::from(key)) {
+			Ok(pair) => {
+				if let Some(pair) = pair {
+					println!("seed -> {:?}", pair.clone().into_inner().seed());
+					println!(
+						"priv.key -> {:?}",
+						array_bytes::bytes2hex("0x", pair.into_inner().seed())
+					);
+				} else {
+					println!("not found");
+				}
+			},
+			Err(error) => println!("error -> {:?}", error),
+		};
+	}
+
+	#[test]
+	fn test_array_bytes_to_hex() {
+		let a = [
+			145, 25, 69, 113, 185, 112, 97, 20, 82, 14, 62, 68, 237, 185, 221, 252, 184, 230, 7,
+			128, 53, 132, 90, 165, 110, 159, 153, 213, 245, 90, 181, 155,
+		];
+		println!("a.len -> {:?}", a.len());
+		let b = array_bytes::bytes2hex("0x", a);
+		println!("b -> {:?}", b);
+	}
+}

@@ -23,6 +23,7 @@ use ethers::{
 };
 use serde::{de::DeserializeOwned, Serialize};
 use tokio::time::{sleep, Duration};
+use url::Url;
 
 use self::{
 	traits::{Eip1559GasMiddleware, LegacyGasMiddleware},
@@ -80,6 +81,11 @@ impl<T: JsonRpcClient> EthClient<T> {
 	/// Returns id which chain this client interacts with.
 	pub fn get_chain_id(&self) -> ChainID {
 		self.metadata.id
+	}
+
+	/// Returns the provider URL.
+	pub fn get_url(&self) -> Url {
+		self.metadata.url.clone()
 	}
 
 	/// Returns `Arc<Provider>`.
