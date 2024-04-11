@@ -186,8 +186,11 @@ impl<T: JsonRpcClient + 'static> BlockManager<T> {
 		let from_block = self.waiting_block;
 
 		for num in from_block..=to_block {
-			let (mut inbound, mut outbound) =
-				(EventMessage::inbound(num, vec![]), EventMessage::outbound(num, vec![]));
+			let (mut inbound, mut outbound, new_block) = (
+				EventMessage::inbound(num, vec![]),
+				EventMessage::outbound(num, vec![]),
+				EventMessage::new_block(num),
+			);
 
 			let block_hash = self.btc_client.get_block_hash(num).await.unwrap();
 			let txs = self.btc_client.get_block_info_with_txs(&block_hash).await.unwrap().tx;
@@ -207,6 +210,7 @@ impl<T: JsonRpcClient + 'static> BlockManager<T> {
 
 			self.sender.send(inbound).unwrap();
 			self.sender.send(outbound).unwrap();
+			self.sender.send(new_block).unwrap();
 		}
 
 		self.increment_waiting_block(to_block);
