@@ -143,8 +143,6 @@ impl<T: JsonRpcClient + 'static> Handler for InboundHandler<T> {
 			let metadata =
 				BitcoinRelayMetadata::new(event.address, user_bfc_address, event.txid, event.index);
 			self.request_send_transaction(tx_request, metadata, SUB_LOG_TARGET).await;
-		} else {
-			todo!("Unmapped vault address? -> erroneous deposit or something")
 		}
 	}
 
