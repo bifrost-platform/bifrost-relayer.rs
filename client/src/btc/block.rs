@@ -2,19 +2,17 @@ use crate::{btc::storage::pending_outbound::PendingOutboundPool, eth::EthClient}
 
 use br_primitives::{bootstrap::BootstrapSharedData, eth::BootstrapState};
 
-use bitcoincore_rpc::{
-	bitcoincore_rpc_json::GetRawTransactionResultVout, jsonrpc, Client as BtcClient, Error, RpcApi,
-};
+use bitcoincore_rpc::bitcoincore_rpc_json::GetRawTransactionResultVout;
 use ethers::providers::JsonRpcClient;
 use miniscript::bitcoin::{address::NetworkUnchecked, Address, Amount, Txid};
-use serde::Deserialize;
-use serde_json::Value;
-use std::{collections::BTreeSet, str::FromStr, sync::Arc, time::Duration};
+use std::{collections::BTreeSet, str::FromStr, sync::Arc};
 use tokio::sync::{
 	broadcast,
 	broadcast::{Receiver, Sender},
 };
 use tokio_stream::StreamExt;
+
+use super::BtcClient;
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub enum EventType {
@@ -64,31 +62,6 @@ pub struct BlockManager<T> {
 	bootstrap_shared_data: Arc<BootstrapSharedData>,
 }
 
-const INTERVAL: u64 = 1000;
-const RETRY_ATTEMPTS: u8 = 10;
-
-#[async_trait::async_trait]
-impl<C: JsonRpcClient> RpcApi for BlockManager<C> {
-	async fn call<T: for<'a> Deserialize<'a> + Send>(
-		&self,
-		cmd: &str,
-		args: &[Value],
-	) -> bitcoincore_rpc::Result<T> {
-		for _ in 0..RETRY_ATTEMPTS {
-			match self.btc_client.call(cmd, args).await {
-				Ok(ret) => return Ok(ret),
-				Err(Error::JsonRpc(jsonrpc::error::Error::Rpc(ref err))) if err.code == -28 => {
-					tokio::time::sleep(Duration::from_millis(INTERVAL)).await;
-					continue;
-				},
-				Err(e) => return Err(e),
-			}
-		}
-		self.btc_client.call(cmd, args).await
-	}
-}
-
-// TODO: Remove failable .unwrap()
 impl<T: JsonRpcClient + 'static> BlockManager<T> {
 	pub fn new(
 		btc_client: BtcClient,
@@ -114,18 +87,18 @@ impl<T: JsonRpcClient + 'static> BlockManager<T> {
 	}
 
 	pub async fn run(&mut self) {
-		self.waiting_block = self.btc_client.get_block_count().await.unwrap(); // TODO: should set at bootstrap process in production
+		self.waiting_block = self.btc_client.get_block_count().await; // TODO: should set at bootstrap process in production
 
 		loop {
 			if self.is_bootstrap_state_synced_as(BootstrapState::NormalStart).await {
-				let latest_block_num = self.btc_client.get_block_count().await.unwrap();
+				let latest_block_num = self.btc_client.get_block_count().await;
 				let (vault_set, refund_set) = self.fetch_registration_sets().await;
 				while self.is_block_confirmed(latest_block_num) {
 					self.process_confirmed_block(latest_block_num, &vault_set, &refund_set).await;
 				}
 			}
 
-			self.btc_client.wait_for_new_block(0).await.unwrap();
+			self.btc_client.wait_for_new_block(0).await;
 		}
 	}
 
@@ -192,8 +165,8 @@ impl<T: JsonRpcClient + 'static> BlockManager<T> {
 				EventMessage::new_block(num),
 			);
 
-			let block_hash = self.btc_client.get_block_hash(num).await.unwrap();
-			let txs = self.btc_client.get_block_info_with_txs(&block_hash).await.unwrap().tx;
+			let block_hash = self.btc_client.get_block_hash(num).await;
+			let txs = self.btc_client.get_block_info_with_txs(&block_hash).await.tx;
 
 			let mut stream = tokio_stream::iter(txs.iter());
 			while let Some(tx) = stream.next().await {

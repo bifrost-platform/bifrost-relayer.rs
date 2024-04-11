@@ -34,6 +34,8 @@ pub const INVALID_CHAIN_SPECIFICATION: &str =
 pub const INVALID_BITCOIN_NETWORK: &str =
 	"Invalid Bitcoin network provided. Please check your `btc_provider.chain` field. Allowed values: `main`, `test`, `sigtest`, `regtest`.";
 
+pub const INVALID_RPC_CALL_ARGS: &str = "Invalid JSON RPC call arguments provided.";
+
 pub const INVALID_KEYSTORE_PATH: &str =
 	"Invalid keystore path provided. Please check your configured path.";
 

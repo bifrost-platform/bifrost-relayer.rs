@@ -17,6 +17,7 @@ use br_client::{
 		handlers::{Handler as BitcoinHandler, InboundHandler, OutboundHandler, PsbtSigner},
 		storage::keypair::KeypairStorage,
 		storage::pending_outbound::PendingOutboundPool,
+		BtcClient,
 	},
 	eth::{
 		events::EventManager,
@@ -266,8 +267,10 @@ fn construct_btc_deps(
 		(Some(username), Some(password)) => Auth::UserPass(username, password),
 		_ => Auth::None,
 	};
-	let btc_client = BitcoinClient::new(&config.relayer_config.btc_provider.provider, auth)
-		.expect(INVALID_PROVIDER_URL);
+	let btc_client = BtcClient::new(
+		BitcoinClient::new(&config.relayer_config.btc_provider.provider, auth)
+			.expect(INVALID_PROVIDER_URL),
+	);
 
 	let bfc_client = manager_deps
 		.clients
@@ -283,7 +286,7 @@ fn construct_btc_deps(
 		.clone();
 
 	let block_manager = BlockManager::new(
-		btc_client.clone(),
+		btc_client,
 		bfc_client.clone(),
 		pending_outbounds.clone(),
 		bootstrap_shared_data.clone(),
