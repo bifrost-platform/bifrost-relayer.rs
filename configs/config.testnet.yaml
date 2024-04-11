@@ -36,20 +36,6 @@ evm_providers:
     chainlink_dai_usd_address: "0xE4eE17114774713d2De0eC0f035d4F7665fc025D"
     chainlink_btc_usd_address: "0x5741306c21795FdCBb9b265Ea0255F499DFe515C"
     chainlink_wbtc_usd_address: "0x5741306c21795FdCBb9b265Ea0255F499DFe515C"
-  - name: "mumbai"
-    id: 80001
-    provider: "<YOUR_MUMBAI_RPC_ENDPOINT>"
-    call_interval: 2000
-    block_confirmations: 7
-    is_relay_target: false
-    eip1559: true
-    socket_address: "0xA25357F3C313Bd13885678f935178211f0dF6722"
-    authority_address: "0x2FD5232fDFa6e1c127e7821CC48108Ca79281a38"
-    chainlink_usdc_usd_address: "0x572dDec9087154dC5dfBB1546Bb62713147e0Ab0"
-    chainlink_usdt_usd_address: "0x92C09849638959196E976289418e5973CC96d645"
-    chainlink_dai_usd_address: "0x0FCAa9c899EC5A91eBc3D5Dd869De833b06fB046"
-    chainlink_btc_usd_address: "0x007A22900a3B98143368Bd5906f8E17e9867581b"
-    chainlink_wbtc_usd_address: "0x007A22900a3B98143368Bd5906f8E17e9867581b"
   - name: "base-sepolia"
     id: 84532
     provider: "<YOUR_BASE_SEPOLIA_RPC_ENDPOINT>"
@@ -72,7 +58,7 @@ evm_providers:
 
 handler_configs:
   - handler_type: Socket
-    watch_list: [49088, 11155111, 97, 80001, 84532, 421614]
+    watch_list: [49088, 11155111, 97, 84532, 421614]
   - handler_type: Roundup
     watch_list: [49088]
 
