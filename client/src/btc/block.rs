@@ -129,23 +129,40 @@ impl<T: JsonRpcClient + 'static> BlockManager<T> {
 		}
 	}
 
+	async fn get_vault_addresses(&self) -> Vec<String> {
+		let registration_pool =
+			self.bfc_client.protocol_contracts.registration_pool.as_ref().unwrap();
+
+		self.bfc_client
+			.contract_call(registration_pool.vault_addresses(), "registration_pool.vault_addresses")
+			.await
+	}
+
+	async fn get_refund_addresses(&self) -> Vec<String> {
+		let registration_pool =
+			self.bfc_client.protocol_contracts.registration_pool.as_ref().unwrap();
+
+		self.bfc_client
+			.contract_call(
+				registration_pool.refund_addresses(),
+				"registration_pool.refund_addresses",
+			)
+			.await
+	}
+
 	#[inline]
 	async fn fetch_registration_sets(
 		&self,
 	) -> (BTreeSet<Address<NetworkUnchecked>>, BTreeSet<Address<NetworkUnchecked>>) {
-		let registration_pool =
-			self.bfc_client.protocol_contracts.registration_pool.as_ref().unwrap();
-		let vault_set: BTreeSet<Address<NetworkUnchecked>> = registration_pool
-			.vault_addresses()
+		let vault_set: BTreeSet<Address<NetworkUnchecked>> = self
+			.get_vault_addresses()
 			.await
-			.unwrap()
 			.iter()
 			.map(|s| Address::from_str(s).unwrap())
 			.collect();
-		let refund_set: BTreeSet<Address<NetworkUnchecked>> = registration_pool
-			.refund_addresses()
+		let refund_set: BTreeSet<Address<NetworkUnchecked>> = self
+			.get_refund_addresses()
 			.await
-			.unwrap()
 			.iter()
 			.map(|s| Address::from_str(s).unwrap())
 			.collect();
