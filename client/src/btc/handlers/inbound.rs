@@ -139,7 +139,7 @@ impl<T: JsonRpcClient + 'static> Handler for InboundHandler<T> {
 		// TODO: if is_bootstrap
 
 		if let Some(user_bfc_address) = self.get_user_bfc_address(&event.address).await {
-			let tx_request = self.build_transaction(&event, user_bfc_address.clone());
+			let tx_request = self.build_transaction(&event, user_bfc_address);
 			let metadata =
 				BitcoinRelayMetadata::new(event.address, user_bfc_address, event.txid, event.index);
 			self.request_send_transaction(tx_request, metadata, SUB_LOG_TARGET).await;

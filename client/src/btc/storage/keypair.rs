@@ -89,7 +89,7 @@ impl KeypairStorage {
 		let public_key = PublicKey::from_slice(key.as_slice()).expect(KEYSTORE_INTERNAL_ERROR);
 
 		match self.db.key_pair::<AppPair>(
-			&AppPublic::from_slice(&key.as_slice()).expect(KEYSTORE_INTERNAL_ERROR),
+			&AppPublic::from_slice(key.as_slice()).expect(KEYSTORE_INTERNAL_ERROR),
 		) {
 			Ok(pair) => {
 				if let Some(pair) = pair {

@@ -70,7 +70,7 @@ impl<T: JsonRpcClient> OutboundHandler<T> {
 			.contract_call(self.socket_queue().outbound_tx(*slice), "socket_queue.outbound_tx")
 			.await;
 
-		if socket_messages.len() == 0 {
+		if socket_messages.is_empty() {
 			(false, SocketMessage::default())
 		} else {
 			for socket_msg_bytes in socket_messages {
