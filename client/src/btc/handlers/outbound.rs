@@ -176,8 +176,6 @@ impl<T: JsonRpcClient + 'static> Handler for OutboundHandler<T> {
 					.await;
 				}
 			}
-		} else {
-			panic!("Impossible flow")
 		}
 	}
 
