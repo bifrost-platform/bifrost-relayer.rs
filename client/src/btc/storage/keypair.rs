@@ -4,12 +4,22 @@ use bitcoincore_rpc::bitcoin::{
 	secp256k1::Signing,
 	PrivateKey, PublicKey,
 };
+use br_primitives::{
+	constants::errors::{
+		INVALID_KEYSTORE_PASSWORD, INVALID_KEYSTORE_PATH, KEYSTORE_INTERNAL_ERROR,
+	},
+	utils::sub_display_format,
+};
 use miniscript::bitcoin::{Network, Psbt};
 use sc_keystore::{Keystore, LocalKeystore};
 use sp_application_crypto::ecdsa::{AppPair, AppPublic};
 use sp_core::{crypto::SecretString, testing::ECDSA, ByteArray};
 use std::{collections::BTreeMap, str::FromStr, sync::Arc};
 use tokio::sync::RwLock;
+
+use crate::btc::LOG_TARGET;
+
+const SUB_LOG_TARGET: &str = "keystore";
 
 #[derive(Clone)]
 pub struct KeypairStorage {
@@ -19,27 +29,47 @@ pub struct KeypairStorage {
 }
 
 impl KeypairStorage {
-	pub fn new(path: &str, secret: &str, network: Network) -> Self {
-		let keystore =
-			LocalKeystore::open(path, Some(SecretString::from_str(secret).unwrap())).unwrap();
+	pub fn new(path: &str, secret: Option<String>, network: Network) -> Self {
+		let mut password = None;
+		if let Some(secret) = secret {
+			password = Some(SecretString::from_str(&secret).expect(INVALID_KEYSTORE_PASSWORD));
+		}
+		let keystore = LocalKeystore::open(path, password).expect(INVALID_KEYSTORE_PATH);
 		let mut inner = BTreeMap::new();
 
-		let keys = keystore.keys(ECDSA).unwrap();
+		let keys = keystore.keys(ECDSA).expect(INVALID_KEYSTORE_PATH);
+		log::info!(
+			target: LOG_TARGET,
+			"-[{}] 🔐 Keystore synchronization started: {:?} keypairs",
+			sub_display_format(SUB_LOG_TARGET),
+			keys.len()
+		);
+
 		for key in keys.clone() {
-			match keystore.key_pair::<AppPair>(&AppPublic::from_slice(&key).unwrap()) {
+			match keystore
+				.key_pair::<AppPair>(&AppPublic::from_slice(&key).expect(KEYSTORE_INTERNAL_ERROR))
+			{
 				Ok(pair) => {
 					if let Some(pair) = pair {
-						let sk =
-							PrivateKey::from_slice(&pair.into_inner().seed(), network).unwrap();
+						let sk = PrivateKey::from_slice(&pair.into_inner().seed(), network)
+							.expect(KEYSTORE_INTERNAL_ERROR);
 						let pk = PublicKey::from_private_key(&Secp256k1::signing_only(), &sk);
 						inner.insert(pk, sk);
 					}
 				},
-				Err(e) => {
-					panic!("{e}")
+				Err(error) => {
+					panic!(
+						"[{}]-[{}] {}: {}",
+						LOG_TARGET, SUB_LOG_TARGET, KEYSTORE_INTERNAL_ERROR, error
+					);
 				},
 			}
 		}
+		log::info!(
+			target: LOG_TARGET,
+			"-[{}] 🔐 Keystore synchronization ended",
+			sub_display_format(SUB_LOG_TARGET),
+		);
 
 		Self { inner: Arc::new(RwLock::new(inner)), db: Arc::new(keystore), network }
 	}
@@ -55,20 +85,26 @@ impl KeypairStorage {
 	}
 
 	pub fn create_new_keypair(&self) -> PublicKey {
-		let key = self.db.ecdsa_generate_new(ECDSA, None).unwrap();
-		let public_key = PublicKey::from_slice(key.as_slice()).unwrap();
+		let key = self.db.ecdsa_generate_new(ECDSA, None).expect(KEYSTORE_INTERNAL_ERROR);
+		let public_key = PublicKey::from_slice(key.as_slice()).expect(KEYSTORE_INTERNAL_ERROR);
 
-		match self.db.key_pair::<AppPair>(&AppPublic::from_slice(&key.as_slice()).unwrap()) {
+		match self.db.key_pair::<AppPair>(
+			&AppPublic::from_slice(&key.as_slice()).expect(KEYSTORE_INTERNAL_ERROR),
+		) {
 			Ok(pair) => {
 				if let Some(pair) = pair {
 					self.insert(
 						public_key,
-						PrivateKey::from_slice(&pair.into_inner().seed(), self.network).unwrap(),
+						PrivateKey::from_slice(&pair.into_inner().seed(), self.network)
+							.expect(KEYSTORE_INTERNAL_ERROR),
 					);
 				}
 			},
-			Err(e) => {
-				panic!("{e}")
+			Err(error) => {
+				panic!(
+					"[{}]-[{}] {}: {}",
+					LOG_TARGET, SUB_LOG_TARGET, KEYSTORE_INTERNAL_ERROR, error
+				);
 			},
 		}
 
@@ -77,7 +113,25 @@ impl KeypairStorage {
 
 	pub fn sign_psbt(&self, psbt: &mut Psbt) -> bool {
 		let before_sign = psbt.clone();
-		psbt.sign(self, &Secp256k1::signing_only()).unwrap();
+		match psbt.sign(self, &Secp256k1::signing_only()) {
+			Ok(keys) => {
+				log::info!(
+					target: LOG_TARGET,
+					"-[{}] 🔐 Successfully signed psbt. Succeeded({:?})",
+					sub_display_format(SUB_LOG_TARGET),
+					keys.len()
+				);
+			},
+			Err((keys, errors)) => {
+				log::info!(
+					target: LOG_TARGET,
+					"-[{}] 🔐 Partially signed psbt. Succeeded({:?}) / Failed({:?})",
+					sub_display_format(SUB_LOG_TARGET),
+					keys.len(),
+					errors.len()
+				);
+			},
+		}
 		psbt.inputs != before_sign.inputs
 	}
 }
@@ -119,8 +173,11 @@ mod tests {
 			keys.push(key);
 		}
 
-		let keypair_storage =
-			KeypairStorage::new("../localkeystore_test", "test", Network::Regtest);
+		let keypair_storage = KeypairStorage::new(
+			"../localkeystore_test",
+			Some("test".to_string()),
+			Network::Regtest,
+		);
 		for key in keys {
 			let pk = PublicKey::from_slice(key.as_slice()).unwrap();
 			println!("loaded -> {:?}:{:?}", pk, keypair_storage.get(&pk).unwrap());

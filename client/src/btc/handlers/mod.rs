@@ -7,7 +7,10 @@ pub use outbound::*;
 pub use psbt_signer::*;
 
 use crate::{
-	btc::block::{Event, EventType},
+	btc::{
+		block::{Event, EventType},
+		LOG_TARGET,
+	},
 	eth::EthClient,
 };
 
@@ -22,8 +25,6 @@ use br_primitives::{
 use ethers::{prelude::TransactionRequest, providers::JsonRpcClient};
 use miniscript::bitcoin::Transaction;
 use std::sync::Arc;
-
-pub const LOG_TARGET: &str = "Bitcoin";
 
 #[async_trait::async_trait]
 pub trait XtRequester<T: JsonRpcClient> {

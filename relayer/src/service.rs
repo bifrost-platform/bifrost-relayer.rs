@@ -36,7 +36,10 @@ use br_primitives::{
 	bootstrap::BootstrapSharedData,
 	cli::{Configuration, HandlerType},
 	constants::{
-		cli::{DEFAULT_GET_LOGS_BATCH_SIZE, DEFAULT_MIN_PRIORITY_FEE, DEFAULT_PROMETHEUS_PORT},
+		cli::{
+			DEFAULT_GET_LOGS_BATCH_SIZE, DEFAULT_KEYSTORE_PATH, DEFAULT_MIN_PRIORITY_FEE,
+			DEFAULT_PROMETHEUS_PORT,
+		},
 		errors::{
 			INVALID_BIFROST_NATIVENESS, INVALID_BITCOIN_NETWORK, INVALID_CHAIN_ID,
 			INVALID_PRIVATE_KEY, INVALID_PROVIDER_URL,
@@ -299,8 +302,13 @@ fn construct_btc_deps(
 	);
 
 	let keypair_storage = KeypairStorage::new(
-		&config.relayer_config.system.keystore_path,
-		&config.relayer_config.system.keystore_password,
+		&config
+			.clone()
+			.relayer_config
+			.system
+			.keystore_path
+			.unwrap_or(DEFAULT_KEYSTORE_PATH.to_string()),
+		config.relayer_config.system.keystore_password.clone(),
 		Network::from_core_arg(&config.relayer_config.btc_provider.chain)
 			.expect(INVALID_BITCOIN_NETWORK),
 	);

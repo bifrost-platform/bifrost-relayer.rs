@@ -1,5 +1,7 @@
 system:
   private_key: "<YOUR_RELAYER_PRIVATE_KEY>"
+  keystore_path: "<YOUR_KEYSTORE_PATH>"
+  keystore_password: "<YOUR_KEYSTORE_PASSWORD>"
   debug_mode: false
 
 btc_provider:
