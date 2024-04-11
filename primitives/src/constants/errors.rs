@@ -4,6 +4,9 @@ pub const INVALID_CONTRACT_ABI: &str =
 pub const INVALID_CONTRACT_ADDRESS: &str =
 	"Invalid contract address provided. Please check your contract's address.";
 
+pub const MISSING_CONTRACT_ADDRESS: &str =
+	"Some protocol contracts are missing for Bifrost. Please check your `evm_providers` configuration.";
+
 pub const INVALID_PRIVATE_KEY: &str =
 	"Invalid private key provided. Please check your relayer's private key.";
 
@@ -35,7 +38,7 @@ pub const INSUFFICIENT_FUNDS: &str =
 	"Insufficient funds. Please check your relayer's remaining balance.";
 
 pub const NETWORK_DOES_NOT_SUPPORT_EIP1559: &str =
-	"Network does not support EIP-1559 transaction. Please check your evm_providers config";
+	"Network does not support EIP-1559 transaction. Please check your evm_providers configuration.";
 
 pub const PROVIDER_INTERNAL_ERROR: &str =
 	"An internal error thrown when making a call to the provider. Please check your provider's status";

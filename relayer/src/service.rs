@@ -178,6 +178,7 @@ fn construct_managers(
 				is_native,
 			),
 			ProtocolContracts::new(
+				is_native,
 				Arc::new(provider.clone()),
 				evm_provider.socket_address.clone(),
 				evm_provider.authority_address.clone(),
@@ -262,8 +263,8 @@ fn construct_btc_deps(
 		(Some(username), Some(password)) => Auth::UserPass(username, password),
 		_ => Auth::None,
 	};
-	let btc_client =
-		BitcoinClient::new(&config.relayer_config.btc_provider.provider, auth).unwrap();
+	let btc_client = BitcoinClient::new(&config.relayer_config.btc_provider.provider, auth)
+		.expect(INVALID_PROVIDER_URL);
 
 	let bfc_client = manager_deps
 		.clients
