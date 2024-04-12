@@ -20,6 +20,7 @@ use ethers::{
 	types::{Address as EthAddress, Bytes},
 };
 use miniscript::bitcoin::{address::NetworkUnchecked, Address as BtcAddress, Amount, Txid};
+use std::collections::BTreeSet;
 use std::sync::Arc;
 use tokio::sync::broadcast::Receiver;
 use tokio_stream::StreamExt;
@@ -63,6 +64,7 @@ impl<T: JsonRpcClient> OutboundHandler<T> {
 		txid: Txid,
 		user_bfc_address: EthAddress,
 		amount: Amount,
+		processed: &mut BTreeSet<Bytes>,
 	) -> (bool, SocketMessage) {
 		let slice: &[u8; 32] = txid.as_ref();
 		let socket_messages: Vec<Bytes> = self
@@ -74,10 +76,14 @@ impl<T: JsonRpcClient> OutboundHandler<T> {
 			(false, SocketMessage::default())
 		} else {
 			for socket_msg_bytes in socket_messages {
+				if processed.contains(&socket_msg_bytes) {
+					continue;
+				}
 				let socket_msg: SocketMessage = SocketMessage::decode(&socket_msg_bytes).unwrap();
 				if socket_msg.params.to == user_bfc_address
 					&& socket_msg.params.amount == amount.to_sat().into()
 				{
+					processed.insert(socket_msg_bytes);
 					return (true, socket_msg);
 				}
 			}
@@ -143,20 +149,27 @@ impl<T: JsonRpcClient + 'static> Handler for OutboundHandler<T> {
 					msg.events.len()
 				);
 
+				let mut processed = BTreeSet::new();
 				let mut stream = tokio_stream::iter(msg.events);
 				while let Some(event) = stream.next().await {
-					self.process_event(event, false).await;
+					self.process_event(event, &mut processed, false).await;
 				}
 			}
 		}
 	}
 
-	async fn process_event(&self, event_tx: Event, _is_bootstrap: bool) {
+	async fn process_event(
+		&self,
+		event_tx: Event,
+		processed: &mut BTreeSet<Bytes>,
+		_is_bootstrap: bool,
+	) {
 		// TODO: if is_bootstrap
 
 		if let Some(user_bfc_address) = self.get_user_bfc_address(&event_tx.address).await {
-			let (is_cccp, mut socket_msg) =
-				self.check_socket_queue(event_tx.txid, user_bfc_address, event_tx.amount).await;
+			let (is_cccp, mut socket_msg) = self
+				.check_socket_queue(event_tx.txid, user_bfc_address, event_tx.amount, processed)
+				.await;
 			if is_cccp {
 				socket_msg.status = SocketEventStatus::Executed.into();
 

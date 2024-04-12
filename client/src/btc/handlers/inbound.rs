@@ -11,8 +11,10 @@ use br_primitives::{
 	tx::{BitcoinRelayMetadata, TxRequestSender},
 	utils::sub_display_format,
 };
+use std::collections::BTreeSet;
 
 use bitcoincore_rpc::bitcoin::Transaction;
+use ethers::types::Bytes;
 use ethers::{
 	providers::JsonRpcClient,
 	types::{Address as EthAddress, Address, TransactionRequest},
@@ -129,13 +131,13 @@ impl<T: JsonRpcClient + 'static> Handler for InboundHandler<T> {
 
 				let mut stream = tokio_stream::iter(msg.events);
 				while let Some(event) = stream.next().await {
-					self.process_event(event, false).await;
+					self.process_event(event, &mut Default::default(), false).await;
 				}
 			}
 		}
 	}
 
-	async fn process_event(&self, event: Event, _is_bootstrap: bool) {
+	async fn process_event(&self, event: Event, _: &mut BTreeSet<Bytes>, _is_bootstrap: bool) {
 		// TODO: if is_bootstrap
 
 		if let Some(user_bfc_address) = self.get_user_bfc_address(&event.address).await {

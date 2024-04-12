@@ -5,6 +5,7 @@ mod psbt_signer;
 pub use inbound::*;
 pub use outbound::*;
 pub use psbt_signer::*;
+use std::collections::BTreeSet;
 
 use crate::{
 	btc::{
@@ -22,6 +23,7 @@ use br_primitives::{
 	},
 	utils::sub_display_format,
 };
+use ethers::types::Bytes;
 use ethers::{prelude::TransactionRequest, providers::JsonRpcClient};
 use miniscript::bitcoin::Transaction;
 use std::sync::Arc;
@@ -131,7 +133,12 @@ pub trait TxRequester<T: JsonRpcClient> {
 pub trait Handler {
 	async fn run(&mut self);
 
-	async fn process_event(&self, event_tx: Event, is_bootstrap: bool);
+	async fn process_event(
+		&self,
+		event_tx: Event,
+		_processed: &mut BTreeSet<Bytes>,
+		is_bootstrap: bool,
+	);
 
 	fn is_target_event(&self, event_type: EventType) -> bool;
 }

@@ -7,6 +7,7 @@ use br_primitives::{
 };
 use ethers::{providers::JsonRpcClient, types::Bytes};
 use miniscript::bitcoin::Psbt;
+use std::collections::BTreeSet;
 use subxt::tx::Payload;
 use tokio::sync::broadcast::Receiver;
 use tokio_stream::StreamExt;
@@ -165,7 +166,7 @@ impl<T: JsonRpcClient> Handler for PsbtSigner<T> {
 		}
 	}
 
-	async fn process_event(&self, _event_tx: Event, _is_bootstrap: bool) {}
+	async fn process_event(&self, _event_tx: Event, _: &mut BTreeSet<Bytes>, _is_bootstrap: bool) {}
 
 	#[inline]
 	fn is_target_event(&self, event_type: EventType) -> bool {
