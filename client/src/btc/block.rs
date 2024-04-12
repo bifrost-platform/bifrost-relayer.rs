@@ -5,7 +5,10 @@ use crate::{
 
 use br_primitives::{
 	bootstrap::BootstrapSharedData,
-	constants::tx::{DEFAULT_CALL_RETRIES, DEFAULT_CALL_RETRY_INTERVAL_MS},
+	constants::{
+		errors::PROVIDER_INTERNAL_ERROR,
+		tx::{DEFAULT_CALL_RETRIES, DEFAULT_CALL_RETRY_INTERVAL_MS},
+	},
 	eth::BootstrapState,
 	utils::sub_display_format,
 };
@@ -13,17 +16,18 @@ use br_primitives::{
 use bitcoincore_rpc::{
 	bitcoincore_rpc_json::GetRawTransactionResultVout, Client as BtcClient, RpcApi,
 };
-use br_primitives::constants::errors::PROVIDER_INTERNAL_ERROR;
 use ethers::providers::JsonRpcClient;
 use miniscript::bitcoin::{address::NetworkUnchecked, Address, Amount, Txid};
 use serde::Deserialize;
 use serde_json::Value;
 use std::{collections::BTreeSet, str::FromStr, sync::Arc};
-use tokio::sync::{
-	broadcast,
-	broadcast::{Receiver, Sender},
+use tokio::{
+	sync::{
+		broadcast,
+		broadcast::{Receiver, Sender},
+	},
+	time::{sleep, Duration},
 };
-use tokio::time::{sleep, Duration};
 use tokio_stream::StreamExt;
 
 const SUB_LOG_TARGET: &str = "block-manager";

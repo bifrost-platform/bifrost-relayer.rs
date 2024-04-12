@@ -1,8 +1,6 @@
 use br_primitives::contracts::socket::RequestID;
-use miniscript::bitcoin::address::NetworkUnchecked;
-use miniscript::bitcoin::{Address, Amount};
-use std::collections::BTreeMap;
-use std::sync::Arc;
+use miniscript::bitcoin::{address::NetworkUnchecked, Address, Amount};
+use std::{collections::BTreeMap, sync::Arc};
 use tokio::sync::RwLock;
 
 #[derive(Debug, Clone)]
