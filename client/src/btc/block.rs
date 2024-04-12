@@ -300,7 +300,6 @@ impl<T: JsonRpcClient + 'static> BlockManager<T> {
 						amount: vout.value,
 					});
 				}
-				// TODO: filter is really cccp related txo
 				if refund_set.contains(&address) {
 					outbound_events.push(Event {
 						txid,
