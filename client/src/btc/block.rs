@@ -168,8 +168,8 @@ impl<T: JsonRpcClient + 'static> BlockManager<T> {
 		loop {
 			if self.is_bootstrap_state_synced_as(BootstrapState::NormalStart).await {
 				let latest_block_num = self.get_block_count().await.unwrap();
-				let (vault_set, refund_set) = self.fetch_registration_sets().await;
-				while self.is_block_confirmed(latest_block_num) {
+				if self.is_block_confirmed(latest_block_num) {
+					let (vault_set, refund_set) = self.fetch_registration_sets().await;
 					self.process_confirmed_block(latest_block_num, &vault_set, &refund_set).await;
 				}
 			}
