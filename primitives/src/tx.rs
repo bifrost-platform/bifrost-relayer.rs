@@ -415,6 +415,7 @@ impl TxRequest {
 			TxRequest::Eip1559(tx_request) => tx_request.from.as_ref().unwrap(),
 		}
 	}
+
 	/// Get the `gas_price` field of the transaction request.
 	pub fn get_gas_price(&self) -> Option<U256> {
 		match self {
@@ -654,7 +655,7 @@ impl XtRequestSender {
 	}
 
 	/// Sends a new tx request message.
-	pub fn send(&self, message: XtRequestMessage) -> Result<(), SendError<XtRequestMessage>> {
-		self.sender.send(message)
+	pub fn send(&self, message: XtRequestMessage) -> Result<(), Box<SendError<XtRequestMessage>>> {
+		Ok(self.sender.send(message)?)
 	}
 }

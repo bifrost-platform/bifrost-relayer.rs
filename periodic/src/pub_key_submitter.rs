@@ -107,7 +107,7 @@ impl<T: JsonRpcClient> PubKeySubmitter<T> {
 			pub_key: Public(converted_pub_key),
 		};
 		let signature = convert_ethers_to_ecdsa_signature(
-			self.client.wallet.sign_message(&pub_key.to_bytes().as_slice()),
+			self.client.wallet.sign_message(pub_key.to_bytes().as_slice()),
 		);
 		(msg, signature)
 	}

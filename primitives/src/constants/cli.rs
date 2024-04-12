@@ -1,3 +1,6 @@
+/// The default path for the keystore.
+pub const DEFAULT_KEYSTORE_PATH: &str = "./keys";
+
 /// The default round offset used on bootstrap. (=3 rounds)
 pub const DEFAULT_BOOTSTRAP_ROUND_OFFSET: u32 = 3;
 

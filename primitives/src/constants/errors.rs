@@ -4,6 +4,9 @@ pub const INVALID_CONTRACT_ABI: &str =
 pub const INVALID_CONTRACT_ADDRESS: &str =
 	"Invalid contract address provided. Please check your contract's address.";
 
+pub const MISSING_CONTRACT_ADDRESS: &str =
+	"Some protocol contracts are missing for Bifrost. Please check your `evm_providers` configuration.";
+
 pub const INVALID_PRIVATE_KEY: &str =
 	"Invalid private key provided. Please check your relayer's private key.";
 
@@ -31,14 +34,25 @@ pub const INVALID_CHAIN_SPECIFICATION: &str =
 pub const INVALID_BITCOIN_NETWORK: &str =
 	"Invalid Bitcoin network provided. Please check your `btc_provider.chain` field. Allowed values: `main`, `test`, `sigtest`, `regtest`.";
 
+pub const INVALID_RPC_CALL_ARGS: &str = "Invalid JSON RPC call arguments provided.";
+
+pub const INVALID_KEYSTORE_PATH: &str =
+	"Invalid keystore path provided. Please check your configured path.";
+
+pub const INVALID_KEYSTORE_PASSWORD: &str =
+	"Invalid keystore password provided. Please check your configured password.";
+
 pub const INSUFFICIENT_FUNDS: &str =
 	"Insufficient funds. Please check your relayer's remaining balance.";
 
 pub const NETWORK_DOES_NOT_SUPPORT_EIP1559: &str =
-	"Network does not support EIP-1559 transaction. Please check your evm_providers config";
+	"Network does not support EIP-1559 transaction. Please check your evm_providers configuration.";
 
 pub const PROVIDER_INTERNAL_ERROR: &str =
 	"An internal error thrown when making a call to the provider. Please check your provider's status";
+
+pub const KEYSTORE_INTERNAL_ERROR: &str =
+	"An internal error thrown when accessing the keystore. Please check your keystore's validness.";
 
 pub const PARAMETER_OUT_OF_RANGE: &str =
 	"An invalid parameter is out of range. Please check your configuration file.";

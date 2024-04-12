@@ -93,12 +93,19 @@ where
 	/// Handles successful transaction requests.
 	async fn handle_success_tx_request<C>(
 		&self,
-		_sub_target: &str,
-		_events: ExtrinsicEvents<C>,
-		_metadata: XtRequestMetadata,
+		sub_target: &str,
+		events: ExtrinsicEvents<C>,
+		metadata: XtRequestMetadata,
 	) where
 		C: Config,
 	{
-		todo!()
+		log::info!(
+			target: &self.get_bfc_client().get_chain_name(),
+			"-[{}] 🎁 The requested transaction has been successfully mined in block: {}, {:?}-{:?}",
+			sub_display_format(sub_target),
+			metadata,
+			events.extrinsic_index(),
+			events.extrinsic_hash()
+		);
 	}
 }
