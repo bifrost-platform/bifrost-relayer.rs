@@ -151,7 +151,7 @@ impl<T: JsonRpcClient + 'static> Handler for OutboundHandler<T> {
 		}
 	}
 
-	async fn process_event(&self, event_tx: Event, is_bootstrap: bool) {
+	async fn process_event(&self, event_tx: Event, _is_bootstrap: bool) {
 		// TODO: if is_bootstrap
 
 		if let Some(user_bfc_address) = self.get_user_bfc_address(&event_tx.address).await {
