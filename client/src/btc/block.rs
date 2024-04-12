@@ -225,7 +225,7 @@ impl<T: JsonRpcClient + 'static> BlockManager<T> {
 	/// Verifies if the stored waiting block has waited enough.
 	#[inline]
 	fn is_block_confirmed(&self, latest_block_num: u64) -> bool {
-		latest_block_num.saturating_sub(self.waiting_block) >= self.block_confirmations // TODO: pending block's conf:0, latest block's conf:1. something weird
+		latest_block_num.saturating_sub(self.waiting_block) >= self.block_confirmations
 	}
 
 	/// Process the confirmed block. Filters whether the block has any Inbound or Outbound events.
