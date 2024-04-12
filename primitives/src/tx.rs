@@ -302,18 +302,17 @@ impl Display for SubmitVaultKeyMetadata {
 /// The metadata used for signed psbt submission.
 pub struct SubmitSignedPsbtMetadata {
 	pub unsigned_psbt: H256,
-	pub signed_psbt: H256,
 }
 
 impl SubmitSignedPsbtMetadata {
-	pub fn new(unsigned_psbt: H256, signed_psbt: H256) -> Self {
-		Self { unsigned_psbt, signed_psbt }
+	pub fn new(unsigned_psbt: H256) -> Self {
+		Self { unsigned_psbt }
 	}
 }
 
 impl Display for SubmitSignedPsbtMetadata {
 	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-		write!(f, "SubmitSignedPsbt({}:{})", self.unsigned_psbt, self.signed_psbt)
+		write!(f, "SubmitSignedPsbt({})", self.unsigned_psbt)
 	}
 }
 
