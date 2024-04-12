@@ -11,8 +11,9 @@ use br_primitives::{
 };
 
 use bitcoincore_rpc::{
-	bitcoincore_rpc_json::GetRawTransactionResultVout, jsonrpc, Client as BtcClient, Error, RpcApi,
+	bitcoincore_rpc_json::GetRawTransactionResultVout, Client as BtcClient, RpcApi,
 };
+use br_primitives::constants::errors::PROVIDER_INTERNAL_ERROR;
 use ethers::providers::JsonRpcClient;
 use miniscript::bitcoin::{address::NetworkUnchecked, Address, Amount, Txid};
 use serde::Deserialize;
@@ -109,17 +110,24 @@ impl<C: JsonRpcClient> RpcApi for BlockManager<C> {
 		cmd: &str,
 		args: &[Value],
 	) -> bitcoincore_rpc::Result<T> {
+		let mut error_msg = String::default();
 		for _ in 0..DEFAULT_CALL_RETRIES {
 			match self.btc_client.call(cmd, args).await {
 				Ok(ret) => return Ok(ret),
-				Err(Error::JsonRpc(jsonrpc::error::Error::Rpc(ref err))) if err.code == -28 => {
-					sleep(Duration::from_millis(DEFAULT_CALL_RETRY_INTERVAL_MS)).await;
-					continue;
+				Err(e) => {
+					error_msg = e.to_string();
 				},
-				Err(e) => return Err(e),
 			}
+			sleep(Duration::from_millis(DEFAULT_CALL_RETRY_INTERVAL_MS)).await;
 		}
-		self.btc_client.call(cmd, args).await
+		panic!(
+			"[{}]-[{}] {} [cmd: {}]: {}",
+			LOG_TARGET,
+			crate::btc::SUB_LOG_TARGET,
+			PROVIDER_INTERNAL_ERROR,
+			cmd,
+			error_msg
+		);
 	}
 }
 
@@ -233,8 +241,8 @@ impl<T: JsonRpcClient + 'static> BlockManager<T> {
 				EventMessage::new_block(num),
 			);
 
-			let block_hash = self.btc_client.get_block_hash(num).await.unwrap();
-			let txs = self.btc_client.get_block_info_with_txs(&block_hash).await.unwrap().tx;
+			let block_hash = self.get_block_hash(num).await.unwrap();
+			let txs = self.get_block_info_with_txs(&block_hash).await.unwrap().tx;
 
 			let mut stream = tokio_stream::iter(txs.iter());
 			while let Some(tx) = stream.next().await {
