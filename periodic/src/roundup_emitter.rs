@@ -1,5 +1,3 @@
-use std::{str::FromStr, sync::Arc, time::Duration};
-
 use cron::Schedule;
 use ethers::{
 	abi::{encode, Detokenize, Token, Tokenize},
@@ -7,6 +5,7 @@ use ethers::{
 	providers::JsonRpcClient,
 	types::{Address, Filter, Log, TransactionRequest, U256},
 };
+use std::{str::FromStr, sync::Arc, time::Duration};
 use tokio::time::sleep;
 
 use br_client::eth::{traits::BootstrapHandler, EthClient};
@@ -23,8 +22,8 @@ use br_primitives::{
 		socket::{RoundUpSubmit, SerializedRoundUp, Signatures, SocketContractEvents},
 	},
 	eth::{BootstrapState, GasCoefficient, RoundUpEventStatus},
-	sub_display_format,
 	tx::{TxRequest, TxRequestMessage, TxRequestMetadata, TxRequestSender, VSPPhase1Metadata},
+	utils::sub_display_format,
 };
 
 use crate::traits::PeriodicWorker;

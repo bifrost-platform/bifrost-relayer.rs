@@ -1,6 +1,5 @@
 use serde::Deserialize;
-use std::borrow::Cow;
-use std::fmt::Display;
+use std::{borrow::Cow, fmt::Display};
 
 use crate::eth::ChainID;
 
@@ -59,6 +58,10 @@ pub struct RelayerConfig {
 pub struct SystemConfig {
 	/// The private key of the relayer.
 	pub private_key: String,
+	/// Path of the keystore. (default: `./keys`)
+	pub keystore_path: Option<String>,
+	/// Password of the keystore. (default: `None`)
+	pub keystore_password: Option<String>,
 	/// Debug mode enabled if set to `true`.
 	pub debug_mode: Option<bool>,
 }
@@ -128,8 +131,13 @@ pub struct EVMProvider {
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct BTCProvider {
+	/// The Bitcoin provider URL.
 	pub provider: String,
+	/// The chain network. (Allowed values: `main`, `test`, `signet`, `regtest`)
+	pub chain: String,
+	/// Optional. The provider username credential.
 	pub username: Option<String>,
+	/// Optional. The provider password credential.
 	pub password: Option<String>,
 }
 

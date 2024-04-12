@@ -1,15 +1,17 @@
-use crate::btc::{
-	block::{Event, EventMessage as BTCEventMessage, EventType},
-	handlers::{BootstrapHandler, Handler, LOG_TARGET},
+use crate::{
+	btc::{
+		block::{Event, EventMessage as BTCEventMessage, EventType},
+		handlers::{BootstrapHandler, Handler, LOG_TARGET},
+	},
+	eth::{traits::SocketRelayBuilder, EthClient},
 };
-use crate::eth::{traits::SocketRelayBuilder, EthClient};
 use bitcoincore_rpc::bitcoin::Transaction;
 use br_primitives::{
 	bootstrap::BootstrapSharedData,
 	contracts::{socket::SocketMessage, socket_queue::SocketQueueContract},
 	eth::{BootstrapState, BuiltRelayTransaction, ChainID, SocketEventStatus},
-	sub_display_format,
 	tx::{BitcoinRelayMetadata, TxRequestSender},
+	utils::sub_display_format,
 };
 use ethers::{
 	abi::AbiDecode,
@@ -21,6 +23,8 @@ use miniscript::bitcoin::{address::NetworkUnchecked, Address as BtcAddress, Amou
 use std::sync::Arc;
 use tokio::sync::broadcast::Receiver;
 use tokio_stream::StreamExt;
+
+use super::TxRequester;
 
 const SUB_LOG_TARGET: &str = "Outbound-handler";
 
@@ -66,7 +70,7 @@ impl<T: JsonRpcClient> OutboundHandler<T> {
 			.contract_call(self.socket_queue().outbound_tx(*slice), "socket_queue.outbound_tx")
 			.await;
 
-		if socket_messages.len() == 0 {
+		if socket_messages.is_empty() {
 			(false, SocketMessage::default())
 		} else {
 			for socket_msg_bytes in socket_messages {
@@ -106,7 +110,7 @@ impl<T: JsonRpcClient> OutboundHandler<T> {
 }
 
 #[async_trait::async_trait]
-impl<T: JsonRpcClient + 'static> Handler<T> for OutboundHandler<T> {
+impl<T: JsonRpcClient> TxRequester<T> for OutboundHandler<T> {
 	fn tx_request_sender(&self) -> Arc<TxRequestSender> {
 		self.tx_request_sender.clone()
 	}
@@ -114,7 +118,10 @@ impl<T: JsonRpcClient + 'static> Handler<T> for OutboundHandler<T> {
 	fn bfc_client(&self) -> Arc<EthClient<T>> {
 		self.bfc_client.clone()
 	}
+}
 
+#[async_trait::async_trait]
+impl<T: JsonRpcClient + 'static> Handler for OutboundHandler<T> {
 	async fn run(&mut self) {
 		loop {
 			// TODO: BootstrapState::BootstrapBitcoinOutbound
@@ -169,8 +176,6 @@ impl<T: JsonRpcClient + 'static> Handler<T> for OutboundHandler<T> {
 					.await;
 				}
 			}
-		} else {
-			panic!("Impossible flow")
 		}
 	}
 

@@ -64,12 +64,12 @@ impl PendingOutboundPool {
 		let read_lock = self.inner.read().await;
 		match read_lock.get(key) {
 			Some(t) => {
-				for i in 0..t.len() {
-					if t[i].amount == amount {
-						return Some(t[i].clone());
+				for item in t {
+					if item.amount == amount {
+						return Some(item.clone());
 					}
 				}
-				return None;
+				None
 			},
 			None => None,
 		}

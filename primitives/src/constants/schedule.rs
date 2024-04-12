@@ -4,6 +4,9 @@ pub const PRICE_FEEDER_SCHEDULE: &str = "0 */5 * * * * *";
 /// The schedule definition for roundup emissions. This will trigger on every 15th second.
 pub const ROUNDUP_EMITTER_SCHEDULE: &str = "*/15 * * * * * *";
 
+/// The schedule definition for public key submissions. This will trigger on every 15th second.
+pub const PUB_KEY_SUBMITTER_SCHEDULE: &str = "*/15 * * * * * *";
+
 /// The schedule definition for heartbeats. This will trigger on every minute.
 pub const HEARTBEAT_SCHEDULE: &str = "0 * * * * * *";
 
