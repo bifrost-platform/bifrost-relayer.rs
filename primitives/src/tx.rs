@@ -655,7 +655,7 @@ impl XtRequestSender {
 	}
 
 	/// Sends a new tx request message.
-	pub fn send(&self, message: XtRequestMessage) -> Result<(), SendError<XtRequestMessage>> {
-		self.sender.send(message)
+	pub fn send(&self, message: XtRequestMessage) -> Result<(), Box<SendError<XtRequestMessage>>> {
+		Ok(self.sender.send(message)?)
 	}
 }
