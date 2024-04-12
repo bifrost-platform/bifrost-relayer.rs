@@ -160,8 +160,7 @@ impl<T: JsonRpcClient + 'static> Handler for OutboundHandler<T> {
 			if is_cccp {
 				socket_msg.status = SocketEventStatus::Executed.into();
 
-				if let Some(built_transaction) =
-					self.build_transaction(socket_msg, false, ChainID::default()).await
+				if let Some(built_transaction) = self.build_transaction(socket_msg, false, 0).await
 				{
 					self.request_send_transaction(
 						built_transaction.tx_request,
@@ -194,15 +193,11 @@ impl<T: JsonRpcClient + 'static> SocketRelayBuilder<T> for OutboundHandler<T> {
 	async fn build_transaction(
 		&self,
 		msg: SocketMessage,
-		is_inbound: bool,
-		_relay_tx_chain_id: ChainID,
+		_: bool,
+		_: ChainID,
 	) -> Option<BuiltRelayTransaction> {
 		// the original msg must be used for building calldata
-		let (signatures, is_external) = if is_inbound {
-			return None; // Unreachable flow
-		} else {
-			self.build_outbound_signatures(msg.clone()).await
-		};
+		let (signatures, is_external) = self.build_outbound_signatures(msg.clone()).await;
 		return Some(BuiltRelayTransaction::new(
 			TransactionRequest::default()
 				.data(self.build_poll_call_data(msg, signatures))
