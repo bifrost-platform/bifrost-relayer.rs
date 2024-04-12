@@ -8,8 +8,8 @@ use crate::{
 use br_primitives::{
 	bootstrap::BootstrapSharedData,
 	eth::BootstrapState,
-	sub_display_format,
 	tx::{BitcoinRelayMetadata, TxRequestSender},
+	utils::sub_display_format,
 };
 
 use bitcoincore_rpc::bitcoin::Transaction;
@@ -21,6 +21,8 @@ use miniscript::bitcoin::{address::NetworkUnchecked, hashes::Hash, Address as Bt
 use std::sync::Arc;
 use tokio::sync::broadcast::Receiver;
 use tokio_stream::StreamExt;
+
+use super::TxRequester;
 
 const SUB_LOG_TARGET: &str = "Inbound-handler";
 
@@ -92,7 +94,7 @@ impl<T: JsonRpcClient + 'static> InboundHandler<T> {
 }
 
 #[async_trait::async_trait]
-impl<T: JsonRpcClient + 'static> Handler<T> for InboundHandler<T> {
+impl<T: JsonRpcClient> TxRequester<T> for InboundHandler<T> {
 	fn tx_request_sender(&self) -> Arc<TxRequestSender> {
 		self.tx_request_sender.clone()
 	}
@@ -100,7 +102,10 @@ impl<T: JsonRpcClient + 'static> Handler<T> for InboundHandler<T> {
 	fn bfc_client(&self) -> Arc<EthClient<T>> {
 		self.bfc_client.clone()
 	}
+}
 
+#[async_trait::async_trait]
+impl<T: JsonRpcClient + 'static> Handler for InboundHandler<T> {
 	async fn run(&mut self) {
 		loop {
 			// TODO: BootstrapState::BootstrapBitcoinInbound
@@ -130,16 +135,14 @@ impl<T: JsonRpcClient + 'static> Handler<T> for InboundHandler<T> {
 		}
 	}
 
-	async fn process_event(&self, event: Event, is_bootstrap: bool) {
+	async fn process_event(&self, event: Event, _is_bootstrap: bool) {
 		// TODO: if is_bootstrap
 
 		if let Some(user_bfc_address) = self.get_user_bfc_address(&event.address).await {
-			let tx_request = self.build_transaction(&event, user_bfc_address.clone());
+			let tx_request = self.build_transaction(&event, user_bfc_address);
 			let metadata =
 				BitcoinRelayMetadata::new(event.address, user_bfc_address, event.txid, event.index);
 			self.request_send_transaction(tx_request, metadata, SUB_LOG_TARGET).await;
-		} else {
-			todo!("Unmapped vault address? -> erroneous deposit or something")
 		}
 	}
 

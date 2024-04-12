@@ -10,8 +10,8 @@ use br_primitives::{
 		errors::{INSUFFICIENT_FUNDS, NETWORK_DOES_NOT_SUPPORT_EIP1559, PROVIDER_INTERNAL_ERROR},
 		tx::{DEFAULT_TX_RETRIES, MAX_FEE_COEFFICIENT, MAX_PRIORITY_FEE_COEFFICIENT},
 	},
-	sub_display_format,
 	tx::{TxRequest, TxRequestMessage},
+	utils::sub_display_format,
 };
 use ethers::{
 	middleware::{MiddlewareBuilder, NonceManagerMiddleware, SignerMiddleware},

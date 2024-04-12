@@ -5,7 +5,7 @@ use reqwest::{Response, Url};
 use serde::Deserialize;
 use tokio::time::{sleep, Duration};
 
-use br_primitives::{periodic::PriceResponse, sub_display_format};
+use br_primitives::{periodic::PriceResponse, utils::sub_display_format};
 
 use crate::{price_source::LOG_TARGET, traits::PriceFetcher};
 

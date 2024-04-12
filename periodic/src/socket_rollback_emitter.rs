@@ -15,8 +15,8 @@ use br_primitives::{
 	contracts::socket::{RequestID, RequestInfo, Signatures, SocketMessage},
 	eth::{ChainID, GasCoefficient, RelayDirection, SocketEventStatus},
 	periodic::{RawRequestID, RollbackableMessage},
-	sub_display_format,
 	tx::{RollbackMetadata, TxRequest, TxRequestMessage, TxRequestMetadata, TxRequestSender},
+	utils::sub_display_format,
 };
 
 use crate::traits::PeriodicWorker;

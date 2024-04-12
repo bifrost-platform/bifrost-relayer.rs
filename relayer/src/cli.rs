@@ -1,4 +1,4 @@
-use br_primitives::sub_display_format;
+use br_primitives::utils::sub_display_format;
 use chrono::{Datelike, Local};
 use clap::{CommandFactory, FromArgMatches, Parser};
 

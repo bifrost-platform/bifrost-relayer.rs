@@ -22,8 +22,8 @@ use br_primitives::{
 		socket::{RoundUpSubmit, SerializedRoundUp, Signatures, SocketContractEvents},
 	},
 	eth::{BootstrapState, GasCoefficient, RoundUpEventStatus},
-	sub_display_format,
 	tx::{TxRequest, TxRequestMessage, TxRequestMetadata, TxRequestSender, VSPPhase1Metadata},
+	utils::sub_display_format,
 };
 
 use crate::traits::PeriodicWorker;

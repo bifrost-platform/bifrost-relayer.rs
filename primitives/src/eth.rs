@@ -4,9 +4,10 @@ use ethers::{
 	providers::{JsonRpcClient, Provider},
 	types::{Address, Signature, TransactionRequest, Uint8, H160, U64},
 };
+use url::Url;
 
 use crate::{
-	constants::errors::INVALID_CONTRACT_ADDRESS,
+	constants::errors::{INVALID_CONTRACT_ADDRESS, INVALID_PROVIDER_URL, MISSING_CONTRACT_ADDRESS},
 	contracts::{
 		authority::AuthorityContract, bitcoin_socket::BitcoinSocketContract,
 		chainlink_aggregator::ChainlinkContract, registration_pool::RegistrationPoolContract,
@@ -20,8 +21,10 @@ pub type ChainID = u32;
 
 /// The metadata of the EVM provider.
 pub struct ProviderMetadata {
+	/// The name of this provider.
 	pub name: String,
-	pub url: String,
+	/// The provider URL. (Allowed values: `http`, `https`)
+	pub url: Url,
 	/// Id of chain which this client interact with.
 	pub id: ChainID,
 	/// The total number of confirmations required for a block to be processed. (block
@@ -49,7 +52,7 @@ impl ProviderMetadata {
 	) -> Self {
 		Self {
 			name,
-			url,
+			url: Url::parse(&url).expect(INVALID_PROVIDER_URL),
 			id,
 			block_confirmations: U64::from(block_confirmations.saturating_add(get_logs_batch_size)),
 			get_logs_batch_size: U64::from(get_logs_batch_size),
@@ -122,6 +125,7 @@ pub struct ProtocolContracts<T> {
 
 impl<T: JsonRpcClient> ProtocolContracts<T> {
 	pub fn new(
+		is_native: bool,
 		provider: Arc<Provider<T>>,
 		socket_address: String,
 		authority_address: String,
@@ -131,7 +135,7 @@ impl<T: JsonRpcClient> ProtocolContracts<T> {
 		registration_pool_address: Option<String>,
 		relay_executive_address: Option<String>,
 	) -> Self {
-		Self {
+		let mut contracts = Self {
 			socket: SocketContract::new(
 				H160::from_str(&socket_address).expect(INVALID_CONTRACT_ADDRESS),
 				provider.clone(),
@@ -140,37 +144,40 @@ impl<T: JsonRpcClient> ProtocolContracts<T> {
 				H160::from_str(&authority_address).expect(INVALID_CONTRACT_ADDRESS),
 				provider.clone(),
 			),
-			relayer_manager: relayer_manager_address.map(|address| {
-				RelayerManagerContract::new(
-					H160::from_str(&address).expect(INVALID_CONTRACT_ADDRESS),
-					provider.clone(),
-				)
-			}),
-			bitcoin_socket: bitcoin_socket_address.map(|address| {
-				BitcoinSocketContract::new(
-					H160::from_str(&address).expect(INVALID_CONTRACT_ADDRESS),
-					provider.clone(),
-				)
-			}),
-			socket_queue: socket_queue_address.map(|address| {
-				SocketQueueContract::new(
-					H160::from_str(&address).expect(INVALID_CONTRACT_ADDRESS),
-					provider.clone(),
-				)
-			}),
-			registration_pool: registration_pool_address.map(|address| {
-				RegistrationPoolContract::new(
-					H160::from_str(&address).expect(INVALID_CONTRACT_ADDRESS),
-					provider.clone(),
-				)
-			}),
-			relay_executive: relay_executive_address.map(|address| {
-				RelayExecutiveContract::new(
-					H160::from_str(&address).expect(INVALID_CONTRACT_ADDRESS),
-					provider.clone(),
-				)
-			}),
+			relayer_manager: None,
+			bitcoin_socket: None,
+			socket_queue: None,
+			registration_pool: None,
+			relay_executive: None,
+		};
+		if is_native {
+			contracts.relayer_manager = Some(RelayerManagerContract::new(
+				H160::from_str(&relayer_manager_address.expect(MISSING_CONTRACT_ADDRESS))
+					.expect(INVALID_CONTRACT_ADDRESS),
+				provider.clone(),
+			));
+			contracts.bitcoin_socket = Some(BitcoinSocketContract::new(
+				H160::from_str(&bitcoin_socket_address.expect(MISSING_CONTRACT_ADDRESS))
+					.expect(INVALID_CONTRACT_ADDRESS),
+				provider.clone(),
+			));
+			contracts.socket_queue = Some(SocketQueueContract::new(
+				H160::from_str(&socket_queue_address.expect(MISSING_CONTRACT_ADDRESS))
+					.expect(INVALID_CONTRACT_ADDRESS),
+				provider.clone(),
+			));
+			contracts.registration_pool = Some(RegistrationPoolContract::new(
+				H160::from_str(&registration_pool_address.expect(MISSING_CONTRACT_ADDRESS))
+					.expect(INVALID_CONTRACT_ADDRESS),
+				provider.clone(),
+			));
+			contracts.relay_executive = Some(RelayExecutiveContract::new(
+				H160::from_str(&relay_executive_address.expect(MISSING_CONTRACT_ADDRESS))
+					.expect(INVALID_CONTRACT_ADDRESS),
+				provider.clone(),
+			));
 		}
+		contracts
 	}
 }
 

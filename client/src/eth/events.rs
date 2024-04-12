@@ -12,7 +12,7 @@ use tokio::{
 use br_primitives::{
 	bootstrap::BootstrapSharedData,
 	eth::{BootstrapState, ChainID},
-	sub_display_format,
+	utils::sub_display_format,
 };
 
 use super::{traits::BootstrapHandler, EthClient};

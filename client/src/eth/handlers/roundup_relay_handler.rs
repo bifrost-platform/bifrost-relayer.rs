@@ -24,8 +24,8 @@ use br_primitives::{
 		},
 	},
 	eth::{BootstrapState, ChainID, GasCoefficient, RecoveredSignature, RoundUpEventStatus},
-	sub_display_format,
 	tx::{TxRequest, TxRequestMessage, TxRequestMetadata, TxRequestSender, VSPPhase2Metadata},
+	utils::sub_display_format,
 };
 
 use crate::eth::{

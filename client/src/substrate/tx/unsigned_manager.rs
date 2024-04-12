@@ -1,12 +1,14 @@
 use br_primitives::{
-	constants::errors::INVALID_PROVIDER_URL, sub_display_format, substrate::CustomConfig,
-	tx::XtRequestMessage,
+	constants::errors::INVALID_PROVIDER_URL,
+	substrate::CustomConfig,
+	tx::{XtRequest, XtRequestMessage},
+	utils::sub_display_format,
 };
 
 use ethers::providers::JsonRpcClient;
 use sc_service::SpawnTaskHandle;
 use std::sync::Arc;
-use subxt::{tx::TxPayload, OnlineClient};
+use subxt::OnlineClient;
 use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
 
 use crate::{eth::EthClient, substrate::traits::ExtrinsicTask};
@@ -14,35 +16,38 @@ use crate::{eth::EthClient, substrate::traits::ExtrinsicTask};
 const SUB_LOG_TARGET: &str = "unsigned-tx-manager";
 
 /// The essential task that sends unsigned transactions asynchronously.
-pub struct UnsignedTransactionManager<T, Call> {
+pub struct UnsignedTransactionManager<T> {
 	/// The substrate client.
 	sub_client: Option<OnlineClient<CustomConfig>>,
 	/// The Bifrost client.
 	bfc_client: Arc<EthClient<T>>,
 	/// The receiver connected to the tx request channel.
-	receiver: UnboundedReceiver<XtRequestMessage<Call>>,
+	receiver: UnboundedReceiver<XtRequestMessage>,
 	/// A handle for spawning transaction tasks in the service.
 	xt_spawn_handle: SpawnTaskHandle,
 }
 
-impl<T, Call> UnsignedTransactionManager<T, Call>
-where
-	T: 'static + JsonRpcClient,
-	Call: 'static + TxPayload + Send,
-{
+impl<T: 'static + JsonRpcClient> UnsignedTransactionManager<T> {
 	/// Instantiates a new `UnsignedTransactionManager`.
 	pub fn new(
 		bfc_client: Arc<EthClient<T>>,
 		xt_spawn_handle: SpawnTaskHandle,
-	) -> (Self, UnboundedSender<XtRequestMessage<Call>>) {
-		let (sender, receiver) = mpsc::unbounded_channel::<XtRequestMessage<Call>>();
+	) -> (Self, UnboundedSender<XtRequestMessage>) {
+		let (sender, receiver) = mpsc::unbounded_channel::<XtRequestMessage>();
 		(Self { sub_client: None, bfc_client, receiver, xt_spawn_handle }, sender)
 	}
 
 	/// Initialize the substrate client.
 	async fn initialize(&mut self) {
+		let mut url = self.bfc_client.get_url();
+		if url.scheme() == "https" {
+			url.set_scheme("wss").expect(INVALID_PROVIDER_URL);
+		} else {
+			url.set_scheme("ws").expect(INVALID_PROVIDER_URL);
+		}
+
 		self.sub_client = Some(
-			OnlineClient::<CustomConfig>::from_url(&self.bfc_client.metadata.url)
+			OnlineClient::<CustomConfig>::from_url(url.as_str())
 				.await
 				.expect(INVALID_PROVIDER_URL),
 		);
@@ -65,7 +70,7 @@ where
 	}
 
 	/// Spawn a transaction task and try sending the transaction.
-	pub async fn spawn_send_transaction(&self, msg: XtRequestMessage<Call>) {
+	pub async fn spawn_send_transaction(&self, msg: XtRequestMessage) {
 		if let Some(sub_client) = &self.sub_client {
 			let task =
 				UnsignedTransactionTask::new(Arc::new(sub_client.clone()), self.bfc_client.clone());
@@ -101,11 +106,8 @@ impl<T: JsonRpcClient> ExtrinsicTask<T> for UnsignedTransactionTask<T> {
 		self.sub_client.clone()
 	}
 
-	async fn try_send_unsigned_transaction<Call: TxPayload + Send>(
-		&self,
-		msg: XtRequestMessage<Call>,
-	) {
-		match self.sub_client.tx().create_unsigned(&msg.call) {
+	async fn try_send_unsigned_transaction(&self, msg: XtRequestMessage) {
+		match self.sub_client.tx().create_unsigned::<XtRequest>(&msg.call) {
 			Ok(xt) => match xt.submit_and_watch().await {
 				Ok(progress) => match progress.wait_for_finalized_success().await {
 					Ok(events) => {
