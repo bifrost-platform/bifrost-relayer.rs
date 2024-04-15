@@ -20,8 +20,8 @@ use br_primitives::{
 	contracts::socket::get_asset_oids,
 	eth::GasCoefficient,
 	periodic::{PriceResponse, PriceSource},
-	sub_display_format,
 	tx::{PriceFeedMetadata, TxRequest, TxRequestMessage, TxRequestMetadata, TxRequestSender},
+	utils::sub_display_format,
 };
 
 use crate::{
@@ -62,7 +62,7 @@ impl<T: JsonRpcClient + 'static> PeriodicWorker for OraclePriceFeeder<T> {
 			let upcoming = self.schedule.upcoming(Utc).next().unwrap();
 			self.feed_period_spreader(upcoming, true).await;
 
-			if self.is_selected_relayer().await {
+			if self.client.is_selected_relayer().await {
 				if self.primary_source.is_empty() {
 					log::warn!(
 						target: &self.client.get_chain_name(),
@@ -331,16 +331,5 @@ impl<T: JsonRpcClient + 'static> OraclePriceFeeder<T> {
 				);
 			},
 		}
-	}
-
-	/// Verifies whether the current relayer was selected at the current round.
-	async fn is_selected_relayer(&self) -> bool {
-		let relayer_manager = self.client.protocol_contracts.relayer_manager.as_ref().unwrap();
-		self.client
-			.contract_call(
-				relayer_manager.is_selected_relayer(self.client.address(), false),
-				"relayer_manager.is_selected_relayer",
-			)
-			.await
 	}
 }

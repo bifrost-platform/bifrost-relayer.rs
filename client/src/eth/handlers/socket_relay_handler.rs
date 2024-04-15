@@ -25,8 +25,8 @@ use br_primitives::{
 		SocketEventStatus,
 	},
 	periodic::RollbackSender,
-	sub_display_format,
 	tx::{SocketRelayMetadata, TxRequest, TxRequestMessage, TxRequestMetadata, TxRequestSender},
+	utils::sub_display_format,
 };
 
 use crate::eth::{
@@ -91,7 +91,7 @@ impl<T: 'static + JsonRpcClient> Handler for SocketRelayHandler<T> {
 					let msg = socket.clone().msg;
 					let metadata = SocketRelayMetadata::new(
 						self.is_inbound_sequence(ChainID::from_be_bytes(msg.ins_code.chain)),
-						SocketEventStatus::from_u8(msg.status),
+						SocketEventStatus::from(msg.status),
 						msg.req_id.sequence,
 						ChainID::from_be_bytes(msg.req_id.chain),
 						ChainID::from_be_bytes(msg.ins_code.chain),
@@ -133,13 +133,17 @@ impl<T: 'static + JsonRpcClient> Handler for SocketRelayHandler<T> {
 		}
 	}
 
+	#[inline]
 	fn is_target_contract(&self, log: &Log) -> bool {
-		if log.address == self.client.protocol_contracts.socket.address() {
-			return true;
+		if let Some(bitcoin_socket) = self.client.protocol_contracts.bitcoin_socket.as_ref() {
+			log.address == self.client.protocol_contracts.socket.address()
+				|| log.address == bitcoin_socket.address()
+		} else {
+			log.address == self.client.protocol_contracts.socket.address()
 		}
-		false
 	}
 
+	#[inline]
 	fn is_target_event(&self, topic: H256) -> bool {
 		topic == self.socket_signature
 	}
@@ -176,7 +180,7 @@ impl<T: JsonRpcClient> SocketRelayBuilder<T> for SocketRelayHandler<T> {
 	}
 
 	async fn build_inbound_signatures(&self, mut msg: SocketMessage) -> (Signatures, bool) {
-		let status = SocketEventStatus::from_u8(msg.status);
+		let status = SocketEventStatus::from(msg.status);
 		let mut is_external = false;
 		let signatures = match status {
 			SocketEventStatus::Requested | SocketEventStatus::Failed => Signatures::default(),
@@ -204,7 +208,7 @@ impl<T: JsonRpcClient> SocketRelayBuilder<T> for SocketRelayHandler<T> {
 	}
 
 	async fn build_outbound_signatures(&self, mut msg: SocketMessage) -> (Signatures, bool) {
-		let status = SocketEventStatus::from_u8(msg.status);
+		let status = SocketEventStatus::from(msg.status);
 		let mut is_external = false;
 		let signatures = match status {
 			SocketEventStatus::Requested => {
@@ -274,7 +278,7 @@ impl<T: 'static + JsonRpcClient> SocketRelayHandler<T> {
 		metadata: SocketRelayMetadata,
 		is_inbound: bool,
 	) {
-		let status = SocketEventStatus::from_u8(socket_msg.status);
+		let status = SocketEventStatus::from(socket_msg.status);
 
 		let relay_tx_chain_id = if is_inbound {
 			self.get_inbound_relay_tx_chain_id(status, metadata.src_chain_id, metadata.dst_chain_id)
@@ -361,7 +365,7 @@ impl<T: 'static + JsonRpcClient> SocketRelayHandler<T> {
 				.await;
 
 			return matches!(
-				SocketEventStatus::from_u8(request.field[0].clone().into()),
+				SocketEventStatus::from(&request.field[0]),
 				SocketEventStatus::Committed | SocketEventStatus::Rollbacked
 			);
 		}
@@ -629,12 +633,13 @@ mod tests {
 	use std::{str::FromStr, sync::Arc};
 
 	use ethers::{
-		abi::ParamType,
+		abi::AbiDecode,
 		providers::{Http, Provider},
 		types::{Bytes, H160},
+		utils::hex::ToHexExt,
 	};
 
-	use br_primitives::contracts::socket::SocketContract;
+	use br_primitives::contracts::socket::{Socket, SocketContract};
 
 	use super::*;
 
@@ -666,66 +671,28 @@ mod tests {
 	fn test_socket_event_decode() {
 		let data = Bytes::from_str("0x000000000000000000000000000000000000000000000000000000000000002000000bfc00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000032900000000000000000000000000000000000000000000000000000000000010fe00000000000000000000000000000000000000000000000000000000000000080000003800000000000000000000000000000000000000000000000000000000040207030100000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000e0000000050000000300000bfc872b347cd764d46c127ffefbcab605fff3f3a48c00000000000000000000000000000000000000000000000000000000000000000000000000000000000000007ac737b14b926f5fbbfb7bfa1dfcb01659da1e230000000000000000000000007ac737b14b926f5fbbfb7bfa1dfcb01659da1e2300000000000000000000000000000000000000000000000075d86ab5ce70b78000000000000000000000000000000000000000000000000000000000000000c00000000000000000000000000000000000000000000000000000000000000000").unwrap();
 
-		match ethers::abi::decode(
-			&[ParamType::Tuple(vec![
-				ParamType::Tuple(vec![
-					ParamType::FixedBytes(4),
-					ParamType::Uint(64),
-					ParamType::Uint(128),
-				]),
-				ParamType::Uint(8),
-				ParamType::Tuple(vec![ParamType::FixedBytes(4), ParamType::FixedBytes(16)]),
-				ParamType::Tuple(vec![
-					ParamType::FixedBytes(32),
-					ParamType::FixedBytes(32),
-					ParamType::Address,
-					ParamType::Address,
-					ParamType::Uint(256),
-					ParamType::Bytes,
-				]),
-			])],
-			&data,
-		) {
+		match Socket::decode(&data) {
 			Ok(socket) => {
-				let socket = socket[0].clone().into_tuple().unwrap();
-				let req_id = socket[0].clone().into_tuple().unwrap();
-				let status = socket[1].clone().into_uint().unwrap();
-				let ins_code = socket[2].clone().into_tuple().unwrap();
-				let params = socket[3].clone().into_tuple().unwrap();
+				let req_id = socket.msg.req_id;
+				let status = socket.msg.status;
+				let ins_code = socket.msg.ins_code;
+				let params = socket.msg.params;
 
-				println!(
-					"req_id.chain -> {:?}",
-					Bytes::from(req_id[0].clone().into_fixed_bytes().unwrap()).to_string()
-				);
-				println!("req_id.round_id -> {:?}", req_id[1].clone().into_uint().unwrap());
-				println!("req_id.sequence -> {:?}", req_id[2].clone().into_uint().unwrap());
+				println!("req_id.chain -> {:?}", req_id.chain.encode_hex_with_prefix());
+				println!("req_id.round_id -> {:?}", req_id.round_id);
+				println!("req_id.sequence -> {:?}", req_id.sequence);
 
 				println!("status -> {:?}", status);
 
-				println!(
-					"ins_code.chain -> {:?}",
-					Bytes::from(ins_code[0].clone().into_fixed_bytes().unwrap()).to_string()
-				);
-				println!(
-					"ins_code.method -> {:?}",
-					Bytes::from(ins_code[1].clone().into_fixed_bytes().unwrap()).to_string()
-				);
+				println!("ins_code.chain -> {:?}", ins_code.chain.encode_hex_with_prefix());
+				println!("ins_code.method -> {:?}", ins_code.method.encode_hex_with_prefix());
 
-				println!(
-					"params.tokenIDX0 -> {:?}",
-					Bytes::from(params[0].clone().into_fixed_bytes().unwrap()).to_string()
-				);
-				println!(
-					"params.tokenIDX1 -> {:?}",
-					Bytes::from(params[1].clone().into_fixed_bytes().unwrap()).to_string()
-				);
-				println!("params.refund -> {:?}", params[2].clone().into_address().unwrap());
-				println!("params.to -> {:?}", params[3].clone().into_address().unwrap());
-				println!("params.amount -> {:?}", params[4].clone().into_uint());
-				println!(
-					"params.variants -> {:?}",
-					Bytes::from(params[5].clone().into_bytes().unwrap()).to_string()
-				);
+				println!("params.tokenIDX0 -> {:?}", params.token_idx0.encode_hex_with_prefix());
+				println!("params.tokenIDX1 -> {:?}", params.token_idx1.encode_hex_with_prefix());
+				println!("params.refund -> {:?}", params.refund);
+				println!("params.to -> {:?}", params.to);
+				println!("params.amount -> {:?}", params.amount);
+				println!("params.variants -> {:?}", params.variants.to_string());
 			},
 			Err(error) => {
 				panic!("decode failed -> {}", error);
