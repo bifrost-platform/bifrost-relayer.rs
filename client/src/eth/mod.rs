@@ -74,6 +74,11 @@ pub struct EthClient<T> {
 		self.metadata.id
 	}
 
+	/// Returns the provider URL.
+	pub fn get_url(&self) -> Url {
+		self.metadata.url.clone()
+	}
+
 	/// Returns `Arc<Provider>`.
 	pub fn get_provider(&self) -> Arc<Provider<T>> {
 		self.provider.clone()

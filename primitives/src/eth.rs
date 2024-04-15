@@ -234,6 +234,8 @@ pub enum SocketVersion {
 /// The metadata of the EVM provider.
 pub struct ProviderMetadata {
 	pub name: String,
+	/// The provider URL. (Allowed values: `http`, `https`)
+	pub url: Url,
 	/// Id of chain which this client interact with.
 	pub id: ChainID,
 	/// The total number of confirmations required for a block to be processed. (block
@@ -252,6 +254,7 @@ pub struct ProviderMetadata {
 impl ProviderMetadata {
 	pub fn new(
 		name: String,
+		url: String,
 		id: ChainID,
 		block_confirmations: u64,
 		call_interval: u64,
@@ -260,6 +263,7 @@ impl ProviderMetadata {
 	) -> Self {
 		Self {
 			name,
+			url: Url::parse(&url).expect(INVALID_PROVIDER_URL),
 			id,
 			block_confirmations: U64::from(block_confirmations.saturating_add(get_logs_batch_size)),
 			get_logs_batch_size: U64::from(get_logs_batch_size),
@@ -320,16 +324,29 @@ pub struct ProtocolContracts<T> {
 	pub authority: AuthorityContract<Provider<T>>,
 	/// RelayerManagerContract (Bifrost only)
 	pub relayer_manager: Option<RelayerManagerContract<Provider<T>>>,
+	/// BitcoinSocketContract (Bifrost only)
+	pub bitcoin_socket: Option<BitcoinSocketContract<Provider<T>>>,
+	/// SocketQueueContract (Bifrost only)
+	pub socket_queue: Option<SocketQueueContract<Provider<T>>>,
+	/// RegistrationPoolContract (Bifrost only)
+	pub registration_pool: Option<RegistrationPoolContract<Provider<T>>>,
+	/// RelayExecutiveContract (Bifrost only)
+	pub relay_executive: Option<RelayExecutiveContract<Provider<T>>>,
 }
 
 impl<T: JsonRpcClient> ProtocolContracts<T> {
 	pub fn new(
+		is_native: bool,
 		provider: Arc<Provider<T>>,
 		socket_address: String,
 		authority_address: String,
 		relayer_manager_address: Option<String>,
+		bitcoin_socket_address: Option<String>,
+		socket_queue_address: Option<String>,
+		registration_pool_address: Option<String>,
+		relay_executive_address: Option<String>,
 	) -> Self {
-		Self {
+		let mut contracts = Self {
 			socket: SocketContract::new(
 				H160::from_str(&socket_address).expect(INVALID_CONTRACT_ADDRESS),
 				provider.clone(),
@@ -338,13 +355,40 @@ impl<T: JsonRpcClient> ProtocolContracts<T> {
 				H160::from_str(&authority_address).expect(INVALID_CONTRACT_ADDRESS),
 				provider.clone(),
 			),
-			relayer_manager: relayer_manager_address.map(|address| {
-				RelayerManagerContract::new(
-					H160::from_str(&address).expect(INVALID_CONTRACT_ADDRESS),
-					provider.clone(),
-				)
-			}),
+			relayer_manager: None,
+			bitcoin_socket: None,
+			socket_queue: None,
+			registration_pool: None,
+			relay_executive: None,
+		};
+		if is_native {
+			contracts.relayer_manager = Some(RelayerManagerContract::new(
+				H160::from_str(&relayer_manager_address.expect(MISSING_CONTRACT_ADDRESS))
+					.expect(INVALID_CONTRACT_ADDRESS),
+				provider.clone(),
+			));
+			contracts.bitcoin_socket = Some(BitcoinSocketContract::new(
+				H160::from_str(&bitcoin_socket_address.expect(MISSING_CONTRACT_ADDRESS))
+					.expect(INVALID_CONTRACT_ADDRESS),
+				provider.clone(),
+			));
+			contracts.socket_queue = Some(SocketQueueContract::new(
+				H160::from_str(&socket_queue_address.expect(MISSING_CONTRACT_ADDRESS))
+					.expect(INVALID_CONTRACT_ADDRESS),
+				provider.clone(),
+			));
+			contracts.registration_pool = Some(RegistrationPoolContract::new(
+				H160::from_str(&registration_pool_address.expect(MISSING_CONTRACT_ADDRESS))
+					.expect(INVALID_CONTRACT_ADDRESS),
+				provider.clone(),
+			));
+			contracts.relay_executive = Some(RelayExecutiveContract::new(
+				H160::from_str(&relay_executive_address.expect(MISSING_CONTRACT_ADDRESS))
+					.expect(INVALID_CONTRACT_ADDRESS),
+				provider.clone(),
+			));
 		}
+		contracts
 	}
 }
 
@@ -361,7 +405,13 @@ pub enum GasCoefficient {
 
 impl GasCoefficient {
 	pub fn into_f64(&self) -> f64 {
-		match self {
+		f64::from(self)
+	}
+}
+
+impl From<&GasCoefficient> for f64 {
+	fn from(value: &GasCoefficient) -> Self {
+		match value {
 			GasCoefficient::Low => 1.2,
 			GasCoefficient::Mid => 7.0,
 			GasCoefficient::High => 10.0,
