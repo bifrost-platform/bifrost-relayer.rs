@@ -86,7 +86,6 @@ impl<T: JsonRpcClient + 'static> InboundHandler<T> {
 		let socket_queue = self.bfc_client.protocol_contracts.socket_queue.as_ref().unwrap();
 
 		let mut slice: [u8; 32] = txid.to_byte_array();
-		slice.reverse();
 
 		let psbt_txid = self
 			.bfc_client
@@ -102,11 +101,6 @@ impl<T: JsonRpcClient + 'static> InboundHandler<T> {
 	fn build_transaction(&self, event: &Event, user_bfc_address: Address) -> TransactionRequest {
 		let calldata = self
 			.bitcoin_socket()
-			.poll(
-				event.txid.to_byte_array(),
-				event.index.into(),
-				user_bfc_address,
-				event.amount.to_sat().into(),
 			)
 			.calldata()
 			.unwrap();
