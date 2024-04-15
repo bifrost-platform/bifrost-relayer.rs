@@ -54,10 +54,6 @@ use br_primitives::{
 	substrate::MigrationSequence,
 	tx::{TxRequestSender, XtRequestSender},
 };
-
-use crate::{
-	cli::{LOG_TARGET, SUB_LOG_TARGET},
-	verification::assert_configuration_validity,
 	bootstrap_shared_data: BootstrapSharedData,
 	migration_sequence: Arc<RwLock<MigrationSequence>>,
 	keypair_storage: Arc<RwLock<KeypairStorage>>,
@@ -542,6 +538,33 @@ fn spawn_relayer_tasks(
 
 			block_manager.run().await
 		},
+	);
+
+	// spawn bitcoin deps
+	task_manager.spawn_essential_handle().spawn(
+		"bitcoin-inbound-handler",
+		Some("handlers"),
+		async move { inbound.run().await },
+	);
+	task_manager.spawn_essential_handle().spawn(
+		"bitcoin-outbound-handler",
+		Some("handlers"),
+		async move { outbound.run().await },
+	);
+	task_manager.spawn_essential_handle().spawn(
+		"bitcoin-psbt-signer",
+		Some("handlers"),
+		async move { psbt_signer.run().await },
+	);
+	task_manager.spawn_essential_handle().spawn(
+		"bitcoin-public-key-submitter",
+		Some("pub-key-submitter"),
+		async move { pub_key_submitter.run().await },
+	);
+	task_manager.spawn_essential_handle().spawn(
+		"bitcoin-block-manager",
+		Some("block-manager"),
+		async move { block_manager.run().await },
 	);
 
 	// spawn prometheus endpoint
