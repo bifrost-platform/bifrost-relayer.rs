@@ -296,25 +296,32 @@ impl<T: JsonRpcClient> TransactionTask<T> for LegacyTransactionTask<T> {
 			msg.tx_request.gas_price(gas_price);
 		}
 
-		// estimate the gas amount to be used
-		let estimated_gas =
-			match self.middleware.estimate_gas(&msg.tx_request.to_typed(), None).await {
-				Ok(estimated_gas) => {
-					br_metrics::increase_rpc_calls(&self.client.get_chain_name());
-					U256::from(
-						(estimated_gas.as_u64() as f64 * msg.gas_coefficient.into_f64()).ceil()
-							as u64,
-					)
-				},
-				Err(error) => {
-					return self.handle_failed_gas_estimation(SUB_LOG_TARGET, msg, &error).await
-				},
-			};
-		msg.tx_request.gas(estimated_gas);
+		match msg.tx_request.get_gas() {
+			None => {
+				// estimate the gas amount to be used
+				let estimated_gas =
+					match self.middleware.estimate_gas(&msg.tx_request.to_typed(), None).await {
+						Ok(estimated_gas) => {
+							br_metrics::increase_rpc_calls(&self.client.get_chain_name());
+							U256::from(
+								(estimated_gas.as_u64() as f64 * msg.gas_coefficient.into_f64())
+									.ceil() as u64,
+							)
+						},
+						Err(error) => {
+							return self
+								.handle_failed_gas_estimation(SUB_LOG_TARGET, msg, &error)
+								.await
+						},
+					};
+				msg.tx_request.gas(estimated_gas);
+			},
+			Some(_) => {},
+		}
 
 		// check the txpool for transaction duplication prevention
 		if !self.is_duplicate_relay(&msg.tx_request, msg.check_mempool).await {
-			if !self.is_sufficient_funds(gas_price, estimated_gas).await {
+			if !self.is_sufficient_funds(gas_price, msg.tx_request.get_gas().unwrap()).await {
 				panic!(
 					"[{}]-[{}]-[{}] {}",
 					&self.client.get_chain_name(),

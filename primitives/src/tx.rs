@@ -290,6 +290,14 @@ impl TxRequest {
 		}
 	}
 
+	/// Get the `gas` field of the transaction request.
+	pub fn get_gas(&self) -> Option<U256> {
+		match self {
+			TxRequest::Legacy(tx_request) => tx_request.gas,
+			TxRequest::Eip1559(tx_request) => tx_request.gas,
+		}
+	}
+
 	/// Sets the `gas` field in the transaction to the provided.
 	pub fn gas(&mut self, estimated_gas: U256) {
 		match self {
