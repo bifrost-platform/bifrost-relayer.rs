@@ -12,7 +12,7 @@ use tokio::{
 use br_primitives::{
 	bootstrap::BootstrapSharedData,
 	eth::{BootstrapState, ChainID},
-	sub_display_format,
+	utils::sub_display_format,
 };
 
 use super::{traits::BootstrapHandler, EthClient};
@@ -128,10 +128,21 @@ impl<T: JsonRpcClient> EventManager<T> {
 		let to = from.saturating_add(
 			self.client.metadata.get_logs_batch_size.saturating_sub(U64::from(1u64)),
 		);
-		let filter = Filter::new()
-			.from_block(BlockNumber::from(from))
-			.to_block(BlockNumber::from(to))
-			.address(self.client.protocol_contracts.socket.address());
+
+		let filter = if let Some(bitcoin_socket) = &self.client.protocol_contracts.bitcoin_socket {
+			Filter::new()
+				.from_block(BlockNumber::from(from))
+				.to_block(BlockNumber::from(to))
+				.address(vec![
+					self.client.protocol_contracts.socket.address(),
+					bitcoin_socket.address(),
+				])
+		} else {
+			Filter::new()
+				.from_block(BlockNumber::from(from))
+				.to_block(BlockNumber::from(to))
+				.address(self.client.protocol_contracts.socket.address())
+		};
 
 		let target_logs = self.client.get_logs(&filter).await;
 		if !target_logs.is_empty() {
@@ -165,6 +176,7 @@ impl<T: JsonRpcClient> EventManager<T> {
 	}
 
 	/// Verifies if the stored waiting block has waited enough.
+	#[inline]
 	fn is_block_confirmed(&self, latest_block: U64) -> bool {
 		latest_block.saturating_sub(self.waiting_block) >= self.client.metadata.block_confirmations
 	}
