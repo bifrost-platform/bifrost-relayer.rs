@@ -3,9 +3,16 @@ use std::{
 	fmt::{Display, Formatter},
 };
 
+use bitcoincore_rpc::bitcoin::PublicKey;
 use ethers::types::{
 	transaction::eip2718::TypedTransaction, Address, Bytes, Eip1559TransactionRequest,
-	NameOrAddress, TransactionRequest, U256,
+	NameOrAddress, TransactionRequest, H256, U256,
+};
+use miniscript::bitcoin::address::NetworkUnchecked;
+use miniscript::bitcoin::{Address as BtcAddress, Txid};
+use subxt::{
+	tx::{Payload, TxPayload},
+	Error, Metadata,
 };
 use tokio::sync::mpsc::{error::SendError, UnboundedSender};
 
@@ -13,6 +20,7 @@ use crate::{
 	constants::tx::{DEFAULT_TX_RETRIES, DEFAULT_TX_RETRY_INTERVAL_MS},
 	eth::{ChainID, GasCoefficient, SocketEventStatus},
 	periodic::PriceResponse,
+	substrate::{SubmitSignedPsbt, SubmitVaultKey},
 };
 
 #[derive(Clone, Debug)]
@@ -210,6 +218,35 @@ impl Display for RollbackMetadata {
 }
 
 #[derive(Clone, Debug)]
+pub struct BitcoinRelayMetadata {
+	pub btc_address: BtcAddress<NetworkUnchecked>,
+	pub bfc_address: Address,
+	pub txid: Txid,
+	pub index: u32,
+}
+
+impl BitcoinRelayMetadata {
+	pub fn new(
+		btc_address: BtcAddress<NetworkUnchecked>,
+		bfc_address: Address,
+		txid: Txid,
+		index: u32,
+	) -> Self {
+		Self { btc_address, bfc_address, txid, index }
+	}
+}
+
+impl Display for BitcoinRelayMetadata {
+	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		write!(
+			f,
+			"BitcoinSocketRelay({}:{} {:?}:{})",
+			self.txid, self.index, self.btc_address, self.bfc_address,
+		)
+	}
+}
+
+#[derive(Clone, Debug)]
 pub enum TxRequestMetadata {
 	SocketRelay(SocketRelayMetadata),
 	PriceFeed(PriceFeedMetadata),
@@ -218,6 +255,7 @@ pub enum TxRequestMetadata {
 	Heartbeat(HeartbeatMetadata),
 	Flush(FlushMetadata),
 	Rollback(RollbackMetadata),
+	BitcoinSocketRelay(BitcoinRelayMetadata),
 }
 
 impl Display for TxRequestMetadata {
@@ -233,8 +271,114 @@ impl Display for TxRequestMetadata {
 				TxRequestMetadata::Heartbeat(metadata) => metadata.to_string(),
 				TxRequestMetadata::Flush(metadata) => metadata.to_string(),
 				TxRequestMetadata::Rollback(metadata) => metadata.to_string(),
+				TxRequestMetadata::BitcoinSocketRelay(metadata) => metadata.to_string(),
 			}
 		)
+	}
+}
+
+#[derive(Clone, Debug)]
+/// The metadata used for vault key submission.
+pub struct SubmitVaultKeyMetadata {
+	/// The user's Bifrost address.
+	pub who: Address,
+	/// The generated public key.
+	pub key: PublicKey,
+}
+
+impl SubmitVaultKeyMetadata {
+	pub fn new(who: Address, key: PublicKey) -> Self {
+		Self { who, key }
+	}
+}
+
+impl Display for SubmitVaultKeyMetadata {
+	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		write!(f, "SubmitVaultKey({}:{:?})", self.who, self.key)
+	}
+}
+
+#[derive(Clone, Debug)]
+/// The metadata used for signed psbt submission.
+pub struct SubmitSignedPsbtMetadata {
+	pub unsigned_psbt: H256,
+}
+
+impl SubmitSignedPsbtMetadata {
+	pub fn new(unsigned_psbt: H256) -> Self {
+		Self { unsigned_psbt }
+	}
+}
+
+impl Display for SubmitSignedPsbtMetadata {
+	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		write!(f, "SubmitSignedPsbt({})", self.unsigned_psbt)
+	}
+}
+
+#[derive(Clone)]
+pub enum XtRequestMetadata {
+	SubmitVaultKey(SubmitVaultKeyMetadata),
+	SubmitSignedPsbt(SubmitSignedPsbtMetadata),
+}
+
+impl Display for XtRequestMetadata {
+	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		write!(
+			f,
+			"{}",
+			match self {
+				XtRequestMetadata::SubmitVaultKey(metadata) => metadata.to_string(),
+				XtRequestMetadata::SubmitSignedPsbt(metadata) => metadata.to_string(),
+			}
+		)
+	}
+}
+
+#[derive(Clone)]
+pub enum XtRequest {
+	SubmitSignedPsbt(Payload<SubmitSignedPsbt>),
+	SubmitVaultKey(Payload<SubmitVaultKey>),
+}
+
+impl TxPayload for XtRequest {
+	fn encode_call_data_to(&self, metadata: &Metadata, out: &mut Vec<u8>) -> Result<(), Error> {
+		match self {
+			XtRequest::SubmitSignedPsbt(call) => call.encode_call_data_to(metadata, out),
+			XtRequest::SubmitVaultKey(call) => call.encode_call_data_to(metadata, out),
+		}
+	}
+}
+
+impl TryFrom<XtRequest> for Payload<SubmitSignedPsbt> {
+	type Error = ();
+
+	fn try_from(value: XtRequest) -> Result<Self, Self::Error> {
+		match value {
+			XtRequest::SubmitSignedPsbt(call) => Ok(call),
+			XtRequest::SubmitVaultKey(_) => Err(()),
+		}
+	}
+}
+impl TryFrom<XtRequest> for Payload<SubmitVaultKey> {
+	type Error = ();
+
+	fn try_from(value: XtRequest) -> Result<Self, Self::Error> {
+		match value {
+			XtRequest::SubmitSignedPsbt(_) => Err(()),
+			XtRequest::SubmitVaultKey(call) => Ok(call),
+		}
+	}
+}
+
+impl From<Payload<SubmitSignedPsbt>> for XtRequest {
+	fn from(value: Payload<SubmitSignedPsbt>) -> Self {
+		Self::SubmitSignedPsbt(value)
+	}
+}
+impl From<Payload<SubmitVaultKey>> for XtRequest {
+	fn from(value: Payload<SubmitVaultKey>) -> Self {
+		Self::SubmitVaultKey(value)
 	}
 }
 
@@ -270,6 +414,7 @@ impl TxRequest {
 			TxRequest::Eip1559(tx_request) => tx_request.from.as_ref().unwrap(),
 		}
 	}
+
 	/// Get the `gas_price` field of the transaction request.
 	pub fn get_gas_price(&self) -> Option<U256> {
 		match self {
@@ -424,7 +569,7 @@ pub struct TxRequestMessage {
 }
 
 impl TxRequestMessage {
-	/// Instantiates a new `EventMessage` instance.
+	/// Instantiates a new `TxRequestMessage` instance.
 	pub fn new(
 		tx_request: TxRequest,
 		metadata: TxRequestMetadata,
@@ -445,7 +590,7 @@ impl TxRequestMessage {
 		}
 	}
 
-	/// Builds a new `EventMessage` to use on transaction retry. This will reduce the remaining
+	/// Builds a new `TxRequestMessage` to use on transaction retry. This will reduce the remaining
 	/// retry counter and increase the retry interval.
 	pub fn build_retry_event(&mut self) {
 		self.tx_request.nonce(None);
@@ -472,5 +617,52 @@ impl TxRequestSender {
 	/// Sends a new event message.
 	pub fn send(&self, message: TxRequestMessage) -> Result<(), SendError<TxRequestMessage>> {
 		self.sender.send(message)
+	}
+}
+
+pub struct XtRequestMessage {
+	/// The remaining retries of the transaction request.
+	pub retries_remaining: u8,
+	/// The retry interval in milliseconds.
+	pub retry_interval: u64,
+	/// The call data of the transaction.
+	pub call: XtRequest,
+	/// The metadata of the transaction.
+	pub metadata: XtRequestMetadata,
+}
+
+impl XtRequestMessage {
+	/// Instantiates a new `XtRequestMessage` instance.
+	pub fn new(call: XtRequest, metadata: XtRequestMetadata) -> Self {
+		Self {
+			retries_remaining: DEFAULT_TX_RETRIES,
+			retry_interval: DEFAULT_TX_RETRY_INTERVAL_MS,
+			call,
+			metadata,
+		}
+	}
+
+	/// Builds a new `XtRequestMessage` to use on transaction retry. This will reduce the remaining
+	/// retry counter and increase the retry interval.
+	pub fn build_retry_event(&mut self) {
+		self.retries_remaining = self.retries_remaining.saturating_sub(1);
+	}
+}
+
+/// The message sender connected to the tx request channel.
+pub struct XtRequestSender {
+	/// The inner sender.
+	pub sender: UnboundedSender<XtRequestMessage>,
+}
+
+impl XtRequestSender {
+	/// Instantiates a new `XtRequestSender` instance.
+	pub fn new(sender: UnboundedSender<XtRequestMessage>) -> Self {
+		Self { sender }
+	}
+
+	/// Sends a new tx request message.
+	pub fn send(&self, message: XtRequestMessage) -> Result<(), Box<SendError<XtRequestMessage>>> {
+		Ok(self.sender.send(message)?)
 	}
 }

@@ -8,8 +8,9 @@ use br_primitives::{
 	},
 	contracts::authority::RoundMetaData,
 	eth::{AggregatorContracts, ChainID, ProtocolContracts, ProviderMetadata},
-	sub_display_format,
+	utils::sub_display_format,
 };
+
 use ethers::{
 	abi::Detokenize,
 	prelude::ContractCall,
@@ -22,6 +23,7 @@ use ethers::{
 };
 use serde::{de::DeserializeOwned, Serialize};
 use tokio::time::{sleep, Duration};
+use url::Url;
 
 use self::{
 	traits::{Eip1559GasMiddleware, LegacyGasMiddleware},
@@ -79,6 +81,11 @@ impl<T: JsonRpcClient> EthClient<T> {
 	/// Returns id which chain this client interacts with.
 	pub fn get_chain_id(&self) -> ChainID {
 		self.metadata.id
+	}
+
+	/// Returns the provider URL.
+	pub fn get_url(&self) -> Url {
+		self.metadata.url.clone()
 	}
 
 	/// Returns `Arc<Provider>`.
@@ -271,6 +278,16 @@ impl<T: JsonRpcClient> EthClient<T> {
 				.parse::<f64>()
 				.unwrap(),
 		);
+	}
+
+	/// Verifies whether the current relayer was selected at the current round.
+	pub async fn is_selected_relayer(&self) -> bool {
+		let relayer_manager = self.protocol_contracts.relayer_manager.as_ref().unwrap();
+		self.contract_call(
+			relayer_manager.is_selected_relayer(self.address(), false),
+			"relayer_manager.is_selected_relayer",
+		)
+		.await
 	}
 }
 
