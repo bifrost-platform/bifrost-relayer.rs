@@ -156,20 +156,15 @@ impl<T: JsonRpcClient + 'static> Handler for InboundHandler<T> {
 
 #[async_trait::async_trait]
 impl<T: JsonRpcClient> BootstrapHandler for InboundHandler<T> {
+	fn bootstrap_shared_data(&self) -> Arc<BootstrapSharedData> {
+		self.bootstrap_shared_data.clone()
+	}
+
 	async fn bootstrap(&self) {
 		todo!()
 	}
 
 	async fn get_bootstrap_events(&self) -> Vec<Transaction> {
 		todo!()
-	}
-
-	async fn is_bootstrap_state_synced_as(&self, state: BootstrapState) -> bool {
-		self.bootstrap_shared_data
-			.bootstrap_states
-			.read()
-			.await
-			.iter()
-			.all(|s| *s == state)
 	}
 }

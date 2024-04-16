@@ -222,20 +222,15 @@ impl<T: JsonRpcClient + 'static> SocketRelayBuilder<T> for OutboundHandler<T> {
 
 #[async_trait::async_trait]
 impl<T: JsonRpcClient + 'static> BootstrapHandler for OutboundHandler<T> {
+	fn bootstrap_shared_data(&self) -> Arc<BootstrapSharedData> {
+		self.bootstrap_shared_data.clone()
+	}
+
 	async fn bootstrap(&self) {
 		todo!()
 	}
 
 	async fn get_bootstrap_events(&self) -> Vec<Transaction> {
 		todo!()
-	}
-
-	async fn is_bootstrap_state_synced_as(&self, state: BootstrapState) -> bool {
-		self.bootstrap_shared_data
-			.bootstrap_states
-			.read()
-			.await
-			.iter()
-			.all(|s| *s == state)
 	}
 }

@@ -16,6 +16,7 @@ use crate::{
 };
 
 use br_primitives::{
+	bootstrap::BootstrapSharedData,
 	eth::{BootstrapState, GasCoefficient},
 	tx::{
 		BitcoinRelayMetadata, TxRequest, TxRequestMessage, TxRequestMetadata, TxRequestSender,
@@ -151,9 +152,18 @@ pub trait Handler {
 
 #[async_trait::async_trait]
 pub trait BootstrapHandler {
+	fn bootstrap_shared_data(&self) -> Arc<BootstrapSharedData>;
+
 	async fn bootstrap(&self);
 
 	async fn get_bootstrap_events(&self) -> Vec<Transaction>;
 
-	async fn is_bootstrap_state_synced_as(&self, state: BootstrapState) -> bool;
+	async fn is_bootstrap_state_synced_as(&self, state: BootstrapState) -> bool {
+		self.bootstrap_shared_data()
+			.bootstrap_states
+			.read()
+			.await
+			.iter()
+			.all(|s| *s == state)
+	}
 }
