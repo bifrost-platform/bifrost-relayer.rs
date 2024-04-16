@@ -8,8 +8,8 @@ use crate::{
 
 #[derive(Clone)]
 pub struct BootstrapSharedData {
-	/// The socket barrier length.
-	pub socket_barrier_len: usize,
+	/// The evm + non-evm providers length.
+	pub system_providers_len: usize,
 	/// The barrier used to lock the system until the socket bootstrap process is done.
 	pub socket_barrier: Arc<Barrier>,
 	/// The barrier used to lock the system until the roundup bootstrap process is done.
@@ -31,26 +31,26 @@ impl BootstrapSharedData {
 		let evm_providers = &config.relayer_config.evm_providers;
 		let bootstrap_config = &config.relayer_config.bootstrap_config;
 
-		let (bootstrap_states, socket_barrier_len): (BootstrapState, usize) = {
+		let (bootstrap_states, system_providers_len): (BootstrapState, usize) = {
 			let mut ret: (BootstrapState, usize) = (BootstrapState::NormalStart, 1);
 			if let Some(bootstrap_config) = bootstrap_config.clone() {
 				if bootstrap_config.is_enabled {
-					ret = (BootstrapState::NodeSyncing, evm_providers.len() + 1 + 1); // add 1 for Bitcoin
+					ret = (BootstrapState::NodeSyncing, evm_providers.len() + 1); // add 1 for Bitcoin
 				}
 			}
 			ret
 		};
 
-		let socket_barrier = Arc::new(Barrier::new(socket_barrier_len));
+		let socket_barrier = Arc::new(Barrier::new(system_providers_len + 1));
 		let roundup_barrier = Arc::new(Barrier::new(
 			evm_providers.iter().filter(|evm_provider| evm_provider.is_relay_target).count(),
 		));
 		let socket_bootstrap_count = Arc::new(Mutex::new(u8::default()));
 		let roundup_bootstrap_count = Arc::new(Mutex::new(u8::default()));
-		let bootstrap_states = Arc::new(RwLock::new(vec![bootstrap_states; evm_providers.len()]));
+		let bootstrap_states = Arc::new(RwLock::new(vec![bootstrap_states; system_providers_len]));
 
 		Self {
-			socket_barrier_len,
+			system_providers_len,
 			socket_barrier,
 			roundup_barrier,
 			socket_bootstrap_count,
