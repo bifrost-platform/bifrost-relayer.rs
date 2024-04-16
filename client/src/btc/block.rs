@@ -166,10 +166,19 @@ impl<T: JsonRpcClient + 'static> BlockManager<T> {
 
 	/// Starts the block manager.
 	pub async fn run(&mut self) {
-		self.waiting_block = self.get_block_count().await.unwrap(); // TODO: should set at bootstrap process in production
+		self.waiting_block = self.get_block_count().await.unwrap();
+
+		log::info!(
+			target: LOG_TARGET,
+			"-[{}] 💤 Idle, best: #{:?}",
+			sub_display_format(SUB_LOG_TARGET),
+			self.waiting_block
+		);
 
 		loop {
-			if self.is_bootstrap_state_synced_as(BootstrapState::NormalStart).await {
+			if self.is_bootstrap_state_synced_as(BootstrapState::BootstrapSocketRelay).await {
+				self.bootstrap().await;
+			} else if self.is_bootstrap_state_synced_as(BootstrapState::NormalStart).await {
 				let latest_block_num = self.get_block_count().await.unwrap();
 				if self.is_block_confirmed(latest_block_num) {
 					let (vault_set, refund_set) = self.fetch_registration_sets().await;
@@ -329,15 +338,13 @@ impl<T: JsonRpcClient + 'static> BootstrapHandler for BlockManager<T> {
 	}
 
 	async fn bootstrap(&self) {
-		let (inbound, outbound) = self.get_bootstrap_events().await;
-
 		log::info!(
 			target: LOG_TARGET,
-			"-[{}] ⚙️  [Bootstrap mode] Bootstrapping Bitcoin events: Inbound({:?}), Outbound({:?})",
+			"-[{}] ⚙️  [Bootstrap mode] Bootstrapping Bitcoin events",
 			sub_display_format(SUB_LOG_TARGET),
-			inbound.events.len(),
-			outbound.events.len()
 		);
+
+		let (inbound, outbound) = self.get_bootstrap_events().await;
 
 		self.sender.send(inbound).unwrap();
 		self.sender.send(outbound).unwrap();
@@ -345,7 +352,7 @@ impl<T: JsonRpcClient + 'static> BootstrapHandler for BlockManager<T> {
 		let mut bootstrap_count = self.bootstrap_shared_data.socket_bootstrap_count.lock().await;
 		*bootstrap_count += 1;
 
-		if *bootstrap_count == self.bootstrap_shared_data.socket_barrier_len as u8 {
+		if *bootstrap_count == self.bootstrap_shared_data.system_providers_len as u8 {
 			let mut bootstrap_guard = self.bootstrap_shared_data.bootstrap_states.write().await;
 
 			for state in bootstrap_guard.iter_mut() {
@@ -362,10 +369,10 @@ impl<T: JsonRpcClient + 'static> BootstrapHandler for BlockManager<T> {
 
 	async fn get_bootstrap_events(&self) -> (EventMessage, EventMessage) {
 		let (vault_set, refund_set) = self.fetch_registration_sets().await;
-		let latest_block_number = self.get_block_count().await.unwrap();
+		let to_block = self.waiting_block.saturating_sub(1);
 
-		let mut inbound = EventMessage::inbound(latest_block_number);
-		let mut outbound = EventMessage::outbound(latest_block_number);
+		let mut inbound = EventMessage::inbound(to_block);
+		let mut outbound = EventMessage::outbound(to_block);
 
 		if let Some(bootstrap_config) = &self.bootstrap_shared_data.bootstrap_config {
 			let round_info = self
@@ -381,8 +388,7 @@ impl<T: JsonRpcClient + 'static> BootstrapHandler for BlockManager<T> {
 				round_info,
 			);
 
-			let mut from_block = latest_block_number.saturating_sub(bootstrap_offset_height.into());
-			let to_block = latest_block_number;
+			let mut from_block = to_block.saturating_sub(bootstrap_offset_height.into());
 
 			while from_block <= to_block {
 				let block_hash = self.get_block_hash(from_block).await.unwrap();
