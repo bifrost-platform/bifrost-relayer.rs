@@ -39,6 +39,8 @@ impl<T: JsonRpcClient + 'static> PeriodicWorker for PubKeySubmitter<T> {
 
 	async fn run(&mut self) {
 		loop {
+			self.wait_until_next_time().await;
+
 			if self.is_relay_executive().await {
 				let pending_registrations = self.get_pending_registrations().await;
 
@@ -71,8 +73,6 @@ impl<T: JsonRpcClient + 'static> PeriodicWorker for PubKeySubmitter<T> {
 					self.request_send_transaction(call, metadata);
 				}
 			}
-
-			self.wait_until_next_time().await;
 		}
 	}
 }
