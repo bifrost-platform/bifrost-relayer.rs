@@ -26,7 +26,7 @@ use tokio_stream::StreamExt;
 
 use super::{BootstrapHandler, EventMessage, TxRequester};
 
-const SUB_LOG_TARGET: &str = "Outbound-handler";
+const SUB_LOG_TARGET: &str = "outbound-handler";
 
 pub struct OutboundHandler<T> {
 	bfc_client: Arc<EthClient<T>>,

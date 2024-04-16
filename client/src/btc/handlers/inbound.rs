@@ -25,7 +25,7 @@ use tokio_stream::StreamExt;
 
 use super::{BootstrapHandler, EventMessage, TxRequester};
 
-const SUB_LOG_TARGET: &str = "Inbound-handler";
+const SUB_LOG_TARGET: &str = "inbound-handler";
 
 pub struct InboundHandler<T> {
 	/// `EthClient` for interact with Bifrost network.
