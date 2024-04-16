@@ -26,8 +26,9 @@ use br_primitives::{
 	utils::sub_display_format,
 };
 use ethers::{prelude::TransactionRequest, providers::JsonRpcClient, types::Bytes};
-use miniscript::bitcoin::Transaction;
 use std::{collections::BTreeSet, sync::Arc};
+
+use super::block::EventMessage;
 
 #[async_trait::async_trait]
 pub trait XtRequester<T: JsonRpcClient> {
@@ -159,7 +160,7 @@ pub trait BootstrapHandler {
 	async fn bootstrap(&self);
 
 	/// Fetch the historical events to bootstrap.
-	async fn get_bootstrap_events(&self) -> Vec<Transaction>;
+	async fn get_bootstrap_events(&self) -> (EventMessage, EventMessage);
 
 	/// Verifies whether the bootstrap state has been synced to the given state.
 	async fn is_bootstrap_state_synced_as(&self, state: BootstrapState) -> bool {
@@ -173,7 +174,7 @@ pub trait BootstrapHandler {
 
 	/// Get factor between the block time of native-chain and block time of this chain.
 	/// We assume Bitcoin's average block time to 10m.
-	async fn get_bootstrap_offset_height_based_on_block_time(
+	fn get_bootstrap_offset_height_based_on_block_time(
 		&self,
 		round_offset: u32,
 		round_info: RoundMetaData,

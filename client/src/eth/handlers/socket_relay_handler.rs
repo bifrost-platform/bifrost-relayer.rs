@@ -546,7 +546,7 @@ impl<T: 'static + JsonRpcClient> BootstrapHandler for SocketRelayHandler<T> {
 		*bootstrap_count += 1;
 
 		// If All thread complete the task, starts the blockManager
-		if *bootstrap_count == self.system_clients.len() as u8 {
+		if *bootstrap_count == self.bootstrap_shared_data.socket_barrier_len as u8 {
 			let mut bootstrap_guard = self.bootstrap_shared_data.bootstrap_states.write().await;
 
 			for state in bootstrap_guard.iter_mut() {

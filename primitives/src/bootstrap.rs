@@ -8,6 +8,8 @@ use crate::{
 
 #[derive(Clone)]
 pub struct BootstrapSharedData {
+	/// The socket barrier length.
+	pub socket_barrier_len: usize,
 	/// The barrier used to lock the system until the socket bootstrap process is done.
 	pub socket_barrier: Arc<Barrier>,
 	/// The barrier used to lock the system until the roundup bootstrap process is done.
@@ -33,7 +35,7 @@ impl BootstrapSharedData {
 			let mut ret: (BootstrapState, usize) = (BootstrapState::NormalStart, 1);
 			if let Some(bootstrap_config) = bootstrap_config.clone() {
 				if bootstrap_config.is_enabled {
-					ret = (BootstrapState::NodeSyncing, evm_providers.len() + 1);
+					ret = (BootstrapState::NodeSyncing, evm_providers.len() + 1 + 1); // add 1 for Bitcoin
 				}
 			}
 			ret
@@ -48,6 +50,7 @@ impl BootstrapSharedData {
 		let bootstrap_states = Arc::new(RwLock::new(vec![bootstrap_states; evm_providers.len()]));
 
 		Self {
+			socket_barrier_len,
 			socket_barrier,
 			roundup_barrier,
 			socket_bootstrap_count,

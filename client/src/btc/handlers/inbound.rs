@@ -5,7 +5,7 @@ use crate::{
 	},
 	eth::EthClient,
 };
-use bitcoincore_rpc::bitcoin::Transaction;
+
 use br_primitives::{
 	bootstrap::BootstrapSharedData,
 	eth::BootstrapState,
@@ -23,7 +23,7 @@ use std::sync::Arc;
 use tokio::sync::broadcast::Receiver;
 use tokio_stream::StreamExt;
 
-use super::{BootstrapHandler, TxRequester};
+use super::{BootstrapHandler, EventMessage, TxRequester};
 
 const SUB_LOG_TARGET: &str = "Inbound-handler";
 
@@ -163,7 +163,7 @@ impl<T: JsonRpcClient> BootstrapHandler for InboundHandler<T> {
 		unreachable!("unimplemented")
 	}
 
-	async fn get_bootstrap_events(&self) -> Vec<Transaction> {
+	async fn get_bootstrap_events(&self) -> (EventMessage, EventMessage) {
 		unreachable!("unimplemented")
 	}
 }

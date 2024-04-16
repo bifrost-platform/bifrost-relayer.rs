@@ -6,6 +6,7 @@ use crate::{
 use br_primitives::{
 	bootstrap::BootstrapSharedData,
 	constants::{
+		cli::DEFAULT_BOOTSTRAP_ROUND_OFFSET,
 		errors::PROVIDER_INTERNAL_ERROR,
 		tx::{DEFAULT_CALL_RETRIES, DEFAULT_CALL_RETRY_INTERVAL_MS},
 	},
@@ -14,8 +15,7 @@ use br_primitives::{
 };
 
 use bitcoincore_rpc::{
-	bitcoin::Transaction, bitcoincore_rpc_json::GetRawTransactionResultVout, Client as BtcClient,
-	RpcApi,
+	bitcoincore_rpc_json::GetRawTransactionResultVout, Client as BtcClient, RpcApi,
 };
 use ethers::providers::JsonRpcClient;
 use miniscript::bitcoin::{address::NetworkUnchecked, Address, Amount, Txid};
@@ -329,14 +329,80 @@ impl<T: JsonRpcClient + 'static> BootstrapHandler for BlockManager<T> {
 	}
 
 	async fn bootstrap(&self) {
+		let (inbound, outbound) = self.get_bootstrap_events().await;
+
 		log::info!(
 			target: LOG_TARGET,
-			"-[{}] ⚙️  [Bootstrap mode] Bootstrapping Bitcoin::Inbound transactions.",
+			"-[{}] ⚙️  [Bootstrap mode] Bootstrapping Bitcoin events: Inbound({:?}), Outbound({:?})",
 			sub_display_format(SUB_LOG_TARGET),
+			inbound.events.len(),
+			outbound.events.len()
 		);
+
+		self.sender.send(inbound).unwrap();
+		self.sender.send(outbound).unwrap();
+
+		let mut bootstrap_count = self.bootstrap_shared_data.socket_bootstrap_count.lock().await;
+		*bootstrap_count += 1;
+
+		if *bootstrap_count == self.bootstrap_shared_data.socket_barrier_len as u8 {
+			let mut bootstrap_guard = self.bootstrap_shared_data.bootstrap_states.write().await;
+
+			for state in bootstrap_guard.iter_mut() {
+				*state = BootstrapState::NormalStart;
+			}
+
+			log::info!(
+				target: "bifrost-relayer",
+				"-[{}] ⚙️  [Bootstrap mode] Bootstrap process successfully ended.",
+				sub_display_format(SUB_LOG_TARGET),
+			);
+		}
 	}
 
-	async fn get_bootstrap_events(&self) -> Vec<Transaction> {
-		todo!()
+	async fn get_bootstrap_events(&self) -> (EventMessage, EventMessage) {
+		let (vault_set, refund_set) = self.fetch_registration_sets().await;
+		let latest_block_number = self.get_block_count().await.unwrap();
+
+		let mut inbound = EventMessage::inbound(latest_block_number);
+		let mut outbound = EventMessage::outbound(latest_block_number);
+
+		if let Some(bootstrap_config) = &self.bootstrap_shared_data.bootstrap_config {
+			let round_info = self
+				.bfc_client
+				.contract_call(
+					self.bfc_client.protocol_contracts.authority.round_info(),
+					"authority.round_info",
+				)
+				.await;
+
+			let bootstrap_offset_height = self.get_bootstrap_offset_height_based_on_block_time(
+				bootstrap_config.round_offset.unwrap_or(DEFAULT_BOOTSTRAP_ROUND_OFFSET),
+				round_info,
+			);
+
+			let mut from_block = latest_block_number.saturating_sub(bootstrap_offset_height.into());
+			let to_block = latest_block_number;
+
+			while from_block <= to_block {
+				let block_hash = self.get_block_hash(from_block).await.unwrap();
+				let txs = self.get_block_info_with_txs(&block_hash).await.unwrap().tx;
+				let mut stream = tokio_stream::iter(txs.iter());
+
+				while let Some(tx) = stream.next().await {
+					self.filter(
+						tx.txid,
+						&tx.vout,
+						&mut inbound.events,
+						&mut outbound.events,
+						&vault_set,
+						&refund_set,
+					)
+					.await;
+				}
+				from_block = from_block.saturating_add(1);
+			}
+		}
+		(inbound, outbound)
 	}
 }
