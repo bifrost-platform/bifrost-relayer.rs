@@ -5,7 +5,6 @@ mod psbt_signer;
 pub use inbound::*;
 pub use outbound::*;
 pub use psbt_signer::*;
-use std::collections::BTreeSet;
 
 use crate::{
 	btc::{
@@ -17,6 +16,8 @@ use crate::{
 
 use br_primitives::{
 	bootstrap::BootstrapSharedData,
+	constants::config::{BITCOIN_BLOCK_TIME, NATIVE_BLOCK_TIME},
+	contracts::authority::RoundMetaData,
 	eth::{BootstrapState, GasCoefficient},
 	tx::{
 		BitcoinRelayMetadata, TxRequest, TxRequestMessage, TxRequestMetadata, TxRequestSender,
@@ -24,10 +25,9 @@ use br_primitives::{
 	},
 	utils::sub_display_format,
 };
-use ethers::types::Bytes;
-use ethers::{prelude::TransactionRequest, providers::JsonRpcClient};
+use ethers::{prelude::TransactionRequest, providers::JsonRpcClient, types::Bytes};
 use miniscript::bitcoin::Transaction;
-use std::sync::Arc;
+use std::{collections::BTreeSet, sync::Arc};
 
 #[async_trait::async_trait]
 pub trait XtRequester<T: JsonRpcClient> {
@@ -152,12 +152,16 @@ pub trait Handler {
 
 #[async_trait::async_trait]
 pub trait BootstrapHandler {
+	/// Fetch the shared bootstrap data.
 	fn bootstrap_shared_data(&self) -> Arc<BootstrapSharedData>;
 
+	/// Starts the bootstrap process.
 	async fn bootstrap(&self);
 
+	/// Fetch the historical events to bootstrap.
 	async fn get_bootstrap_events(&self) -> Vec<Transaction>;
 
+	/// Verifies whether the bootstrap state has been synced to the given state.
 	async fn is_bootstrap_state_synced_as(&self, state: BootstrapState) -> bool {
 		self.bootstrap_shared_data()
 			.bootstrap_states
@@ -165,5 +169,17 @@ pub trait BootstrapHandler {
 			.await
 			.iter()
 			.all(|s| *s == state)
+	}
+
+	/// Get factor between the block time of native-chain and block time of this chain.
+	/// We assume Bitcoin's average block time to 10m.
+	async fn get_bootstrap_offset_height_based_on_block_time(
+		&self,
+		round_offset: u32,
+		round_info: RoundMetaData,
+	) -> u32 {
+		let blocks = round_offset.checked_mul(round_info.round_length.as_u32()).unwrap();
+		let blocks_to_native_chain_time = blocks.checked_mul(NATIVE_BLOCK_TIME).unwrap();
+		blocks_to_native_chain_time / BITCOIN_BLOCK_TIME
 	}
 }

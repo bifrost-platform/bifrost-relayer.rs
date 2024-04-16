@@ -14,7 +14,8 @@ use br_primitives::{
 };
 
 use bitcoincore_rpc::{
-	bitcoincore_rpc_json::GetRawTransactionResultVout, Client as BtcClient, RpcApi,
+	bitcoin::Transaction, bitcoincore_rpc_json::GetRawTransactionResultVout, Client as BtcClient,
+	RpcApi,
 };
 use ethers::providers::JsonRpcClient;
 use miniscript::bitcoin::{address::NetworkUnchecked, Address, Amount, Txid};
@@ -29,6 +30,8 @@ use tokio::{
 	time::{sleep, Duration},
 };
 use tokio_stream::StreamExt;
+
+use super::handlers::BootstrapHandler;
 
 const SUB_LOG_TARGET: &str = "block-manager";
 
@@ -317,14 +320,23 @@ impl<T: JsonRpcClient + 'static> BlockManager<T> {
 	fn increment_waiting_block(&mut self, to: u64) {
 		self.waiting_block = to.saturating_add(1);
 	}
+}
 
-	#[inline]
-	pub async fn is_bootstrap_state_synced_as(&self, state: BootstrapState) -> bool {
-		self.bootstrap_shared_data
-			.bootstrap_states
-			.read()
-			.await
-			.iter()
-			.all(|s| *s == state)
+#[async_trait::async_trait]
+impl<T: JsonRpcClient + 'static> BootstrapHandler for BlockManager<T> {
+	fn bootstrap_shared_data(&self) -> Arc<BootstrapSharedData> {
+		self.bootstrap_shared_data.clone()
+	}
+
+	async fn bootstrap(&self) {
+		log::info!(
+			target: LOG_TARGET,
+			"-[{}] ⚙️  [Bootstrap mode] Bootstrapping Bitcoin::Inbound transactions.",
+			sub_display_format(SUB_LOG_TARGET),
+		);
+	}
+
+	async fn get_bootstrap_events(&self) -> Vec<Transaction> {
+		todo!()
 	}
 }

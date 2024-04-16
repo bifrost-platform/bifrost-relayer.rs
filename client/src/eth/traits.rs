@@ -527,6 +527,7 @@ where
 
 #[async_trait::async_trait]
 pub trait BootstrapHandler {
+	/// Fetch the shared bootstrap data.
 	fn bootstrap_shared_data(&self) -> Arc<BootstrapSharedData>;
 
 	/// Starts the bootstrap process.

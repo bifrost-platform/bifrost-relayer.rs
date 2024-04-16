@@ -1,10 +1,11 @@
 use crate::{
 	btc::{
 		block::{Event, EventMessage as BTCEventMessage, EventType},
-		handlers::{BootstrapHandler, Handler, LOG_TARGET},
+		handlers::{Handler, LOG_TARGET},
 	},
 	eth::EthClient,
 };
+use bitcoincore_rpc::bitcoin::Transaction;
 use br_primitives::{
 	bootstrap::BootstrapSharedData,
 	eth::BootstrapState,
@@ -13,18 +14,16 @@ use br_primitives::{
 };
 use std::collections::BTreeSet;
 
-use bitcoincore_rpc::bitcoin::Transaction;
-use ethers::types::Bytes;
 use ethers::{
 	providers::JsonRpcClient,
-	types::{Address as EthAddress, Address, TransactionRequest},
+	types::{Address as EthAddress, Address, Bytes, TransactionRequest},
 };
 use miniscript::bitcoin::{address::NetworkUnchecked, hashes::Hash, Address as BtcAddress};
 use std::sync::Arc;
 use tokio::sync::broadcast::Receiver;
 use tokio_stream::StreamExt;
 
-use super::TxRequester;
+use super::{BootstrapHandler, TxRequester};
 
 const SUB_LOG_TARGET: &str = "Inbound-handler";
 
@@ -161,10 +160,10 @@ impl<T: JsonRpcClient> BootstrapHandler for InboundHandler<T> {
 	}
 
 	async fn bootstrap(&self) {
-		todo!()
+		unreachable!("unimplemented")
 	}
 
 	async fn get_bootstrap_events(&self) -> Vec<Transaction> {
-		todo!()
+		unreachable!("unimplemented")
 	}
 }
