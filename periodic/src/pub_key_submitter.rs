@@ -4,18 +4,16 @@ use bitcoincore_rpc::bitcoin::PublicKey;
 use br_client::{btc::storage::keypair::KeypairStorage, eth::EthClient};
 use br_primitives::{
 	constants::{errors::INVALID_PERIODIC_SCHEDULE, schedule::PUB_KEY_SUBMITTER_SCHEDULE},
-	substrate::{
-		bifrost_runtime, AccountId20, EthereumSignature, Public, SubmitVaultKey, VaultKeySubmission,
-	},
-	tx::{SubmitVaultKeyMetadata, XtRequestMessage, XtRequestMetadata, XtRequestSender},
+	contracts::registration_pool::RegistrationPoolContract,
+	substrate::{bifrost_runtime, AccountId20, EthereumSignature, Public, VaultKeySubmission},
+	tx::{SubmitVaultKeyMetadata, XtRequest, XtRequestMessage, XtRequestMetadata, XtRequestSender},
 	utils::{convert_ethers_to_ecdsa_signature, sub_display_format},
 };
 use cron::Schedule;
 use ethers::{
-	providers::JsonRpcClient,
+	providers::{JsonRpcClient, Provider},
 	types::{Address, Bytes},
 };
-use subxt::tx::Payload;
 use tokio_stream::StreamExt;
 
 use crate::traits::PeriodicWorker;
@@ -70,7 +68,7 @@ impl<T: JsonRpcClient + 'static> PeriodicWorker for PubKeySubmitter<T> {
 						continue;
 					}
 
-					let pub_key = self.keypair_storage.create_new_keypair();
+					let pub_key = self.keypair_storage.create_new_keypair().await;
 					let (call, metadata) = self.build_unsigned_tx(who, pub_key);
 					self.request_send_transaction(call, metadata);
 				}
@@ -95,7 +93,8 @@ impl<T: JsonRpcClient> PubKeySubmitter<T> {
 		}
 	}
 
-	/// Build the payload for the unsigned transaction. (`submit_vault_key()`)
+	/// Build the payload for the unsigned transaction.
+	/// (`submit_vault_key()` or `submit_system_vault_key()`)
 	fn build_payload(
 		&self,
 		who: Address,
@@ -109,29 +108,42 @@ impl<T: JsonRpcClient> PubKeySubmitter<T> {
 			who: AccountId20(who.0),
 			pub_key: Public(converted_pub_key),
 		};
-		let signature = convert_ethers_to_ecdsa_signature(
-			self.client.wallet.sign_message(pub_key.to_bytes().as_slice()),
-		);
+		let message = array_bytes::bytes2hex("0x", converted_pub_key);
+		let signature =
+			convert_ethers_to_ecdsa_signature(self.client.wallet.sign_message(&message.as_bytes()));
 		(msg, signature)
 	}
 
-	/// Build the calldata for the unsigned transaction. (`submit_vault_key()`)
+	/// Build the calldata for the unsigned transaction.
+	/// (`submit_vault_key()` or `submit_system_vault_key()`)
 	fn build_unsigned_tx(
 		&self,
 		who: Address,
 		pub_key: PublicKey,
-	) -> (Payload<SubmitVaultKey>, SubmitVaultKeyMetadata) {
+	) -> (XtRequest, SubmitVaultKeyMetadata) {
 		let (msg, signature) = self.build_payload(who, pub_key);
 		let metadata = SubmitVaultKeyMetadata::new(who, pub_key);
-		(bifrost_runtime::tx().btc_registration_pool().submit_vault_key(msg, signature), metadata)
+		if who == self.registration_pool().address() {
+			(
+				XtRequest::from(
+					bifrost_runtime::tx()
+						.btc_registration_pool()
+						.submit_system_vault_key(msg, signature),
+				),
+				metadata,
+			)
+		} else {
+			(
+				XtRequest::from(
+					bifrost_runtime::tx().btc_registration_pool().submit_vault_key(msg, signature),
+				),
+				metadata,
+			)
+		}
 	}
 
 	/// Send the transaction request message to the channel.
-	fn request_send_transaction(
-		&self,
-		call: Payload<SubmitVaultKey>,
-		metadata: SubmitVaultKeyMetadata,
-	) {
+	fn request_send_transaction(&self, call: XtRequest, metadata: SubmitVaultKeyMetadata) {
 		match self.xt_request_sender.send(XtRequestMessage::new(
 			call.into(),
 			XtRequestMetadata::SubmitVaultKey(metadata.clone()),
@@ -168,11 +180,9 @@ impl<T: JsonRpcClient> PubKeySubmitter<T> {
 
 	/// Get the pending registrations.
 	async fn get_pending_registrations(&self) -> Vec<Address> {
-		let registration_pool = self.client.protocol_contracts.registration_pool.as_ref().unwrap();
-
 		self.client
 			.contract_call(
-				registration_pool.pending_registrations(),
+				self.registration_pool().pending_registrations(),
 				"registration_pool.pending_registrations",
 			)
 			.await
@@ -188,10 +198,14 @@ impl<T: JsonRpcClient> PubKeySubmitter<T> {
 
 		self.client
 			.contract_call(
-				registration_pool.registration_info(who),
+				self.registration_pool().registration_info(who),
 				"registration_pool.registration_info",
 			)
 			.await
+	}
+
+	fn registration_pool(&self) -> &RegistrationPoolContract<Provider<T>> {
+		self.client.protocol_contracts.registration_pool.as_ref().unwrap()
 	}
 
 	/// Verify whether the current relayer is an executive.

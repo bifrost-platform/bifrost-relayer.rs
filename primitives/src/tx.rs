@@ -294,7 +294,7 @@ impl SubmitVaultKeyMetadata {
 
 impl Display for SubmitVaultKeyMetadata {
 	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-		write!(f, "SubmitVaultKey({}:{:?})", self.who, self.key)
+		write!(f, "SubmitVaultKey({:?}:{})", self.who, self.key.to_string())
 	}
 }
 
@@ -379,7 +379,11 @@ pub enum XtRequest {
 	SubmitSignedPsbt(Payload<SubmitSignedPsbt>),
 	SubmitVaultKey(Payload<SubmitVaultKey>),
 	SubmitUnsignedPsbt(Payload<SubmitUnsignedPsbt>),
+<<<<<<< HEAD
 	SubmitExecutedRequest(Payload<SubmitExecutedRequest>),
+=======
+	SubmitSystemVaultKey(Payload<SubmitSystemVaultKey>),
+>>>>>>> d50efe4 (fix: resolve unsigned tx submissions)
 }
 
 impl TxPayload for XtRequest {
@@ -388,7 +392,11 @@ impl TxPayload for XtRequest {
 			XtRequest::SubmitSignedPsbt(call) => call.encode_call_data_to(metadata, out),
 			XtRequest::SubmitVaultKey(call) => call.encode_call_data_to(metadata, out),
 			XtRequest::SubmitUnsignedPsbt(call) => call.encode_call_data_to(metadata, out),
+<<<<<<< HEAD
 			XtRequest::SubmitExecutedRequest(call) => call.encode_call_data_to(metadata, out),
+=======
+			XtRequest::SubmitSystemVaultKey(call) => call.encode_call_data_to(metadata, out),
+>>>>>>> d50efe4 (fix: resolve unsigned tx submissions)
 		}
 	}
 }
@@ -401,7 +409,11 @@ impl TryFrom<XtRequest> for Payload<SubmitSignedPsbt> {
 			XtRequest::SubmitSignedPsbt(call) => Ok(call),
 			XtRequest::SubmitVaultKey(_) => Err(()),
 			XtRequest::SubmitUnsignedPsbt(_) => Err(()),
+<<<<<<< HEAD
 			XtRequest::SubmitExecutedRequest(_) => Err(()),
+=======
+			XtRequest::SubmitSystemVaultKey(_) => Err(()),
+>>>>>>> d50efe4 (fix: resolve unsigned tx submissions)
 		}
 	}
 }
@@ -411,6 +423,7 @@ impl TryFrom<XtRequest> for Payload<SubmitVaultKey> {
 	fn try_from(value: XtRequest) -> Result<Self, Self::Error> {
 		match value {
 			XtRequest::SubmitSignedPsbt(_) => Err(()),
+			XtRequest::SubmitSystemVaultKey(_) => Err(()),
 			XtRequest::SubmitVaultKey(call) => Ok(call),
 			XtRequest::SubmitUnsignedPsbt(_) => Err(()),
 			XtRequest::SubmitExecutedRequest(_) => Err(()),
@@ -425,6 +438,7 @@ impl TryFrom<XtRequest> for Payload<SubmitUnsignedPsbt> {
 		match value {
 			XtRequest::SubmitSignedPsbt(_) => Err(()),
 			XtRequest::SubmitVaultKey(_) => Err(()),
+			XtRequest::SubmitSystemVaultKey(_) => Err(()),
 			XtRequest::SubmitUnsignedPsbt(call) => Ok(call),
 			XtRequest::SubmitExecutedRequest(_) => Err(()),
 		}
@@ -440,6 +454,18 @@ impl TryFrom<XtRequest> for Payload<SubmitExecutedRequest> {
 			XtRequest::SubmitVaultKey(_) => Err(()),
 			XtRequest::SubmitUnsignedPsbt(_) => Err(()),
 			XtRequest::SubmitExecutedRequest(call) => Ok(call),
+		}
+	}
+}
+impl TryFrom<XtRequest> for Payload<SubmitSystemVaultKey> {
+	type Error = ();
+
+	fn try_from(value: XtRequest) -> Result<Self, Self::Error> {
+		match value {
+			XtRequest::SubmitSignedPsbt(_) => Err(()),
+			XtRequest::SubmitVaultKey(_) => Err(()),
+			XtRequest::SubmitUnsignedPsbt(_) => Err(()),
+			XtRequest::SubmitSystemVaultKey(call) => Ok(call),
 		}
 	}
 }
@@ -459,9 +485,15 @@ impl From<Payload<SubmitUnsignedPsbt>> for XtRequest {
 		Self::SubmitUnsignedPsbt(value)
 	}
 }
+<<<<<<< HEAD
 impl From<Payload<SubmitExecutedRequest>> for XtRequest {
 	fn from(value: Payload<SubmitExecutedRequest>) -> Self {
 		Self::SubmitExecutedRequest(value)
+=======
+impl From<Payload<SubmitSystemVaultKey>> for XtRequest {
+	fn from(value: Payload<SubmitSystemVaultKey>) -> Self {
+		Self::SubmitSystemVaultKey(value)
+>>>>>>> d50efe4 (fix: resolve unsigned tx submissions)
 	}
 }
 

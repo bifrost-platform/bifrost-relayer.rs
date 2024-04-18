@@ -107,6 +107,10 @@ impl<T: JsonRpcClient> ExtrinsicTask<T> for UnsignedTransactionTask<T> {
 	}
 
 	async fn try_send_unsigned_transaction(&self, msg: XtRequestMessage) {
+		if msg.retries_remaining == 0 {
+			return;
+		}
+
 		match self.sub_client.tx().create_unsigned::<XtRequest>(&msg.call) {
 			Ok(xt) => match xt.submit_and_watch().await {
 				Ok(progress) => match progress.wait_for_finalized_success().await {
