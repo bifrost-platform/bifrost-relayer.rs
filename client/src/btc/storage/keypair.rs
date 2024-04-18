@@ -75,17 +75,17 @@ impl KeypairStorage {
 		Self { inner: Arc::new(RwLock::new(inner)), db: Arc::new(keystore), network }
 	}
 
-	fn insert(&self, key: PublicKey, value: PrivateKey) -> Option<PrivateKey> {
-		let mut write_lock = self.inner.blocking_write();
+	async fn insert(&self, key: PublicKey, value: PrivateKey) -> Option<PrivateKey> {
+		let mut write_lock = self.inner.write().await;
 		write_lock.insert(key, value)
 	}
 
 	fn get(&self, key: &PublicKey) -> Option<PrivateKey> {
-		let read_lock = self.inner.blocking_read();
+		let read_lock = self.inner.try_read().expect(KEYSTORE_INTERNAL_ERROR);
 		read_lock.get(key).cloned()
 	}
 
-	pub fn create_new_keypair(&self) -> PublicKey {
+	pub async fn create_new_keypair(&mut self) -> PublicKey {
 		let key = self.db.ecdsa_generate_new(ECDSA, None).expect(KEYSTORE_INTERNAL_ERROR);
 		let public_key = PublicKey::from_slice(key.as_slice()).expect(KEYSTORE_INTERNAL_ERROR);
 
@@ -98,7 +98,8 @@ impl KeypairStorage {
 						public_key,
 						PrivateKey::from_slice(&pair.into_inner().seed(), self.network)
 							.expect(KEYSTORE_INTERNAL_ERROR),
-					);
+					)
+					.await;
 				}
 			},
 			Err(error) => {
