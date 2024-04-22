@@ -69,7 +69,4 @@ impl BootstrapSharedData {
 			socket_bootstrap_count: Arc::new(Default::default()),
 			roundup_bootstrap_count: Arc::new(Default::default()),
 			bootstrap_states: Arc::new(RwLock::new(vec![BootstrapState::NormalStart])),
-			bootstrap_config: None,
-		}
-	}
 }
