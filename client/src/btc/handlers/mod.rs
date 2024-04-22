@@ -45,6 +45,9 @@ pub trait XtRequester<T: JsonRpcClient> {
 				XtRequestMessage::new(call.into(), metadata.clone())
 			},
 			XtRequest::SubmitVaultKey(call) => XtRequestMessage::new(call.into(), metadata.clone()),
+			XtRequest::SubmitUnsignedPsbt(call) => {
+				XtRequestMessage::new(call.into(), metadata.clone())
+			},
 		};
 		match self.xt_request_sender().send(msg) {
 			Ok(_) => log::info!(
