@@ -16,6 +16,7 @@ use subxt::{
 };
 use tokio::sync::mpsc::{error::SendError, UnboundedSender};
 
+use crate::substrate::bifrost_runtime::btc_socket_queue::calls::types::SubmitUnsignedPsbt;
 use crate::{
 	constants::tx::{DEFAULT_TX_RETRIES, DEFAULT_TX_RETRY_INTERVAL_MS},
 	eth::{ChainID, GasCoefficient, SocketEventStatus},
@@ -339,6 +340,7 @@ impl Display for XtRequestMetadata {
 pub enum XtRequest {
 	SubmitSignedPsbt(Payload<SubmitSignedPsbt>),
 	SubmitVaultKey(Payload<SubmitVaultKey>),
+	SubmitUnsignedPsbt(Payload<SubmitUnsignedPsbt>),
 }
 
 impl TxPayload for XtRequest {
@@ -346,6 +348,7 @@ impl TxPayload for XtRequest {
 		match self {
 			XtRequest::SubmitSignedPsbt(call) => call.encode_call_data_to(metadata, out),
 			XtRequest::SubmitVaultKey(call) => call.encode_call_data_to(metadata, out),
+			XtRequest::SubmitUnsignedPsbt(call) => call.encode_call_data_to(metadata, out),
 		}
 	}
 }
@@ -357,6 +360,7 @@ impl TryFrom<XtRequest> for Payload<SubmitSignedPsbt> {
 		match value {
 			XtRequest::SubmitSignedPsbt(call) => Ok(call),
 			XtRequest::SubmitVaultKey(_) => Err(()),
+			XtRequest::SubmitUnsignedPsbt(_) => Err(()),
 		}
 	}
 }
@@ -367,6 +371,19 @@ impl TryFrom<XtRequest> for Payload<SubmitVaultKey> {
 		match value {
 			XtRequest::SubmitSignedPsbt(_) => Err(()),
 			XtRequest::SubmitVaultKey(call) => Ok(call),
+			XtRequest::SubmitUnsignedPsbt(_) => Err(()),
+		}
+	}
+}
+
+impl TryFrom<XtRequest> for Payload<SubmitUnsignedPsbt> {
+	type Error = ();
+
+	fn try_from(value: XtRequest) -> Result<Self, Self::Error> {
+		match value {
+			XtRequest::SubmitSignedPsbt(_) => Err(()),
+			XtRequest::SubmitVaultKey(_) => Err(()),
+			XtRequest::SubmitUnsignedPsbt(call) => Ok(call),
 		}
 	}
 }
@@ -379,6 +396,11 @@ impl From<Payload<SubmitSignedPsbt>> for XtRequest {
 impl From<Payload<SubmitVaultKey>> for XtRequest {
 	fn from(value: Payload<SubmitVaultKey>) -> Self {
 		Self::SubmitVaultKey(value)
+	}
+}
+impl From<Payload<SubmitUnsignedPsbt>> for XtRequest {
+	fn from(value: Payload<SubmitUnsignedPsbt>) -> Self {
+		Self::SubmitUnsignedPsbt(value)
 	}
 }
 
