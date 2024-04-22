@@ -56,4 +56,15 @@ impl BootstrapSharedData {
 			bootstrap_config: bootstrap_config.clone(),
 		}
 	}
+
+	pub fn dummy() -> Self {
+		Self {
+			socket_barrier: Arc::new(Barrier::new(0)),
+			roundup_barrier: Arc::new(Barrier::new(0)),
+			socket_bootstrap_count: Arc::new(Default::default()),
+			roundup_bootstrap_count: Arc::new(Default::default()),
+			bootstrap_states: Arc::new(Default::default()),
+			bootstrap_config: None,
+		}
+	}
 }
