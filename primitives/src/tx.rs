@@ -317,10 +317,29 @@ impl Display for SubmitSignedPsbtMetadata {
 	}
 }
 
+#[derive(Clone, Debug)]
+/// The metadata used for signed psbt submission.
+pub struct SubmitUnsignedPsbtMetadata {
+	pub unsigned_psbt: H256,
+}
+
+impl SubmitUnsignedPsbtMetadata {
+	pub fn new(unsigned_psbt: H256) -> Self {
+		Self { unsigned_psbt }
+	}
+}
+
+impl Display for SubmitUnsignedPsbtMetadata {
+	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		write!(f, "SubmitUnsignedPsbt({})", self.unsigned_psbt)
+	}
+}
+
 #[derive(Clone)]
 pub enum XtRequestMetadata {
 	SubmitVaultKey(SubmitVaultKeyMetadata),
 	SubmitSignedPsbt(SubmitSignedPsbtMetadata),
+	SubmitUnsignedPsbt(SubmitUnsignedPsbtMetadata),
 }
 
 impl Display for XtRequestMetadata {
@@ -331,6 +350,7 @@ impl Display for XtRequestMetadata {
 			match self {
 				XtRequestMetadata::SubmitVaultKey(metadata) => metadata.to_string(),
 				XtRequestMetadata::SubmitSignedPsbt(metadata) => metadata.to_string(),
+				XtRequestMetadata::SubmitUnsignedPsbt(metadata) => metadata.to_string(),
 			}
 		)
 	}
