@@ -16,6 +16,7 @@ use subxt::{
 };
 use tokio::sync::mpsc::{error::SendError, UnboundedSender};
 
+use crate::substrate::bifrost_runtime::btc_socket_queue::calls::types::SubmitUnsignedPsbt;
 use crate::{
 	constants::tx::{DEFAULT_TX_RETRIES, DEFAULT_TX_RETRY_INTERVAL_MS},
 	eth::{ChainID, GasCoefficient, SocketEventStatus},
