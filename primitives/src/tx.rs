@@ -16,12 +16,11 @@ use subxt::{
 };
 use tokio::sync::mpsc::{error::SendError, UnboundedSender};
 
-use crate::substrate::bifrost_runtime::btc_socket_queue::calls::types::SubmitUnsignedPsbt;
 use crate::{
 	constants::tx::{DEFAULT_TX_RETRIES, DEFAULT_TX_RETRY_INTERVAL_MS},
 	eth::{ChainID, GasCoefficient, SocketEventStatus},
 	periodic::PriceResponse,
-	substrate::{SubmitSignedPsbt, SubmitVaultKey},
+	substrate::{SubmitExecutedRequest, SubmitSignedPsbt, SubmitUnsignedPsbt, SubmitVaultKey},
 };
 
 #[derive(Clone, Debug)]
@@ -318,7 +317,7 @@ impl Display for SubmitSignedPsbtMetadata {
 }
 
 #[derive(Clone, Debug)]
-/// The metadata used for signed psbt submission.
+/// The metadata used for unsigned psbt submission.
 pub struct SubmitUnsignedPsbtMetadata {
 	pub unsigned_psbt: H256,
 }
@@ -335,11 +334,29 @@ impl Display for SubmitUnsignedPsbtMetadata {
 	}
 }
 
+#[derive(Clone, Debug)]
+pub struct SubmitExecutedRequestMetadata {
+	pub txid: H256,
+}
+
+impl SubmitExecutedRequestMetadata {
+	pub fn new(txid: H256) -> Self {
+		Self { txid }
+	}
+}
+
+impl Display for SubmitExecutedRequestMetadata {
+	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		write!(f, "SubmitExecutedRequest({})", self.txid)
+	}
+}
+
 #[derive(Clone)]
 pub enum XtRequestMetadata {
 	SubmitVaultKey(SubmitVaultKeyMetadata),
 	SubmitSignedPsbt(SubmitSignedPsbtMetadata),
 	SubmitUnsignedPsbt(SubmitUnsignedPsbtMetadata),
+	SubmitExecutedRequest(SubmitExecutedRequestMetadata),
 }
 
 impl Display for XtRequestMetadata {
@@ -351,6 +368,7 @@ impl Display for XtRequestMetadata {
 				XtRequestMetadata::SubmitVaultKey(metadata) => metadata.to_string(),
 				XtRequestMetadata::SubmitSignedPsbt(metadata) => metadata.to_string(),
 				XtRequestMetadata::SubmitUnsignedPsbt(metadata) => metadata.to_string(),
+				XtRequestMetadata::SubmitExecutedRequest(metadata) => metadata.to_string(),
 			}
 		)
 	}
@@ -361,6 +379,7 @@ pub enum XtRequest {
 	SubmitSignedPsbt(Payload<SubmitSignedPsbt>),
 	SubmitVaultKey(Payload<SubmitVaultKey>),
 	SubmitUnsignedPsbt(Payload<SubmitUnsignedPsbt>),
+	SubmitExecutedRequest(Payload<SubmitExecutedRequest>),
 }
 
 impl TxPayload for XtRequest {
@@ -369,6 +388,7 @@ impl TxPayload for XtRequest {
 			XtRequest::SubmitSignedPsbt(call) => call.encode_call_data_to(metadata, out),
 			XtRequest::SubmitVaultKey(call) => call.encode_call_data_to(metadata, out),
 			XtRequest::SubmitUnsignedPsbt(call) => call.encode_call_data_to(metadata, out),
+			XtRequest::SubmitExecutedRequest(call) => call.encode_call_data_to(metadata, out),
 		}
 	}
 }
@@ -381,6 +401,7 @@ impl TryFrom<XtRequest> for Payload<SubmitSignedPsbt> {
 			XtRequest::SubmitSignedPsbt(call) => Ok(call),
 			XtRequest::SubmitVaultKey(_) => Err(()),
 			XtRequest::SubmitUnsignedPsbt(_) => Err(()),
+			XtRequest::SubmitExecutedRequest(_) => Err(()),
 		}
 	}
 }
@@ -392,6 +413,7 @@ impl TryFrom<XtRequest> for Payload<SubmitVaultKey> {
 			XtRequest::SubmitSignedPsbt(_) => Err(()),
 			XtRequest::SubmitVaultKey(call) => Ok(call),
 			XtRequest::SubmitUnsignedPsbt(_) => Err(()),
+			XtRequest::SubmitExecutedRequest(_) => Err(()),
 		}
 	}
 }
@@ -404,6 +426,20 @@ impl TryFrom<XtRequest> for Payload<SubmitUnsignedPsbt> {
 			XtRequest::SubmitSignedPsbt(_) => Err(()),
 			XtRequest::SubmitVaultKey(_) => Err(()),
 			XtRequest::SubmitUnsignedPsbt(call) => Ok(call),
+			XtRequest::SubmitExecutedRequest(_) => Err(()),
+		}
+	}
+}
+
+impl TryFrom<XtRequest> for Payload<SubmitExecutedRequest> {
+	type Error = ();
+
+	fn try_from(value: XtRequest) -> Result<Self, Self::Error> {
+		match value {
+			XtRequest::SubmitSignedPsbt(_) => Err(()),
+			XtRequest::SubmitVaultKey(_) => Err(()),
+			XtRequest::SubmitUnsignedPsbt(_) => Err(()),
+			XtRequest::SubmitExecutedRequest(call) => Ok(call),
 		}
 	}
 }
@@ -421,6 +457,11 @@ impl From<Payload<SubmitVaultKey>> for XtRequest {
 impl From<Payload<SubmitUnsignedPsbt>> for XtRequest {
 	fn from(value: Payload<SubmitUnsignedPsbt>) -> Self {
 		Self::SubmitUnsignedPsbt(value)
+	}
+}
+impl From<Payload<SubmitExecutedRequest>> for XtRequest {
+	fn from(value: Payload<SubmitExecutedRequest>) -> Self {
+		Self::SubmitExecutedRequest(value)
 	}
 }
 

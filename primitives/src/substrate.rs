@@ -16,8 +16,8 @@ pub use runtime_types::pallet_btc_socket_queue::{
 };
 pub use runtime_types::sp_core::ecdsa::Signature;
 
-pub use bifrost_runtime::btc_registration_pool::calls::types::SubmitVaultKey;
-pub use bifrost_runtime::btc_socket_queue::calls::types::SubmitSignedPsbt;
+pub use bifrost_runtime::btc_registration_pool::calls::types::*;
+pub use bifrost_runtime::btc_socket_queue::calls::types::*;
 
 use subxt::config::{Config, DefaultExtrinsicParams, SubstrateConfig};
 
