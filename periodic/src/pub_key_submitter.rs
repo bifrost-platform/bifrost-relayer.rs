@@ -11,6 +11,7 @@ use br_primitives::{
 	utils::{convert_ethers_to_ecdsa_signature, sub_display_format},
 };
 use cron::Schedule;
+use ethers::prelude::Bytes;
 use ethers::{providers::JsonRpcClient, types::Address};
 use subxt::tx::Payload;
 use tokio_stream::StreamExt;
@@ -180,7 +181,7 @@ impl<T: JsonRpcClient> PubKeySubmitter<T> {
 	async fn get_registration_info(
 		&self,
 		who: Address,
-	) -> (Address, String, String, Vec<Address>, Vec<String>) {
+	) -> (Address, String, String, Vec<Address>, Vec<Bytes>) {
 		let registration_pool = self.client.protocol_contracts.registration_pool.as_ref().unwrap();
 
 		self.client
