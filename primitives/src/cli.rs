@@ -139,6 +139,8 @@ pub struct BTCProvider {
 	pub username: Option<String>,
 	/// Optional. The provider password credential.
 	pub password: Option<String>,
+	/// Optional
+	pub id: Option<u32>,
 }
 
 #[derive(Debug, Clone, Deserialize, PartialEq)]
