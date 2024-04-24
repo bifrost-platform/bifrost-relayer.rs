@@ -316,6 +316,18 @@ impl<T: JsonRpcClient> AggregatorContracts<T> {
 	}
 }
 
+impl<T: JsonRpcClient> Default for AggregatorContracts<T> {
+	fn default() -> Self {
+		Self {
+			chainlink_usdc_usd: None,
+			chainlink_usdt_usd: None,
+			chainlink_dai_usd: None,
+			chainlink_btc_usd: None,
+			chainlink_wbtc_usd: None,
+		}
+	}
+}
+
 /// The protocol contract instances of the EVM provider.
 pub struct ProtocolContracts<T> {
 	/// SocketContract
