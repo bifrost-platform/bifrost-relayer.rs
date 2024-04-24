@@ -74,14 +74,16 @@ impl PendingOutboundPool {
 		}
 	}
 
-	pub async fn pop_next_outputs(&self) -> HashMap<String, Amount> {
-		let mut ret = HashMap::new();
+	pub async fn pop_next_outputs(&self) -> (HashMap<String, Amount>, Vec<SocketMessage>) {
+		let mut outputs = HashMap::new();
+		let mut socket_messages = vec![];
 		let mut keys_to_remove = vec![];
 
 		let mut write_lock = self.inner.write().await;
 		for (address, amount_vec) in write_lock.iter_mut() {
 			if let Some(first_amount) = amount_vec.pop() {
-				ret.insert(address.assume_checked_ref().to_string(), first_amount.amount);
+				outputs.insert(address.assume_checked_ref().to_string(), first_amount.amount);
+				socket_messages.push(first_amount.socket_message);
 				if amount_vec.is_empty() {
 					keys_to_remove.push(address.clone());
 				}
@@ -92,7 +94,7 @@ impl PendingOutboundPool {
 			write_lock.remove(&key);
 		}
 
-		ret
+		(outputs, socket_messages)
 	}
 }
 
