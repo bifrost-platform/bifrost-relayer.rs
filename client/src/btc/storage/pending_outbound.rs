@@ -1,4 +1,4 @@
-use br_primitives::contracts::socket::RequestID;
+use br_primitives::contracts::socket::SocketMessage;
 use miniscript::bitcoin::{address::NetworkUnchecked, Address, Amount};
 use std::collections::HashMap;
 use std::{collections::BTreeMap, sync::Arc};
@@ -6,7 +6,7 @@ use tokio::sync::RwLock;
 
 #[derive(Debug, Clone)]
 pub struct PendingOutboundValue {
-	pub request_id: RequestID,
+	pub socket_message: SocketMessage,
 	pub amount: Amount,
 }
 
