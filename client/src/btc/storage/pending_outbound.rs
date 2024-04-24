@@ -1,5 +1,6 @@
 use br_primitives::contracts::socket::RequestID;
 use miniscript::bitcoin::{address::NetworkUnchecked, Address, Amount};
+use std::collections::HashMap;
 use std::{collections::BTreeMap, sync::Arc};
 use tokio::sync::RwLock;
 
@@ -71,6 +72,27 @@ impl PendingOutboundPool {
 			},
 			None => None,
 		}
+	}
+
+	pub async fn pop_next_outputs(&self) -> HashMap<String, Amount> {
+		let mut ret = HashMap::new();
+		let mut keys_to_remove = vec![];
+
+		let mut write_lock = self.inner.write().await;
+		for (address, amount_vec) in write_lock.iter_mut() {
+			if let Some(first_amount) = amount_vec.pop() {
+				ret.insert(address.assume_checked_ref().to_string(), first_amount.amount);
+				if amount_vec.is_empty() {
+					keys_to_remove.push(address.clone());
+				}
+			}
+		}
+
+		for key in keys_to_remove {
+			write_lock.remove(&key);
+		}
+
+		ret
 	}
 }
 
