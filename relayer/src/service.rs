@@ -63,6 +63,7 @@ pub fn relay(config: Configuration) -> Result<TaskManager, ServiceError> {
 
 /// Initializes periodic components.
 fn construct_periodics(
+	config: &Configuration,
 	bootstrap_shared_data: BootstrapSharedData,
 	relayer_deps: &ManagerDeps,
 ) -> PeriodicDeps {
@@ -87,8 +88,11 @@ fn construct_periodics(
 
 	// initialize socket rollback handlers
 	tx_request_senders.iter().for_each(|tx_request_sender| {
-		let (rollback_emitter, rollback_sender) =
-			SocketRollbackEmitter::new(tx_request_sender.clone(), clients.clone());
+		let (rollback_emitter, rollback_sender) = SocketRollbackEmitter::new(
+			tx_request_sender.clone(),
+			clients.clone(),
+			config.relayer_config.btc_provider.id,
+		);
 		rollback_emitters.push(rollback_emitter);
 		rollback_senders.insert(
 			tx_request_sender.id,
@@ -618,7 +622,7 @@ fn new_relay_base(config: Configuration) -> Result<RelayBase, ServiceError> {
 	let pending_outbounds = PendingOutboundPool::new();
 
 	let manager_deps = construct_managers(&config, bootstrap_shared_data.clone(), &task_manager);
-	let periodic_deps = construct_periodics(bootstrap_shared_data.clone(), &manager_deps);
+	let periodic_deps = construct_periodics(&config, bootstrap_shared_data.clone(), &manager_deps);
 	let handler_deps =
 		construct_handlers(&config, &periodic_deps, &manager_deps, bootstrap_shared_data.clone());
 	let substrate_deps = construct_substrate_deps(&manager_deps, &task_manager);
