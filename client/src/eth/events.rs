@@ -186,7 +186,7 @@ impl<T: JsonRpcClient> EventManager<T> {
 				SyncingStatus::IsSyncing(status) => {
 					log::info!(
 						target: &self.client.get_chain_name(),
-						"-[{}] ⚙️  Syncing #{:?}, Highest: #{:?}",
+						"-[{}] ⚙️  Syncing: #{:?}, Highest: #{:?}",
 						sub_display_format(SUB_LOG_TARGET),
 						status.current_block,
 						status.highest_block,
@@ -195,7 +195,7 @@ impl<T: JsonRpcClient> EventManager<T> {
 				SyncingStatus::IsArbitrumSyncing(status) => {
 					log::info!(
 						target: &self.client.get_chain_name(),
-						"-[{}] ⚙️  Syncing #{:?}, Highest: #{:?}",
+						"-[{}] ⚙️  Processed batch: #{:?}, Last batch: #{:?}",
 						sub_display_format(SUB_LOG_TARGET),
 						status.batch_processed,
 						status.batch_seen
