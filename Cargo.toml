@@ -50,7 +50,7 @@ serde = "1.0.188"
 serde_json = "1.0.107"
 
 hex = "0.4.3"
-ethers = "2.0.10"
+ethers = { git = "https://github.com/bifrost-platform/ethers-rs", tag = "ethers-v2.0.10-arbitrum-support" }
 k256 = "0.13.1"
 sha3 = "0.10.8"
 
