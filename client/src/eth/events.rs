@@ -172,21 +172,35 @@ impl<T: JsonRpcClient> EventManager<T> {
 	/// Verifies if the connected provider is in block sync mode.
 	pub async fn wait_provider_sync(&self) {
 		loop {
-			if let SyncingStatus::IsSyncing(status) = self.client.is_syncing().await {
-				log::info!(
-					target: &self.client.get_chain_name(),
-					"-[{}] ⚙️  Syncing #{:?}, Highest: #{:?}",
-					sub_display_format(SUB_LOG_TARGET),
-					status.current_block,
-					status.highest_block,
-				);
-			} else {
-				for state in self.bootstrap_shared_data.bootstrap_states.write().await.iter_mut() {
-					if *state == BootstrapState::NodeSyncing {
-						*state = BootstrapState::BootstrapRoundUpPhase1;
+			match self.client.is_syncing().await {
+				SyncingStatus::IsFalse => {
+					for state in
+						self.bootstrap_shared_data.bootstrap_states.write().await.iter_mut()
+					{
+						if *state == BootstrapState::NodeSyncing {
+							*state = BootstrapState::BootstrapRoundUpPhase1;
+						}
 					}
-				}
-				return;
+					return;
+				},
+				SyncingStatus::IsSyncing(status) => {
+					log::info!(
+						target: &self.client.get_chain_name(),
+						"-[{}] ⚙️  Syncing #{:?}, Highest: #{:?}",
+						sub_display_format(SUB_LOG_TARGET),
+						status.current_block,
+						status.highest_block,
+					);
+				},
+				SyncingStatus::IsArbitrumSyncing(status) => {
+					log::info!(
+						target: &self.client.get_chain_name(),
+						"-[{}] ⚙️  Syncing #{:?}, Highest: #{:?}",
+						sub_display_format(SUB_LOG_TARGET),
+						status.batch_processed,
+						status.batch_seen
+					)
+				},
 			}
 
 			sleep(Duration::from_millis(self.client.metadata.call_interval)).await;
