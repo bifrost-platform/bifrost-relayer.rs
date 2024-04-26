@@ -373,13 +373,13 @@ impl<T: JsonRpcClient + 'static> BootstrapHandler for BlockManager<T> {
 	async fn get_bootstrap_events(&self) -> (EventMessage, EventMessage) {
 		let (vault_set, refund_set) = self.fetch_registration_sets().await;
 
-		let to_block = self.waiting_block.saturating_sub(1);
+		let to_block = self.waiting_block;
 		let from_block = to_block.saturating_sub(self.bootstrap_offset.into());
 
 		let mut inbound = EventMessage::inbound(to_block);
 		let mut outbound = EventMessage::outbound(to_block);
 
-		for i in from_block..=to_block {
+		for i in from_block..to_block {
 			let block_hash = self.get_block_hash(i).await.unwrap();
 			let txs = self.get_block_info_with_txs(&block_hash).await.unwrap().tx;
 			let mut stream = tokio_stream::iter(txs);
