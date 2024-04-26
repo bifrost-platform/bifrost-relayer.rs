@@ -131,6 +131,8 @@ pub struct EVMProvider {
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct BTCProvider {
+	/// The bitcoin chain ID used for CCCP.
+	pub id: u32,
 	/// The Bitcoin provider URL.
 	pub provider: String,
 	/// The chain network. (Allowed values: `main`, `test`, `signet`, `regtest`)
@@ -139,8 +141,8 @@ pub struct BTCProvider {
 	pub username: Option<String>,
 	/// Optional. The provider password credential.
 	pub password: Option<String>,
-	/// Optional
-	pub id: Option<u32>,
+	/// Optional. The bootstrap offset in blocks.
+	pub bootstrap_offset: Option<u32>,
 }
 
 #[derive(Debug, Clone, Deserialize, PartialEq)]
