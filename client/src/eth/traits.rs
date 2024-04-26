@@ -1,6 +1,7 @@
 use std::{error::Error, str::FromStr, sync::Arc, time::Duration};
 
 use br_primitives::{
+	bootstrap::BootstrapSharedData,
 	contracts::socket::{PollSubmit, Signatures, SocketMessage},
 	eth::{BootstrapState, BuiltRelayTransaction, ChainID, GasCoefficient, RecoveredSignature},
 	tx::{FlushMetadata, TxRequest, TxRequestMessage, TxRequestMetadata},
@@ -526,6 +527,9 @@ where
 
 #[async_trait::async_trait]
 pub trait BootstrapHandler {
+	/// Fetch the shared bootstrap data.
+	fn bootstrap_shared_data(&self) -> Arc<BootstrapSharedData>;
+
 	/// Starts the bootstrap process.
 	async fn bootstrap(&self);
 
@@ -533,5 +537,12 @@ pub trait BootstrapHandler {
 	async fn get_bootstrap_events(&self) -> Vec<Log>;
 
 	/// Verifies whether the bootstrap state has been synced to the given state.
-	async fn is_bootstrap_state_synced_as(&self, state: BootstrapState) -> bool;
+	async fn is_bootstrap_state_synced_as(&self, state: BootstrapState) -> bool {
+		self.bootstrap_shared_data()
+			.bootstrap_states
+			.read()
+			.await
+			.iter()
+			.all(|s| *s == state)
+	}
 }

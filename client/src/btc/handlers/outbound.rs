@@ -1,11 +1,11 @@
 use crate::{
 	btc::{
 		block::{Event, EventMessage as BTCEventMessage, EventType},
-		handlers::{BootstrapHandler, Handler, LOG_TARGET},
+		handlers::{Handler, LOG_TARGET},
 	},
 	eth::{traits::SocketRelayBuilder, EthClient},
 };
-use bitcoincore_rpc::bitcoin::Transaction;
+
 use br_primitives::{
 	bootstrap::BootstrapSharedData,
 	contracts::{socket::SocketMessage, socket_queue::SocketQueueContract},
@@ -20,14 +20,13 @@ use ethers::{
 	types::{Address as EthAddress, Bytes},
 };
 use miniscript::bitcoin::{address::NetworkUnchecked, Address as BtcAddress, Amount, Txid};
-use std::collections::BTreeSet;
-use std::sync::Arc;
+use std::{collections::BTreeSet, sync::Arc};
 use tokio::sync::broadcast::Receiver;
 use tokio_stream::StreamExt;
 
-use super::TxRequester;
+use super::{BootstrapHandler, EventMessage, TxRequester};
 
-const SUB_LOG_TARGET: &str = "Outbound-handler";
+const SUB_LOG_TARGET: &str = "outbound-handler";
 
 pub struct OutboundHandler<T> {
 	bfc_client: Arc<EthClient<T>>,
@@ -221,21 +220,16 @@ impl<T: JsonRpcClient + 'static> SocketRelayBuilder<T> for OutboundHandler<T> {
 }
 
 #[async_trait::async_trait]
-impl<T: JsonRpcClient + 'static> BootstrapHandler for OutboundHandler<T> {
+impl<T: JsonRpcClient> BootstrapHandler for OutboundHandler<T> {
+	fn bootstrap_shared_data(&self) -> Arc<BootstrapSharedData> {
+		self.bootstrap_shared_data.clone()
+	}
+
 	async fn bootstrap(&self) {
-		todo!()
+		unreachable!("unimplemented")
 	}
 
-	async fn get_bootstrap_events(&self) -> Vec<Transaction> {
-		todo!()
-	}
-
-	async fn is_bootstrap_state_synced_as(&self, state: BootstrapState) -> bool {
-		self.bootstrap_shared_data
-			.bootstrap_states
-			.read()
-			.await
-			.iter()
-			.all(|s| *s == state)
+	async fn get_bootstrap_events(&self) -> (EventMessage, EventMessage) {
+		unreachable!("unimplemented")
 	}
 }

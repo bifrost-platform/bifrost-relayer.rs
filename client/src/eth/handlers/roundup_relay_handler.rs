@@ -362,6 +362,10 @@ impl<T: JsonRpcClient> RoundupRelayHandler<T> {
 
 #[async_trait]
 impl<T: JsonRpcClient> BootstrapHandler for RoundupRelayHandler<T> {
+	fn bootstrap_shared_data(&self) -> Arc<BootstrapSharedData> {
+		self.bootstrap_shared_data.clone()
+	}
+
 	async fn bootstrap(&self) {
 		log::info!(
 			target: &self.client.get_chain_name(),
@@ -446,15 +450,5 @@ impl<T: JsonRpcClient> BootstrapHandler for RoundupRelayHandler<T> {
 		}
 
 		logs
-	}
-
-	/// Verifies whether the bootstrap state has been synced to the given state.
-	async fn is_bootstrap_state_synced_as(&self, state: BootstrapState) -> bool {
-		self.bootstrap_shared_data
-			.bootstrap_states
-			.read()
-			.await
-			.iter()
-			.all(|s| *s == state)
 	}
 }
