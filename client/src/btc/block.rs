@@ -6,7 +6,6 @@ use crate::{
 use br_primitives::{
 	bootstrap::BootstrapSharedData,
 	constants::{
-		cli::DEFAULT_BOOTSTRAP_ROUND_OFFSET,
 		errors::PROVIDER_INTERNAL_ERROR,
 		tx::{DEFAULT_CALL_RETRIES, DEFAULT_CALL_RETRY_INTERVAL_MS},
 	},
@@ -106,6 +105,8 @@ pub struct BlockManager<T> {
 	waiting_block: u64,
 	/// The bootstrap shared data.
 	bootstrap_shared_data: Arc<BootstrapSharedData>,
+	/// The bootstrap offset in blocks.
+	bootstrap_offset: u32,
 	/// TODO: need usecase
 	_pending_outbounds: PendingOutboundPool,
 }
@@ -145,6 +146,7 @@ impl<T: JsonRpcClient + 'static> BlockManager<T> {
 		bfc_client: Arc<EthClient<T>>,
 		_pending_outbounds: PendingOutboundPool,
 		bootstrap_shared_data: Arc<BootstrapSharedData>,
+		bootstrap_offset: u32,
 	) -> Self {
 		let (sender, _receiver) = broadcast::channel(512);
 
@@ -155,6 +157,7 @@ impl<T: JsonRpcClient + 'static> BlockManager<T> {
 			block_confirmations: 0,
 			waiting_block: 0,
 			bootstrap_shared_data,
+			bootstrap_offset,
 			_pending_outbounds,
 		}
 	}
@@ -369,42 +372,28 @@ impl<T: JsonRpcClient + 'static> BootstrapHandler for BlockManager<T> {
 
 	async fn get_bootstrap_events(&self) -> (EventMessage, EventMessage) {
 		let (vault_set, refund_set) = self.fetch_registration_sets().await;
+
 		let to_block = self.waiting_block.saturating_sub(1);
+		let from_block = to_block.saturating_sub(self.bootstrap_offset.into());
 
 		let mut inbound = EventMessage::inbound(to_block);
 		let mut outbound = EventMessage::outbound(to_block);
 
-		if let Some(bootstrap_config) = &self.bootstrap_shared_data.bootstrap_config {
-			let round_info = self
-				.bfc_client
-				.contract_call(
-					self.bfc_client.protocol_contracts.authority.round_info(),
-					"authority.round_info",
+		for i in from_block..=to_block {
+			let block_hash = self.get_block_hash(i).await.unwrap();
+			let txs = self.get_block_info_with_txs(&block_hash).await.unwrap().tx;
+			let mut stream = tokio_stream::iter(txs);
+
+			while let Some(tx) = stream.next().await {
+				self.filter(
+					tx.txid,
+					&tx.vout,
+					&mut inbound.events,
+					&mut outbound.events,
+					&vault_set,
+					&refund_set,
 				)
 				.await;
-
-			let bootstrap_offset_height = self.get_bootstrap_offset_height_based_on_block_time(
-				bootstrap_config.round_offset.unwrap_or(DEFAULT_BOOTSTRAP_ROUND_OFFSET),
-				round_info,
-			);
-
-			let from_block = to_block.saturating_sub(bootstrap_offset_height.into());
-			for i in from_block..=to_block {
-				let block_hash = self.get_block_hash(i).await.unwrap();
-				let txs = self.get_block_info_with_txs(&block_hash).await.unwrap().tx;
-				let mut stream = tokio_stream::iter(txs);
-
-				while let Some(tx) = stream.next().await {
-					self.filter(
-						tx.txid,
-						&tx.vout,
-						&mut inbound.events,
-						&mut outbound.events,
-						&vault_set,
-						&refund_set,
-					)
-					.await;
-				}
 			}
 		}
 		(inbound, outbound)
