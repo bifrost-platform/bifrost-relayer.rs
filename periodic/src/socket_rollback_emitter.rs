@@ -39,6 +39,8 @@ pub struct SocketRollbackEmitter<T> {
 	tx_request_sender: Arc<TxRequestSender>,
 	/// The time schedule that represents when to check heartbeat pulsed.
 	schedule: Schedule,
+	/// The bitcoin chain ID used for CCCP.
+	bitcoin_chain_id: u32,
 }
 
 impl<T: JsonRpcClient> SocketRollbackEmitter<T> {
@@ -46,6 +48,7 @@ impl<T: JsonRpcClient> SocketRollbackEmitter<T> {
 	pub fn new(
 		tx_request_sender: Arc<TxRequestSender>,
 		system_clients_vec: Vec<Arc<EthClient<T>>>,
+		bitcoin_chain_id: u32,
 	) -> (Self, UnboundedSender<SocketMessage>) {
 		let (sender, rollback_receiver) = mpsc::unbounded_channel::<SocketMessage>();
 
@@ -63,6 +66,7 @@ impl<T: JsonRpcClient> SocketRollbackEmitter<T> {
 				tx_request_sender,
 				schedule: Schedule::from_str(ROLLBACK_CHECK_SCHEDULE)
 					.expect(INVALID_PERIODIC_SCHEDULE),
+				bitcoin_chain_id,
 			},
 			sender,
 		)

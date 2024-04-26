@@ -214,8 +214,6 @@ impl<T: JsonRpcClient> PubKeySubmitter<T> {
 		&self,
 		who: Address,
 	) -> (Address, String, String, Vec<Address>, Vec<Bytes>) {
-		let registration_pool = self.client.protocol_contracts.registration_pool.as_ref().unwrap();
-
 		self.client
 			.contract_call(
 				self.registration_pool().registration_info(who, round),

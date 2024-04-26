@@ -147,6 +147,7 @@ impl<T: JsonRpcClient + 'static> BlockManager<T> {
 		bfc_client: Arc<EthClient<T>>,
 		_pending_outbounds: PendingOutboundPool,
 		bootstrap_shared_data: Arc<BootstrapSharedData>,
+		bootstrap_offset: u32,
 	) -> Self {
 		let (sender, _receiver) = broadcast::channel(512);
 

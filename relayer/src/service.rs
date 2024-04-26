@@ -41,8 +41,8 @@ use br_primitives::{
 	cli::{Configuration, HandlerType},
 	constants::{
 		cli::{
-			DEFAULT_GET_LOGS_BATCH_SIZE, DEFAULT_KEYSTORE_PATH, DEFAULT_MIN_PRIORITY_FEE,
-			DEFAULT_PROMETHEUS_PORT,
+			DEFAULT_BITCOIN_BOOTSTRAP_BLOCK_OFFSET, DEFAULT_GET_LOGS_BATCH_SIZE,
+			DEFAULT_KEYSTORE_PATH, DEFAULT_MIN_PRIORITY_FEE, DEFAULT_PROMETHEUS_PORT,
 		},
 		errors::{
 			INVALID_BIFROST_NATIVENESS, INVALID_BITCOIN_NETWORK, INVALID_CHAIN_ID,
@@ -68,6 +68,7 @@ pub fn relay(config: Configuration) -> Result<TaskManager, ServiceError> {
 
 /// Initializes periodic components.
 fn construct_periodics(
+	config: &Configuration,
 	bootstrap_shared_data: BootstrapSharedData,
 	migration_sequence: Arc<RwLock<MigrationSequence>>,
 	keypair_storage: Arc<RwLock<KeypairStorage>>,
@@ -98,8 +99,11 @@ fn construct_periodics(
 
 	// initialize socket rollback handlers
 	tx_request_senders.iter().for_each(|tx_request_sender| {
-		let (rollback_emitter, rollback_sender) =
-			SocketRollbackEmitter::new(tx_request_sender.clone(), clients.clone());
+		let (rollback_emitter, rollback_sender) = SocketRollbackEmitter::new(
+			tx_request_sender.clone(),
+			clients.clone(),
+			config.relayer_config.btc_provider.id,
+		);
 		rollback_emitters.push(rollback_emitter);
 		rollback_senders.insert(
 			tx_request_sender.id,
@@ -330,6 +334,11 @@ fn construct_btc_deps(
 		bfc_client.clone(),
 		pending_outbounds.clone(),
 		bootstrap_shared_data.clone(),
+		config
+			.relayer_config
+			.btc_provider
+			.bootstrap_offset
+			.unwrap_or(DEFAULT_BITCOIN_BOOTSTRAP_BLOCK_OFFSET),
 	);
 	let inbound = InboundHandler::new(
 		bfc_client.clone(),
