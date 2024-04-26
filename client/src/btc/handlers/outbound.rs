@@ -8,7 +8,10 @@ use crate::{
 
 use br_primitives::{
 	bootstrap::BootstrapSharedData,
-	contracts::{socket::SocketMessage, socket_queue::SocketQueueContract},
+	contracts::{
+		socket::{Socket, SocketMessage},
+		socket_queue::SocketQueueContract,
+	},
 	eth::{BootstrapState, BuiltRelayTransaction, ChainID, SocketEventStatus},
 	tx::{BitcoinRelayMetadata, TxRequestSender},
 	utils::sub_display_format,
@@ -81,12 +84,12 @@ impl<T: JsonRpcClient> OutboundHandler<T> {
 				if processed.contains(&socket_msg_bytes) {
 					continue;
 				}
-				let socket_msg: SocketMessage = SocketMessage::decode(&socket_msg_bytes).unwrap();
-				if socket_msg.params.to == user_bfc_address
-					&& socket_msg.params.amount == amount.to_sat().into()
+				let socket: Socket = Socket::decode(&socket_msg_bytes).unwrap();
+				if socket.msg.params.to == user_bfc_address
+					&& socket.msg.params.amount == amount.to_sat().into()
 				{
 					processed.insert(socket_msg_bytes);
-					return (true, socket_msg);
+					return (true, socket.msg);
 				}
 			}
 
