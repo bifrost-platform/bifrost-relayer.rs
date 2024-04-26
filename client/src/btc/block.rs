@@ -388,12 +388,11 @@ impl<T: JsonRpcClient + 'static> BootstrapHandler for BlockManager<T> {
 				round_info,
 			);
 
-			let mut from_block = to_block.saturating_sub(bootstrap_offset_height.into());
-
-			while from_block <= to_block {
-				let block_hash = self.get_block_hash(from_block).await.unwrap();
+			let from_block = to_block.saturating_sub(bootstrap_offset_height.into());
+			for i in from_block..=to_block {
+				let block_hash = self.get_block_hash(i).await.unwrap();
 				let txs = self.get_block_info_with_txs(&block_hash).await.unwrap().tx;
-				let mut stream = tokio_stream::iter(txs.iter());
+				let mut stream = tokio_stream::iter(txs);
 
 				while let Some(tx) = stream.next().await {
 					self.filter(
@@ -406,7 +405,6 @@ impl<T: JsonRpcClient + 'static> BootstrapHandler for BlockManager<T> {
 					)
 					.await;
 				}
-				from_block = from_block.saturating_add(1);
 			}
 		}
 		(inbound, outbound)
