@@ -83,8 +83,11 @@ use br_primitives::{
 
 	// initialize socket rollback handlers
 	tx_request_senders.iter().for_each(|tx_request_sender| {
-		let (rollback_emitter, rollback_sender) =
-			SocketRollbackEmitter::new(tx_request_sender.clone(), clients.clone());
+		let (rollback_emitter, rollback_sender) = SocketRollbackEmitter::new(
+			tx_request_sender.clone(),
+			clients.clone(),
+			config.relayer_config.btc_provider.id,
+		);
 		rollback_emitters.push(rollback_emitter);
 			tx_request_sender.id,
 			Arc::new(RollbackSender::new(tx_request_sender.id, rollback_sender)),

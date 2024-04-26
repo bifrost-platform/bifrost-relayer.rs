@@ -1,9 +1,6 @@
 /// The native chain's average block time in seconds.
 pub const NATIVE_BLOCK_TIME: u32 = 3u32;
 
-/// Bitcoin's average block time in seconds.
-pub const BITCOIN_BLOCK_TIME: u32 = 600u32;
-
 /// Ethereum network's average block time in seconds.
 pub const ETHEREUM_BLOCK_TIME: u64 = 12u64;
 
