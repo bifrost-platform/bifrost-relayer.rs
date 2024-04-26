@@ -11,8 +11,10 @@ use br_primitives::{
 	utils::{convert_ethers_to_ecdsa_signature, sub_display_format},
 };
 use cron::Schedule;
-use ethers::prelude::Bytes;
-use ethers::{providers::JsonRpcClient, types::Address};
+use ethers::{
+	providers::JsonRpcClient,
+	types::{Address, Bytes},
+};
 use subxt::tx::Payload;
 use tokio_stream::StreamExt;
 
