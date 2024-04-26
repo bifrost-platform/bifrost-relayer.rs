@@ -62,6 +62,7 @@ impl BootstrapSharedData {
 
 	pub fn dummy() -> Self {
 		Self {
+			system_providers_len: 0,
 			socket_barrier: Arc::new(Barrier::new(0)),
 			roundup_barrier: Arc::new(Barrier::new(0)),
 			socket_bootstrap_count: Arc::new(Default::default()),
