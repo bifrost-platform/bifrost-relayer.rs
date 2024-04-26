@@ -565,6 +565,19 @@ impl TryFrom<XtRequest> for Payload<SubmitRollbackPoll> {
 		}
 	}
 }
+impl TryFrom<XtRequest> for Payload<SubmitSystemVaultKey> {
+	type Error = ();
+
+	fn try_from(value: XtRequest) -> Result<Self, Self::Error> {
+		match value {
+			XtRequest::SubmitSignedPsbt(_) => Err(()),
+			XtRequest::SubmitVaultKey(_) => Err(()),
+			XtRequest::SubmitUnsignedPsbt(_) => Err(()),
+			XtRequest::SubmitExecutedRequest(_) => Err(()),
+			XtRequest::SubmitSystemVaultKey(call) => Ok(call),
+		}
+	}
+}
 
 impl TryFrom<XtRequest> for DefaultPayload<VaultKeyPresubmission> {
 	type Error = ();
