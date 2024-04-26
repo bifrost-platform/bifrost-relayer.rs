@@ -607,11 +607,23 @@ impl<T: 'static + JsonRpcClient> BootstrapHandler for SocketRelayHandler<T> {
 				let chunk_to_block =
 					std::cmp::min(from_block + BOOTSTRAP_BLOCK_CHUNK_SIZE - 1, to_block);
 
-				let filter = Filter::new()
-					.address(self.client.protocol_contracts.socket.address())
-					.topic0(self.socket_signature)
-					.from_block(from_block)
-					.to_block(chunk_to_block);
+				let filter =
+					if let Some(bitcoin_socket) = &self.client.protocol_contracts.bitcoin_socket {
+						Filter::new()
+							.address(vec![
+								self.client.protocol_contracts.socket.address(),
+								bitcoin_socket.address(),
+							])
+							.topic0(self.socket_signature)
+							.from_block(from_block)
+							.to_block(chunk_to_block)
+					} else {
+						Filter::new()
+							.address(self.client.protocol_contracts.socket.address())
+							.topic0(self.socket_signature)
+							.from_block(from_block)
+							.to_block(chunk_to_block)
+					};
 				let target_logs_chunk = self.client.get_logs(&filter).await;
 				logs.extend(target_logs_chunk);
 
