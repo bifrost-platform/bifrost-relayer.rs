@@ -86,9 +86,8 @@ impl<T: JsonRpcClient> PsbtSigner<T> {
 				unsigned_psbt: unsigned_psbt.serialize(),
 				signed_psbt: signed_psbt.clone(),
 			};
-			let message = hash_bytes(&signed_psbt);
 			let signature = convert_ethers_to_ecdsa_signature(
-				self.client.wallet.sign_message(&message.as_bytes()),
+				self.client.wallet.sign_message(signed_psbt.as_ref()),
 			);
 			return Some((msg, signature));
 		}
