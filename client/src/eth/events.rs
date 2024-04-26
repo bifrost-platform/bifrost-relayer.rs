@@ -246,13 +246,4 @@ impl<T: JsonRpcClient> BootstrapHandler for EventManager<T> {
 	async fn get_bootstrap_events(&self) -> Vec<Log> {
 		vec![]
 	}
-
-	async fn is_bootstrap_state_synced_as(&self, state: BootstrapState) -> bool {
-		self.bootstrap_shared_data
-			.bootstrap_states
-			.read()
-			.await
-			.iter()
-			.all(|s| *s == state)
-	}
 }

@@ -409,7 +409,20 @@ fn construct_btc_deps(
 	task_manager.spawn_essential_handle().spawn(
 		"bitcoin-block-manager",
 		Some("block-manager"),
-		async move { block_manager.run().await },
+		async move {
+			socket_barrier.wait().await;
+
+			// After All of barrier complete the waiting
+			let mut guard = bootstrap_states.write().await;
+			if guard.iter().all(|s| *s == BootstrapState::BootstrapRoundUpPhase2) {
+				for state in guard.iter_mut() {
+					*state = BootstrapState::BootstrapSocketRelay;
+				}
+			}
+			drop(guard);
+
+			block_manager.run().await
+		},
 	);
 
 	// spawn prometheus endpoint

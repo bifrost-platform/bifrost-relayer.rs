@@ -45,7 +45,7 @@ impl BootstrapSharedData {
 			ret
 		};
 
-		let socket_barrier = Arc::new(Barrier::new(socket_barrier_len));
+		let socket_barrier = Arc::new(Barrier::new(system_providers_len + 1));
 		let roundup_barrier = Arc::new(Barrier::new(
 			evm_providers.iter().filter(|evm_provider| evm_provider.is_relay_target).count(),
 		));

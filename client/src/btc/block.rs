@@ -6,6 +6,7 @@ use crate::{
 use br_primitives::{
 	bootstrap::BootstrapSharedData,
 	constants::{
+		cli::DEFAULT_BOOTSTRAP_ROUND_OFFSET,
 		errors::PROVIDER_INTERNAL_ERROR,
 		tx::{DEFAULT_CALL_RETRIES, DEFAULT_CALL_RETRY_INTERVAL_MS},
 	},
