@@ -24,14 +24,15 @@ async-trait = { workspace = true }
 async-recursion = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 tokio = { workspace = true, features = [
-    "signal",
-    "rt-multi-thread",
-    "parking_lot",
+	"signal",
+	"rt-multi-thread",
+	"parking_lot",
 ] }
 k256 = { workspace = true, features = ["ecdsa"] }
 sha3 = { workspace = true }
 subxt = { workspace = true }
 url = { workspace = true }
+array-bytes = { workspace = true }
 
 # subs
 sc-keystore = { workspace = true }

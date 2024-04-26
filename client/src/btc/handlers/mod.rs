@@ -16,8 +16,6 @@ use crate::{
 
 use br_primitives::{
 	bootstrap::BootstrapSharedData,
-	constants::config::{BITCOIN_BLOCK_TIME, NATIVE_BLOCK_TIME},
-	contracts::authority::RoundMetaData,
 	eth::{BootstrapState, GasCoefficient},
 	tx::{
 		BitcoinRelayMetadata, TxRequest, TxRequestMessage, TxRequestMetadata, TxRequestSender,
@@ -51,6 +49,9 @@ pub trait XtRequester<T: JsonRpcClient> {
 				XtRequestMessage::new(call.into(), metadata.clone())
 			},
 			XtRequest::SubmitExecutedRequest(call) => {
+				XtRequestMessage::new(call.into(), metadata.clone())
+			},
+			XtRequest::SubmitSystemVaultKey(call) => {
 				XtRequestMessage::new(call.into(), metadata.clone())
 			},
 		};
@@ -170,17 +171,5 @@ pub trait BootstrapHandler {
 			.await
 			.iter()
 			.all(|s| *s == state)
-	}
-
-	/// Get factor between the block time of native-chain and block time of this chain.
-	/// We assume Bitcoin's average block time to 10m.
-	fn get_bootstrap_offset_height_based_on_block_time(
-		&self,
-		round_offset: u32,
-		round_info: RoundMetaData,
-	) -> u32 {
-		let blocks = round_offset.checked_mul(round_info.round_length.as_u32()).unwrap();
-		let blocks_to_native_chain_time = blocks.checked_mul(NATIVE_BLOCK_TIME).unwrap();
-		blocks_to_native_chain_time / BITCOIN_BLOCK_TIME
 	}
 }

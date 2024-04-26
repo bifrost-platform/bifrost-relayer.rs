@@ -15,7 +15,7 @@ use sc_keystore::{Keystore, LocalKeystore};
 use sp_application_crypto::ecdsa::{AppPair, AppPublic};
 use sp_core::{crypto::SecretString, testing::ECDSA, ByteArray};
 use std::{collections::BTreeMap, str::FromStr, sync::Arc};
-use tokio::sync::RwLock;
+use tokio::{runtime::Handle, sync::RwLock, task};
 
 use crate::btc::LOG_TARGET;
 
@@ -75,17 +75,17 @@ impl KeypairStorage {
 		Self { inner: Arc::new(RwLock::new(inner)), db: Arc::new(keystore), network }
 	}
 
-	fn insert(&self, key: PublicKey, value: PrivateKey) -> Option<PrivateKey> {
-		let mut write_lock = self.inner.blocking_write();
+	async fn insert(&self, key: PublicKey, value: PrivateKey) -> Option<PrivateKey> {
+		let mut write_lock = self.inner.write().await;
 		write_lock.insert(key, value)
 	}
 
-	fn get(&self, key: &PublicKey) -> Option<PrivateKey> {
-		let read_lock = self.inner.blocking_read();
+	async fn get(&self, key: &PublicKey) -> Option<PrivateKey> {
+		let read_lock = self.inner.read().await;
 		read_lock.get(key).cloned()
 	}
 
-	pub fn create_new_keypair(&self) -> PublicKey {
+	pub async fn create_new_keypair(&mut self) -> PublicKey {
 		let key = self.db.ecdsa_generate_new(ECDSA, None).expect(KEYSTORE_INTERNAL_ERROR);
 		let public_key = PublicKey::from_slice(key.as_slice()).expect(KEYSTORE_INTERNAL_ERROR);
 
@@ -98,7 +98,8 @@ impl KeypairStorage {
 						public_key,
 						PrivateKey::from_slice(&pair.into_inner().seed(), self.network)
 							.expect(KEYSTORE_INTERNAL_ERROR),
-					);
+					)
+					.await;
 				}
 			},
 			Err(error) => {
@@ -146,7 +147,9 @@ impl GetKey for KeypairStorage {
 		_: &Secp256k1<C>,
 	) -> Result<Option<PrivateKey>, Self::Error> {
 		match key_request {
-			KeyRequest::Pubkey(pk) => Ok(self.get(&pk)),
+			KeyRequest::Pubkey(pk) => Ok(task::block_in_place(move || {
+				Handle::current().block_on(async move { self.get(&pk).await })
+			})),
 			_ => Err(GetKeyError::NotSupported),
 		}
 	}
@@ -159,8 +162,8 @@ mod tests {
 	use sc_keystore::Keystore;
 	use sp_core::{crypto::SecretString, testing::ECDSA, ByteArray};
 
-	#[test]
-	fn test_load_sc_keystore() {
+	#[tokio::test]
+	async fn test_load_sc_keystore() {
 		let keystore = sc_keystore::LocalKeystore::open(
 			"../localkeystore_test",
 			Some(SecretString::new("test".to_string())),
@@ -181,7 +184,7 @@ mod tests {
 		);
 		for key in keys {
 			let pk = PublicKey::from_slice(key.as_slice()).unwrap();
-			println!("loaded -> {:?}:{:?}", pk, keypair_storage.get(&pk).unwrap());
+			println!("loaded -> {:?}:{:?}", pk, keypair_storage.get(&pk).await.unwrap());
 		}
 	}
 

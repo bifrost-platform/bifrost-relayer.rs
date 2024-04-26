@@ -39,6 +39,8 @@ pub struct SocketRollbackEmitter<T> {
 	tx_request_sender: Arc<TxRequestSender>,
 	/// The time schedule that represents when to check heartbeat pulsed.
 	schedule: Schedule,
+	/// The bitcoin chain ID used for CCCP.
+	bitcoin_chain_id: u32,
 }
 
 impl<T: JsonRpcClient> SocketRollbackEmitter<T> {
@@ -46,6 +48,7 @@ impl<T: JsonRpcClient> SocketRollbackEmitter<T> {
 	pub fn new(
 		tx_request_sender: Arc<TxRequestSender>,
 		system_clients_vec: Vec<Arc<EthClient<T>>>,
+		bitcoin_chain_id: u32,
 	) -> (Self, UnboundedSender<SocketMessage>) {
 		let (sender, rollback_receiver) = mpsc::unbounded_channel::<SocketMessage>();
 
@@ -63,6 +66,7 @@ impl<T: JsonRpcClient> SocketRollbackEmitter<T> {
 				tx_request_sender,
 				schedule: Schedule::from_str(ROLLBACK_CHECK_SCHEDULE)
 					.expect(INVALID_PERIODIC_SCHEDULE),
+				bitcoin_chain_id,
 			},
 			sender,
 		)
@@ -204,6 +208,13 @@ impl<T: JsonRpcClient> SocketRollbackEmitter<T> {
 	/// The timestamp will be set to the current highest block's timestamp.
 	fn receive(&mut self, current_timestamp: U256) {
 		while let Ok(msg) = self.rollback_receiver.try_recv() {
+			// prevent rollback for bitcoin bridges
+			if msg.req_id.chain.as_slice() == self.bitcoin_chain_id.to_be_bytes()
+				|| msg.ins_code.chain.as_slice() == self.bitcoin_chain_id.to_be_bytes()
+			{
+				continue;
+			}
+
 			let req_id = msg.req_id.sequence;
 			// ignore if the request already exists.
 			if self.rollback_msgs.contains_key(&req_id) {

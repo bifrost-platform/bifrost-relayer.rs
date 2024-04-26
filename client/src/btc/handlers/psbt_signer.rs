@@ -1,14 +1,11 @@
 use br_primitives::{
-	substrate::{
-		bifrost_runtime, AccountId20, EthereumSignature, SignedPsbtMessage, SubmitSignedPsbt,
-	},
+	substrate::{bifrost_runtime, AccountId20, EthereumSignature, SignedPsbtMessage},
 	tx::{SubmitSignedPsbtMetadata, XtRequest, XtRequestMetadata, XtRequestSender},
 	utils::{convert_ethers_to_ecdsa_signature, hash_bytes, sub_display_format},
 };
 use ethers::{providers::JsonRpcClient, types::Bytes};
 use miniscript::bitcoin::Psbt;
 use std::collections::BTreeSet;
-use subxt::tx::Payload;
 use tokio::sync::broadcast::Receiver;
 use tokio_stream::StreamExt;
 
@@ -89,8 +86,10 @@ impl<T: JsonRpcClient> PsbtSigner<T> {
 				unsigned_psbt: unsigned_psbt.serialize(),
 				signed_psbt: signed_psbt.clone(),
 			};
-			let signature =
-				convert_ethers_to_ecdsa_signature(self.client.wallet.sign_message(&signed_psbt));
+			let message = hash_bytes(&signed_psbt);
+			let signature = convert_ethers_to_ecdsa_signature(
+				self.client.wallet.sign_message(&message.as_bytes()),
+			);
 			return Some((msg, signature));
 		}
 		log::warn!(
@@ -106,11 +105,13 @@ impl<T: JsonRpcClient> PsbtSigner<T> {
 	fn build_unsigned_tx(
 		&self,
 		unsigned_psbt: &mut Psbt,
-	) -> Option<(Payload<SubmitSignedPsbt>, SubmitSignedPsbtMetadata)> {
+	) -> Option<(XtRequest, SubmitSignedPsbtMetadata)> {
 		if let Some((msg, signature)) = self.build_payload(unsigned_psbt) {
 			let metadata = SubmitSignedPsbtMetadata::new(hash_bytes(&msg.unsigned_psbt));
 			return Some((
-				bifrost_runtime::tx().btc_socket_queue().submit_signed_psbt(msg, signature),
+				XtRequest::from(
+					bifrost_runtime::tx().btc_socket_queue().submit_signed_psbt(msg, signature),
+				),
 				metadata,
 			));
 		}
@@ -157,7 +158,7 @@ impl<T: JsonRpcClient> Handler for PsbtSigner<T> {
 					self.build_unsigned_tx(&mut Psbt::deserialize(&unsigned_psbt).unwrap())
 				{
 					self.request_send_transaction(
-						XtRequest::SubmitSignedPsbt(call),
+						call,
 						XtRequestMetadata::SubmitSignedPsbt(metadata),
 						SUB_LOG_TARGET,
 					);
