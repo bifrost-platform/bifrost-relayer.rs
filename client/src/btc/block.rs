@@ -6,6 +6,7 @@ use crate::{
 use br_primitives::{
 	bootstrap::BootstrapSharedData,
 	constants::{
+		cli::DEFAULT_BOOTSTRAP_ROUND_OFFSET,
 		errors::PROVIDER_INTERNAL_ERROR,
 		tx::{DEFAULT_CALL_RETRIES, DEFAULT_CALL_RETRY_INTERVAL_MS},
 	},
@@ -29,6 +30,8 @@ use tokio::{
 	time::{sleep, Duration},
 };
 use tokio_stream::StreamExt;
+
+use super::handlers::BootstrapHandler;
 
 const SUB_LOG_TARGET: &str = "block-manager";
 
@@ -163,10 +166,19 @@ impl<T: JsonRpcClient + 'static> BlockManager<T> {
 
 	/// Starts the block manager.
 	pub async fn run(&mut self) {
-		self.waiting_block = self.get_block_count().await.unwrap(); // TODO: should set at bootstrap process in production
+		self.waiting_block = self.get_block_count().await.unwrap();
+
+		log::info!(
+			target: LOG_TARGET,
+			"-[{}] 💤 Idle, best: #{:?}",
+			sub_display_format(SUB_LOG_TARGET),
+			self.waiting_block
+		);
 
 		loop {
-			if self.is_bootstrap_state_synced_as(BootstrapState::NormalStart).await {
+			if self.is_bootstrap_state_synced_as(BootstrapState::BootstrapSocketRelay).await {
+				self.bootstrap().await;
+			} else if self.is_bootstrap_state_synced_as(BootstrapState::NormalStart).await {
 				let latest_block_num = self.get_block_count().await.unwrap();
 				if self.is_block_confirmed(latest_block_num) {
 					let (vault_set, refund_set) = self.fetch_registration_sets().await;
@@ -317,14 +329,84 @@ impl<T: JsonRpcClient + 'static> BlockManager<T> {
 	fn increment_waiting_block(&mut self, to: u64) {
 		self.waiting_block = to.saturating_add(1);
 	}
+}
 
-	#[inline]
-	pub async fn is_bootstrap_state_synced_as(&self, state: BootstrapState) -> bool {
-		self.bootstrap_shared_data
-			.bootstrap_states
-			.read()
-			.await
-			.iter()
-			.all(|s| *s == state)
+#[async_trait::async_trait]
+impl<T: JsonRpcClient + 'static> BootstrapHandler for BlockManager<T> {
+	fn bootstrap_shared_data(&self) -> Arc<BootstrapSharedData> {
+		self.bootstrap_shared_data.clone()
+	}
+
+	async fn bootstrap(&self) {
+		log::info!(
+			target: LOG_TARGET,
+			"-[{}] ⚙️  [Bootstrap mode] Bootstrapping Bitcoin events",
+			sub_display_format(SUB_LOG_TARGET),
+		);
+
+		let (inbound, outbound) = self.get_bootstrap_events().await;
+
+		self.sender.send(inbound).unwrap();
+		self.sender.send(outbound).unwrap();
+
+		let mut bootstrap_count = self.bootstrap_shared_data.socket_bootstrap_count.lock().await;
+		*bootstrap_count += 1;
+
+		if *bootstrap_count == self.bootstrap_shared_data.system_providers_len as u8 {
+			let mut bootstrap_guard = self.bootstrap_shared_data.bootstrap_states.write().await;
+
+			for state in bootstrap_guard.iter_mut() {
+				*state = BootstrapState::NormalStart;
+			}
+
+			log::info!(
+				target: "bifrost-relayer",
+				"-[{}] ⚙️  [Bootstrap mode] Bootstrap process successfully ended.",
+				sub_display_format(SUB_LOG_TARGET),
+			);
+		}
+	}
+
+	async fn get_bootstrap_events(&self) -> (EventMessage, EventMessage) {
+		let (vault_set, refund_set) = self.fetch_registration_sets().await;
+		let to_block = self.waiting_block.saturating_sub(1);
+
+		let mut inbound = EventMessage::inbound(to_block);
+		let mut outbound = EventMessage::outbound(to_block);
+
+		if let Some(bootstrap_config) = &self.bootstrap_shared_data.bootstrap_config {
+			let round_info = self
+				.bfc_client
+				.contract_call(
+					self.bfc_client.protocol_contracts.authority.round_info(),
+					"authority.round_info",
+				)
+				.await;
+
+			let bootstrap_offset_height = self.get_bootstrap_offset_height_based_on_block_time(
+				bootstrap_config.round_offset.unwrap_or(DEFAULT_BOOTSTRAP_ROUND_OFFSET),
+				round_info,
+			);
+
+			let from_block = to_block.saturating_sub(bootstrap_offset_height.into());
+			for i in from_block..=to_block {
+				let block_hash = self.get_block_hash(i).await.unwrap();
+				let txs = self.get_block_info_with_txs(&block_hash).await.unwrap().tx;
+				let mut stream = tokio_stream::iter(txs);
+
+				while let Some(tx) = stream.next().await {
+					self.filter(
+						tx.txid,
+						&tx.vout,
+						&mut inbound.events,
+						&mut outbound.events,
+						&vault_set,
+						&refund_set,
+					)
+					.await;
+				}
+			}
+		}
+		(inbound, outbound)
 	}
 }

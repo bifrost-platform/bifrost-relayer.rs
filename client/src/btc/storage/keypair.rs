@@ -40,8 +40,9 @@ impl KeypairStorage {
 		let keys = keystore.keys(ECDSA).expect(INVALID_KEYSTORE_PATH);
 		log::info!(
 			target: LOG_TARGET,
-			"-[{}] 🔐 Keystore synchronization started: {:?} keypairs",
+			"-[{}] 🔐 Keystore synchronization started (path: {}): {:?} keypairs",
 			sub_display_format(SUB_LOG_TARGET),
+			path,
 			keys.len()
 		);
 

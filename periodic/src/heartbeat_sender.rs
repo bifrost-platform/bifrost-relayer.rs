@@ -69,7 +69,6 @@ impl<T: JsonRpcClient> PeriodicWorker for HeartbeatSender<T> {
 				)
 				.await;
 			}
-
 			self.wait_until_next_time().await;
 		}
 	}
