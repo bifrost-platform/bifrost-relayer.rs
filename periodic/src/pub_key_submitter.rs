@@ -11,8 +11,10 @@ use br_primitives::{
 	utils::{convert_ethers_to_ecdsa_signature, sub_display_format},
 };
 use cron::Schedule;
-use ethers::prelude::Bytes;
-use ethers::{providers::JsonRpcClient, types::Address};
+use ethers::{
+	providers::JsonRpcClient,
+	types::{Address, Bytes},
+};
 use subxt::tx::Payload;
 use tokio_stream::StreamExt;
 
@@ -39,6 +41,8 @@ impl<T: JsonRpcClient + 'static> PeriodicWorker for PubKeySubmitter<T> {
 
 	async fn run(&mut self) {
 		loop {
+			self.wait_until_next_time().await;
+
 			if self.is_relay_executive().await {
 				let pending_registrations = self.get_pending_registrations().await;
 
@@ -71,8 +75,6 @@ impl<T: JsonRpcClient + 'static> PeriodicWorker for PubKeySubmitter<T> {
 					self.request_send_transaction(call, metadata);
 				}
 			}
-
-			self.wait_until_next_time().await;
 		}
 	}
 }

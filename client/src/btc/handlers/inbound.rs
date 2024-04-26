@@ -1,10 +1,11 @@
 use crate::{
 	btc::{
 		block::{Event, EventMessage as BTCEventMessage, EventType},
-		handlers::{BootstrapHandler, Handler, LOG_TARGET},
+		handlers::{Handler, LOG_TARGET},
 	},
 	eth::EthClient,
 };
+
 use br_primitives::{
 	bootstrap::BootstrapSharedData,
 	eth::BootstrapState,
@@ -13,20 +14,18 @@ use br_primitives::{
 };
 use std::collections::BTreeSet;
 
-use bitcoincore_rpc::bitcoin::Transaction;
-use ethers::types::Bytes;
 use ethers::{
 	providers::JsonRpcClient,
-	types::{Address as EthAddress, Address, TransactionRequest},
+	types::{Address as EthAddress, Address, Bytes, TransactionRequest},
 };
 use miniscript::bitcoin::{address::NetworkUnchecked, hashes::Hash, Address as BtcAddress};
 use std::sync::Arc;
 use tokio::sync::broadcast::Receiver;
 use tokio_stream::StreamExt;
 
-use super::TxRequester;
+use super::{BootstrapHandler, EventMessage, TxRequester};
 
-const SUB_LOG_TARGET: &str = "Inbound-handler";
+const SUB_LOG_TARGET: &str = "inbound-handler";
 
 pub struct InboundHandler<T> {
 	/// `EthClient` for interact with Bifrost network.
@@ -156,20 +155,15 @@ impl<T: JsonRpcClient + 'static> Handler for InboundHandler<T> {
 
 #[async_trait::async_trait]
 impl<T: JsonRpcClient> BootstrapHandler for InboundHandler<T> {
+	fn bootstrap_shared_data(&self) -> Arc<BootstrapSharedData> {
+		self.bootstrap_shared_data.clone()
+	}
+
 	async fn bootstrap(&self) {
-		todo!()
+		unreachable!("unimplemented")
 	}
 
-	async fn get_bootstrap_events(&self) -> Vec<Transaction> {
-		todo!()
-	}
-
-	async fn is_bootstrap_state_synced_as(&self, state: BootstrapState) -> bool {
-		self.bootstrap_shared_data
-			.bootstrap_states
-			.read()
-			.await
-			.iter()
-			.all(|s| *s == state)
+	async fn get_bootstrap_events(&self) -> (EventMessage, EventMessage) {
+		unreachable!("unimplemented")
 	}
 }

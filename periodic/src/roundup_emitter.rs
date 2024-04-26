@@ -221,6 +221,10 @@ impl<T: JsonRpcClient> RoundupEmitter<T> {
 
 #[async_trait::async_trait]
 impl<T: JsonRpcClient> BootstrapHandler for RoundupEmitter<T> {
+	fn bootstrap_shared_data(&self) -> Arc<BootstrapSharedData> {
+		self.bootstrap_shared_data.clone()
+	}
+
 	async fn bootstrap(&self) {
 		let get_next_poll_round = || async move {
 			let logs = self.get_bootstrap_events().await;
@@ -349,14 +353,5 @@ impl<T: JsonRpcClient> BootstrapHandler for RoundupEmitter<T> {
 		}
 
 		round_up_events
-	}
-
-	async fn is_bootstrap_state_synced_as(&self, state: BootstrapState) -> bool {
-		self.bootstrap_shared_data
-			.bootstrap_states
-			.read()
-			.await
-			.iter()
-			.all(|s| *s == state)
 	}
 }

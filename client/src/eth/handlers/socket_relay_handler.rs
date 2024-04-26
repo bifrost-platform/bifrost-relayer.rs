@@ -524,6 +524,10 @@ impl<T: 'static + JsonRpcClient> SocketRelayHandler<T> {
 
 #[async_trait::async_trait]
 impl<T: 'static + JsonRpcClient> BootstrapHandler for SocketRelayHandler<T> {
+	fn bootstrap_shared_data(&self) -> Arc<BootstrapSharedData> {
+		self.bootstrap_shared_data.clone()
+	}
+
 	async fn bootstrap(&self) {
 		log::info!(
 			target: &self.client.get_chain_name(),
@@ -542,7 +546,7 @@ impl<T: 'static + JsonRpcClient> BootstrapHandler for SocketRelayHandler<T> {
 		*bootstrap_count += 1;
 
 		// If All thread complete the task, starts the blockManager
-		if *bootstrap_count == self.system_clients.len() as u8 {
+		if *bootstrap_count == self.bootstrap_shared_data.system_providers_len as u8 {
 			let mut bootstrap_guard = self.bootstrap_shared_data.bootstrap_states.write().await;
 
 			for state in bootstrap_guard.iter_mut() {
@@ -616,15 +620,6 @@ impl<T: 'static + JsonRpcClient> BootstrapHandler for SocketRelayHandler<T> {
 		}
 
 		logs
-	}
-
-	async fn is_bootstrap_state_synced_as(&self, state: BootstrapState) -> bool {
-		self.bootstrap_shared_data
-			.bootstrap_states
-			.read()
-			.await
-			.iter()
-			.all(|s| *s == state)
 	}
 }
 
