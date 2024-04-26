@@ -19,6 +19,7 @@ use ethers::{
 	providers::{JsonRpcClient, Provider},
 	types::{Address as EthAddress, Bytes},
 };
+use miniscript::bitcoin::hashes::Hash;
 use miniscript::bitcoin::{address::NetworkUnchecked, Address as BtcAddress, Amount, Txid};
 use std::{collections::BTreeSet, sync::Arc};
 use tokio::sync::broadcast::Receiver;
@@ -65,10 +66,12 @@ impl<T: JsonRpcClient> OutboundHandler<T> {
 		amount: Amount,
 		processed: &mut BTreeSet<Bytes>,
 	) -> (bool, SocketMessage) {
-		let slice: &[u8; 32] = txid.as_ref();
+		let mut slice: [u8; 32] = txid.to_byte_array();
+		slice.reverse();
+
 		let socket_messages: Vec<Bytes> = self
 			.bfc_client
-			.contract_call(self.socket_queue().outbound_tx(*slice), "socket_queue.outbound_tx")
+			.contract_call(self.socket_queue().outbound_tx(slice), "socket_queue.outbound_tx")
 			.await;
 
 		if socket_messages.is_empty() {
