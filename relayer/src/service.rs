@@ -68,7 +68,6 @@ pub fn relay(config: Configuration) -> Result<TaskManager, ServiceError> {
 
 /// Initializes periodic components.
 fn construct_periodics(
-	config: &Configuration,
 	bootstrap_shared_data: BootstrapSharedData,
 	migration_sequence: Arc<RwLock<MigrationSequence>>,
 	keypair_storage: Arc<RwLock<KeypairStorage>>,
@@ -99,11 +98,8 @@ fn construct_periodics(
 
 	// initialize socket rollback handlers
 	tx_request_senders.iter().for_each(|tx_request_sender| {
-		let (rollback_emitter, rollback_sender) = SocketRollbackEmitter::new(
-			tx_request_sender.clone(),
-			clients.clone(),
-			config.relayer_config.btc_provider.id,
-		);
+		let (rollback_emitter, rollback_sender) =
+			SocketRollbackEmitter::new(tx_request_sender.clone(), clients.clone());
 		rollback_emitters.push(rollback_emitter);
 		rollback_senders.insert(
 			tx_request_sender.id,

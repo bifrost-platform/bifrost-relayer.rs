@@ -158,6 +158,10 @@ pub struct EthClient<T> {
 		self.metadata.id
 	}
 
+	pub fn get_bitcoin_chain_id(&self) -> Option<ChainID> {
+		self.metadata.bitcoin_chain_id
+	}
+
 	/// Returns the provider URL.
 	pub fn get_url(&self) -> Url {
 		self.metadata.url.clone()
