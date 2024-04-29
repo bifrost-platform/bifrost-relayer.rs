@@ -18,7 +18,7 @@ use br_primitives::{
 	},
 	contracts::{
 		authority::RoundMetaData,
-		socket::{RequestID, Signatures, SocketEvents, SocketMessage},
+		socket::{Instruction, RequestID, Signatures, SocketEvents, SocketMessage},
 	},
 	eth::{
 		BootstrapState, BuiltRelayTransaction, ChainID, GasCoefficient, RelayDirection,
@@ -114,7 +114,7 @@ impl<T: 'static + JsonRpcClient> Handler for SocketRelayHandler<T> {
 						// do nothing if not selected
 						return;
 					}
-					if self.is_sequence_ended(&msg.req_id, metadata.src_chain_id).await {
+					if self.is_sequence_ended(&msg.req_id, &msg.ins_code, metadata.status).await {
 						// do nothing if protocol sequence ended
 						return;
 					}
@@ -355,11 +355,26 @@ impl<T: 'static + JsonRpcClient> SocketRelayHandler<T> {
 
 	/// Compare the request status recorded in source chain with event status to determine if the
 	/// event has already been committed or rollbacked.
-	async fn is_sequence_ended(&self, rid: &RequestID, src_chain_id: ChainID) -> bool {
-		if let Some(src_client) = &self.system_clients.get(&src_chain_id) {
+	async fn is_sequence_ended(
+		&self,
+		req_id: &RequestID,
+		ins_code: &Instruction,
+		status: SocketEventStatus,
+	) -> bool {
+		let src = ChainID::from_be_bytes(req_id.chain);
+		let dst = ChainID::from_be_bytes(ins_code.chain);
+
+		// if inbound::accepted/reverted and relaying to bitcoin we consider as ended
+		if let Some(bitcoin_chain_id) = self.client.get_bitcoin_chain_id() {
+			if self.is_inbound_sequence(dst) && bitcoin_chain_id == src {
+				return matches!(status, SocketEventStatus::Accepted | SocketEventStatus::Reverted);
+			}
+		}
+
+		if let Some(src_client) = &self.system_clients.get(&src) {
 			let request = src_client
 				.contract_call(
-					src_client.protocol_contracts.socket.get_request(rid.clone()),
+					src_client.protocol_contracts.socket.get_request(req_id.clone()),
 					"socket.get_request",
 				)
 				.await;
