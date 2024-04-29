@@ -8,6 +8,7 @@ use crate::{
 
 use br_primitives::{
 	bootstrap::BootstrapSharedData,
+	contracts::bitcoin_socket::BitcoinSocketContract,
 	eth::BootstrapState,
 	tx::{BitcoinRelayMetadata, TxRequestSender},
 	utils::sub_display_format,
@@ -15,7 +16,7 @@ use br_primitives::{
 use std::collections::BTreeSet;
 
 use ethers::{
-	providers::JsonRpcClient,
+	providers::{JsonRpcClient, Provider},
 	types::{Address as EthAddress, Address, Bytes, TransactionRequest},
 };
 use miniscript::bitcoin::{address::NetworkUnchecked, hashes::Hash, Address as BtcAddress};
@@ -79,8 +80,8 @@ impl<T: JsonRpcClient + 'static> InboundHandler<T> {
 	}
 
 	fn build_transaction(&self, event: &Event, user_bfc_address: Address) -> TransactionRequest {
-		let bitcoin_socket = self.bfc_client.protocol_contracts.bitcoin_socket.as_ref().unwrap();
-		let calldata = bitcoin_socket
+		let calldata = self
+			.bitcoin_socket()
 			.poll(
 				event.txid.to_byte_array(),
 				event.index.into(),
@@ -90,7 +91,35 @@ impl<T: JsonRpcClient + 'static> InboundHandler<T> {
 			.calldata()
 			.unwrap();
 
-		TransactionRequest::default().data(calldata).to(bitcoin_socket.address())
+		TransactionRequest::default().data(calldata).to(self.bitcoin_socket().address())
+	}
+
+	/// Checks if the relayer has already voted on the event.
+	async fn is_relayer_voted(&self, event: &Event, user_bfc_address: Address) -> bool {
+		let hash_key = self
+			.bfc_client
+			.contract_call(
+				self.bitcoin_socket().get_hash_key(
+					event.txid.to_byte_array(),
+					event.index.into(),
+					user_bfc_address,
+					event.amount.to_sat().into(),
+				),
+				"bitcoin_socket.get_hash_key",
+			)
+			.await;
+
+		self.bfc_client
+			.contract_call(
+				self.bitcoin_socket().is_relayer_voted(hash_key, self.bfc_client.address()),
+				"bitcoin_socket.is_relayer_voted",
+			)
+			.await
+	}
+
+	#[inline]
+	fn bitcoin_socket(&self) -> &BitcoinSocketContract<Provider<T>> {
+		self.bfc_client.protocol_contracts.bitcoin_socket.as_ref().unwrap()
 	}
 }
 
@@ -136,6 +165,10 @@ impl<T: JsonRpcClient + 'static> Handler for InboundHandler<T> {
 
 	async fn process_event(&self, event: Event, _: &mut BTreeSet<Bytes>, _is_bootstrap: bool) {
 		if let Some(user_bfc_address) = self.get_user_bfc_address(&event.address).await {
+			if self.is_relayer_voted(&event, user_bfc_address).await {
+				return;
+			}
+
 			let tx_request = self.build_transaction(&event, user_bfc_address);
 			let metadata =
 				BitcoinRelayMetadata::new(event.address, user_bfc_address, event.txid, event.index);
