@@ -109,8 +109,6 @@ impl<T: JsonRpcClient> TxRequester<T> for InboundHandler<T> {
 impl<T: JsonRpcClient + 'static> Handler for InboundHandler<T> {
 	async fn run(&mut self) {
 		loop {
-			// TODO: BootstrapState::BootstrapBitcoinInbound
-
 			if self.is_bootstrap_state_synced_as(BootstrapState::NormalStart).await {
 				let msg = self.event_receiver.recv().await.unwrap();
 
@@ -137,8 +135,6 @@ impl<T: JsonRpcClient + 'static> Handler for InboundHandler<T> {
 	}
 
 	async fn process_event(&self, event: Event, _: &mut BTreeSet<Bytes>, _is_bootstrap: bool) {
-		// TODO: if is_bootstrap
-
 		if let Some(user_bfc_address) = self.get_user_bfc_address(&event.address).await {
 			let tx_request = self.build_transaction(&event, user_bfc_address);
 			let metadata =
