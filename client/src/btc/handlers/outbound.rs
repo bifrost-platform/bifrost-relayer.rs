@@ -135,8 +135,6 @@ impl<T: JsonRpcClient> TxRequester<T> for OutboundHandler<T> {
 impl<T: JsonRpcClient + 'static> Handler for OutboundHandler<T> {
 	async fn run(&mut self) {
 		loop {
-			// TODO: BootstrapState::BootstrapBitcoinOutbound
-
 			if self.is_bootstrap_state_synced_as(BootstrapState::NormalStart).await {
 				let msg = self.event_receiver.recv().await.unwrap();
 
@@ -169,8 +167,6 @@ impl<T: JsonRpcClient + 'static> Handler for OutboundHandler<T> {
 		processed: &mut BTreeSet<Bytes>,
 		_is_bootstrap: bool,
 	) {
-		// TODO: if is_bootstrap
-
 		if let Some(user_bfc_address) = self.get_user_bfc_address(&event_tx.address).await {
 			let (is_cccp, mut socket_msg) = self
 				.check_socket_queue(event_tx.txid, user_bfc_address, event_tx.amount, processed)

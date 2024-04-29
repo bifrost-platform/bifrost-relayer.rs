@@ -27,6 +27,8 @@ pub struct ProviderMetadata {
 	pub url: Url,
 	/// Id of chain which this client interact with.
 	pub id: ChainID,
+	/// The bitcoin chain ID used for CCCP.
+	pub bitcoin_chain_id: Option<ChainID>,
 	/// The total number of confirmations required for a block to be processed. (block
 	/// confirmations + eth_getLogs batch size)
 	pub block_confirmations: U64,
@@ -45,6 +47,7 @@ impl ProviderMetadata {
 		name: String,
 		url: String,
 		id: ChainID,
+		bitcoin_chain_id: Option<ChainID>,
 		block_confirmations: u64,
 		call_interval: u64,
 		get_logs_batch_size: u64,
@@ -54,6 +57,7 @@ impl ProviderMetadata {
 			name,
 			url: Url::parse(&url).expect(INVALID_PROVIDER_URL),
 			id,
+			bitcoin_chain_id,
 			block_confirmations: U64::from(block_confirmations.saturating_add(get_logs_batch_size)),
 			get_logs_batch_size: U64::from(get_logs_batch_size),
 			call_interval,

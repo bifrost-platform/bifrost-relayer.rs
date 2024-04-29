@@ -107,7 +107,7 @@ pub struct BlockManager<T> {
 	bootstrap_shared_data: Arc<BootstrapSharedData>,
 	/// The bootstrap offset in blocks.
 	bootstrap_offset: u32,
-	/// TODO: need usecase
+	/// NOTE: currently not used.
 	_pending_outbounds: PendingOutboundPool,
 }
 
