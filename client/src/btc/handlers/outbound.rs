@@ -13,20 +13,19 @@ use br_primitives::{
 		socket_queue::SocketQueueContract,
 	},
 	eth::{BootstrapState, BuiltRelayTransaction, ChainID, SocketEventStatus},
-	tx::{BitcoinRelayMetadata, TxRequestSender},
+	tx::{SocketRelayMetadata, TxRequestMetadata, TxRequestSender},
 	utils::sub_display_format,
 };
 use ethers::{
 	abi::AbiDecode,
 	prelude::TransactionRequest,
 	providers::{JsonRpcClient, Provider},
-	types::{Address as EthAddress, Bytes},
+	types::Bytes,
 };
 use miniscript::bitcoin::hashes::Hash;
-use miniscript::bitcoin::{address::NetworkUnchecked, Address as BtcAddress, Amount, Txid};
+use miniscript::bitcoin::Txid;
 use std::{collections::BTreeSet, sync::Arc};
 use tokio::sync::broadcast::Receiver;
-use tokio_stream::StreamExt;
 
 use super::{BootstrapHandler, EventMessage, TxRequester};
 
@@ -62,13 +61,8 @@ impl<T: JsonRpcClient> OutboundHandler<T> {
 		self.bfc_client.protocol_contracts.socket_queue.as_ref().unwrap()
 	}
 
-	async fn check_socket_queue(
-		&self,
-		txid: Txid,
-		user_bfc_address: EthAddress,
-		amount: Amount,
-		processed: &mut BTreeSet<Bytes>,
-	) -> (bool, SocketMessage) {
+	/// Check if the transaction was originated by CCCP. If true, returns the composed socket messages.
+	async fn check_socket_queue(&self, txid: Txid) -> Vec<SocketMessage> {
 		let mut slice: [u8; 32] = txid.to_byte_array();
 		slice.reverse();
 
@@ -77,46 +71,10 @@ impl<T: JsonRpcClient> OutboundHandler<T> {
 			.contract_call(self.socket_queue().outbound_tx(slice), "socket_queue.outbound_tx")
 			.await;
 
-		if socket_messages.is_empty() {
-			(false, SocketMessage::default())
-		} else {
-			for socket_msg_bytes in socket_messages {
-				if processed.contains(&socket_msg_bytes) {
-					continue;
-				}
-				let socket: Socket = Socket::decode(&socket_msg_bytes).unwrap();
-				if socket.msg.params.to == user_bfc_address
-					&& socket.msg.params.amount == amount.to_sat().into()
-				{
-					processed.insert(socket_msg_bytes);
-					return (true, socket.msg);
-				}
-			}
-
-			(false, SocketMessage::default())
-		}
-	}
-
-	async fn get_user_bfc_address(
-		&self,
-		refund_address: &BtcAddress<NetworkUnchecked>,
-	) -> Option<EthAddress> {
-		let registration_pool =
-			self.bfc_client.protocol_contracts.registration_pool.as_ref().unwrap();
-		let user_address: EthAddress = self
-			.bfc_client
-			.contract_call(
-				registration_pool
-					.user_address(refund_address.clone().assume_checked().to_string(), false),
-				"registration_pool.user_address",
-			)
-			.await;
-
-		if user_address == EthAddress::zero() {
-			None
-		} else {
-			user_address.into()
-		}
+		socket_messages
+			.iter()
+			.map(|bytes| Socket::decode(&bytes).unwrap().msg)
+			.collect()
 	}
 }
 
@@ -152,44 +110,38 @@ impl<T: JsonRpcClient + 'static> Handler for OutboundHandler<T> {
 					msg.events.len()
 				);
 
-				let mut processed = BTreeSet::new();
-				let mut stream = tokio_stream::iter(msg.events);
-				while let Some(event) = stream.next().await {
-					self.process_event(event, &mut processed, false).await;
+				let txids: BTreeSet<Txid> = msg.events.iter().map(|event| event.txid).collect();
+				for txid in txids {
+					let socket_messages = self.check_socket_queue(txid).await;
+					for mut msg in socket_messages {
+						msg.status = SocketEventStatus::Executed.into();
+
+						if let Some(built_transaction) =
+							self.build_transaction(msg.clone(), false, Default::default()).await
+						{
+							self.request_send_transaction(
+								built_transaction.tx_request,
+								TxRequestMetadata::SocketRelay(SocketRelayMetadata::new(
+									false,
+									SocketEventStatus::from(msg.status),
+									msg.req_id.sequence,
+									ChainID::from_be_bytes(msg.req_id.chain),
+									ChainID::from_be_bytes(msg.ins_code.chain),
+									msg.params.to,
+									false,
+								)),
+								SUB_LOG_TARGET,
+							)
+							.await;
+						}
+					}
 				}
 			}
 		}
 	}
 
-	async fn process_event(
-		&self,
-		event_tx: Event,
-		processed: &mut BTreeSet<Bytes>,
-		_is_bootstrap: bool,
-	) {
-		if let Some(user_bfc_address) = self.get_user_bfc_address(&event_tx.address).await {
-			let (is_cccp, mut socket_msg) = self
-				.check_socket_queue(event_tx.txid, user_bfc_address, event_tx.amount, processed)
-				.await;
-			if is_cccp {
-				socket_msg.status = SocketEventStatus::Executed.into();
-
-				if let Some(built_transaction) = self.build_transaction(socket_msg, false, 0).await
-				{
-					self.request_send_transaction(
-						built_transaction.tx_request,
-						BitcoinRelayMetadata::new(
-							event_tx.address,
-							user_bfc_address,
-							event_tx.txid,
-							event_tx.index,
-						),
-						SUB_LOG_TARGET,
-					)
-					.await;
-				}
-			}
-		}
+	async fn process_event(&self, _event_tx: Event) {
+		unreachable!("unimplemented")
 	}
 
 	#[inline]

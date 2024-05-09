@@ -18,13 +18,13 @@ use br_primitives::{
 	bootstrap::BootstrapSharedData,
 	eth::{BootstrapState, GasCoefficient},
 	tx::{
-		BitcoinRelayMetadata, TxRequest, TxRequestMessage, TxRequestMetadata, TxRequestSender,
-		XtRequest, XtRequestMessage, XtRequestMetadata, XtRequestSender,
+		TxRequest, TxRequestMessage, TxRequestMetadata, TxRequestSender, XtRequest,
+		XtRequestMessage, XtRequestMetadata, XtRequestSender,
 	},
 	utils::sub_display_format,
 };
-use ethers::{prelude::TransactionRequest, providers::JsonRpcClient, types::Bytes};
-use std::{collections::BTreeSet, sync::Arc};
+use ethers::{prelude::TransactionRequest, providers::JsonRpcClient};
+use std::sync::Arc;
 
 use super::block::EventMessage;
 
@@ -96,12 +96,12 @@ pub trait TxRequester<T: JsonRpcClient> {
 	async fn request_send_transaction(
 		&self,
 		tx_request: TransactionRequest,
-		metadata: BitcoinRelayMetadata,
+		metadata: TxRequestMetadata,
 		sub_log_target: &str,
 	) {
 		match self.tx_request_sender().send(TxRequestMessage::new(
 			TxRequest::Legacy(tx_request),
-			TxRequestMetadata::BitcoinSocketRelay(metadata.clone()),
+			metadata.clone(),
 			true,
 			false,
 			GasCoefficient::Mid,
@@ -142,12 +142,7 @@ pub trait TxRequester<T: JsonRpcClient> {
 pub trait Handler {
 	async fn run(&mut self);
 
-	async fn process_event(
-		&self,
-		event_tx: Event,
-		_processed: &mut BTreeSet<Bytes>,
-		is_bootstrap: bool,
-	);
+	async fn process_event(&self, event_tx: Event);
 
 	fn is_target_event(&self, event_type: EventType) -> bool;
 }

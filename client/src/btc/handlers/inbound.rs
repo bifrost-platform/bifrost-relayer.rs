@@ -10,14 +10,13 @@ use br_primitives::{
 	bootstrap::BootstrapSharedData,
 	contracts::bitcoin_socket::BitcoinSocketContract,
 	eth::BootstrapState,
-	tx::{BitcoinRelayMetadata, TxRequestSender},
+	tx::{BitcoinRelayMetadata, TxRequestMetadata, TxRequestSender},
 	utils::sub_display_format,
 };
-use std::collections::BTreeSet;
 
 use ethers::{
 	providers::{JsonRpcClient, Provider},
-	types::{Address as EthAddress, Address, Bytes, TransactionRequest},
+	types::{Address as EthAddress, Address, TransactionRequest},
 };
 use miniscript::bitcoin::{address::NetworkUnchecked, hashes::Hash, Address as BtcAddress};
 use std::sync::Arc;
@@ -157,13 +156,13 @@ impl<T: JsonRpcClient + 'static> Handler for InboundHandler<T> {
 
 				let mut stream = tokio_stream::iter(msg.events);
 				while let Some(event) = stream.next().await {
-					self.process_event(event, &mut Default::default(), false).await;
+					self.process_event(event).await;
 				}
 			}
 		}
 	}
 
-	async fn process_event(&self, event: Event, _: &mut BTreeSet<Bytes>, _is_bootstrap: bool) {
+	async fn process_event(&self, event: Event) {
 		if let Some(user_bfc_address) = self.get_user_bfc_address(&event.address).await {
 			if self.is_relayer_voted(&event, user_bfc_address).await {
 				return;
@@ -172,7 +171,12 @@ impl<T: JsonRpcClient + 'static> Handler for InboundHandler<T> {
 			let tx_request = self.build_transaction(&event, user_bfc_address);
 			let metadata =
 				BitcoinRelayMetadata::new(event.address, user_bfc_address, event.txid, event.index);
-			self.request_send_transaction(tx_request, metadata, SUB_LOG_TARGET).await;
+			self.request_send_transaction(
+				tx_request,
+				TxRequestMetadata::BitcoinSocketRelay(metadata),
+				SUB_LOG_TARGET,
+			)
+			.await;
 		}
 	}
 
