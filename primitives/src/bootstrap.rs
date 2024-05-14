@@ -31,17 +31,21 @@ impl BootstrapSharedData {
 		let evm_providers = &config.relayer_config.evm_providers;
 		let bootstrap_config = &config.relayer_config.bootstrap_config;
 
-		let (bootstrap_states, system_providers_len): (BootstrapState, usize) = {
-			let mut ret: (BootstrapState, usize) = (BootstrapState::NormalStart, 1);
+		let system_providers_len = evm_providers.len().saturating_add(1); // add 1 for Bitcoin
+
+		let (bootstrap_states, socket_barrier_len): (BootstrapState, usize) = {
+			let mut ret: (BootstrapState, usize) =
+				(BootstrapState::NormalStart, system_providers_len);
 			if let Some(bootstrap_config) = bootstrap_config.clone() {
 				if bootstrap_config.is_enabled {
-					ret = (BootstrapState::NodeSyncing, evm_providers.len() + 1); // add 1 for Bitcoin
+					ret.0 = BootstrapState::NodeSyncing;
+					ret.1 = ret.1.saturating_add(1); // add 1 for roundup handler
 				}
 			}
 			ret
 		};
 
-		let socket_barrier = Arc::new(Barrier::new(system_providers_len + 1));
+		let socket_barrier = Arc::new(Barrier::new(socket_barrier_len));
 		let roundup_barrier = Arc::new(Barrier::new(
 			evm_providers.iter().filter(|evm_provider| evm_provider.is_relay_target).count(),
 		));
