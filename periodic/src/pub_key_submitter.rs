@@ -144,10 +144,10 @@ impl<T: JsonRpcClient> PubKeySubmitter<T> {
 
 	/// Send the transaction request message to the channel.
 	fn request_send_transaction(&self, call: XtRequest, metadata: SubmitVaultKeyMetadata) {
-		match self.xt_request_sender.send(XtRequestMessage::new(
-			call.into(),
-			XtRequestMetadata::SubmitVaultKey(metadata.clone()),
-		)) {
+		match self
+			.xt_request_sender
+			.send(XtRequestMessage::new(call, XtRequestMetadata::SubmitVaultKey(metadata.clone())))
+		{
 			Ok(_) => log::info!(
 				target: &self.client.get_chain_name(),
 				"-[{}] 🔖 Request unsigned transaction: {}",
