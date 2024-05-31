@@ -1,11 +1,11 @@
 use std::{collections::BTreeMap, str::FromStr, sync::Arc, time::Duration};
 
 use bitcoincore_rpc::{
-	bitcoin::{hashes::sha256d::Hash, Address, Amount, Psbt, TxOut, Txid},
+	bitcoin::{hashes::sha256d::Hash, Address, Amount, Psbt, Txid},
 	bitcoincore_rpc_json::GetRawTransactionResult,
 	Client as BtcClient, Error, RpcApi,
 };
-use br_client::eth::EthClient;
+use br_client::{btc::handlers::XtRequester, eth::EthClient};
 use br_primitives::{
 	constants::{
 		errors::{INVALID_PERIODIC_SCHEDULE, PROVIDER_INTERNAL_ERROR},
@@ -13,8 +13,9 @@ use br_primitives::{
 		tx::{DEFAULT_CALL_RETRIES, DEFAULT_CALL_RETRY_INTERVAL_MS},
 	},
 	contracts::socket_queue::SocketQueueContract,
-	tx::XtRequestSender,
-	utils::sub_display_format,
+	substrate::{bifrost_runtime, AccountId20, EthereumSignature, RollbackPollMessage},
+	tx::{SubmitRollbackPollMetadata, XtRequest, XtRequestMetadata, XtRequestSender},
+	utils::{convert_ethers_to_ecdsa_signature, sub_display_format},
 };
 use cron::Schedule;
 use ethers::{
@@ -42,7 +43,7 @@ type EvmRollbackRequestOf = (
 	bool,      // is_approved
 );
 
-struct RollbackRequest {
+pub struct RollbackRequest {
 	pub unsigned_psbt: Bytes,
 	pub who: H160,
 	pub txid: Txid,
@@ -98,6 +99,17 @@ impl<C: JsonRpcClient> RpcApi for BitcoinRollbackVerifier<C> {
 			sleep(Duration::from_millis(DEFAULT_CALL_RETRY_INTERVAL_MS)).await;
 		}
 		Err(latest_error)
+	}
+}
+
+#[async_trait::async_trait]
+impl<T: JsonRpcClient> XtRequester<T> for BitcoinRollbackVerifier<T> {
+	fn xt_request_sender(&self) -> Arc<XtRequestSender> {
+		self.xt_request_sender.clone()
+	}
+
+	fn bfc_client(&self) -> Arc<EthClient<T>> {
+		self.bfc_client.clone()
 	}
 }
 
@@ -160,6 +172,12 @@ impl<T: JsonRpcClient> PeriodicWorker for BitcoinRollbackVerifier<T> {
 					}
 
 					// build payload
+					let (call, metadata) = self.build_unsigned_tx(psbt, is_approved);
+					self.request_send_transaction(
+						call,
+						XtRequestMetadata::SubmitRollbackPoll(metadata),
+						SUB_LOG_TARGET,
+					);
 				}
 			}
 		}
@@ -199,6 +217,38 @@ impl<T: JsonRpcClient> BitcoinRollbackVerifier<T> {
 			return true;
 		}
 		return false;
+	}
+
+	fn build_payload(
+		&self,
+		unsigned_psbt: Vec<u8>,
+		is_approved: bool,
+	) -> (RollbackPollMessage<AccountId20>, EthereumSignature) {
+		let msg = RollbackPollMessage {
+			authority_id: AccountId20(self.bfc_client.address().0),
+			unsigned_psbt: unsigned_psbt.clone(),
+			is_approved,
+		};
+		let signature = convert_ethers_to_ecdsa_signature(
+			self.bfc_client.wallet.sign_message(unsigned_psbt.as_ref()),
+		);
+		return (msg, signature);
+	}
+
+	fn build_unsigned_tx(
+		&self,
+		unsigned_psbt: Psbt,
+		is_approved: bool,
+	) -> (XtRequest, SubmitRollbackPollMetadata) {
+		let (msg, signature) = self.build_payload(unsigned_psbt.serialize(), is_approved);
+		let metadata =
+			SubmitRollbackPollMetadata::new(unsigned_psbt.unsigned_tx.txid(), is_approved);
+		return (
+			XtRequest::from(
+				bifrost_runtime::tx().btc_socket_queue().submit_rollback_poll(msg, signature),
+			),
+			metadata,
+		);
 	}
 
 	async fn get_rollback_psbts(&self) -> Vec<Bytes> {
