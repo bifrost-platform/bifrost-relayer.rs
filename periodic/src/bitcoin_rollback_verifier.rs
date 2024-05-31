@@ -43,14 +43,23 @@ type EvmRollbackRequestOf = (
 	bool,      // is_approved
 );
 
+/// (Bitcoin) Rollback request information.
 pub struct RollbackRequest {
+	/// The unsigned PSBT of the rollback request (in bytes).
 	pub unsigned_psbt: Bytes,
+	/// The registered user who attemps to request.
 	pub who: H160,
+	/// The Bitcoin transaction hash that contains the output.
 	pub txid: Txid,
+	/// The output index.
 	pub vout: usize,
+	/// The output destination address.
 	pub to: Address,
+	/// The output amount.
 	pub amount: Amount,
+	/// The current voting state of the request.
 	pub votes: BTreeMap<H160, bool>,
+	/// The current voting result of the request.
 	pub is_approved: bool,
 }
 
@@ -76,8 +85,11 @@ impl From<EvmRollbackRequestOf> for RollbackRequest {
 pub struct BitcoinRollbackVerifier<T> {
 	/// The Bitcoin client.
 	btc_client: BtcClient,
+	/// The Bifrost client.
 	bfc_client: Arc<EthClient<T>>,
+	/// The unsigned transaction message sender.
 	xt_request_sender: Arc<XtRequestSender>,
+	/// The periodic schedule.
 	schedule: Schedule,
 }
 
@@ -185,6 +197,7 @@ impl<T: JsonRpcClient> PeriodicWorker for BitcoinRollbackVerifier<T> {
 }
 
 impl<T: JsonRpcClient> BitcoinRollbackVerifier<T> {
+	/// Instantiates a new `BitcoinRollbackVerifier` instance.
 	pub fn new(
 		btc_client: BtcClient,
 		bfc_client: Arc<EthClient<T>>,
@@ -199,6 +212,7 @@ impl<T: JsonRpcClient> BitcoinRollbackVerifier<T> {
 		}
 	}
 
+	/// Verifies whether the pending request information matches with on-chain data.
 	fn is_rollback_valid(&self, tx: GetRawTransactionResult, request: &RollbackRequest) -> bool {
 		// output[index] must exist
 		if tx.vout.len() < request.vout {
@@ -219,6 +233,7 @@ impl<T: JsonRpcClient> BitcoinRollbackVerifier<T> {
 		return false;
 	}
 
+	/// Build the payload for the unsigned transaction. (`submit_rollback_poll()`)
 	fn build_payload(
 		&self,
 		unsigned_psbt: Vec<u8>,
@@ -235,6 +250,7 @@ impl<T: JsonRpcClient> BitcoinRollbackVerifier<T> {
 		return (msg, signature);
 	}
 
+	/// Build the calldata for the unsigned transaction. (`submit_rollback_poll()`)
 	fn build_unsigned_tx(
 		&self,
 		unsigned_psbt: Psbt,
@@ -251,12 +267,14 @@ impl<T: JsonRpcClient> BitcoinRollbackVerifier<T> {
 		);
 	}
 
+	/// Get the pending rollback PSBT's.
 	async fn get_rollback_psbts(&self) -> Vec<Bytes> {
 		self.bfc_client
 			.contract_call(self.socket_queue().rollback_psbts(), "socket_queue.rollback_psbts")
 			.await
 	}
 
+	/// Get the rollback information.
 	async fn get_rollback_request(&self, txid: H256) -> RollbackRequest {
 		self.bfc_client
 			.contract_call(
@@ -267,6 +285,7 @@ impl<T: JsonRpcClient> BitcoinRollbackVerifier<T> {
 			.into()
 	}
 
+	/// Get the `BtcSocketQueue` precompile contract instance.
 	fn socket_queue(&self) -> &SocketQueueContract<Provider<T>> {
 		self.bfc_client.protocol_contracts.socket_queue.as_ref().unwrap()
 	}
