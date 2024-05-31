@@ -84,7 +84,7 @@ impl From<EvmRollbackRequestOf> for RollbackRequest {
 
 pub struct BitcoinRollbackVerifier<T> {
 	/// The Bitcoin client.
-	btc_client: BtcClient,
+	btc_client: Arc<BtcClient>,
 	/// The Bifrost client.
 	bfc_client: Arc<EthClient<T>>,
 	/// The unsigned transaction message sender.
@@ -199,7 +199,7 @@ impl<T: JsonRpcClient> PeriodicWorker for BitcoinRollbackVerifier<T> {
 impl<T: JsonRpcClient> BitcoinRollbackVerifier<T> {
 	/// Instantiates a new `BitcoinRollbackVerifier` instance.
 	pub fn new(
-		btc_client: BtcClient,
+		btc_client: Arc<BtcClient>,
 		bfc_client: Arc<EthClient<T>>,
 		xt_request_sender: Arc<XtRequestSender>,
 	) -> Self {
