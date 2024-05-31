@@ -21,8 +21,8 @@ use crate::{
 	eth::{ChainID, GasCoefficient, SocketEventStatus},
 	periodic::PriceResponse,
 	substrate::{
-		SubmitExecutedRequest, SubmitSignedPsbt, SubmitSystemVaultKey, SubmitUnsignedPsbt,
-		SubmitVaultKey,
+		SubmitExecutedRequest, SubmitRollbackPoll, SubmitSignedPsbt, SubmitSystemVaultKey,
+		SubmitUnsignedPsbt, SubmitVaultKey,
 	},
 };
 
@@ -354,12 +354,32 @@ impl Display for SubmitExecutedRequestMetadata {
 	}
 }
 
+#[derive(Clone, Debug)]
+/// The metadata used for rollback poll submission.
+pub struct SubmitRollbackPollMetadata {
+	pub txid: H256,
+	pub is_approved: bool,
+}
+
+impl SubmitRollbackPollMetadata {
+	pub fn new(txid: H256, is_approved: bool) -> Self {
+		Self { txid, is_approved }
+	}
+}
+
+impl Display for SubmitRollbackPollMetadata {
+	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		write!(f, "SubmitRollbackPoll({}:{})", self.txid, self.is_approved)
+	}
+}
+
 #[derive(Clone)]
 pub enum XtRequestMetadata {
 	SubmitVaultKey(SubmitVaultKeyMetadata),
 	SubmitSignedPsbt(SubmitSignedPsbtMetadata),
 	SubmitUnsignedPsbt(SubmitUnsignedPsbtMetadata),
 	SubmitExecutedRequest(SubmitExecutedRequestMetadata),
+	SubmitRollbackPoll(SubmitRollbackPollMetadata),
 }
 
 impl Display for XtRequestMetadata {
@@ -372,6 +392,7 @@ impl Display for XtRequestMetadata {
 				XtRequestMetadata::SubmitSignedPsbt(metadata) => metadata.to_string(),
 				XtRequestMetadata::SubmitUnsignedPsbt(metadata) => metadata.to_string(),
 				XtRequestMetadata::SubmitExecutedRequest(metadata) => metadata.to_string(),
+				XtRequestMetadata::SubmitRollbackPoll(metadata) => metadata.to_string(),
 			}
 		)
 	}
@@ -384,6 +405,7 @@ pub enum XtRequest {
 	SubmitUnsignedPsbt(Payload<SubmitUnsignedPsbt>),
 	SubmitExecutedRequest(Payload<SubmitExecutedRequest>),
 	SubmitSystemVaultKey(Payload<SubmitSystemVaultKey>),
+	SubmitRollbackPoll(Payload<SubmitRollbackPoll>),
 }
 
 impl TxPayload for XtRequest {
@@ -394,6 +416,7 @@ impl TxPayload for XtRequest {
 			XtRequest::SubmitUnsignedPsbt(call) => call.encode_call_data_to(metadata, out),
 			XtRequest::SubmitExecutedRequest(call) => call.encode_call_data_to(metadata, out),
 			XtRequest::SubmitSystemVaultKey(call) => call.encode_call_data_to(metadata, out),
+			XtRequest::SubmitRollbackPoll(call) => call.encode_call_data_to(metadata, out),
 		}
 	}
 }
@@ -408,6 +431,7 @@ impl TryFrom<XtRequest> for Payload<SubmitSignedPsbt> {
 			XtRequest::SubmitUnsignedPsbt(_) => Err(()),
 			XtRequest::SubmitExecutedRequest(_) => Err(()),
 			XtRequest::SubmitSystemVaultKey(_) => Err(()),
+			XtRequest::SubmitRollbackPoll(_) => Err(()),
 		}
 	}
 }
@@ -421,6 +445,7 @@ impl TryFrom<XtRequest> for Payload<SubmitVaultKey> {
 			XtRequest::SubmitVaultKey(call) => Ok(call),
 			XtRequest::SubmitUnsignedPsbt(_) => Err(()),
 			XtRequest::SubmitExecutedRequest(_) => Err(()),
+			XtRequest::SubmitRollbackPoll(_) => Err(()),
 		}
 	}
 }
@@ -435,6 +460,7 @@ impl TryFrom<XtRequest> for Payload<SubmitUnsignedPsbt> {
 			XtRequest::SubmitSystemVaultKey(_) => Err(()),
 			XtRequest::SubmitUnsignedPsbt(call) => Ok(call),
 			XtRequest::SubmitExecutedRequest(_) => Err(()),
+			XtRequest::SubmitRollbackPoll(_) => Err(()),
 		}
 	}
 }
@@ -449,6 +475,7 @@ impl TryFrom<XtRequest> for Payload<SubmitExecutedRequest> {
 			XtRequest::SubmitSystemVaultKey(_) => Err(()),
 			XtRequest::SubmitUnsignedPsbt(_) => Err(()),
 			XtRequest::SubmitExecutedRequest(call) => Ok(call),
+			XtRequest::SubmitRollbackPoll(_) => Err(()),
 		}
 	}
 }
@@ -462,6 +489,21 @@ impl TryFrom<XtRequest> for Payload<SubmitSystemVaultKey> {
 			XtRequest::SubmitUnsignedPsbt(_) => Err(()),
 			XtRequest::SubmitExecutedRequest(_) => Err(()),
 			XtRequest::SubmitSystemVaultKey(call) => Ok(call),
+			XtRequest::SubmitRollbackPoll(_) => Err(()),
+		}
+	}
+}
+impl TryFrom<XtRequest> for Payload<SubmitRollbackPoll> {
+	type Error = ();
+
+	fn try_from(value: XtRequest) -> Result<Self, Self::Error> {
+		match value {
+			XtRequest::SubmitSignedPsbt(_) => Err(()),
+			XtRequest::SubmitVaultKey(_) => Err(()),
+			XtRequest::SubmitUnsignedPsbt(_) => Err(()),
+			XtRequest::SubmitExecutedRequest(_) => Err(()),
+			XtRequest::SubmitSystemVaultKey(_) => Err(()),
+			XtRequest::SubmitRollbackPoll(call) => Ok(call),
 		}
 	}
 }
@@ -489,6 +531,11 @@ impl From<Payload<SubmitExecutedRequest>> for XtRequest {
 impl From<Payload<SubmitSystemVaultKey>> for XtRequest {
 	fn from(value: Payload<SubmitSystemVaultKey>) -> Self {
 		Self::SubmitSystemVaultKey(value)
+	}
+}
+impl From<Payload<SubmitRollbackPoll>> for XtRequest {
+	fn from(value: Payload<SubmitRollbackPoll>) -> Self {
+		Self::SubmitRollbackPoll(value)
 	}
 }
 
