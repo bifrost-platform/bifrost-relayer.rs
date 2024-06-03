@@ -65,7 +65,10 @@ impl<T: JsonRpcClient + 'static> InboundHandler<T> {
 		let user_address: EthAddress = self
 			.bfc_client
 			.contract_call(
-				registration_pool.user_address(vault_address.clone().assume_checked().to_string()),
+				registration_pool.user_address(
+					vault_address.clone().assume_checked().to_string(),
+					self.get_current_round().await,
+				),
 				"registration_pool.user_address",
 			)
 			.await;
@@ -112,6 +115,14 @@ impl<T: JsonRpcClient + 'static> InboundHandler<T> {
 				self.bitcoin_socket().is_relayer_voted(hash_key, self.bfc_client.address()),
 				"bitcoin_socket.is_relayer_voted",
 			)
+			.await
+	}
+
+	async fn get_current_round(&self) -> u32 {
+		let registration_pool =
+			self.bfc_client.protocol_contracts.registration_pool.as_ref().unwrap();
+		self.bfc_client
+			.contract_call(registration_pool.current_round(), "registration_pool.current_round")
 			.await
 	}
 

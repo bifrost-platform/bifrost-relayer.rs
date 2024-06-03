@@ -195,7 +195,7 @@ impl<T: JsonRpcClient> PubKeySubmitter<T> {
 	async fn get_pending_registrations(&self) -> Vec<Address> {
 		self.client
 			.contract_call(
-				self.registration_pool().pending_registrations(),
+				self.registration_pool().pending_registrations(self.get_current_round().await),
 				"registration_pool.pending_registrations",
 			)
 			.await
@@ -209,7 +209,7 @@ impl<T: JsonRpcClient> PubKeySubmitter<T> {
 	) -> (Address, String, String, Vec<Address>, Vec<Bytes>) {
 		self.client
 			.contract_call(
-				self.registration_pool().registration_info(who),
+				self.registration_pool().registration_info(who, self.get_current_round().await),
 				"registration_pool.registration_info",
 			)
 			.await
@@ -232,6 +232,13 @@ impl<T: JsonRpcClient> PubKeySubmitter<T> {
 	#[inline]
 	fn is_system_vault(&self, who: Address) -> bool {
 		who == self.registration_pool().address()
+	}
+
+	async fn get_current_round(&self) -> u32 {
+		let registration_pool = self.registration_pool();
+		self.client
+			.contract_call(registration_pool.current_round(), "registration_pool.current_round")
+			.await
 	}
 
 	/// Check the service state. (Normal -> true, Maintenance -> false)

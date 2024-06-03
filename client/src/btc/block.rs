@@ -199,7 +199,10 @@ impl<T: JsonRpcClient + 'static> BlockManager<T> {
 			self.bfc_client.protocol_contracts.registration_pool.as_ref().unwrap();
 
 		self.bfc_client
-			.contract_call(registration_pool.vault_addresses(), "registration_pool.vault_addresses")
+			.contract_call(
+				registration_pool.vault_addresses(self.get_current_round().await),
+				"registration_pool.vault_addresses",
+			)
 			.await
 	}
 
@@ -210,9 +213,19 @@ impl<T: JsonRpcClient + 'static> BlockManager<T> {
 
 		self.bfc_client
 			.contract_call(
-				registration_pool.refund_addresses(),
+				registration_pool.refund_addresses(self.get_current_round().await),
 				"registration_pool.refund_addresses",
 			)
+			.await
+	}
+
+	/// Returns current pool round.
+	async fn get_current_round(&self) -> u32 {
+		let registration_pool =
+			self.bfc_client.protocol_contracts.registration_pool.as_ref().unwrap();
+
+		self.bfc_client
+			.contract_call(registration_pool.current_round(), "registration_pool.current_round")
 			.await
 	}
 

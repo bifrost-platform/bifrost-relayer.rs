@@ -106,7 +106,7 @@ fn construct_periodics(
 		.find(|client| client.metadata.is_native)
 		.expect(INVALID_BIFROST_NATIVENESS)
 		.clone();
-	let migration_detector =
+	let keypair_manager =
 		KeypairStorageManager::new(bfc_client, migration_sequence, keypair_storage);
 
 	PeriodicDeps {
@@ -115,7 +115,7 @@ fn construct_periodics(
 		roundup_emitter,
 		rollback_emitters,
 		rollback_senders,
-		migration_detector,
+		keypair_manager,
 	}
 }
 
@@ -276,6 +276,8 @@ fn construct_btc_deps(
 	migration_sequence: Arc<RwLock<MigrationSequence>>,
 ) -> BtcDeps {
 	let bootstrap_shared_data = Arc::new(bootstrap_shared_data.clone());
+	let network = Network::from_core_arg(&config.relayer_config.btc_provider.chain)
+		.expect(INVALID_BITCOIN_NETWORK);
 
 	let auth = match (
 		config.relayer_config.btc_provider.username.clone(),
@@ -329,6 +331,8 @@ fn construct_btc_deps(
 		substrate_deps.xt_request_sender.clone(),
 		block_manager.subscribe(),
 		keypair_storage.clone(),
+		migration_sequence.clone(),
+		network,
 	);
 	let pub_key_submitter = PubKeySubmitter::new(
 		bfc_client.clone(),
@@ -384,7 +388,7 @@ fn spawn_relayer_tasks(
 		mut oracle_price_feeder,
 		mut roundup_emitter,
 		rollback_emitters,
-		mut migration_detector,
+		mut keypair_manager,
 		..
 	} = periodic_deps;
 	let HandlerDeps { socket_relay_handlers, roundup_relay_handlers } = handler_deps;
@@ -401,7 +405,7 @@ fn spawn_relayer_tasks(
 	task_manager.spawn_essential_handle().spawn(
 		"migration-detector",
 		Some("migration-detector"),
-		async move { migration_detector.run().await },
+		async move { keypair_manager.run().await },
 	);
 
 	// spawn legacy transaction managers
@@ -737,7 +741,7 @@ struct PeriodicDeps {
 	/// The `RollbackSender`'s for each specified chain.
 	rollback_senders: BTreeMap<ChainID, Arc<RollbackSender>>,
 	/// The `MigrationDetector` used for detecting migration sequences.
-	migration_detector: KeypairStorageManager<Http>,
+	keypair_manager: KeypairStorageManager<Http>,
 }
 
 struct HandlerDeps {
