@@ -5,7 +5,10 @@ use br_client::{btc::storage::keypair::KeypairStorage, eth::EthClient};
 use br_primitives::{
 	constants::{errors::INVALID_PERIODIC_SCHEDULE, schedule::PUB_KEY_SUBMITTER_SCHEDULE},
 	contracts::registration_pool::RegistrationPoolContract,
-	substrate::{bifrost_runtime, AccountId20, EthereumSignature, Public, VaultKeySubmission},
+	substrate::{
+		bifrost_runtime, AccountId20, EthereumSignature, MigrationSequence, Public,
+		VaultKeySubmission,
+	},
 	tx::{SubmitVaultKeyMetadata, XtRequest, XtRequestMessage, XtRequestMetadata, XtRequestSender},
 	utils::{convert_ethers_to_ecdsa_signature, sub_display_format},
 };
@@ -14,6 +17,7 @@ use ethers::{
 	providers::{JsonRpcClient, Provider},
 	types::{Address, Bytes},
 };
+use tokio::sync::RwLock;
 use tokio_stream::StreamExt;
 
 use crate::traits::PeriodicWorker;
@@ -27,6 +31,8 @@ pub struct PubKeySubmitter<T> {
 	xt_request_sender: Arc<XtRequestSender>,
 	/// The public and private keypair local storage.
 	keypair_storage: KeypairStorage,
+	/// The migration sequence.
+	migration_sequence: Arc<RwLock<MigrationSequence>>,
 	/// The time schedule that represents when check pending registrations.
 	schedule: Schedule,
 }
@@ -53,6 +59,11 @@ impl<T: JsonRpcClient + 'static> PeriodicWorker for PubKeySubmitter<T> {
 
 				let mut stream = tokio_stream::iter(pending_registrations);
 				while let Some(who) = stream.next().await {
+					// Skip the registration if the service is in maintenance mode. (Only system vaults are allowed to register in maintenance mode.)
+					if !self.check_service_state().await && !self.is_system_vault(who) {
+						continue;
+					}
+
 					let registration_info = self.get_registration_info(who).await;
 
 					// user doesn't exist in the pool.
@@ -83,11 +94,13 @@ impl<T: JsonRpcClient> PubKeySubmitter<T> {
 		client: Arc<EthClient<T>>,
 		xt_request_sender: Arc<XtRequestSender>,
 		keypair_storage: KeypairStorage,
+		migration_sequence: Arc<RwLock<MigrationSequence>>,
 	) -> Self {
 		Self {
 			client,
 			xt_request_sender,
 			keypair_storage,
+			migration_sequence,
 			schedule: Schedule::from_str(PUB_KEY_SUBMITTER_SCHEDULE)
 				.expect(INVALID_PERIODIC_SCHEDULE),
 		}
@@ -123,7 +136,7 @@ impl<T: JsonRpcClient> PubKeySubmitter<T> {
 	) -> (XtRequest, SubmitVaultKeyMetadata) {
 		let (msg, signature) = self.build_payload(who, pub_key);
 		let metadata = SubmitVaultKeyMetadata::new(who, pub_key);
-		if who == self.registration_pool().address() {
+		if self.is_system_vault(who) {
 			(
 				XtRequest::from(
 					bifrost_runtime::tx()
@@ -213,5 +226,19 @@ impl<T: JsonRpcClient> PubKeySubmitter<T> {
 		self.client
 			.contract_call(relay_exec.is_member(self.client.address()), "relay_executive.is_member")
 			.await
+	}
+
+	/// Verify whether the given address is a system vault.
+	#[inline]
+	fn is_system_vault(&self, who: Address) -> bool {
+		who == self.registration_pool().address()
+	}
+
+	/// Check the service state. (Normal -> true, Maintenance -> false)
+	async fn check_service_state(&self) -> bool {
+		return match *self.migration_sequence.read().await {
+			MigrationSequence::Normal => true,
+			_ => false,
+		};
 	}
 }
