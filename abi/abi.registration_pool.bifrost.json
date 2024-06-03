@@ -179,13 +179,8 @@
     "inputs": [
       {
         "internalType": "string",
-        "name": "vault_or_refund",
+        "name": "vault_address",
         "type": "string"
-      },
-      {
-        "internalType": "bool",
-        "name": "is_vault",
-        "type": "bool"
       }
     ],
     "name": "user_address",

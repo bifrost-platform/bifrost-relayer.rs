@@ -65,8 +65,7 @@ impl<T: JsonRpcClient + 'static> InboundHandler<T> {
 		let user_address: EthAddress = self
 			.bfc_client
 			.contract_call(
-				registration_pool
-					.user_address(vault_address.clone().assume_checked().to_string(), true),
+				registration_pool.user_address(vault_address.clone().assume_checked().to_string()),
 				"registration_pool.user_address",
 			)
 			.await;
