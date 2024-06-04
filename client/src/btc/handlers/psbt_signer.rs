@@ -1,7 +1,6 @@
 use br_primitives::{
 	substrate::{
-		bifrost_runtime, AccountId20, CustomConfig, EthereumSignature, MigrationSequence,
-		SignedPsbtMessage,
+		bifrost_runtime, AccountId20, EthereumSignature, MigrationSequence, SignedPsbtMessage,
 	},
 	tx::{SubmitSignedPsbtMetadata, XtRequest, XtRequestMetadata, XtRequestSender},
 	utils::{convert_ethers_to_ecdsa_signature, hash_bytes, sub_display_format},
@@ -9,7 +8,6 @@ use br_primitives::{
 use ethers::{providers::JsonRpcClient, types::Bytes};
 use miniscript::bitcoin::{Address as BtcAddress, Network, Psbt};
 use std::{str::FromStr, sync::Arc};
-use subxt::OnlineClient;
 use tokio::sync::{broadcast::Receiver, RwLock};
 use tokio_stream::StreamExt;
 
@@ -30,8 +28,6 @@ const SUB_LOG_TARGET: &str = "psbt-signer";
 pub struct PsbtSigner<T> {
 	/// The Bifrost client.
 	client: Arc<EthClient<T>>,
-	/// The substrate client.
-	sub_client: Option<OnlineClient<CustomConfig>>,
 	/// The unsigned transaction message sender.
 	xt_request_sender: Arc<XtRequestSender>,
 	/// The Bitcoin event receiver.
@@ -58,7 +54,6 @@ impl<T: JsonRpcClient> PsbtSigner<T> {
 	) -> Self {
 		Self {
 			client,
-			sub_client: None,
 			xt_request_sender,
 			event_receiver,
 			target_event: EventType::NewBlock,
@@ -168,21 +163,12 @@ impl<T: JsonRpcClient> PsbtSigner<T> {
 		BtcAddress::from_str(&system_vault).unwrap().assume_checked()
 	}
 
-	fn get_sub_client(&self) -> &OnlineClient<CustomConfig> {
-		self.sub_client.as_ref().unwrap()
-	}
-
 	/// Get the current round number.
 	async fn get_current_round(&self) -> u32 {
-		self.get_sub_client()
-			.storage()
-			.at_latest()
+		let registration_pool = self.client.protocol_contracts.registration_pool.as_ref().unwrap();
+		self.client
+			.contract_call(registration_pool.current_round(), "registration_pool.current_round")
 			.await
-			.unwrap()
-			.fetch(&bifrost_runtime::storage().btc_registration_pool().current_round())
-			.await
-			.unwrap()
-			.unwrap()
 	}
 }
 
@@ -200,12 +186,6 @@ impl<T: JsonRpcClient> XtRequester<T> for PsbtSigner<T> {
 #[async_trait::async_trait]
 impl<T: JsonRpcClient> Handler for PsbtSigner<T> {
 	async fn run(&mut self) {
-		self.sub_client = Some(
-			OnlineClient::<CustomConfig>::from_url(self.client.get_url().as_str())
-				.await
-				.unwrap(),
-		);
-
 		loop {
 			let msg = self.event_receiver.recv().await.unwrap();
 
