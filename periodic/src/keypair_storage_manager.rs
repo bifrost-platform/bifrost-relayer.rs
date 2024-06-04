@@ -2,7 +2,7 @@ use crate::traits::PeriodicWorker;
 
 use br_client::{btc::storage::keypair::KeypairStorage, eth::EthClient};
 use br_primitives::{
-	constants::schedule::MIGRATION_DETECTOR_SCHEDULE,
+	constants::{schedule::MIGRATION_DETECTOR_SCHEDULE, tx::DEFAULT_CALL_RETRY_INTERVAL_MS},
 	substrate::{
 		bifrost_runtime::{
 			self, btc_registration_pool::storage::types::service_state::ServiceState,
@@ -12,7 +12,7 @@ use br_primitives::{
 };
 use cron::Schedule;
 use ethers::prelude::JsonRpcClient;
-use std::{str::FromStr, sync::Arc};
+use std::{str::FromStr, sync::Arc, time::Duration};
 use subxt::OnlineClient;
 use tokio::sync::RwLock;
 
@@ -25,6 +25,7 @@ pub struct KeypairStorageManager<T> {
 }
 
 impl<T: JsonRpcClient> KeypairStorageManager<T> {
+	/// Instantiates a new `KeypairStorageManager` instance.
 	pub fn new(
 		bfc_client: Arc<EthClient<T>>,
 		migration_sequence: Arc<RwLock<MigrationSequence>>,
@@ -59,34 +60,64 @@ impl<T: JsonRpcClient> KeypairStorageManager<T> {
 		}
 	}
 
-	#[inline]
+	/// Get the current round number.
 	async fn get_current_round(&self) -> u32 {
-		self.sub_client
-			.as_ref()
-			.unwrap()
-			.storage()
-			.at_latest()
-			.await
-			.unwrap()
-			.fetch(&bifrost_runtime::storage().btc_registration_pool().current_round())
-			.await
-			.unwrap()
-			.unwrap()
+		loop {
+			match self.sub_client.as_ref().unwrap().storage().at_latest().await {
+				Ok(storage) => {
+					match storage
+						.fetch(&bifrost_runtime::storage().btc_registration_pool().current_round())
+						.await
+					{
+						Ok(Some(round)) => return round,
+						Ok(None) => {
+							unreachable!("The current round number should always be available.")
+						},
+						Err(_) => {
+							tokio::time::sleep(Duration::from_millis(
+								DEFAULT_CALL_RETRY_INTERVAL_MS,
+							))
+							.await;
+							continue;
+						},
+					}
+				},
+				Err(_) => {
+					tokio::time::sleep(Duration::from_millis(DEFAULT_CALL_RETRY_INTERVAL_MS)).await;
+					continue;
+				},
+			}
+		}
 	}
 
-	#[inline]
+	/// Fetch the latest service state from the storage.
 	async fn get_service_state(&self) -> ServiceState {
-		self.sub_client
-			.as_ref()
-			.unwrap()
-			.storage()
-			.at_latest()
-			.await
-			.unwrap()
-			.fetch(&bifrost_runtime::storage().btc_registration_pool().service_state())
-			.await
-			.unwrap()
-			.unwrap()
+		loop {
+			match self.sub_client.as_ref().unwrap().storage().at_latest().await {
+				Ok(storage) => {
+					match storage
+						.fetch(&bifrost_runtime::storage().btc_registration_pool().service_state())
+						.await
+					{
+						Ok(Some(state)) => return state,
+						Ok(None) => {
+							unreachable!("The service state should always be available.")
+						},
+						Err(_) => {
+							tokio::time::sleep(Duration::from_millis(
+								DEFAULT_CALL_RETRY_INTERVAL_MS,
+							))
+							.await;
+							continue;
+						},
+					}
+				},
+				Err(_) => {
+					tokio::time::sleep(Duration::from_millis(DEFAULT_CALL_RETRY_INTERVAL_MS)).await;
+					continue;
+				},
+			}
+		}
 	}
 }
 
@@ -100,19 +131,9 @@ impl<T: JsonRpcClient> PeriodicWorker for KeypairStorageManager<T> {
 		self.initialize().await;
 
 		loop {
-			let sub_client = self.sub_client.as_ref().unwrap();
-
 			// Fetch the latest service state from the storage.
 			{
-				let service_state = sub_client
-					.storage()
-					.at_latest()
-					.await
-					.unwrap()
-					.fetch(&bifrost_runtime::storage().btc_registration_pool().service_state())
-					.await
-					.unwrap()
-					.unwrap();
+				let service_state = self.get_service_state().await;
 
 				let mut write_lock = self.migration_sequence.write().await;
 				match *write_lock {
