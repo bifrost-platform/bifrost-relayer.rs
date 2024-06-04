@@ -1,18 +1,17 @@
 use br_primitives::{
-	substrate::{bifrost_runtime, AccountId20, EthereumSignature, SignedPsbtMessage},
+	substrate::{
+		bifrost_runtime, AccountId20, CustomConfig, EthereumSignature, MigrationSequence,
+		SignedPsbtMessage,
+	},
 	tx::{SubmitSignedPsbtMetadata, XtRequest, XtRequestMetadata, XtRequestSender},
 	utils::{convert_ethers_to_ecdsa_signature, hash_bytes, sub_display_format},
 };
 use ethers::{providers::JsonRpcClient, types::Bytes};
 use miniscript::bitcoin::{Address as BtcAddress, Network, Psbt};
-use std::str::FromStr;
-use tokio::sync::broadcast::Receiver;
-use tokio_stream::StreamExt;
-
-use br_primitives::substrate::{CustomConfig, MigrationSequence};
-use std::sync::Arc;
+use std::{str::FromStr, sync::Arc};
 use subxt::OnlineClient;
-use tokio::sync::RwLock;
+use tokio::sync::{broadcast::Receiver, RwLock};
+use tokio_stream::StreamExt;
 
 use crate::{
 	btc::{
@@ -159,10 +158,7 @@ impl<T: JsonRpcClient> PsbtSigner<T> {
 			)
 			.await;
 
-		BtcAddress::from_str(&system_vault)
-			.unwrap()
-			.require_network(self.btc_network)
-			.unwrap()
+		BtcAddress::from_str(&system_vault).unwrap().assume_checked()
 	}
 
 	fn get_sub_client(&self) -> &OnlineClient<CustomConfig> {
