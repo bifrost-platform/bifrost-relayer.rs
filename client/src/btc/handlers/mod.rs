@@ -63,23 +63,16 @@ pub trait XtRequester<T: JsonRpcClient> {
 				metadata
 			),
 			Err(error) => {
-				log::error!(
-					target: &self.bfc_client().get_chain_name(),
-					"-[{}] ❗️ Failed to send unsigned transaction: {}, Error: {}",
+				let log_msg = format!(
+					"-[{}]-[{}] ❗️ Failed to send unsigned transaction: {}, Error: {}",
 					sub_display_format(sub_log_target),
+					self.bfc_client().address(),
 					metadata,
-					error.to_string()
+					error
 				);
+				log::error!(target: &self.bfc_client().get_chain_name(), "{log_msg}");
 				sentry::capture_message(
-					format!(
-						"[{}]-[{}]-[{}] ❗️ Failed to send unsigned transaction: {}, Error: {}",
-						&self.bfc_client().get_chain_name(),
-						sub_log_target,
-						self.bfc_client().address(),
-						metadata,
-						error
-					)
-					.as_str(),
+					&format!("[{}]{log_msg}", &self.bfc_client().get_chain_name()),
 					sentry::Level::Error,
 				);
 			},
@@ -114,23 +107,16 @@ pub trait TxRequester<T: JsonRpcClient> {
 				metadata
 			),
 			Err(error) => {
-				log::error!(
-					target: LOG_TARGET,
-					"-[{}] ❗️ Failed to send relay transaction: {}, Error: {}",
+				let log_msg = format!(
+					"-[{}]-[{}] ❗️ Failed to send relay transaction: {}, Error: {}",
 					sub_display_format(sub_log_target),
+					self.bfc_client().address(),
 					metadata,
-					error.to_string()
+					error
 				);
+				log::error!(target: LOG_TARGET, "{log_msg}");
 				sentry::capture_message(
-					format!(
-						"[{}]-[{}]-[{}] ❗️ Failed to send relay transaction: {}, Error: {}",
-						LOG_TARGET,
-						sub_log_target,
-						self.bfc_client().address(),
-						metadata,
-						error
-					)
-					.as_str(),
+					&format!("[{}]{log_msg}", LOG_TARGET),
 					sentry::Level::Error,
 				);
 			},

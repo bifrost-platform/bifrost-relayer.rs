@@ -168,23 +168,16 @@ impl<T: JsonRpcClient> PubKeySubmitter<T> {
 				metadata
 			),
 			Err(error) => {
-				log::error!(
-					target: &self.client.get_chain_name(),
-					"-[{}] ❗️ Failed to send unsigned transaction: {}, Error: {}",
+				let log_msg = format!(
+					"-[{}]-[{}] ❗️ Failed to send unsigned transaction: {}, Error: {}",
 					sub_display_format(SUB_LOG_TARGET),
+					self.client.address(),
 					metadata,
 					error.to_string()
 				);
+				log::error!(target: &self.client.get_chain_name(), "{log_msg}");
 				sentry::capture_message(
-					format!(
-						"[{}]-[{}]-[{}] ❗️ Failed to send unsigned transaction: {}, Error: {}",
-						&self.client.get_chain_name(),
-						SUB_LOG_TARGET,
-						self.client.address(),
-						metadata,
-						error
-					)
-					.as_str(),
+					&format!("[{}]{log_msg}", &self.client.get_chain_name()),
 					sentry::Level::Error,
 				);
 			},

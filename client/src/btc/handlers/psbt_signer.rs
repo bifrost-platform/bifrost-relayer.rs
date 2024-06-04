@@ -98,10 +98,10 @@ impl<T: JsonRpcClient> PsbtSigner<T> {
 					BtcAddress::from_script(x.script_pubkey.as_script(), self.btc_network).unwrap()
 						== system_vault
 				}) {
-					let log = format!("-[{}] ❕ Only transfer to new system vault is allowed on `UTXOTransfer` sequence: {:?}", sub_display_format(SUB_LOG_TARGET), unsigned_psbt);
-					log::warn!(target: &self.client.get_chain_name(), "{log}");
+					let log_msg = format!("-[{}] ❕ Only transfer to new system vault is allowed on `UTXOTransfer` sequence: {:?}", sub_display_format(SUB_LOG_TARGET), unsigned_psbt);
+					log::warn!(target: &self.client.get_chain_name(), "{log_msg}");
 					sentry::capture_message(
-						&format!("[{}]{log}", &self.client.get_chain_name()),
+						&format!("[{}]{log_msg}", &self.client.get_chain_name()),
 						sentry::Level::Warning,
 					);
 
