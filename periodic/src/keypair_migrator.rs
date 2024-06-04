@@ -16,7 +16,7 @@ use std::{str::FromStr, sync::Arc, time::Duration};
 use subxt::OnlineClient;
 use tokio::sync::RwLock;
 
-pub struct KeypairStorageManager<T> {
+pub struct KeypairMigrator<T> {
 	sub_client: Option<OnlineClient<CustomConfig>>,
 	bfc_client: Arc<EthClient<T>>,
 	migration_sequence: Arc<RwLock<MigrationSequence>>,
@@ -24,8 +24,8 @@ pub struct KeypairStorageManager<T> {
 	schedule: Schedule,
 }
 
-impl<T: JsonRpcClient> KeypairStorageManager<T> {
-	/// Instantiates a new `KeypairStorageManager` instance.
+impl<T: JsonRpcClient> KeypairMigrator<T> {
+	/// Instantiates a new `KeypairMigrator` instance.
 	pub fn new(
 		bfc_client: Arc<EthClient<T>>,
 		migration_sequence: Arc<RwLock<MigrationSequence>>,
@@ -122,7 +122,7 @@ impl<T: JsonRpcClient> KeypairStorageManager<T> {
 }
 
 #[async_trait::async_trait]
-impl<T: JsonRpcClient> PeriodicWorker for KeypairStorageManager<T> {
+impl<T: JsonRpcClient> PeriodicWorker for KeypairMigrator<T> {
 	fn schedule(&self) -> Schedule {
 		self.schedule.clone()
 	}

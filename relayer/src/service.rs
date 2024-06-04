@@ -30,8 +30,8 @@ use br_client::{
 	substrate::tx::UnsignedTransactionManager,
 };
 use br_periodic::{
-	traits::PeriodicWorker, HeartbeatSender, KeypairStorageManager, OraclePriceFeeder,
-	PubKeySubmitter, RoundupEmitter, SocketRollbackEmitter,
+	traits::PeriodicWorker, HeartbeatSender, KeypairMigrator, OraclePriceFeeder, PubKeySubmitter,
+	RoundupEmitter, SocketRollbackEmitter,
 };
 use br_primitives::{
 	bootstrap::BootstrapSharedData,
@@ -106,8 +106,7 @@ fn construct_periodics(
 		.find(|client| client.metadata.is_native)
 		.expect(INVALID_BIFROST_NATIVENESS)
 		.clone();
-	let keypair_manager =
-		KeypairStorageManager::new(bfc_client, migration_sequence, keypair_storage);
+	let keypair_migrator = KeypairMigrator::new(bfc_client, migration_sequence, keypair_storage);
 
 	PeriodicDeps {
 		heartbeat_sender,
@@ -115,7 +114,7 @@ fn construct_periodics(
 		roundup_emitter,
 		rollback_emitters,
 		rollback_senders,
-		keypair_manager,
+		keypair_migrator,
 	}
 }
 
@@ -388,7 +387,7 @@ fn spawn_relayer_tasks(
 		mut oracle_price_feeder,
 		mut roundup_emitter,
 		rollback_emitters,
-		mut keypair_manager,
+		mut keypair_migrator,
 		..
 	} = periodic_deps;
 	let HandlerDeps { socket_relay_handlers, roundup_relay_handlers } = handler_deps;
@@ -405,7 +404,7 @@ fn spawn_relayer_tasks(
 	task_manager.spawn_essential_handle().spawn(
 		"migration-detector",
 		Some("migration-detector"),
-		async move { keypair_manager.run().await },
+		async move { keypair_migrator.run().await },
 	);
 
 	// spawn legacy transaction managers
@@ -740,8 +739,8 @@ struct PeriodicDeps {
 	rollback_emitters: Vec<SocketRollbackEmitter<Http>>,
 	/// The `RollbackSender`'s for each specified chain.
 	rollback_senders: BTreeMap<ChainID, Arc<RollbackSender>>,
-	/// The `MigrationDetector` used for detecting migration sequences.
-	keypair_manager: KeypairStorageManager<Http>,
+	/// The `KeypairMigrator` used for detecting migration sequences.
+	keypair_migrator: KeypairMigrator<Http>,
 }
 
 struct HandlerDeps {

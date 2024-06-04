@@ -1,5 +1,5 @@
 mod heartbeat_sender;
-mod keypair_storage_manager;
+mod keypair_migrator;
 mod price_feeder;
 mod price_source;
 mod pub_key_submitter;
@@ -8,7 +8,7 @@ mod socket_rollback_emitter;
 pub mod traits;
 
 pub use heartbeat_sender::*;
-pub use keypair_storage_manager::*;
+pub use keypair_migrator::*;
 pub use price_feeder::*;
 pub use pub_key_submitter::*;
 pub use roundup_emitter::*;
