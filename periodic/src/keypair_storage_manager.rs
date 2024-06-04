@@ -1,16 +1,20 @@
 use crate::traits::PeriodicWorker;
-use br_primitives::substrate::{bifrost_runtime, CustomConfig, MigrationSequence};
-use std::str::FromStr;
 
-use br_client::eth::EthClient;
-use br_primitives::constants::schedule::MIGRATION_DETECTOR_SCHEDULE;
+use br_client::{btc::storage::keypair::KeypairStorage, eth::EthClient};
+use br_primitives::{
+	constants::schedule::MIGRATION_DETECTOR_SCHEDULE,
+	substrate::{
+		bifrost_runtime::{
+			self, btc_registration_pool::storage::types::service_state::ServiceState,
+		},
+		CustomConfig, MigrationSequence,
+	},
+};
 use cron::Schedule;
 use ethers::prelude::JsonRpcClient;
-use std::sync::Arc;
+use std::{str::FromStr, sync::Arc};
 use subxt::OnlineClient;
 use tokio::sync::RwLock;
-use br_client::btc::storage::keypair::KeypairStorage;
-use br_primitives::substrate::bifrost_runtime::btc_registration_pool::storage::types::service_state::ServiceState;
 
 pub struct KeypairStorageManager<T> {
 	sub_client: Option<OnlineClient<CustomConfig>>,
