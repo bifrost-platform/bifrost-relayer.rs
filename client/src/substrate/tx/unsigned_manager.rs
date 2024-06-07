@@ -98,12 +98,12 @@ impl<T: JsonRpcClient> UnsignedTransactionTask<T> {
 
 #[async_trait::async_trait]
 impl<T: JsonRpcClient> ExtrinsicTask<T> for UnsignedTransactionTask<T> {
-	fn get_bfc_client(&self) -> Arc<EthClient<T>> {
-		self.bfc_client.clone()
-	}
-
 	fn get_sub_client(&self) -> Arc<OnlineClient<CustomConfig>> {
 		self.sub_client.clone()
+	}
+
+	fn get_bfc_client(&self) -> Arc<EthClient<T>> {
+		self.bfc_client.clone()
 	}
 
 	async fn try_send_unsigned_transaction(&self, msg: XtRequestMessage) {
