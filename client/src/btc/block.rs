@@ -94,7 +94,7 @@ impl EventMessage {
 /// A module that reads every new Bitcoin block and filters `Inbound`, `Outbound` events.
 pub struct BlockManager<T> {
 	/// The Bitcoin client.
-	btc_client: Arc<BtcClient>,
+	btc_client: BtcClient,
 	/// The Bifrost client.
 	bfc_client: Arc<EthClient<T>>,
 	/// The event message sender.
@@ -142,7 +142,7 @@ impl<C: JsonRpcClient> RpcApi for BlockManager<C> {
 impl<T: JsonRpcClient + 'static> BlockManager<T> {
 	/// Instantiates a new `BlockManager` instance.
 	pub fn new(
-		btc_client: Arc<BtcClient>,
+		btc_client: BtcClient,
 		bfc_client: Arc<EthClient<T>>,
 		_pending_outbounds: PendingOutboundPool,
 		bootstrap_shared_data: Arc<BootstrapSharedData>,
