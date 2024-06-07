@@ -407,6 +407,11 @@ fn construct_btc_deps(
 		async move { pub_key_submitter.run().await },
 	);
 	task_manager.spawn_essential_handle().spawn(
+		"bitcoin-rollback-verifier",
+		Some("rollback-verifier"),
+		async move { rollback_verifier.run().await },
+	);
+	task_manager.spawn_essential_handle().spawn(
 		"bitcoin-block-manager",
 		Some("block-manager"),
 		async move {
