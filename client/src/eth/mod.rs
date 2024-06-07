@@ -346,23 +346,16 @@ impl<T: JsonRpcClient> LegacyGasMiddleware for EthClient<T> {
 			br_metrics::increase_rpc_calls(&self.get_chain_name());
 
 			if self.debug_mode {
-				log::warn!(
-					target: &self.get_chain_name(),
-					"-[{}] ⚠️  Warning! Error encountered during get gas price, Retries left: {:?}, Error: {}",
+				let log_msg = format!(
+					"-[{}]-[{}] ⚠️  Warning! Error encountered during get gas price, Retries left: {:?}, Error: {}",
 					sub_display_format(SUB_LOG_TARGET),
+					self.address(),
 					retries - 1,
 					last_error
 				);
+				log::warn!(target: &self.get_chain_name(), "{log_msg}");
 				sentry::capture_message(
-					format!(
-						"[{}]-[{}]-[{}] ⚠️  Warning! Error encountered during get gas price, Retries left: {:?}, Error: {}",
-						&self.get_chain_name(),
-						SUB_LOG_TARGET,
-						self.address(),
-						retries - 1,
-						last_error
-					)
-					.as_str(),
+					&format!("[{}]{log_msg}", &self.get_chain_name()),
 					sentry::Level::Warning,
 				);
 			}
@@ -418,23 +411,16 @@ impl<T: JsonRpcClient> Eip1559GasMiddleware for EthClient<T> {
 			br_metrics::increase_rpc_calls(&self.get_chain_name());
 
 			if self.debug_mode {
-				log::warn!(
-					target: &self.get_chain_name(),
-					"-[{}] ⚠️  Warning! Error encountered during get estimated eip1559 fees, Retries left: {:?}, Error: {}",
+				let log_msg = format!(
+					"-[{}]-[{}] ⚠️  Warning! Error encountered during get estimated eip1559 fees, Retries left: {:?}, Error: {}",
 					sub_display_format(SUB_LOG_TARGET),
+					self.address(),
 					retries - 1,
 					last_error
 				);
+				log::warn!(target: &self.get_chain_name(), "{log_msg}");
 				sentry::capture_message(
-					format!(
-						"[{}]-[{}]-[{}] ⚠️  Warning! Error encountered during get estimated eip1559 fees, Retries left: {:?}, Error: {}",
-						&self.get_chain_name(),
-						SUB_LOG_TARGET,
-						self.address(),
-						retries - 1,
-						last_error
-					)
-						.as_str(),
+					&format!("[{}]{log_msg}", &self.get_chain_name()),
 					sentry::Level::Warning,
 				);
 			}

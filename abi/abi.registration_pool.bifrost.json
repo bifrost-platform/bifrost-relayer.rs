@@ -19,11 +19,29 @@
     "type": "event"
   },
   {
+    "inputs": [],
+    "name": "current_round",
+    "outputs": [
+      {
+        "internalType": "uint32",
+        "name": "",
+        "type": "uint32"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
     "inputs": [
       {
         "internalType": "string",
         "name": "vault_address",
         "type": "string"
+      },
+      {
+        "internalType": "uint32",
+        "name": "pool_round",
+        "type": "uint32"
       }
     ],
     "name": "descriptor",
@@ -38,7 +56,13 @@
     "type": "function"
   },
   {
-    "inputs": [],
+    "inputs": [
+      {
+        "internalType": "uint32",
+        "name": "pool_round",
+        "type": "uint32"
+      }
+    ],
     "name": "descriptors",
     "outputs": [
       {
@@ -51,7 +75,13 @@
     "type": "function"
   },
   {
-    "inputs": [],
+    "inputs": [
+      {
+        "internalType": "uint32",
+        "name": "pool_round",
+        "type": "uint32"
+      }
+    ],
     "name": "pending_registrations",
     "outputs": [
       {
@@ -74,6 +104,11 @@
         "internalType": "address",
         "name": "user_bfc_address",
         "type": "address"
+      },
+      {
+        "internalType": "uint32",
+        "name": "pool_round",
+        "type": "uint32"
       }
     ],
     "name": "refund_address",
@@ -88,7 +123,13 @@
     "type": "function"
   },
   {
-    "inputs": [],
+    "inputs": [
+      {
+        "internalType": "uint32",
+        "name": "pool_round",
+        "type": "uint32"
+      }
+    ],
     "name": "refund_addresses",
     "outputs": [
       {
@@ -106,6 +147,11 @@
         "internalType": "address",
         "name": "user_bfc_address",
         "type": "address"
+      },
+      {
+        "internalType": "uint32",
+        "name": "pool_round",
+        "type": "uint32"
       }
     ],
     "name": "registration_info",
@@ -140,7 +186,13 @@
     "type": "function"
   },
   {
-    "inputs": [],
+    "inputs": [
+      {
+        "internalType": "uint32",
+        "name": "pool_round",
+        "type": "uint32"
+      }
+    ],
     "name": "registration_pool",
     "outputs": [
       {
@@ -181,6 +233,11 @@
         "internalType": "string",
         "name": "vault_address",
         "type": "string"
+      },
+      {
+        "internalType": "uint32",
+        "name": "pool_round",
+        "type": "uint32"
       }
     ],
     "name": "user_address",
@@ -200,6 +257,11 @@
         "internalType": "address",
         "name": "user_bfc_address",
         "type": "address"
+      },
+      {
+        "internalType": "uint32",
+        "name": "pool_round",
+        "type": "uint32"
       }
     ],
     "name": "vault_address",
@@ -214,7 +276,13 @@
     "type": "function"
   },
   {
-    "inputs": [],
+    "inputs": [
+      {
+        "internalType": "uint32",
+        "name": "pool_round",
+        "type": "uint32"
+      }
+    ],
     "name": "vault_addresses",
     "outputs": [
       {
