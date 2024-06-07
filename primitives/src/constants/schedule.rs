@@ -10,6 +10,9 @@ pub const PUB_KEY_SUBMITTER_SCHEDULE: &str = "*/15 * * * * * *";
 /// The schedule definition for heartbeats. This will trigger on every minute.
 pub const HEARTBEAT_SCHEDULE: &str = "0 * * * * * *";
 
+/// The schedule definition for bitcoin rollback checks. This will trigger on every minute.
+pub const BITCOIN_ROLLBACK_CHECK_SCHEDULE: &str = "0 * * * * * *";
+
 /// The schedule definition for rollback checks. This will trigger on every minute.
 pub const ROLLBACK_CHECK_SCHEDULE: &str = "0 * * * * * *";
 

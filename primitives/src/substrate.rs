@@ -13,7 +13,7 @@ pub use runtime_types::pallet_btc_registration_pool::{
 	VaultKeySubmission,
 };
 pub use runtime_types::pallet_btc_socket_queue::{
-	pallet::pallet::Call::submit_unsigned_psbt, SignedPsbtMessage,
+	pallet::pallet::Call::submit_unsigned_psbt, RollbackPollMessage, SignedPsbtMessage,
 };
 pub use runtime_types::sp_core::ecdsa::Signature;
 

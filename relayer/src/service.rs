@@ -30,8 +30,8 @@ use br_client::{
 	substrate::tx::UnsignedTransactionManager,
 };
 use br_periodic::{
-	traits::PeriodicWorker, HeartbeatSender, KeypairMigrator, OraclePriceFeeder, PubKeySubmitter,
-	RoundupEmitter, SocketRollbackEmitter,
+	traits::PeriodicWorker, BitcoinRollbackVerifier, HeartbeatSender, KeypairMigrator,
+	OraclePriceFeeder, PubKeySubmitter, RoundupEmitter, SocketRollbackEmitter,
 };
 use br_primitives::{
 	bootstrap::BootstrapSharedData,
@@ -302,7 +302,7 @@ fn construct_btc_deps(
 		.clone();
 
 	let block_manager = BlockManager::new(
-		btc_client,
+		btc_client.clone(),
 		bfc_client.clone(),
 		pending_outbounds.clone(),
 		bootstrap_shared_data.clone(),
@@ -339,8 +339,13 @@ fn construct_btc_deps(
 		keypair_storage.clone(),
 		migration_sequence.clone(),
 	);
+	let rollback_verifier = BitcoinRollbackVerifier::new(
+		btc_client.clone(),
+		bfc_client.clone(),
+		substrate_deps.xt_request_sender.clone(),
+	);
 
-	BtcDeps { outbound, inbound, block_manager, psbt_signer, pub_key_submitter }
+	BtcDeps { outbound, inbound, block_manager, psbt_signer, pub_key_submitter, rollback_verifier }
 }
 
 /// Initializes Substrate related instances.
@@ -398,6 +403,7 @@ fn spawn_relayer_tasks(
 		mut block_manager,
 		mut psbt_signer,
 		mut pub_key_submitter,
+		mut rollback_verifier,
 	} = btc_deps;
 
 	// spawn migration detector
@@ -544,6 +550,11 @@ fn spawn_relayer_tasks(
 		"bitcoin-public-key-submitter",
 		Some("pub-key-submitter"),
 		async move { pub_key_submitter.run().await },
+	);
+	task_manager.spawn_essential_handle().spawn(
+		"bitcoin-rollback-verifier",
+		Some("rollback-verifier"),
+		async move { rollback_verifier.run().await },
 	);
 	task_manager.spawn_essential_handle().spawn(
 		"bitcoin-block-manager",
@@ -719,6 +730,8 @@ struct BtcDeps {
 	psbt_signer: PsbtSigner<Http>,
 	/// The Bitcoin vault public key submitter.
 	pub_key_submitter: PubKeySubmitter<Http>,
+	/// The Bitcoin rollback verifier.
+	rollback_verifier: BitcoinRollbackVerifier<Http>,
 }
 
 struct SubstrateDeps {
