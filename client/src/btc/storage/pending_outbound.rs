@@ -1,18 +1,20 @@
 use br_primitives::contracts::socket::SocketMessage;
 use miniscript::bitcoin::{address::NetworkUnchecked, Address, Amount};
-use std::collections::HashMap;
-use std::{collections::BTreeMap, sync::Arc};
+use std::{
+	collections::{BTreeMap, HashMap},
+	sync::Arc,
+};
 use tokio::sync::RwLock;
 
 #[derive(Debug, Clone)]
 pub struct PendingOutboundValue {
-	pub socket_message: SocketMessage,
+	pub socket_messages: Vec<SocketMessage>,
 	pub amount: Amount,
 }
 
 #[derive(Debug, Clone)]
 pub struct PendingOutboundPool {
-	inner: Arc<RwLock<BTreeMap<Address<NetworkUnchecked>, Vec<PendingOutboundValue>>>>,
+	inner: Arc<RwLock<BTreeMap<Address<NetworkUnchecked>, PendingOutboundValue>>>,
 }
 
 impl PendingOutboundPool {
@@ -24,70 +26,44 @@ impl PendingOutboundPool {
 		&self,
 		key: Address<NetworkUnchecked>,
 		value: PendingOutboundValue,
-	) -> Option<Vec<PendingOutboundValue>> {
+	) -> Option<PendingOutboundValue> {
 		let mut write_lock = self.inner.write().await;
 		return match write_lock.get_mut(&key) {
 			Some(t) => {
-				t.push(value);
+				// If the socket message is already in the list, we don't want to add it again
+				if t.socket_messages.iter().any(|x| value.socket_messages.contains(x)) {
+					return None;
+				}
+
+				t.amount += value.amount;
+				for x in value.socket_messages {
+					t.socket_messages.push(x);
+				}
+
 				Some(t.clone())
 			},
-			None => write_lock.insert(key, vec![value]),
+			None => write_lock.insert(key, value),
 		};
 	}
 
-	pub async fn remove(
-		&self,
-		key: &Address<NetworkUnchecked>,
-		amount: Amount,
-	) -> Option<Vec<PendingOutboundValue>> {
-		let mut write_lock = self.inner.write().await;
-		return match write_lock.get_mut(key) {
-			Some(t) => {
-				for i in 0..t.len() {
-					if t[i].amount == amount {
-						t.remove(i);
-						return Some(t.clone());
-					}
-				}
-				None
-			},
-			None => None,
-		};
+	pub async fn get(&self, key: &Address<NetworkUnchecked>) -> Option<PendingOutboundValue> {
+		self.inner.read().await.get(key).cloned()
 	}
 
-	pub async fn get(
+	pub async fn pop_next_outputs(
 		&self,
-		key: &Address<NetworkUnchecked>,
-		amount: Amount,
-	) -> Option<PendingOutboundValue> {
-		let read_lock = self.inner.read().await;
-		match read_lock.get(key) {
-			Some(t) => {
-				for item in t {
-					if item.amount == amount {
-						return Some(item.clone());
-					}
-				}
-				None
-			},
-			None => None,
-		}
-	}
-
-	pub async fn pop_next_outputs(&self) -> (HashMap<String, Amount>, Vec<SocketMessage>) {
+	) -> (HashMap<String, Amount>, BTreeMap<String, Vec<SocketMessage>>) {
 		let mut outputs = HashMap::new();
-		let mut socket_messages = vec![];
+		let mut socket_messages = BTreeMap::new();
 		let mut keys_to_remove = vec![];
 
 		let mut write_lock = self.inner.write().await;
-		for (address, amount_vec) in write_lock.iter_mut() {
-			if let Some(first_amount) = amount_vec.pop() {
-				outputs.insert(address.assume_checked_ref().to_string(), first_amount.amount);
-				socket_messages.push(first_amount.socket_message);
-				if amount_vec.is_empty() {
-					keys_to_remove.push(address.clone());
-				}
-			}
+		for (address, value) in write_lock.iter_mut() {
+			outputs.insert(address.assume_checked_ref().to_string(), value.amount);
+			socket_messages
+				.insert(address.assume_checked_ref().to_string(), value.socket_messages.clone());
+
+			keys_to_remove.push(address.clone());
 		}
 
 		for key in keys_to_remove {
@@ -95,17 +71,5 @@ impl PendingOutboundPool {
 		}
 
 		(outputs, socket_messages)
-	}
-}
-
-impl From<BTreeMap<Address<NetworkUnchecked>, Vec<PendingOutboundValue>>> for PendingOutboundPool {
-	fn from(value: BTreeMap<Address<NetworkUnchecked>, Vec<PendingOutboundValue>>) -> Self {
-		Self { inner: Arc::new(RwLock::new(value)) }
-	}
-}
-
-impl From<&[(Address<NetworkUnchecked>, Vec<PendingOutboundValue>)]> for PendingOutboundPool {
-	fn from(value: &[(Address<NetworkUnchecked>, Vec<PendingOutboundValue>)]) -> Self {
-		Self { inner: Arc::new(RwLock::new(value.iter().cloned().collect())) }
 	}
 }
