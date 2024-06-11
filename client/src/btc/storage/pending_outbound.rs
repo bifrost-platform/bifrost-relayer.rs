@@ -56,7 +56,7 @@ impl PendingOutboundPool {
 		&self,
 	) -> (HashMap<String, Amount>, Vec<(BoundedVec<u8>, Vec<Vec<u8>>)>) {
 		let mut outputs = HashMap::new();
-		let mut socket_messages = vec![];
+		let mut socket_messages = BTreeMap::new();
 		let mut keys_to_remove = vec![];
 
 		let mut write_lock = self.inner.write().await;
