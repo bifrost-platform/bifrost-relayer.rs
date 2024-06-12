@@ -1,0 +1,390 @@
+[
+  {
+    "inputs": [],
+    "name": "heartbeat",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint256",
+        "name": "impl_version",
+        "type": "uint256"
+      },
+      {
+        "internalType": "bytes32",
+        "name": "spec_version",
+        "type": "bytes32"
+      }
+    ],
+    "name": "heartbeat_v2",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "address[]",
+        "name": "relayers",
+        "type": "address[]"
+      },
+      {
+        "internalType": "bool",
+        "name": "is_initial",
+        "type": "bool"
+      }
+    ],
+    "name": "is_complete_selected_relayers",
+    "outputs": [
+      {
+        "internalType": "bool",
+        "name": "",
+        "type": "bool"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "address",
+        "name": "relayer",
+        "type": "address"
+      }
+    ],
+    "name": "is_heartbeat_pulsed",
+    "outputs": [
+      {
+        "internalType": "bool",
+        "name": "",
+        "type": "bool"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint256",
+        "name": "round_index",
+        "type": "uint256"
+      },
+      {
+        "internalType": "address",
+        "name": "relayer",
+        "type": "address"
+      },
+      {
+        "internalType": "bool",
+        "name": "is_initial",
+        "type": "bool"
+      }
+    ],
+    "name": "is_previous_selected_relayer",
+    "outputs": [
+      {
+        "internalType": "bool",
+        "name": "",
+        "type": "bool"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint256",
+        "name": "round_index",
+        "type": "uint256"
+      },
+      {
+        "internalType": "address[]",
+        "name": "relayers",
+        "type": "address[]"
+      },
+      {
+        "internalType": "bool",
+        "name": "is_initial",
+        "type": "bool"
+      }
+    ],
+    "name": "is_previous_selected_relayers",
+    "outputs": [
+      {
+        "internalType": "bool",
+        "name": "",
+        "type": "bool"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "address",
+        "name": "relayer",
+        "type": "address"
+      }
+    ],
+    "name": "is_relayer",
+    "outputs": [
+      {
+        "internalType": "bool",
+        "name": "",
+        "type": "bool"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "address[]",
+        "name": "relayers",
+        "type": "address[]"
+      }
+    ],
+    "name": "is_relayers",
+    "outputs": [
+      {
+        "internalType": "bool",
+        "name": "",
+        "type": "bool"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "address",
+        "name": "relayer",
+        "type": "address"
+      },
+      {
+        "internalType": "bool",
+        "name": "is_initial",
+        "type": "bool"
+      }
+    ],
+    "name": "is_selected_relayer",
+    "outputs": [
+      {
+        "internalType": "bool",
+        "name": "",
+        "type": "bool"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "address[]",
+        "name": "relayers",
+        "type": "address[]"
+      },
+      {
+        "internalType": "bool",
+        "name": "is_initial",
+        "type": "bool"
+      }
+    ],
+    "name": "is_selected_relayers",
+    "outputs": [
+      {
+        "internalType": "bool",
+        "name": "",
+        "type": "bool"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [],
+    "name": "latest_round",
+    "outputs": [
+      {
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "bool",
+        "name": "is_initial",
+        "type": "bool"
+      }
+    ],
+    "name": "majority",
+    "outputs": [
+      {
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint256",
+        "name": "round_index",
+        "type": "uint256"
+      },
+      {
+        "internalType": "bool",
+        "name": "is_initial",
+        "type": "bool"
+      }
+    ],
+    "name": "previous_majority",
+    "outputs": [
+      {
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint256",
+        "name": "round_index",
+        "type": "uint256"
+      },
+      {
+        "internalType": "bool",
+        "name": "is_initial",
+        "type": "bool"
+      }
+    ],
+    "name": "previous_selected_relayers",
+    "outputs": [
+      {
+        "internalType": "address[]",
+        "name": "",
+        "type": "address[]"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [],
+    "name": "relayer_pool",
+    "outputs": [
+      {
+        "internalType": "address[]",
+        "name": "",
+        "type": "address[]"
+      },
+      {
+        "internalType": "address[]",
+        "name": "",
+        "type": "address[]"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "address",
+        "name": "relayer",
+        "type": "address"
+      }
+    ],
+    "name": "relayer_state",
+    "outputs": [
+      {
+        "components": [
+          {
+            "internalType": "address",
+            "name": "relayer",
+            "type": "address"
+          },
+          {
+            "internalType": "address",
+            "name": "controller",
+            "type": "address"
+          },
+          {
+            "internalType": "uint256",
+            "name": "status",
+            "type": "uint256"
+          }
+        ],
+        "internalType": "struct RelayManager.relayer_state_meta_data",
+        "name": "",
+        "type": "tuple"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [],
+    "name": "relayer_states",
+    "outputs": [
+      {
+        "internalType": "address[]",
+        "name": "",
+        "type": "address[]"
+      },
+      {
+        "internalType": "address[]",
+        "name": "",
+        "type": "address[]"
+      },
+      {
+        "internalType": "uint256[]",
+        "name": "",
+        "type": "uint256[]"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "bool",
+        "name": "is_initial",
+        "type": "bool"
+      }
+    ],
+    "name": "selected_relayers",
+    "outputs": [
+      {
+        "internalType": "address[]",
+        "name": "",
+        "type": "address[]"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  }
+]

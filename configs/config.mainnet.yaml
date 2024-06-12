@@ -1,0 +1,99 @@
+system:
+  private_key: "<YOUR_RELAYER_PRIVATE_KEY>"
+  keystore_path: "<YOUR_KEYSTORE_PATH>"
+  keystore_password: "<YOUR_KEYSTORE_PASSWORD>"
+  debug_mode: false
+
+btc_provider:
+  provider: "<YOUR_BITCOIN_RPC_ENDPOINT>"
+  chain: "main"
+
+evm_providers:
+  - name: "bifrost"
+    id: 3068
+    provider: "<YOUR_BIFROST_RPC_ENDPOINT>"
+    call_interval: 3000
+    block_confirmations: 5
+    is_native: true
+    is_relay_target: true
+    socket_address: "0xd551F33Ca8eCb0Be83d8799D9C68a368BA36Dd52"
+    authority_address: "0x0000000000000000000000000000000000000400"
+    relayer_manager_address: "0x0000000000000000000000000000000000002000"
+    bitcoin_socket_address: "TODO"
+    socket_queue_address: "TODO"
+    registration_pool_address: "TODO"
+    relay_executive_address: "TODO"
+  - name: "ethereum"
+    id: 1
+    provider: "<YOUR_ETHEREUM_RPC_ENDPOINT>"
+    call_interval: 12000
+    block_confirmations: 1
+    is_relay_target: false
+    eip1559: true
+    socket_address: "0x4A31FfeAc276CC5e508cAC0568d932d398C4DD84"
+    authority_address: "0xAdcaa90cabDc730855064d5b0f5242c16A9B7E10"
+    chainlink_usdc_usd_address: "0x8fFfFfd4AfB6115b954Bd326cbe7B4BA576818f6"
+    chainlink_usdt_usd_address: "0x3E7d1eAB13ad0104d2750B8863b489D65364e32D"
+    chainlink_dai_usd_address: "0xAed0c38402a5d19df6E4c03F4E2DceD6e29c1ee9"
+    chainlink_btc_usd_address: "0xf4030086522a5beea4988f8ca5b36dbc97bee88c"
+    chainlink_wbtc_usd_address: "0xfdFD9C85aD200c506Cf9e21F1FD8dd01932FBB23"
+  - name: "bsc"
+    id: 56
+    provider: "<YOUR_BSC_RPC_ENDPOINT>"
+    call_interval: 3000
+    block_confirmations: 5
+    is_relay_target: false
+    eip1559: true
+    socket_address: "0xb5Fa48E8B9b89760a9f9176388D1B64A8D4968dF"
+    authority_address: "0xF0500d77d5446665314722b963ab1F71872063E9"
+  - name: "polygon"
+    id: 137
+    provider: "<YOUR_POLYGON_RPC_ENDPOINT>"
+    call_interval: 2000
+    block_confirmations: 7
+    is_relay_target: false
+    eip1559: true
+    min_priority_fee: 30000000000
+    socket_address: "0x050606CC2Bcd9504991Be2c309D6c6c832Bb5bd0"
+    authority_address: "0x7F48909fBd1E38f1e05B5E326A44175fc2462B13"
+  - name: "base"
+    id: 8453
+    provider: "<YOUR_BASE_RPC_ENDPOINT>"
+    call_interval: 2000
+    block_confirmations: 7
+    is_relay_target: false
+    eip1559: true
+    socket_address: "0xAe172D8c5E428D4b7C70f9E593b207F9daC9BF3e"
+    authority_address: "0x4C7a44F3FB37A53F33D3fe3cCdE97A444F105239"
+  - name: "arbitrum"
+    id: 42161
+    provider: "<YOUR_ARBITRUM_ONE_RPC_ENDPOINT>"
+    call_interval: 2000
+    block_confirmations: 5
+    get_logs_batch_size: 8
+    is_relay_target: false
+    eip1559: true
+    socket_address: "0xac1552e30857A814a225BAa81145bcB071B46DDd"
+    authority_address: "0xA069a57426Cd4c53925c1847Bec01aAB832A5118"
+
+handler_configs:
+  - handler_type: Socket
+    watch_list: [3068, 1, 56, 137, 8453, 42161]
+  - handler_type: Roundup
+    watch_list: [3068]
+
+###  The items below are optional. ###
+
+bootstrap_config:
+  is_enabled: true
+  round_offset: 3
+
+sentry_config:
+  environment: "<YOUR_SENTRY_ENVIRONMENT>"
+  is_enabled: false
+  dsn: "<YOUR_SENTRY_DSN>"
+
+prometheus_config:
+  is_enabled: false
+  is_external: false
+  port: 8000
