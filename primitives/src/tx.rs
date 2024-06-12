@@ -298,7 +298,7 @@ impl SubmitVaultKeyMetadata {
 
 impl Display for SubmitVaultKeyMetadata {
 	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-		write!(f, "SubmitVaultKey({:?}:{})", self.who, self.key.to_string())
+		write!(f, "SubmitVaultKey({:?}:{})", self.who, self.key)
 	}
 }
 
