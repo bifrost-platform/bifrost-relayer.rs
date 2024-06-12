@@ -14,8 +14,7 @@ use miniscript::bitcoin::{Network, Psbt};
 use sc_keystore::{Keystore, LocalKeystore};
 use sp_application_crypto::ecdsa::{AppPair, AppPublic};
 use sp_core::{crypto::SecretString, testing::ECDSA, ByteArray};
-use std::{collections::BTreeMap, str::FromStr, sync::Arc};
-use tokio::{runtime::Handle, sync::RwLock, task};
+use std::{str::FromStr, sync::Arc};
 
 use crate::btc::LOG_TARGET;
 
@@ -23,85 +22,53 @@ const SUB_LOG_TARGET: &str = "keystore";
 
 #[derive(Clone)]
 pub struct KeypairStorage {
-	inner: Arc<RwLock<BTreeMap<PublicKey, PrivateKey>>>,
-	db: Arc<LocalKeystore>,
+	db: Option<Arc<LocalKeystore>>,
+	path: String,
+	secret: Option<SecretString>,
 	network: Network,
 }
 
 impl KeypairStorage {
-	pub fn new(path: &str, secret: Option<String>, network: Network) -> Self {
+	/// Returns the keystore database.
+	fn db(&self) -> Arc<LocalKeystore> {
+		self.db.clone().expect("Keystore not loaded")
+	}
+
+	pub fn new(path: String, secret: Option<String>, network: Network) -> Self {
 		let mut password = None;
 		if let Some(secret) = secret {
-			password = Some(SecretString::from_str(&secret).expect(INVALID_KEYSTORE_PASSWORD));
+			password = Some(SecretString::from_str(&secret).unwrap());
 		}
-		let keystore = LocalKeystore::open(path, password).expect(INVALID_KEYSTORE_PATH);
-		let mut inner = BTreeMap::new();
 
-		let keys = keystore.keys(ECDSA).expect(INVALID_KEYSTORE_PATH);
+		Self { db: None, path, secret: password, network }
+	}
+
+	pub async fn load(&mut self, round: u32) {
+		let path = format!("{}/{}", self.path, round);
+
+		let keystore =
+			LocalKeystore::open(&path, self.secret.clone()).expect(INVALID_KEYSTORE_PASSWORD);
+		self.db = Some(Arc::new(keystore));
+
+		let keys = self.db().keys(ECDSA).expect(INVALID_KEYSTORE_PATH);
 		log::info!(
 			target: LOG_TARGET,
-			"-[{}] 🔐 Keystore synchronization started (path: {}): {:?} keypairs",
+			"-[{}] 🔐 Keystore loaded (path: {}): {:?} keypairs",
 			sub_display_format(SUB_LOG_TARGET),
-			path,
+			&path,
 			keys.len()
 		);
-
-		for key in keys.clone() {
-			match keystore
-				.key_pair::<AppPair>(&AppPublic::from_slice(&key).expect(KEYSTORE_INTERNAL_ERROR))
-			{
-				Ok(pair) => {
-					if let Some(pair) = pair {
-						let sk = PrivateKey::from_slice(&pair.into_inner().seed(), network)
-							.expect(KEYSTORE_INTERNAL_ERROR);
-						let pk = PublicKey::from_private_key(&Secp256k1::signing_only(), &sk);
-						inner.insert(pk, sk);
-					}
-				},
-				Err(error) => {
-					panic!(
-						"[{}]-[{}] {}: {}",
-						LOG_TARGET, SUB_LOG_TARGET, KEYSTORE_INTERNAL_ERROR, error
-					);
-				},
-			}
-		}
-		log::info!(
-			target: LOG_TARGET,
-			"-[{}] 🔐 Keystore synchronization ended",
-			sub_display_format(SUB_LOG_TARGET),
-		);
-
-		Self { inner: Arc::new(RwLock::new(inner)), db: Arc::new(keystore), network }
-	}
-
-	async fn insert(&self, key: PublicKey, value: PrivateKey) -> Option<PrivateKey> {
-		let mut write_lock = self.inner.write().await;
-		write_lock.insert(key, value)
-	}
-
-	async fn get(&self, key: &PublicKey) -> Option<PrivateKey> {
-		let read_lock = self.inner.read().await;
-		read_lock.get(key).cloned()
 	}
 
 	pub async fn create_new_keypair(&mut self) -> PublicKey {
-		let key = self.db.ecdsa_generate_new(ECDSA, None).expect(KEYSTORE_INTERNAL_ERROR);
+		let key = self.db().ecdsa_generate_new(ECDSA, None).expect(KEYSTORE_INTERNAL_ERROR);
 		let public_key = PublicKey::from_slice(key.as_slice()).expect(KEYSTORE_INTERNAL_ERROR);
 
-		match self.db.key_pair::<AppPair>(
+		// Ensure the key is stored in the keystore.
+		match self.db().key_pair::<AppPair>(
 			&AppPublic::from_slice(key.as_slice()).expect(KEYSTORE_INTERNAL_ERROR),
 		) {
-			Ok(pair) => {
-				if let Some(pair) = pair {
-					self.insert(
-						public_key,
-						PrivateKey::from_slice(&pair.into_inner().seed(), self.network)
-							.expect(KEYSTORE_INTERNAL_ERROR),
-					)
-					.await;
-				}
-			},
+			Ok(_) => {},
 			Err(error) => {
 				panic!(
 					"[{}]-[{}] {}: {}",
@@ -147,9 +114,26 @@ impl GetKey for KeypairStorage {
 		_: &Secp256k1<C>,
 	) -> Result<Option<PrivateKey>, Self::Error> {
 		match key_request {
-			KeyRequest::Pubkey(pk) => Ok(task::block_in_place(move || {
-				Handle::current().block_on(async move { self.get(&pk).await })
-			})),
+			KeyRequest::Pubkey(pk) => {
+				match self.db().key_pair::<AppPair>(
+					&AppPublic::from_slice(pk.inner.serialize().as_slice())
+						.expect(KEYSTORE_INTERNAL_ERROR),
+				) {
+					Ok(pair) => {
+						if let Some(pair) = pair {
+							return Ok(Some(
+								PrivateKey::from_slice(&pair.into_inner().seed(), self.network)
+									.expect(KEYSTORE_INTERNAL_ERROR),
+							));
+						} else {
+							unreachable!()
+						}
+					},
+					Err(err) => {
+						panic!("{:?}", err)
+					},
+				}
+			},
 			_ => Err(GetKeyError::NotSupported),
 		}
 	}
@@ -158,7 +142,11 @@ impl GetKey for KeypairStorage {
 #[cfg(test)]
 mod tests {
 	use super::KeypairStorage;
-	use miniscript::bitcoin::{Network, PublicKey};
+	use bitcoincore_rpc::bitcoin::key::Secp256k1;
+	use miniscript::bitcoin::{
+		psbt::{GetKey, KeyRequest},
+		Network, PublicKey,
+	};
 	use sc_keystore::Keystore;
 	use sp_core::{crypto::SecretString, testing::ECDSA, ByteArray};
 
@@ -166,7 +154,7 @@ mod tests {
 	async fn test_load_sc_keystore() {
 		let keystore = sc_keystore::LocalKeystore::open(
 			"../localkeystore_test",
-			Some(SecretString::new("test".to_string())),
+			Some(SecretString::new("test".into())),
 		)
 		.unwrap();
 
@@ -178,13 +166,19 @@ mod tests {
 		}
 
 		let keypair_storage = KeypairStorage::new(
-			"../localkeystore_test",
-			Some("test".to_string()),
+			"../localkeystore_test".into(),
+			Some("test".into()),
 			Network::Regtest,
 		);
 		for key in keys {
 			let pk = PublicKey::from_slice(key.as_slice()).unwrap();
-			println!("loaded -> {:?}:{:?}", pk, keypair_storage.get(&pk).await.unwrap());
+			println!(
+				"loaded -> {:?}:{:?}",
+				pk,
+				keypair_storage
+					.get_key(KeyRequest::Pubkey(pk), &Secp256k1::signing_only())
+					.unwrap()
+			);
 		}
 	}
 
