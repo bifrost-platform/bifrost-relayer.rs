@@ -52,7 +52,7 @@ impl PendingOutboundPool {
 
 	pub async fn pop_next_outputs(
 		&self,
-	) -> (HashMap<String, Amount>, BTreeMap<String, Vec<SocketMessage>>) {
+	) -> (HashMap<String, Amount>, BTreeMap<Vec<u8>, Vec<SocketMessage>>) {
 		let mut outputs = HashMap::new();
 		let mut socket_messages = BTreeMap::new();
 		let mut keys_to_remove = vec![];
@@ -60,8 +60,10 @@ impl PendingOutboundPool {
 		let mut write_lock = self.inner.write().await;
 		for (address, value) in write_lock.iter_mut() {
 			outputs.insert(address.assume_checked_ref().to_string(), value.amount);
-			socket_messages
-				.insert(address.assume_checked_ref().to_string(), value.socket_messages.clone());
+			socket_messages.insert(
+				address.assume_checked_ref().to_string().into_bytes(),
+				value.socket_messages.clone(),
+			);
 
 			keys_to_remove.push(address.clone());
 		}
