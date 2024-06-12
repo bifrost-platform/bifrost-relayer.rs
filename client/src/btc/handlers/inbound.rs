@@ -6,6 +6,7 @@ use crate::{
 	eth::EthClient,
 };
 
+use bitcoincore_rpc::bitcoin::Txid;
 use br_primitives::{
 	bootstrap::BootstrapSharedData,
 	contracts::bitcoin_socket::BitcoinSocketContract,
@@ -19,6 +20,7 @@ use ethers::{
 	types::{Address as EthAddress, Address, TransactionRequest},
 };
 use miniscript::bitcoin::{address::NetworkUnchecked, hashes::Hash, Address as BtcAddress};
+use sp_core::H256;
 use std::sync::Arc;
 use tokio::sync::broadcast::Receiver;
 use tokio_stream::StreamExt;
@@ -65,8 +67,10 @@ impl<T: JsonRpcClient + 'static> InboundHandler<T> {
 		let user_address: EthAddress = self
 			.bfc_client
 			.contract_call(
-				registration_pool
-					.user_address(vault_address.clone().assume_checked().to_string(), true),
+				registration_pool.user_address(
+					vault_address.clone().assume_checked().to_string(),
+					self.get_current_round().await,
+				),
 				"registration_pool.user_address",
 			)
 			.await;
@@ -78,8 +82,24 @@ impl<T: JsonRpcClient + 'static> InboundHandler<T> {
 		}
 	}
 
-	fn 
-		build_transaction(&self, event: &Event, user_bfc_address: Address) -> TransactionRequest {
+	async fn is_rollback_output(&self, txid: Txid, index: u32) -> bool {
+		let socket_queue = self.bfc_client.protocol_contracts.socket_queue.as_ref().unwrap();
+
+		let mut slice: [u8; 32] = txid.to_byte_array();
+		slice.reverse();
+
+		let psbt_txid = self
+			.bfc_client
+			.contract_call(
+				socket_queue.rollback_output(slice, index.into()),
+				"socket_queue.rollback_output",
+			)
+			.await;
+
+		!H256::from(psbt_txid).is_zero()
+	}
+
+	fn build_transaction(&self, event: &Event, user_bfc_address: Address) -> TransactionRequest {
 		let calldata = self
 			.bitcoin_socket()
 			.poll(
@@ -114,6 +134,14 @@ impl<T: JsonRpcClient + 'static> InboundHandler<T> {
 				self.bitcoin_socket().is_relayer_voted(hash_key, self.bfc_client.address()),
 				"bitcoin_socket.is_relayer_voted",
 			)
+			.await
+	}
+
+	async fn get_current_round(&self) -> u32 {
+		let registration_pool =
+			self.bfc_client.protocol_contracts.registration_pool.as_ref().unwrap();
+		self.bfc_client
+			.contract_call(registration_pool.current_round(), "registration_pool.current_round")
 			.await
 	}
 
@@ -165,6 +193,10 @@ impl<T: JsonRpcClient + 'static> Handler for InboundHandler<T> {
 
 	async fn process_event(&self, event: Event) {
 		if let Some(user_bfc_address) = self.get_user_bfc_address(&event.address).await {
+			// check if transaction has been submitted to be rollbacked
+			if self.is_rollback_output(event.txid, event.index).await {
+				return;
+			}
 			if self.is_relayer_voted(&event, user_bfc_address).await {
 				return;
 			}
