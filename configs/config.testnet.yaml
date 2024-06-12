@@ -5,28 +5,24 @@ system:
   debug_mode: false
 
 btc_provider:
-  id: 10002
-  provider: "http://skv1-develop.bifrost.infra:18443"
-  chain: "regtest"
-  username: "pilab"
-  password: "pilab0920!"
-  bootstrap_offset: 800
+  provider: "<YOUR_BITCOIN_RPC_ENDPOINT>"
+  chain: "test"
 
 evm_providers:
-  - name: "bifrost-testbed"
+  - name: "bifrost-testnet"
     id: 49088
-    provider: "http://10.100.0.94:9944"
+    provider: "<YOUR_BIFROST_TESTNET_RPC_ENDPOINT>"
     call_interval: 3000
     block_confirmations: 5
     is_native: true
     is_relay_target: true
-    socket_address: "0xd1E060FD930B75DA9A709c91E6Ad03B330Fb2950"
+    socket_address: "0x0218371b18340aBD460961bdF3Bd5F01858dAB53"
     authority_address: "0x0000000000000000000000000000000000000400"
     relayer_manager_address: "0x0000000000000000000000000000000000002000"
-    bitcoin_socket_address: "0xe20138CacA144b93D7F248530e6c5953cf75fBa4"
-    socket_queue_address: "0x0000000000000000000000000000000000000101"
-    registration_pool_address: "0x0000000000000000000000000000000000000100"
-    relay_executive_address: "0x0000000000000000000000000000000000000803"
+    bitcoin_socket_address: "TODO"
+    socket_queue_address: "TODO"
+    registration_pool_address: "TODO"
+    relay_executive_address: "TODO"
   - name: "sepolia"
     id: 11155111
     provider: "<YOUR_SEPOLIA_RPC_ENDPOINT>"
