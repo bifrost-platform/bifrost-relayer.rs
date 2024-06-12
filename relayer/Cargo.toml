@@ -51,9 +51,3 @@ substrate-build-script-utils = { workspace = true }
 
 [[bin]]
 name = "bifrost-relayer"
-
-[features]
-registration-integration = []
-inbound-integration = []
-outbound-integration = []
-
