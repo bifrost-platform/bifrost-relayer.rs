@@ -178,3 +178,5 @@ Cargo.lock
 
 *.local.yaml
 keys/
+configs/
+
