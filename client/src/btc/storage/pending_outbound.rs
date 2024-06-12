@@ -1,4 +1,5 @@
 use br_primitives::contracts::socket::SocketMessage;
+use br_primitives::substrate::BoundedVec;
 use ethers::abi::Token;
 use miniscript::bitcoin::{address::NetworkUnchecked, Address, Amount};
 use std::{
@@ -53,7 +54,7 @@ impl PendingOutboundPool {
 
 	pub async fn pop_next_outputs(
 		&self,
-	) -> (HashMap<String, Amount>, BTreeMap<Vec<u8>, Vec<Vec<u8>>>) {
+	) -> (HashMap<String, Amount>, BTreeMap<BoundedVec<u8>, Vec<Vec<u8>>>) {
 		let mut outputs = HashMap::new();
 		let mut socket_messages = BTreeMap::new();
 		let mut keys_to_remove = vec![];
@@ -62,7 +63,7 @@ impl PendingOutboundPool {
 		for (address, value) in write_lock.iter_mut() {
 			outputs.insert(address.assume_checked_ref().to_string(), value.amount);
 			socket_messages.insert(
-				address.assume_checked_ref().to_string().into_bytes(),
+				BoundedVec(address.assume_checked_ref().to_string().into_bytes()),
 				self.encode_socket_messages(value.socket_messages.clone()),
 			);
 
