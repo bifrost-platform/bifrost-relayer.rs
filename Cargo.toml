@@ -47,6 +47,7 @@ rand = "0.8.5"
 lazy_static = "1.4.0"
 url = "2.5.0"
 array-bytes = "6.1"
+base64 = "0.22.0"
 
 serde_yaml = "0.9.25"
 serde = "1.0.188"
