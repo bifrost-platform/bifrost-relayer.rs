@@ -78,7 +78,8 @@ impl<T: JsonRpcClient + 'static> InboundHandler<T> {
 		}
 	}
 
-	fn build_transaction(&self, event: &Event, user_bfc_address: Address) -> TransactionRequest {
+	fn 
+		build_transaction(&self, event: &Event, user_bfc_address: Address) -> TransactionRequest {
 		let calldata = self
 			.bitcoin_socket()
 			.poll(
