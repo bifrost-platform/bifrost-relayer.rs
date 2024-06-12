@@ -1,4 +1,5 @@
 use br_primitives::contracts::socket::SocketMessage;
+use ethers::abi::Token;
 use miniscript::bitcoin::{address::NetworkUnchecked, Address, Amount};
 use std::{
 	collections::{BTreeMap, HashMap},
@@ -52,7 +53,7 @@ impl PendingOutboundPool {
 
 	pub async fn pop_next_outputs(
 		&self,
-	) -> (HashMap<String, Amount>, BTreeMap<Vec<u8>, Vec<SocketMessage>>) {
+	) -> (HashMap<String, Amount>, BTreeMap<Vec<u8>, Vec<Vec<u8>>>) {
 		let mut outputs = HashMap::new();
 		let mut socket_messages = BTreeMap::new();
 		let mut keys_to_remove = vec![];
@@ -62,7 +63,7 @@ impl PendingOutboundPool {
 			outputs.insert(address.assume_checked_ref().to_string(), value.amount);
 			socket_messages.insert(
 				address.assume_checked_ref().to_string().into_bytes(),
-				value.socket_messages.clone(),
+				self.encode_socket_messages(value.socket_messages.clone()),
 			);
 
 			keys_to_remove.push(address.clone());
@@ -73,5 +74,38 @@ impl PendingOutboundPool {
 		}
 
 		(outputs, socket_messages)
+	}
+
+	fn encode_socket_messages(&self, messages: Vec<SocketMessage>) -> Vec<Vec<u8>> {
+		messages
+			.into_iter()
+			.map(|msg| {
+				let req_id_token = Token::Tuple(vec![
+					Token::FixedBytes(msg.req_id.chain.into()),
+					Token::Uint(msg.req_id.round_id.into()),
+					Token::Uint(msg.req_id.sequence.into()),
+				]);
+				let status_token = Token::Uint(msg.status.into());
+				let ins_code_token = Token::Tuple(vec![
+					Token::FixedBytes(msg.ins_code.chain.into()),
+					Token::FixedBytes(msg.ins_code.method.into()),
+				]);
+				let params_token = Token::Tuple(vec![
+					Token::FixedBytes(msg.params.token_idx0.into()),
+					Token::FixedBytes(msg.params.token_idx1.into()),
+					Token::Address(msg.params.refund),
+					Token::Address(msg.params.to),
+					Token::Uint(msg.params.amount),
+					Token::Bytes(msg.params.variants.to_vec()),
+				]);
+
+				ethers::abi::encode(&[Token::Tuple(vec![
+					req_id_token,
+					status_token,
+					ins_code_token,
+					params_token,
+				])])
+			})
+			.collect()
 	}
 }
