@@ -30,6 +30,7 @@ sentry = { version = "0.32.1", default-features = false, features = [
 	"contexts",
 	"panic",
 ] }
+base64 = "0.22.0"
 
 anyhow = "1.0.81"
 async-trait = "0.1.73"
@@ -61,6 +62,7 @@ miniscript = "11.0.0"
 bitcoincore-rpc = { git = "https://github.com/bifrost-platform/rust-bitcoincore-rpc", branch = "reqwest-migration" }
 
 tokio = "1.33.0"
+
 tokio-stream = "0.1.14"
 
 subxt = "0.35.0"
