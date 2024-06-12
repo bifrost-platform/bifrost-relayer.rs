@@ -141,6 +141,8 @@ pub struct BTCProvider {
 	pub username: Option<String>,
 	/// Optional. The provider password credential.
 	pub password: Option<String>,
+	/// Optional. The wallet name.
+	pub wallet: Option<String>,
 	/// Optional. The bootstrap offset in blocks.
 	pub bootstrap_offset: Option<u32>,
 }

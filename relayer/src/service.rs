@@ -285,8 +285,12 @@ fn construct_btc_deps(
 		(Some(username), Some(password)) => Auth::UserPass(username, password),
 		_ => Auth::None,
 	};
-	let btc_client = BitcoinClient::new(&config.relayer_config.btc_provider.provider, auth)
-		.expect(INVALID_PROVIDER_URL);
+	let btc_client = BitcoinClient::new(
+		&config.relayer_config.btc_provider.provider,
+		auth,
+		config.relayer_config.btc_provider.wallet.clone(),
+	)
+	.expect(INVALID_PROVIDER_URL);
 
 	let bfc_client = manager_deps
 		.clients
