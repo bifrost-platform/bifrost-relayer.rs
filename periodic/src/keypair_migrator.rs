@@ -151,7 +151,26 @@ impl<T: JsonRpcClient> PeriodicWorker for KeypairMigrator<T> {
 						},
 						_ => {},
 					},
-					_ => {},
+					MigrationSequence::PrepareNextSystemVault => match service_state {
+						ServiceState::UTXOTransfer => {
+							self.keypair_storage
+								.write()
+								.await
+								.load(self.get_current_round().await)
+								.await;
+						},
+						_ => {},
+					},
+					MigrationSequence::UTXOTransfer => match service_state {
+						ServiceState::Normal => {
+							self.keypair_storage
+								.write()
+								.await
+								.load(self.get_current_round().await + 1)
+								.await;
+						},
+						_ => {},
+					},
 				}
 				*write_lock = service_state;
 			}
