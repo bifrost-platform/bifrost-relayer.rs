@@ -6,6 +6,7 @@ use crate::{
 use br_primitives::{
 	bootstrap::BootstrapSharedData,
 	constants::{
+		cli::DEFAULT_BITCOIN_BOOTSTRAP_BLOCK_OFFSET,
 		errors::PROVIDER_INTERNAL_ERROR,
 		tx::{DEFAULT_CALL_RETRIES, DEFAULT_CALL_RETRY_INTERVAL_MS},
 	},
@@ -146,9 +147,17 @@ impl<T: JsonRpcClient + 'static> BlockManager<T> {
 		bfc_client: Arc<EthClient<T>>,
 		_pending_outbounds: PendingOutboundPool,
 		bootstrap_shared_data: Arc<BootstrapSharedData>,
-		bootstrap_offset: u32,
 	) -> Self {
 		let (sender, _receiver) = broadcast::channel(512);
+
+		let mut bootstrap_offset = 0u32;
+		if let Some(bootstrap_config) = &bootstrap_shared_data.bootstrap_config {
+			if bootstrap_config.is_enabled {
+				bootstrap_offset = bootstrap_config
+					.btc_block_offset
+					.unwrap_or(DEFAULT_BITCOIN_BOOTSTRAP_BLOCK_OFFSET);
+			}
+		}
 
 		Self {
 			btc_client,

@@ -87,6 +87,7 @@ handler_configs:
 bootstrap_config:
   is_enabled: true
   round_offset: 3
+  btc_block_offset: 72
 
 sentry_config:
   environment: "<YOUR_SENTRY_ENVIRONMENT>"
