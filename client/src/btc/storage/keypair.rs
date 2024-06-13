@@ -126,7 +126,7 @@ impl GetKey for KeypairStorage {
 									.expect(KEYSTORE_INTERNAL_ERROR),
 							));
 						} else {
-							unreachable!()
+							return Ok(None);
 						}
 					},
 					Err(err) => {
