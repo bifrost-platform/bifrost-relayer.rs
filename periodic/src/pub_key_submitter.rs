@@ -30,7 +30,7 @@ pub struct PubKeySubmitter<T> {
 	/// The unsigned transaction message sender.
 	xt_request_sender: Arc<XtRequestSender>,
 	/// The public and private keypair local storage.
-	keypair_storage: KeypairStorage,
+	keypair_storage: Arc<RwLock<KeypairStorage>>,
 	/// The migration sequence.
 	migration_sequence: Arc<RwLock<MigrationSequence>>,
 	/// The time schedule that represents when check pending registrations.
@@ -79,7 +79,7 @@ impl<T: JsonRpcClient + 'static> PeriodicWorker for PubKeySubmitter<T> {
 						continue;
 					}
 
-					let pub_key = self.keypair_storage.create_new_keypair().await;
+					let pub_key = self.keypair_storage.write().await.create_new_keypair().await;
 					let (call, metadata) = self.build_unsigned_tx(who, pub_key);
 					self.request_send_transaction(call, metadata);
 				}
@@ -93,7 +93,7 @@ impl<T: JsonRpcClient> PubKeySubmitter<T> {
 	pub fn new(
 		client: Arc<EthClient<T>>,
 		xt_request_sender: Arc<XtRequestSender>,
-		keypair_storage: KeypairStorage,
+		keypair_storage: Arc<RwLock<KeypairStorage>>,
 		migration_sequence: Arc<RwLock<MigrationSequence>>,
 	) -> Self {
 		Self {

@@ -67,7 +67,7 @@ pub fn relay(config: Configuration) -> Result<TaskManager, ServiceError> {
 fn construct_periodics(
 	bootstrap_shared_data: BootstrapSharedData,
 	migration_sequence: Arc<RwLock<MigrationSequence>>,
-	keypair_storage: KeypairStorage,
+	keypair_storage: Arc<RwLock<KeypairStorage>>,
 	relayer_deps: &ManagerDeps,
 ) -> PeriodicDeps {
 	let clients = &relayer_deps.clients;
@@ -268,7 +268,7 @@ fn construct_managers(
 fn construct_btc_deps(
 	config: &Configuration,
 	pending_outbounds: PendingOutboundPool,
-	keypair_storage: KeypairStorage,
+	keypair_storage: Arc<RwLock<KeypairStorage>>,
 	bootstrap_shared_data: BootstrapSharedData,
 	manager_deps: &ManagerDeps,
 	substrate_deps: &SubstrateDeps,
@@ -650,7 +650,7 @@ fn new_relay_base(config: Configuration) -> Result<RelayBase, ServiceError> {
 	let bootstrap_shared_data = BootstrapSharedData::new(&config);
 
 	let pending_outbounds = PendingOutboundPool::new();
-	let keypair_storage = KeypairStorage::new(
+	let keypair_storage = Arc::new(RwLock::new(KeypairStorage::new(
 		config
 			.clone()
 			.relayer_config
@@ -660,7 +660,7 @@ fn new_relay_base(config: Configuration) -> Result<RelayBase, ServiceError> {
 		config.relayer_config.system.keystore_password.clone(),
 		Network::from_core_arg(&config.relayer_config.btc_provider.chain)
 			.expect(INVALID_BITCOIN_NETWORK),
-	);
+	)));
 
 	let migration_sequence = Arc::new(RwLock::new(MigrationSequence::Normal));
 
