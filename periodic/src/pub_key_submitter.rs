@@ -50,7 +50,13 @@ impl<T: JsonRpcClient + 'static> PeriodicWorker for PubKeySubmitter<T> {
 			self.wait_until_next_time().await;
 
 			if self.is_relay_executive().await {
-				let pending_registrations = self.get_pending_registrations().await;
+				let target_round = if self.check_service_state().await {
+					self.get_current_round().await
+				} else {
+					self.get_current_round().await.saturating_add(1)
+				};
+
+				let pending_registrations = self.get_pending_registrations(target_round).await;
 
 				log::info!(
 					target: &self.client.get_chain_name(),
@@ -68,7 +74,7 @@ impl<T: JsonRpcClient + 'static> PeriodicWorker for PubKeySubmitter<T> {
 						continue;
 					}
 
-					let registration_info = self.get_registration_info(who).await;
+					let registration_info = self.get_registration_info(who, target_round).await;
 
 					// user doesn't exist in the pool.
 					if registration_info.0 != who {
@@ -189,10 +195,10 @@ impl<T: JsonRpcClient> PubKeySubmitter<T> {
 	}
 
 	/// Get the pending registrations.
-	async fn get_pending_registrations(&self) -> Vec<Address> {
+	async fn get_pending_registrations(&self, round: u32) -> Vec<Address> {
 		self.client
 			.contract_call(
-				self.registration_pool().pending_registrations(self.get_current_round().await),
+				self.registration_pool().pending_registrations(round),
 				"registration_pool.pending_registrations",
 			)
 			.await
@@ -203,10 +209,11 @@ impl<T: JsonRpcClient> PubKeySubmitter<T> {
 	async fn get_registration_info(
 		&self,
 		who: Address,
+		round: u32,
 	) -> (Address, String, String, Vec<Address>, Vec<Bytes>) {
 		self.client
 			.contract_call(
-				self.registration_pool().registration_info(who, self.get_current_round().await),
+				self.registration_pool().registration_info(who, round),
 				"registration_pool.registration_info",
 			)
 			.await
