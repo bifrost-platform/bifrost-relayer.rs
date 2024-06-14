@@ -34,30 +34,27 @@
   {
     "inputs": [
       {
-        "internalType": "uint256[]",
-        "name": "sequences",
-        "type": "uint256[]"
+        "internalType": "bytes32",
+        "name": "txid",
+        "type": "bytes32"
+      },
+      {
+        "internalType": "bytes",
+        "name": "signed_psbt",
+        "type": "bytes"
+      },
+      {
+        "internalType": "address",
+        "name": "authority_id",
+        "type": "address"
       }
     ],
-    "name": "filter_executable_msgs",
+    "name": "is_signed_psbt_submitted",
     "outputs": [
       {
-        "internalType": "uint256[]",
+        "internalType": "bool",
         "name": "",
-        "type": "uint256[]"
-      }
-    ],
-    "stateMutability": "view",
-    "type": "function"
-  },
-  {
-    "inputs": [],
-    "name": "finalized_psbts",
-    "outputs": [
-      {
-        "internalType": "bytes[]",
-        "name": "",
-        "type": "bytes[]"
+        "type": "bool"
       }
     ],
     "stateMutability": "view",

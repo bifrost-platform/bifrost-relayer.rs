@@ -1,12 +1,9 @@
-use sc_service::{Error as ServiceError, TaskManager};
 use std::{
 	collections::BTreeMap,
 	net::{Ipv4Addr, SocketAddr},
 	sync::Arc,
 	time::Duration,
 };
-use std::{str::FromStr, sync::Arc};
-use tokio::sync::{Barrier, Mutex, RwLock};
 
 use bitcoincore_rpc::{Auth, Client as BitcoinClient};
 use ethers::providers::{Http, Provider};
@@ -53,7 +50,21 @@ use br_primitives::{
 	periodic::RollbackSender,
 	substrate::MigrationSequence,
 	tx::{TxRequestSender, XtRequestSender},
+	utils::sub_display_format,
 };
+
+use crate::{
+	cli::{LOG_TARGET, SUB_LOG_TARGET},
+	verification::assert_configuration_validity,
+};
+
+/// Starts the relayer service.
+pub fn relay(config: Configuration) -> Result<TaskManager, ServiceError> {
+	new_relay_base(config).map(|RelayBase { task_manager, .. }| task_manager)
+}
+
+/// Initializes periodic components.
+fn construct_periodics(
 	bootstrap_shared_data: BootstrapSharedData,
 	migration_sequence: Arc<RwLock<MigrationSequence>>,
 	keypair_storage: Arc<RwLock<KeypairStorage>>,
@@ -62,9 +73,6 @@ use br_primitives::{
 ) -> PeriodicDeps {
 	let clients = &relayer_deps.clients;
 	let tx_request_senders = &relayer_deps.tx_request_senders;
-
-	let mut rollback_emitters = vec![];
-	let mut rollback_senders = BTreeMap::new();
 
 	let mut rollback_emitters = vec![];
 	let mut rollback_senders = BTreeMap::new();
@@ -87,6 +95,7 @@ use br_primitives::{
 		let (rollback_emitter, rollback_sender) =
 			SocketRollbackEmitter::new(tx_request_sender.clone(), clients.clone());
 		rollback_emitters.push(rollback_emitter);
+		rollback_senders.insert(
 			tx_request_sender.id,
 			Arc::new(RollbackSender::new(tx_request_sender.id, rollback_sender)),
 		);
@@ -249,8 +258,6 @@ fn construct_managers(
 					sender,
 					is_native,
 				)));
-
-				number_of_relay_targets += 1;
 			}
 		}
 		let event_manager = EventManager::new(
@@ -528,17 +535,24 @@ fn spawn_relayer_tasks(
 	// spawn roundup emitter
 	task_manager.spawn_essential_handle().spawn(
 		"roundup-emitter",
+		Some("roundup-emitter"),
 		async move { roundup_emitter.run().await },
 	);
-				for state in guard.iter_mut() {
-					*state = BootstrapState::BootstrapSocketRelay;
-				}
-			}
-			drop(guard);
 
-			block_manager.run().await
-		},
-	);
+	// spawn event managers
+	event_managers.into_iter().for_each(|(_chain_id, mut event_manager)| {
+		task_manager.spawn_essential_handle().spawn(
+			Box::leak(
+				format!("{}-event-manager", event_manager.client.get_chain_name()).into_boxed_str(),
+			),
+			Some("event-managers"),
+			async move {
+				event_manager.wait_provider_sync().await;
+
+				event_manager.run().await
+			},
+		)
+	});
 
 	// spawn bitcoin deps
 	task_manager.spawn_essential_handle().spawn(

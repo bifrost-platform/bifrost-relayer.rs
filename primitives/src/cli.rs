@@ -3,8 +3,6 @@ use std::{borrow::Cow, fmt::Display};
 
 use crate::eth::ChainID;
 
-use crate::eth::ChainID;
-
 pub type Result<T> = std::result::Result<T, Error>;
 
 /// Error type for the CLI.

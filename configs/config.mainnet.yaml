@@ -84,11 +84,6 @@ handler_configs:
 
 ###  The items below are optional. ###
 
-prometheus_config:
-  is_enabled: false
-  is_external: false
-  port: 8000
-
 bootstrap_config:
   is_enabled: true
   round_offset: 3

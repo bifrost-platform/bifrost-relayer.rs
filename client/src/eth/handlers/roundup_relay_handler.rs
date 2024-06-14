@@ -353,8 +353,6 @@ impl<T: JsonRpcClient> BootstrapHandler for RoundupRelayHandler<T> {
 		self.bootstrap_shared_data.clone()
 	}
 
-#[async_trait::async_trait]
-impl<T: JsonRpcClient> BootstrapHandler for RoundupRelayHandler<T> {
 	async fn bootstrap(&self) {
 		log::info!(
 			target: &self.client.get_chain_name(),
