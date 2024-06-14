@@ -50,7 +50,8 @@ impl<T: JsonRpcClient + 'static> PeriodicWorker for PubKeySubmitter<T> {
 			self.wait_until_next_time().await;
 
 			if self.is_relay_executive().await {
-				let target_round = if self.check_service_state().await {
+				let target_round = if *self.migration_sequence.read().await == ServiceState::Normal
+				{
 					self.get_current_round().await
 				} else {
 					self.get_current_round().await.saturating_add(1)

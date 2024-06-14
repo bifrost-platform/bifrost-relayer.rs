@@ -43,6 +43,7 @@ type EvmRollbackRequestOf = (
 	bool,      // is_approved
 );
 
+#[derive(Debug)]
 /// (Bitcoin) Rollback request information.
 pub struct RollbackRequest {
 	/// The unsigned PSBT of the rollback request (in bytes).
@@ -69,10 +70,12 @@ impl From<EvmRollbackRequestOf> for RollbackRequest {
 		for idx in 0..value.6.len() {
 			votes.insert(value.6[idx], value.7[idx]);
 		}
+		let mut txid = value.2;
+		txid.reverse();
 		Self {
 			unsigned_psbt: value.0,
 			who: value.1,
-			txid: Txid::from_raw_hash(*Hash::from_bytes_ref(&value.2)),
+			txid: Txid::from_raw_hash(*Hash::from_bytes_ref(&txid)),
 			vout: value.3.as_usize(),
 			to: Address::from_str(&value.4).unwrap().assume_checked(),
 			amount: Amount::from_sat(value.5.as_u64()),
@@ -173,6 +176,12 @@ impl<T: JsonRpcClient> PeriodicWorker for BitcoinRollbackVerifier<T> {
 						},
 						Err(_) => {
 							// failed to fetch transaction
+							log::warn!(
+								target: &self.bfc_client.get_chain_name(),
+								"-[{}] ⚠️  Failed to fetch rollback transaction: {}",
+								sub_display_format(SUB_LOG_TARGET),
+								&request.txid
+							);
 						},
 					}
 
