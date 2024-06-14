@@ -166,7 +166,7 @@ impl<T: JsonRpcClient> PeriodicWorker for KeypairMigrator<T> {
 							self.keypair_storage
 								.write()
 								.await
-								.load(self.get_current_round().await + 1)
+								.load(self.get_current_round().await)
 								.await;
 						},
 						_ => {},

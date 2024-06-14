@@ -6,8 +6,10 @@ use br_primitives::{
 	constants::{errors::INVALID_PERIODIC_SCHEDULE, schedule::PUB_KEY_SUBMITTER_SCHEDULE},
 	contracts::registration_pool::RegistrationPoolContract,
 	substrate::{
-		bifrost_runtime, AccountId20, EthereumSignature, MigrationSequence, Public,
-		VaultKeySubmission,
+		bifrost_runtime::{
+			self, btc_registration_pool::storage::types::service_state::ServiceState,
+		},
+		AccountId20, EthereumSignature, MigrationSequence, Public, VaultKeySubmission,
 	},
 	tx::{SubmitVaultKeyMetadata, XtRequest, XtRequestMessage, XtRequestMetadata, XtRequestSender},
 	utils::{convert_ethers_to_ecdsa_signature, sub_display_format},
@@ -60,7 +62,9 @@ impl<T: JsonRpcClient + 'static> PeriodicWorker for PubKeySubmitter<T> {
 				let mut stream = tokio_stream::iter(pending_registrations);
 				while let Some(who) = stream.next().await {
 					// Skip the registration if the service is in maintenance mode. (Only system vaults are allowed to register in maintenance mode.)
-					if !self.check_service_state().await && !self.is_system_vault(who) {
+					if *self.migration_sequence.read().await != ServiceState::Normal
+						&& !self.is_system_vault(who)
+					{
 						continue;
 					}
 
@@ -232,13 +236,5 @@ impl<T: JsonRpcClient> PubKeySubmitter<T> {
 		self.client
 			.contract_call(registration_pool.current_round(), "registration_pool.current_round")
 			.await
-	}
-
-	/// Check the service state. (Normal -> true, Maintenance -> false)
-	async fn check_service_state(&self) -> bool {
-		return match *self.migration_sequence.read().await {
-			MigrationSequence::Normal => true,
-			_ => false,
-		};
 	}
 }
