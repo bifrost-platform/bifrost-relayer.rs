@@ -64,6 +64,7 @@ tokio = "1.33.0"
 tokio-stream = "0.1.14"
 
 subxt = "0.35.0"
+ed25519-dalek = "~1.0"
 
 # Substrate Clients
 sc-cli = { git = "https://github.com/bifrost-platform/polkadot-sdk", default-features = false, branch = "bifrost-polkadot-v1.3.0" }
@@ -79,6 +80,44 @@ sp-application-crypto = { git = "https://github.com/bifrost-platform/polkadot-sd
 
 # Substrate Builds
 substrate-build-script-utils = { git = "https://github.com/bifrost-platform/polkadot-sdk", default-features = false, branch = "bifrost-polkadot-v1.3.0" }
+
+borsh = "0.9"
+
+# Solana
+spl-token = {version = "3.1.1", features = ["no-entrypoint"]}
+solana-client = "=1.14.13"
+solana-program = "=1.14.13"
+solana-sdk = "=1.14.13"
+
+[patch.crates-io.ed25519-dalek]
+branch = "main"
+git = "https://github.com/Eclipse-Laboratories-Inc/ed25519-dalek"
+version = "1.0.1"
+
+[patch.crates-io.curve25519-dalek]
+branch = "v3.2.2-relax-zeroize"
+git = "https://github.com/Eclipse-Laboratories-Inc/curve25519-dalek"
+version = "3.2.2"
+
+[patch.crates-io.solana-client]
+git = "https://github.com/SunoukMun/solana.git"
+branch = "bifrost-solana-v1.14.13"
+version = "=1.14.13"
+
+[patch.crates-io.solana-program]
+git = "https://github.com/SunoukMun/solana.git"
+branch = "bifrost-solana-v1.14.13"
+version = "=1.14.13"
+
+[patch.crates-io.solana-sdk]
+git = "https://github.com/SunoukMun/solana.git"
+branch = "bifrost-solana-v1.14.13"
+version = "=1.14.13"
+
+[patch.crates-io.solana-zk-token-sdk]
+git = "https://github.com/SunoukMun/solana.git"
+branch = "bifrost-solana-v1.14.13"
+version = "=1.14.13"
 
 [profile.production]
 inherits = "release"

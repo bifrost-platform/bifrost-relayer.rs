@@ -29,3 +29,11 @@ miniscript = { workspace = true }
 subxt = { workspace = true }
 bitcoincore-rpc = { workspace = true }
 url = { workspace = true }
+
+anyhow = { workspace = true }
+borsh = { workspace = true }
+
+# Solana
+solana-sdk ={ workspace = true }
+solana-client ={ workspace = true }
+

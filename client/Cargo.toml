@@ -46,6 +46,13 @@ br-metrics = { path = "../metrics", default-features = false }
 # Substrate
 sc-service = { workspace = true }
 
+# Solana
+spl-token = {workspace = true}
+solana-sdk ={ workspace = true }
+solana-program = { workspace = true }
+solana-client = { workspace = true }
+
+
 [dev-dependencies]
 serde_json = { workspace = true }
 array-bytes = { workspace = true }

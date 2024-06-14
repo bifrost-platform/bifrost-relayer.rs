@@ -25,6 +25,19 @@ use crate::{
 		SubmitUnsignedPsbt, SubmitVaultKey,
 	},
 };
+use anyhow::Result;
+use borsh::{BorshDeserialize, BorshSerialize};
+use solana_client::rpc_client::RpcClient;
+use solana_sdk::{
+	hash::Hash,
+	instruction::Instruction,
+	message::Message,
+	nonce,
+	pubkey::Pubkey,
+	signature::{Keypair, Signer},
+	system_instruction,
+	transaction::Transaction,
+};
 
 #[derive(Clone, Debug)]
 pub struct SocketRelayMetadata {
@@ -259,6 +272,7 @@ pub enum TxRequestMetadata {
 	Flush(FlushMetadata),
 	Rollback(RollbackMetadata),
 	BitcoinSocketRelay(BitcoinRelayMetadata),
+	SolanaRelay(SolanaRelayMetadata),
 }
 
 impl Display for TxRequestMetadata {
@@ -275,6 +289,7 @@ impl Display for TxRequestMetadata {
 				TxRequestMetadata::Flush(metadata) => metadata.to_string(),
 				TxRequestMetadata::Rollback(metadata) => metadata.to_string(),
 				TxRequestMetadata::BitcoinSocketRelay(metadata) => metadata.to_string(),
+				TxRequestMetadata::SolanaRelay(metadata) => metadata.to_string(),
 			}
 		)
 	}
@@ -821,5 +836,173 @@ impl XtRequestSender {
 	/// Sends a new tx request message.
 	pub fn send(&self, message: XtRequestMessage) -> Result<(), Box<SendError<XtRequestMessage>>> {
 		Ok(self.sender.send(message)?)
+	}
+}
+
+// A custom program instruction. This would typically be defined in
+// another crate so it can be shared between the on-chain program and
+// the client.
+#[derive(BorshSerialize, BorshDeserialize)]
+enum EventInstruction {
+	Initialize,
+	Deposit { lamports: u64 },
+	Withdraw { lamports: u64 },
+}
+
+#[derive(Clone, Debug)]
+pub struct SolanaRelayMetadata {
+	/// The socket relay direction flag.
+	pub is_inbound: bool,
+	/// The socket event status.
+	pub status: bool,
+	/// The socket request sequence ID.
+	pub sequence: u128,
+	/// The source chain ID.
+	pub src_chain_id: ChainID, // solana chain id = 1399811149
+	/// The destination chain ID.
+	pub dst_chain_id: ChainID,
+	/// The flag whether this relay is processed on bootstrap.
+	pub is_bootstrap: bool,
+}
+
+impl SolanaRelayMetadata {
+	pub fn new(
+		is_inbound: bool,
+		status: bool,
+		sequence: u128,
+		src_chain_id: ChainID,
+		dst_chain_id: ChainID,
+		is_bootstrap: bool,
+	) -> Self {
+		Self { is_inbound, status, sequence, src_chain_id, dst_chain_id, is_bootstrap }
+	}
+}
+
+impl Display for SolanaRelayMetadata {
+	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		write!(
+			f,
+			"Relay({}-{:?}-{:?}, {:?} -> {:?})",
+			if self.is_inbound { "Inbound".to_string() } else { "Outbound".to_string() },
+			self.status,
+			self.sequence,
+			self.src_chain_id,
+			self.dst_chain_id,
+		)
+	}
+}
+
+#[derive(Clone, Debug)]
+/// The message format passed through the event channel.
+pub struct SolanaTxRequestMessage {
+	/// The remaining retries of the transaction request.
+	pub retries_remaining: u8,
+	/// The retry interval in milliseconds.
+	pub retry_interval: u64,
+	/// The raw transaction request.
+	pub tx_request: Transaction,
+	/// Additional data of the transaction request.
+	pub metadata: SolanaRelayMetadata,
+	/// The flag that represents whether the event is requested by a bootstrap process.
+	/// If true, the event will be processed by a asynchronous task.
+	pub is_bootstrap: bool,
+}
+
+impl SolanaTxRequestMessage {
+	/// Instantiates a new `SolanaTxRequestMessage` instance.
+	pub fn new(tx_request: Transaction, metadata: SolanaRelayMetadata, is_bootstrap: bool) -> Self {
+		Self {
+			retries_remaining: DEFAULT_TX_RETRIES,
+			retry_interval: DEFAULT_TX_RETRY_INTERVAL_MS,
+			tx_request,
+			metadata,
+			is_bootstrap,
+		}
+	}
+
+	/// Builds a new `TxRequestMessage` to use on transaction retry. This will reduce the remaining
+	/// retry counter and increase the retry interval.
+	pub fn build_retry_event(&mut self) {
+		// self.tx_request.message.new_with_nonce(None);
+		todo!("create_offline_initialize_tx");
+		self.retries_remaining = self.retries_remaining.saturating_sub(1);
+	}
+
+	fn create_offline_initialize_tx(
+		&self,
+		client: &RpcClient,
+		program_id: Pubkey,
+		payer: &Keypair,
+	) -> Result<(Transaction, Pubkey)> {
+		let event_instruction = EventInstruction::Initialize;
+		let event_instruction = Instruction::new_with_borsh(program_id, &event_instruction, vec![]);
+
+		// This will create a nonce account and assign authority to the
+		// payer so they can sign to advance the nonce and withdraw its rent.
+		let nonce_account = self.make_nonce_account(client, payer)?;
+
+		let mut message = Message::new_with_nonce(
+			vec![event_instruction],
+			Some(&payer.pubkey()),
+			&nonce_account,
+			&payer.pubkey(),
+		);
+
+		// This transaction will need to be signed later, using the blockhash
+		// stored in the nonce account.
+		let tx = Transaction::new_unsigned(message);
+
+		Ok((tx, nonce_account))
+	}
+
+	fn make_nonce_account(&self, client: &RpcClient, payer: &Keypair) -> Result<Pubkey> {
+		let nonce_account_address = Keypair::new();
+		let nonce_account_size = nonce::State::size();
+		let nonce_rent = client.get_minimum_balance_for_rent_exemption(nonce_account_size)?;
+
+		// Assigning the nonce authority to the payer so they can sign for the withdrawal,
+		// and we can throw away the nonce address secret key.
+		let create_nonce_instr = system_instruction::create_nonce_account(
+			&payer.pubkey(),
+			&nonce_account_address.pubkey(),
+			&payer.pubkey(),
+			nonce_rent,
+		);
+
+		let mut nonce_tx = Transaction::new_with_payer(&create_nonce_instr, Some(&payer.pubkey()));
+		let blockhash = client.get_latest_blockhash()?;
+		nonce_tx.sign(&[&payer, &nonce_account_address], blockhash);
+		client.send_and_confirm_transaction(&nonce_tx)?;
+
+		Ok(nonce_account_address.pubkey())
+	}
+}
+
+/// The message sender connected to the event channel.
+pub struct SolanaTxRequestSender {
+	/// The chain ID of the event channel.
+	pub id: ChainID,
+	/// The message sender.
+	pub sender: UnboundedSender<SolanaTxRequestMessage>,
+	/// Is Bifrost network?
+	pub is_native: bool,
+}
+
+impl SolanaTxRequestSender {
+	/// Instantiates a new `TxRequestSender` instance.
+	pub fn new(
+		id: ChainID,
+		sender: UnboundedSender<SolanaTxRequestMessage>,
+		is_native: bool,
+	) -> Self {
+		Self { id, sender, is_native }
+	}
+
+	/// Sends a new event message.
+	pub fn send(
+		&self,
+		message: SolanaTxRequestMessage,
+	) -> Result<(), SendError<SolanaTxRequestMessage>> {
+		self.sender.send(message)
 	}
 }
