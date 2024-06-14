@@ -23,7 +23,7 @@ const SUB_LOG_TARGET: &str = "keystore";
 #[derive(Clone)]
 pub struct KeypairStorage {
 	db: Option<Arc<LocalKeystore>>,
-	path: String,
+	base_path: String,
 	secret: Option<SecretString>,
 	network: Network,
 }
@@ -40,11 +40,11 @@ impl KeypairStorage {
 			password = Some(SecretString::from_str(&secret).unwrap());
 		}
 
-		Self { db: None, path, secret: password, network }
+		Self { db: None, base_path: path, secret: password, network }
 	}
 
 	pub async fn load(&mut self, round: u32) {
-		let path = format!("{}/{}", self.path, round);
+		let path = format!("{}/{}", self.base_path, round);
 
 		let keystore =
 			LocalKeystore::open(&path, self.secret.clone()).expect(INVALID_KEYSTORE_PASSWORD);
@@ -120,13 +120,13 @@ impl GetKey for KeypairStorage {
 						.expect(KEYSTORE_INTERNAL_ERROR),
 				) {
 					Ok(pair) => {
-						if let Some(pair) = pair {
-							return Ok(Some(
+						return if let Some(pair) = pair {
+							Ok(Some(
 								PrivateKey::from_slice(&pair.into_inner().seed(), self.network)
 									.expect(KEYSTORE_INTERNAL_ERROR),
-							));
+							))
 						} else {
-							unreachable!()
+							Ok(None)
 						}
 					},
 					Err(err) => {

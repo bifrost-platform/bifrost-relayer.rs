@@ -6,8 +6,10 @@ use br_primitives::{
 	constants::{errors::INVALID_PERIODIC_SCHEDULE, schedule::PUB_KEY_SUBMITTER_SCHEDULE},
 	contracts::registration_pool::RegistrationPoolContract,
 	substrate::{
-		bifrost_runtime, AccountId20, EthereumSignature, MigrationSequence, Public,
-		VaultKeySubmission,
+		bifrost_runtime::{
+			self, btc_registration_pool::storage::types::service_state::ServiceState,
+		},
+		AccountId20, EthereumSignature, MigrationSequence, Public, VaultKeySubmission,
 	},
 	tx::{SubmitVaultKeyMetadata, XtRequest, XtRequestMessage, XtRequestMetadata, XtRequestSender},
 	utils::{convert_ethers_to_ecdsa_signature, sub_display_format},
@@ -30,7 +32,7 @@ pub struct PubKeySubmitter<T> {
 	/// The unsigned transaction message sender.
 	xt_request_sender: Arc<XtRequestSender>,
 	/// The public and private keypair local storage.
-	keypair_storage: KeypairStorage,
+	keypair_storage: Arc<RwLock<KeypairStorage>>,
 	/// The migration sequence.
 	migration_sequence: Arc<RwLock<MigrationSequence>>,
 	/// The time schedule that represents when check pending registrations.
@@ -48,7 +50,14 @@ impl<T: JsonRpcClient + 'static> PeriodicWorker for PubKeySubmitter<T> {
 			self.wait_until_next_time().await;
 
 			if self.is_relay_executive().await {
-				let pending_registrations = self.get_pending_registrations().await;
+				let target_round = if *self.migration_sequence.read().await == ServiceState::Normal
+				{
+					self.get_current_round().await
+				} else {
+					self.get_current_round().await.saturating_add(1)
+				};
+
+				let pending_registrations = self.get_pending_registrations(target_round).await;
 
 				log::info!(
 					target: &self.client.get_chain_name(),
@@ -60,11 +69,13 @@ impl<T: JsonRpcClient + 'static> PeriodicWorker for PubKeySubmitter<T> {
 				let mut stream = tokio_stream::iter(pending_registrations);
 				while let Some(who) = stream.next().await {
 					// Skip the registration if the service is in maintenance mode. (Only system vaults are allowed to register in maintenance mode.)
-					if !self.check_service_state().await && !self.is_system_vault(who) {
+					if *self.migration_sequence.read().await != ServiceState::Normal
+						&& !self.is_system_vault(who)
+					{
 						continue;
 					}
 
-					let registration_info = self.get_registration_info(who).await;
+					let registration_info = self.get_registration_info(who, target_round).await;
 
 					// user doesn't exist in the pool.
 					if registration_info.0 != who {
@@ -79,7 +90,7 @@ impl<T: JsonRpcClient + 'static> PeriodicWorker for PubKeySubmitter<T> {
 						continue;
 					}
 
-					let pub_key = self.keypair_storage.create_new_keypair().await;
+					let pub_key = self.keypair_storage.write().await.create_new_keypair().await;
 					let (call, metadata) = self.build_unsigned_tx(who, pub_key);
 					self.request_send_transaction(call, metadata);
 				}
@@ -93,7 +104,7 @@ impl<T: JsonRpcClient> PubKeySubmitter<T> {
 	pub fn new(
 		client: Arc<EthClient<T>>,
 		xt_request_sender: Arc<XtRequestSender>,
-		keypair_storage: KeypairStorage,
+		keypair_storage: Arc<RwLock<KeypairStorage>>,
 		migration_sequence: Arc<RwLock<MigrationSequence>>,
 	) -> Self {
 		Self {
@@ -185,10 +196,10 @@ impl<T: JsonRpcClient> PubKeySubmitter<T> {
 	}
 
 	/// Get the pending registrations.
-	async fn get_pending_registrations(&self) -> Vec<Address> {
+	async fn get_pending_registrations(&self, round: u32) -> Vec<Address> {
 		self.client
 			.contract_call(
-				self.registration_pool().pending_registrations(self.get_current_round().await),
+				self.registration_pool().pending_registrations(round),
 				"registration_pool.pending_registrations",
 			)
 			.await
@@ -199,10 +210,11 @@ impl<T: JsonRpcClient> PubKeySubmitter<T> {
 	async fn get_registration_info(
 		&self,
 		who: Address,
+		round: u32,
 	) -> (Address, String, String, Vec<Address>, Vec<Bytes>) {
 		self.client
 			.contract_call(
-				self.registration_pool().registration_info(who, self.get_current_round().await),
+				self.registration_pool().registration_info(who, round),
 				"registration_pool.registration_info",
 			)
 			.await
@@ -232,13 +244,5 @@ impl<T: JsonRpcClient> PubKeySubmitter<T> {
 		self.client
 			.contract_call(registration_pool.current_round(), "registration_pool.current_round")
 			.await
-	}
-
-	/// Check the service state. (Normal -> true, Maintenance -> false)
-	async fn check_service_state(&self) -> bool {
-		return match *self.migration_sequence.read().await {
-			MigrationSequence::Normal => true,
-			_ => false,
-		};
 	}
 }

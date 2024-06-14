@@ -143,8 +143,8 @@ pub struct BTCProvider {
 	pub username: Option<String>,
 	/// Optional. The provider password credential.
 	pub password: Option<String>,
-	/// Optional. The bootstrap offset in blocks.
-	pub bootstrap_offset: Option<u32>,
+	/// Optional. The wallet name.
+	pub wallet: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize, PartialEq)]
@@ -177,8 +177,10 @@ pub struct HandlerConfig {
 pub struct BootstrapConfig {
 	/// Bootstrapping flag
 	pub is_enabled: bool,
-	/// Round for bootstrap
+	/// Optional. The round offset used for EVM bootstrap.
 	pub round_offset: Option<u32>,
+	/// Optional. The block offset used for Bitcoin bootstrap.
+	pub btc_block_offset: Option<u32>,
 }
 
 #[derive(Default, Debug, Clone, Deserialize)]

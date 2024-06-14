@@ -35,7 +35,7 @@ pub struct PsbtSigner<T> {
 	/// The target Bitcoin event.
 	target_event: EventType,
 	/// The public and private keypair local storage.
-	keypair_storage: KeypairStorage,
+	keypair_storage: Arc<RwLock<KeypairStorage>>,
 	/// The migration sequence.
 	migration_sequence: Arc<RwLock<MigrationSequence>>,
 	/// The Bitcoin network.
@@ -48,7 +48,7 @@ impl<T: JsonRpcClient> PsbtSigner<T> {
 		client: Arc<EthClient<T>>,
 		xt_request_sender: Arc<XtRequestSender>,
 		event_receiver: Receiver<BTCEventMessage>,
-		keypair_storage: KeypairStorage,
+		keypair_storage: Arc<RwLock<KeypairStorage>>,
 		migration_sequence: Arc<RwLock<MigrationSequence>>,
 		btc_network: Network,
 	) -> Self {
@@ -111,7 +111,7 @@ impl<T: JsonRpcClient> PsbtSigner<T> {
 		};
 
 		let mut psbt = unsigned_psbt.clone();
-		if self.keypair_storage.sign_psbt(&mut psbt) {
+		if self.keypair_storage.read().await.sign_psbt(&mut psbt) {
 			let signed_psbt = psbt.serialize();
 			let msg = SignedPsbtMessage {
 				authority_id: AccountId20(self.client.address().0),

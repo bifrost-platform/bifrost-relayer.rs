@@ -1,6 +1,11 @@
 #[subxt::subxt(
 	runtime_metadata_path = "../configs/bifrost_metadata.scale",
-	derive_for_all_types = "Clone"
+	derive_for_all_types = "Clone",
+	derive_for_type(
+		path = "bounded_collections::bounded_vec::BoundedVec",
+		derive = "Ord, PartialOrd, Eq, PartialEq"
+	),
+	derive_for_type(path = "bp_multi_sig::MigrationSequence", derive = "Eq, PartialEq")
 )]
 pub mod bifrost_runtime {}
 
@@ -19,6 +24,7 @@ pub use runtime_types::sp_core::ecdsa::Signature;
 
 pub use bifrost_runtime::btc_registration_pool::calls::types::*;
 pub use bifrost_runtime::btc_socket_queue::calls::types::*;
+pub use bifrost_runtime::runtime_types::bounded_collections::bounded_vec::BoundedVec;
 
 use subxt::config::{Config, DefaultExtrinsicParams, SubstrateConfig};
 

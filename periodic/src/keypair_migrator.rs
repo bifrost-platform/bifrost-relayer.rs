@@ -20,7 +20,7 @@ pub struct KeypairMigrator<T> {
 	sub_client: Option<OnlineClient<CustomConfig>>,
 	bfc_client: Arc<EthClient<T>>,
 	migration_sequence: Arc<RwLock<MigrationSequence>>,
-	keypair_storage: KeypairStorage,
+	keypair_storage: Arc<RwLock<KeypairStorage>>,
 	schedule: Schedule,
 }
 
@@ -29,7 +29,7 @@ impl<T: JsonRpcClient> KeypairMigrator<T> {
 	pub fn new(
 		bfc_client: Arc<EthClient<T>>,
 		migration_sequence: Arc<RwLock<MigrationSequence>>,
-		keypair_storage: KeypairStorage,
+		keypair_storage: Arc<RwLock<KeypairStorage>>,
 	) -> Self {
 		Self {
 			sub_client: None,
@@ -51,11 +51,15 @@ impl<T: JsonRpcClient> KeypairMigrator<T> {
 		self.sub_client = Some(OnlineClient::<CustomConfig>::from_url(url.as_str()).await.unwrap());
 
 		match self.get_service_state().await {
-			ServiceState::Normal => {
-				self.keypair_storage.load(self.get_current_round().await).await;
+			ServiceState::Normal | ServiceState::UTXOTransfer => {
+				self.keypair_storage.write().await.load(self.get_current_round().await).await;
 			},
-			_ => {
-				self.keypair_storage.load(self.get_current_round().await + 1).await;
+			ServiceState::PrepareNextSystemVault => {
+				self.keypair_storage
+					.write()
+					.await
+					.load(self.get_current_round().await + 1)
+					.await;
 			},
 		}
 	}
@@ -139,11 +143,34 @@ impl<T: JsonRpcClient> PeriodicWorker for KeypairMigrator<T> {
 				match *write_lock {
 					MigrationSequence::Normal => match service_state {
 						ServiceState::PrepareNextSystemVault => {
-							self.keypair_storage.load(self.get_current_round().await + 1).await;
+							self.keypair_storage
+								.write()
+								.await
+								.load(self.get_current_round().await + 1)
+								.await;
 						},
 						_ => {},
 					},
-					_ => {},
+					MigrationSequence::PrepareNextSystemVault => match service_state {
+						ServiceState::UTXOTransfer => {
+							self.keypair_storage
+								.write()
+								.await
+								.load(self.get_current_round().await)
+								.await;
+						},
+						_ => {},
+					},
+					MigrationSequence::UTXOTransfer => match service_state {
+						ServiceState::Normal => {
+							self.keypair_storage
+								.write()
+								.await
+								.load(self.get_current_round().await)
+								.await;
+						},
+						_ => {},
+					},
 				}
 				*write_lock = service_state;
 			}

@@ -20,4 +20,4 @@ pub const ROLLBACK_CHECK_SCHEDULE: &str = "0 * * * * * *";
 pub const ROLLBACK_CHECK_MINIMUM_INTERVAL: u32 = 3 * 60;
 
 /// The schedule definition for migration detector. This will trigger on every 3rd second.
-pub const MIGRATION_DETECTOR_SCHEDULE: &str = "*/3 * * * * * *";
+pub const MIGRATION_DETECTOR_SCHEDULE: &str = "*/1 * * * * * *";
