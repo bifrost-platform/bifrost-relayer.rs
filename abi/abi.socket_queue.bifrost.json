@@ -37,6 +37,35 @@
         "internalType": "bytes32",
         "name": "txid",
         "type": "bytes32"
+      },
+      {
+        "internalType": "bytes",
+        "name": "signed_psbt",
+        "type": "bytes"
+      },
+      {
+        "internalType": "address",
+        "name": "authority_id",
+        "type": "address"
+      }
+    ],
+    "name": "is_signed_psbt_submitted",
+    "outputs": [
+      {
+        "internalType": "bool",
+        "name": "",
+        "type": "bool"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "bytes32",
+        "name": "txid",
+        "type": "bytes32"
       }
     ],
     "name": "outbound_tx",
