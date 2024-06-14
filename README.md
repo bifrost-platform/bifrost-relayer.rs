@@ -13,7 +13,7 @@ Learn to use the Bifrost network with our [technical docs](https://docs.bifrostn
 ### Bifrost Network Testnet (ChainID: 49088)
 
 | Public Endpoints (rpc/ws)                        |
-|--------------------------------------------------|
+| ------------------------------------------------ |
 | https://public-01.testnet.bifrostnetwork.com/rpc |
 | https://public-02.testnet.bifrostnetwork.com/rpc |
 | wss://public-01.testnet.bifrostnetwork.com/wss   |
@@ -22,7 +22,7 @@ Learn to use the Bifrost network with our [technical docs](https://docs.bifrostn
 ### Bifrost Network Mainnet (ChainID: 3068)
 
 | Public Endpoints (rpc/ws)                        |
-|--------------------------------------------------|
+| ------------------------------------------------ |
 | https://public-01.mainnet.bifrostnetwork.com/rpc |
 | https://public-02.mainnet.bifrostnetwork.com/rpc |
 | wss://public-01.mainnet.bifrostnetwork.com/wss   |
@@ -87,6 +87,39 @@ bifrost-relayer --chain <PATH_TO_CONFIG_FILE>
 
 To build and develop Bifrost Relayer, you will need a proper development environment. If you've never worked with a
 Rust-based project before, your should probably try to first install `rustup`.
+
+```sh
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+```
+
+Then, fetch the project's code by using git.
+
+```sh
+git clone https://github.com/bifrost-platform/bifrost-relayer.rs
+cd bifrost-relayer.rs
+```
+
+And now build the project to generate the executable binary file. (The first build will take some time to end)
+
+- Bifrost (**Must be priorly self-operating and fully synced**)
+- Ethereum
+- Binance Smart Chain
+- Polygon
+
+You should also prepare an EVM account that will act as your relayer account. This account should have enough balance
+for transaction fees used in operations.
+
+### Run the Relayer
+
+Use the following command to execute the CCCP Relayer. The `<PATH_TO_CONFIG_FILE>` should be set to the absolute path of the installed configuration YAML file.
+
+```sh
+bifrost-relayer --chain <PATH_TO_CONFIG_FILE>
+```
+
+## Development
+
+To build and develop CCCP Relayer, you will need a proper development environment. If you've never worked with a Rust-based project before, your should probably try to first install `rustup`.
 
 ```sh
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh

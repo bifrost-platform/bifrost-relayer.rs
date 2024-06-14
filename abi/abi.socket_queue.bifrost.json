@@ -34,6 +34,38 @@
   {
     "inputs": [
       {
+        "internalType": "uint256[]",
+        "name": "sequences",
+        "type": "uint256[]"
+      }
+    ],
+    "name": "filter_executable_msgs",
+    "outputs": [
+      {
+        "internalType": "uint256[]",
+        "name": "",
+        "type": "uint256[]"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [],
+    "name": "finalized_psbts",
+    "outputs": [
+      {
+        "internalType": "bytes[]",
+        "name": "",
+        "type": "bytes[]"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
         "internalType": "bytes32",
         "name": "txid",
         "type": "bytes32"

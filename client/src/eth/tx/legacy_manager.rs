@@ -57,12 +57,6 @@ pub struct LegacyTransactionManager<T> {
 	/// A handle for spawning transaction tasks in the service.
 	tx_spawn_handle: SpawnTaskHandle,
 }
-
-impl<T: 'static + JsonRpcClient> LegacyTransactionManager<T> {
-	/// Instantiates a new `LegacyTransactionManager` instance.
-	pub fn new(
-		client: Arc<EthClient<T>>,
-		escalate_percentage: Option<f64>,
 		min_gas_price: Option<u64>,
 		is_initially_escalated: bool,
 		duplicate_confirm_delay: Option<u64>,

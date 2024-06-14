@@ -123,6 +123,23 @@ impl<T: JsonRpcClient + 'static> OraclePriceFeeder<T> {
 		}
 	}
 
+	async fn feed_period_spreader(&self, until: DateTime<Utc>, in_between: bool) {
+		let should_be_done_in = until - Utc::now();
+
+		if in_between {
+			let sleep_duration = should_be_done_in
+				- chrono::Duration::seconds(
+					rand::thread_rng().gen_range(0..=should_be_done_in.num_seconds()),
+				);
+
+			if let Ok(sleep_duration) = sleep_duration.to_std() {
+				sleep(sleep_duration).await
+			}
+		} else if let Ok(sleep_duration) = should_be_done_in.to_std() {
+			sleep(sleep_duration).await
+		}
+	}
+
 	async fn try_with_primary(&self) {
 		match self.primary_source[0].get_tickers().await {
 			// If primary source works well.
@@ -203,6 +220,16 @@ impl<T: JsonRpcClient + 'static> OraclePriceFeeder<T> {
 			volume_weighted.insert("DAI".into(), (parse_ether(1).unwrap(), U256::from(1)));
 		}
 
+		if !volume_weighted.contains_key("USDC") {
+			volume_weighted.insert("USDC".into(), (parse_ether(1).unwrap(), U256::from(1)));
+		}
+		if !volume_weighted.contains_key("USDT") {
+			volume_weighted.insert("USDT".into(), (parse_ether(1).unwrap(), U256::from(1)));
+		}
+		if !volume_weighted.contains_key("DAI") {
+			volume_weighted.insert("DAI".into(), (parse_ether(1).unwrap(), U256::from(1)));
+		}
+
 		Ok(volume_weighted
 			.into_iter()
 			.map(|(symbol, (volume_weighted_sum, total_volume))| {
@@ -245,6 +272,23 @@ impl<T: JsonRpcClient + 'static> OraclePriceFeeder<T> {
 				}
 			}
 		}
+
+		if volume_weighted.is_empty() {
+			return Err(Error::default());
+		}
+
+		Ok(volume_weighted
+			.into_iter()
+			.map(|(symbol, (volume_weighted_sum, total_volume))| {
+				(
+					symbol,
+					PriceResponse {
+						price: volume_weighted_sum / total_volume,
+						volume: total_volume.into(),
+					},
+				)
+			})
+			.collect())
 	}
 
 	/// Build and send transaction.
@@ -291,6 +335,9 @@ impl<T: JsonRpcClient + 'static> OraclePriceFeeder<T> {
 		match self.tx_request_sender.send(TxRequestMessage::new(
 			TxRequest::Legacy(tx_request),
 			TxRequestMetadata::PriceFeed(metadata.clone()),
+			false,
+			false,
+			GasCoefficient::Mid,
 			false,
 			false,
 			GasCoefficient::Mid,

@@ -151,7 +151,7 @@ pub async fn get_btc_client(btc_provider: BTCProvider) -> BitcoinClient {
 
 	println!("btc_url: {:?}", btc_provider.provider.as_str());
 
-	BitcoinClient::new(btc_provider.provider.as_str(), auth).expect(INVALID_PROVIDER_URL)
+	BitcoinClient::new(btc_provider.provider.as_str(), auth, None).expect(INVALID_PROVIDER_URL)
 }
 
 pub async fn test_get_vault_contract(
