@@ -3,8 +3,6 @@ use std::{borrow::Cow, fmt::Display};
 
 use crate::eth::ChainID;
 
-use crate::eth::ChainID;
-
 pub type Result<T> = std::result::Result<T, Error>;
 
 /// Error type for the CLI.
@@ -184,53 +182,6 @@ pub struct BootstrapConfig {
 }
 
 #[derive(Default, Debug, Clone, Deserialize)]
-pub struct SentryConfig {
-	/// Identifier for Sentry client
-	pub environment: Option<Cow<'static, str>>,
-	/// Builds a Sentry client.
-	pub is_enabled: bool,
-	/// The DSN that tells Sentry where to send the events to.
-	pub dsn: String,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-pub struct PrometheusConfig {
-	/// Expose a Prometheus exporter endpoint.
-	///
-	/// Prometheus metric endpoint is disabled by default.
-	pub is_enabled: bool,
-	/// Expose Prometheus exporter on all interfaces.
-	///
-	/// Default is local.
-	pub is_external: Option<bool>,
-	/// Prometheus exporter TCP Port.
-	pub port: Option<u16>,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-pub struct PriceFeederConfig {
-	pub chain_id: u32,
-	pub schedule: String,
-	pub contract: String,
-	pub price_sources: Vec<PriceSource>,
-	pub symbols: Vec<String>,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-pub struct PeriodicWorkerConfig {
-	/// Oracle price feeder
-	pub oracle_price_feeder: Option<Vec<PriceFeederConfig>>,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-pub struct BootstrapConfig {
-	/// Bootstrapping flag
-	pub is_enabled: bool,
-	/// Round for bootstrap
-	pub round_offset: Option<u32>,
-}
-
-#[derive(Debug, Clone, Deserialize)]
 pub struct SentryConfig {
 	/// Identifier for Sentry client
 	pub environment: Option<Cow<'static, str>>,

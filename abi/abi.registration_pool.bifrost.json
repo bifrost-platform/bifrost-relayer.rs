@@ -56,43 +56,6 @@
     "type": "function"
   },
   {
-    "inputs": [],
-    "name": "current_round",
-    "outputs": [
-      {
-        "internalType": "uint32",
-        "name": "",
-        "type": "uint32"
-      }
-    ],
-    "stateMutability": "view",
-    "type": "function"
-  },
-  {
-    "inputs": [
-      {
-        "internalType": "string",
-        "name": "vault_address",
-        "type": "string"
-      },
-      {
-        "internalType": "uint32",
-        "name": "pool_round",
-        "type": "uint32"
-      }
-    ],
-    "name": "descriptor",
-    "outputs": [
-      {
-        "internalType": "string",
-        "name": "",
-        "type": "string"
-      }
-    ],
-    "stateMutability": "view",
-    "type": "function"
-  },
-  {
     "inputs": [
       {
         "internalType": "uint32",

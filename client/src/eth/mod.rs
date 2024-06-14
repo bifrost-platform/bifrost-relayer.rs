@@ -10,9 +10,6 @@ use br_primitives::{
 	eth::{AggregatorContracts, ChainID, ProtocolContracts, ProviderMetadata},
 	utils::sub_display_format,
 };
-use serde::{de::DeserializeOwned, Serialize};
-use std::{fmt::Debug, str::FromStr, sync::Arc};
-use tokio::time::{sleep, Duration};
 
 use ethers::{
 	abi::Detokenize,
@@ -39,12 +36,6 @@ pub mod traits;
 pub mod tx;
 pub mod wallet;
 
-pub mod events;
-pub mod handlers;
-pub mod traits;
-pub mod tx;
-pub mod wallet;
-
 const SUB_LOG_TARGET: &str = "eth-client";
 
 /// The core client for EVM-based chain interactions.
@@ -57,6 +48,24 @@ pub struct EthClient<T> {
 	pub protocol_contracts: ProtocolContracts<T>,
 	/// the aggregator contract instances of the provider.
 	pub aggregator_contracts: AggregatorContracts<T>,
+	/// The ethers.rs wrapper for the connected chain.
+	provider: Arc<Provider<T>>,
+	/// The flag whether debug mode is enabled. If enabled, certain errors will be logged such as
+	/// gas estimation failures.
+	debug_mode: bool,
+}
+
+impl<T: JsonRpcClient> EthClient<T> {
+	/// Instantiates a new `EthClient` instance for the given chain.
+	pub fn new(
+		wallet: WalletManager,
+		provider: Arc<Provider<T>>,
+		metadata: ProviderMetadata,
+		protocol_contracts: ProtocolContracts<T>,
+		aggregator_contracts: AggregatorContracts<T>,
+		debug_mode: bool,
+	) -> Self {
+		Self { wallet, provider, metadata, protocol_contracts, aggregator_contracts, debug_mode }
 	}
 
 	/// Returns the relayer address.
@@ -211,11 +220,6 @@ pub struct EthClient<T> {
 		self.rpc_call("eth_getTransactionByHash", vec![hash]).await
 	}
 
-	/// Retrieves the transaction of the given transaction hash.
-	pub async fn get_transaction(&self, hash: H256) -> Option<Transaction> {
-		self.rpc_call("eth_getTransactionByHash", vec![hash]).await
-	}
-
 	/// Retrieves the transaction receipt of the given transaction hash.
 	pub async fn get_transaction_receipt(&self, hash: H256) -> Option<TransactionReceipt> {
 		self.rpc_call("eth_getTransactionReceipt", vec![hash]).await
@@ -344,167 +348,6 @@ impl<T: JsonRpcClient> LegacyGasMiddleware for EthClient<T> {
 			if self.debug_mode {
 				let log_msg = format!(
 					"-[{}]-[{}] ⚠️  Warning! Error encountered during get gas price, Retries left: {:?}, Error: {}",
-					sub_display_format(SUB_LOG_TARGET),
-					self.address(),
-					retries - 1,
-					last_error
-				);
-				log::warn!(target: &self.get_chain_name(), "{log_msg}");
-				sentry::capture_message(
-					&format!("[{}]{log_msg}", &self.get_chain_name()),
-					sentry::Level::Warning,
-				);
-			}
-
-			match self.provider.get_gas_price().await {
-				Ok(gas_price) => return gas_price,
-				Err(error) => {
-					sleep(Duration::from_millis(DEFAULT_CALL_RETRY_INTERVAL_MS)).await;
-					retries -= 1;
-					last_error = error.to_string();
-				},
-			}
-		}
-
-		panic!(
-			"[{}]-[{}]-[{}] {} [method: get_gas_price]: {}",
-			&self.get_chain_name(),
-			SUB_LOG_TARGET,
-			self.address(),
-			PROVIDER_INTERNAL_ERROR,
-			last_error
-		);
-	}
-}
-
-#[async_trait::async_trait]
-impl<T: JsonRpcClient> Eip1559GasMiddleware for EthClient<T> {
-	async fn get_estimated_eip1559_fees(&self) -> (U256, U256) {
-		match self.provider.estimate_eip1559_fees(None).await {
-			Ok(fees) => {
-				br_metrics::increase_rpc_calls(&self.get_chain_name());
-				fees
-			},
-			Err(error) => {
-				self.handle_failed_get_estimated_eip1559_fees(
-					DEFAULT_CALL_RETRIES,
-					error.to_string(),
-				)
-				.await
-			},
-		}
-	}
-
-	async fn handle_failed_get_estimated_eip1559_fees(
-		&self,
-		retries_remaining: u8,
-		error: String,
-	) -> (U256, U256) {
-		let mut retries = retries_remaining;
-		let mut last_error = error;
-
-		while retries > 0 {
-			br_metrics::increase_rpc_calls(&self.get_chain_name());
-
-			if self.debug_mode {
-				let log_msg = format!(
-					"-[{}]-[{}] ⚠️  Warning! Error encountered during get estimated eip1559 fees, Retries left: {:?}, Error: {}",
-					sub_display_format(SUB_LOG_TARGET),
-					self.address(),
-					retries - 1,
-					last_error
-				);
-				log::warn!(target: &self.get_chain_name(), "{log_msg}");
-				sentry::capture_message(
-					&format!("[{}]{log_msg}", &self.get_chain_name()),
-					sentry::Level::Warning,
-				);
-			}
-
-			match self.provider.estimate_eip1559_fees(None).await {
-				Ok(fees) => return fees,
-				Err(error) => {
-					sleep(Duration::from_millis(DEFAULT_CALL_RETRY_INTERVAL_MS)).await;
-					retries -= 1;
-					last_error = error.to_string();
-				},
-			}
-		}
-
-		panic!(
-			"[{}]-[{}]-[{}] {} [method: get_estimated_eip1559_fees]: {}",
-			&self.get_chain_name(),
-			SUB_LOG_TARGET,
-			self.address(),
-			PROVIDER_INTERNAL_ERROR,
-			last_error
-		);
-	}
-
-	/// Send prometheus metric of the current balance.
-	pub async fn sync_balance(&self) {
-		br_metrics::set_native_balance(
-			&self.get_chain_name(),
-			format_units(self.get_balance(self.address()).await, "ether")
-				.unwrap()
-				.parse::<f64>()
-				.unwrap(),
-		);
-	}
-}
-
-#[async_trait::async_trait]
-impl<T: JsonRpcClient> LegacyGasMiddleware for EthClient<T> {
-	async fn get_gas_price(&self) -> U256 {
-		match self.provider.get_gas_price().await {
-			Ok(gas_price) => {
-				br_metrics::increase_rpc_calls(&self.get_chain_name());
-				gas_price
-			},
-			Err(error) => {
-				self.handle_failed_get_gas_price(DEFAULT_CALL_RETRIES, error.to_string()).await
-			},
-		}
-	}
-
-	async fn get_gas_price_for_retry(
-		&self,
-		previous_gas_price: U256,
-		gas_price_coefficient: f64,
-		min_gas_price: U256,
-	) -> U256 {
-		let previous_gas_price = previous_gas_price.as_u64() as f64;
-
-		let current_gas_price = self.get_gas_price().await;
-		let escalated_gas_price =
-			U256::from((previous_gas_price * gas_price_coefficient).ceil() as u64);
-
-		max(max(current_gas_price, escalated_gas_price), min_gas_price)
-	}
-
-	async fn get_gas_price_for_escalation(
-		&self,
-		gas_price: U256,
-		gas_price_coefficient: f64,
-		min_gas_price: U256,
-	) -> U256 {
-		max(
-			U256::from((gas_price.as_u64() as f64 * gas_price_coefficient).ceil() as u64),
-			min_gas_price,
-		)
-	}
-
-	async fn handle_failed_get_gas_price(&self, retries_remaining: u8, error: String) -> U256 {
-		let mut retries = retries_remaining;
-		let mut last_error = error;
-
-		while retries > 0 {
-			br_metrics::increase_rpc_calls(&self.get_chain_name());
-
-			if self.debug_mode {
-				log::warn!(
-					target: &self.get_chain_name(),
-					"-[{}] ⚠️  Warning! Error encountered during get gas price, Retries left: {:?}, Error: {}",
 					sub_display_format(SUB_LOG_TARGET),
 					self.address(),
 					retries - 1,

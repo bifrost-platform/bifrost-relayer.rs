@@ -46,14 +46,6 @@ fn main() {
 	sc_sysinfo::print_sysinfo(&sc_sysinfo::gather_sysinfo());
 	cli.print_relayer_infos();
 
-	let cli = Cli::from_args();
-
-	let tokio_runtime = build_runtime().unwrap();
-	let configuration =
-		create_configuration(tokio_runtime.handle().clone(), cli.load_spec()).unwrap();
-
-	cli.print_relayer_infos();
-
 	let runner = Runner::new(configuration, tokio_runtime).unwrap();
 	runner
 		.run_relayer_until_exit(|config| async move {

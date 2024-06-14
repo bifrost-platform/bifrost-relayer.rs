@@ -297,7 +297,7 @@ impl SubmitVaultKeyMetadata {
 
 impl Display for SubmitVaultKeyMetadata {
 	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-		write!(f, "SubmitVaultKey({:?}:{})", self.who, self.key)
+		write!(f, "SubmitVaultKey({:?}:{})", self.who, self.key.to_string())
 	}
 }
 
@@ -476,34 +476,6 @@ impl TryFrom<XtRequest> for Payload<SubmitExecutedRequest> {
 			XtRequest::SubmitUnsignedPsbt(_) => Err(()),
 			XtRequest::SubmitExecutedRequest(call) => Ok(call),
 			XtRequest::SubmitRollbackPoll(_) => Err(()),
-		}
-	}
-}
-impl TryFrom<XtRequest> for Payload<SubmitSystemVaultKey> {
-	type Error = ();
-
-	fn try_from(value: XtRequest) -> Result<Self, Self::Error> {
-		match value {
-			XtRequest::SubmitSignedPsbt(_) => Err(()),
-			XtRequest::SubmitVaultKey(_) => Err(()),
-			XtRequest::SubmitUnsignedPsbt(_) => Err(()),
-			XtRequest::SubmitExecutedRequest(_) => Err(()),
-			XtRequest::SubmitSystemVaultKey(call) => Ok(call),
-			XtRequest::SubmitRollbackPoll(_) => Err(()),
-		}
-	}
-}
-impl TryFrom<XtRequest> for Payload<SubmitRollbackPoll> {
-	type Error = ();
-
-	fn try_from(value: XtRequest) -> Result<Self, Self::Error> {
-		match value {
-			XtRequest::SubmitSignedPsbt(_) => Err(()),
-			XtRequest::SubmitVaultKey(_) => Err(()),
-			XtRequest::SubmitUnsignedPsbt(_) => Err(()),
-			XtRequest::SubmitExecutedRequest(_) => Err(()),
-			XtRequest::SubmitSystemVaultKey(_) => Err(()),
-			XtRequest::SubmitRollbackPoll(call) => Ok(call),
 		}
 	}
 }
