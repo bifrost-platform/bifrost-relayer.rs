@@ -23,7 +23,7 @@ use crate::{
 	periodic::PriceResponse,
 	substrate::{
 		SubmitExecutedRequest, SubmitRollbackPoll, SubmitSignedPsbt, SubmitSystemVaultKey,
-		SubmitUnsignedPsbt, SubmitVaultKey,
+		SubmitUnsignedPsbt, SubmitVaultKey, VaultKeyPresubmission,
 	},
 };
 
