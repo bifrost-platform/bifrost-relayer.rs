@@ -57,7 +57,7 @@ impl<T: JsonRpcClient + 'static> PeriodicWorker for PubKeyPreSubmitter<T> {
 					continue;
 				}
 
-				let n = self.get_n().await;
+				let n = self.get_presubmittable_amount().await;
 				if n > 0 {
 					log::info!(
 						target: &self.bfc_client.get_chain_name(),
@@ -66,7 +66,7 @@ impl<T: JsonRpcClient + 'static> PeriodicWorker for PubKeyPreSubmitter<T> {
 						n,
 					);
 
-					let (call, metadata) = self.build_unsigned_tx(self.get_n_pub_keys(n).await);
+					let (call, metadata) = self.build_unsigned_tx(self.create_pub_keys(n).await);
 					self.request_send_transaction(call, metadata);
 				}
 			}
@@ -184,11 +184,11 @@ impl<T: JsonRpcClient + 'static> PubKeyPreSubmitter<T> {
 		}
 	}
 
-	/// Create n public keys.
-	async fn get_n_pub_keys(&self, n: usize) -> Vec<PublicKey> {
+	/// Create public key * amount
+	async fn create_pub_keys(&self, amount: usize) -> Vec<PublicKey> {
 		let mut res = Vec::new();
 		let mut keypair_storage = self.keypair_storage.write().await;
-		for _ in 0..n {
+		for _ in 0..amount {
 			let key = keypair_storage.create_new_keypair().await;
 			res.push(key);
 		}
@@ -219,7 +219,7 @@ impl<T: JsonRpcClient + 'static> PubKeyPreSubmitter<T> {
 		}
 	}
 
-	async fn get_n(&self) -> usize {
+	async fn get_presubmittable_amount(&self) -> usize {
 		loop {
 			let storage = self.get_latest_storage().await;
 			match storage
