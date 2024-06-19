@@ -31,7 +31,7 @@ use br_client::{
 };
 use br_periodic::{
 	traits::PeriodicWorker, BitcoinRollbackVerifier, HeartbeatSender, KeypairMigrator,
-	OraclePriceFeeder, PubKeySubmitter, RoundupEmitter, SocketRollbackEmitter,
+	OraclePriceFeeder, PubKeyPreSubmitter, PubKeySubmitter, RoundupEmitter, SocketRollbackEmitter,
 };
 use br_primitives::{
 	bootstrap::BootstrapSharedData,
@@ -69,6 +69,7 @@ fn construct_periodics(
 	migration_sequence: Arc<RwLock<MigrationSequence>>,
 	keypair_storage: Arc<RwLock<KeypairStorage>>,
 	relayer_deps: &ManagerDeps,
+	substrate_deps: &SubstrateDeps,
 ) -> PeriodicDeps {
 	let clients = &relayer_deps.clients;
 	let tx_request_senders = &relayer_deps.tx_request_senders;
@@ -106,7 +107,17 @@ fn construct_periodics(
 		.find(|client| client.metadata.is_native)
 		.expect(INVALID_BIFROST_NATIVENESS)
 		.clone();
-	let keypair_migrator = KeypairMigrator::new(bfc_client, migration_sequence, keypair_storage);
+	let keypair_migrator = KeypairMigrator::new(
+		bfc_client.clone(),
+		migration_sequence.clone(),
+		keypair_storage.clone(),
+	);
+	let presubmitter = PubKeyPreSubmitter::new(
+		bfc_client.clone(),
+		substrate_deps.xt_request_sender.clone(),
+		keypair_storage.clone(),
+		migration_sequence.clone(),
+	);
 
 	PeriodicDeps {
 		heartbeat_sender,
@@ -115,6 +126,7 @@ fn construct_periodics(
 		rollback_emitters,
 		rollback_senders,
 		keypair_migrator,
+		presubmitter,
 	}
 }
 
@@ -392,6 +404,7 @@ fn spawn_relayer_tasks(
 		mut roundup_emitter,
 		rollback_emitters,
 		mut keypair_migrator,
+		mut presubmitter,
 		..
 	} = periodic_deps;
 	let HandlerDeps { socket_relay_handlers, roundup_relay_handlers } = handler_deps;
@@ -410,6 +423,13 @@ fn spawn_relayer_tasks(
 		"migration-detector",
 		Some("migration-detector"),
 		async move { keypair_migrator.run().await },
+	);
+
+	// spawn public key presubmitter
+	task_manager.spawn_essential_handle().spawn(
+		"pub-key-presubmitter",
+		Some("pub-key-presubmitter"),
+		async move { presubmitter.run().await },
 	);
 
 	// spawn legacy transaction managers
@@ -665,15 +685,16 @@ fn new_relay_base(config: Configuration) -> Result<RelayBase, ServiceError> {
 	let migration_sequence = Arc::new(RwLock::new(MigrationSequence::Normal));
 
 	let manager_deps = construct_managers(&config, bootstrap_shared_data.clone(), &task_manager);
+	let substrate_deps = construct_substrate_deps(&manager_deps, &task_manager);
 	let periodic_deps = construct_periodics(
 		bootstrap_shared_data.clone(),
 		migration_sequence.clone(),
 		keypair_storage.clone(),
 		&manager_deps,
+		&substrate_deps,
 	);
 	let handler_deps =
 		construct_handlers(&config, &periodic_deps, &manager_deps, bootstrap_shared_data.clone());
-	let substrate_deps = construct_substrate_deps(&manager_deps, &task_manager);
 	let btc_deps = construct_btc_deps(
 		&config,
 		pending_outbounds.clone(),
@@ -753,6 +774,8 @@ struct PeriodicDeps {
 	rollback_senders: BTreeMap<ChainID, Arc<RollbackSender>>,
 	/// The `KeypairMigrator` used for detecting migration sequences.
 	keypair_migrator: KeypairMigrator<Http>,
+	/// The `PubKeyPreSubmitter` used for presubmitting public keys.
+	presubmitter: PubKeyPreSubmitter<Http>,
 }
 
 struct HandlerDeps {

@@ -15,7 +15,6 @@ const SUB_LOG_TARGET: &str = "coingecko";
 pub struct SupportedCoin {
 	pub id: String,
 	pub symbol: String,
-	pub name: String,
 }
 
 #[derive(Clone)]
