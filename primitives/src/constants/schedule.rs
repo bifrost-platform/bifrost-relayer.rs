@@ -19,5 +19,8 @@ pub const ROLLBACK_CHECK_SCHEDULE: &str = "0 * * * * * *";
 /// The minimum interval that should be passed in order to handle rollback checks. (=3 minutes)
 pub const ROLLBACK_CHECK_MINIMUM_INTERVAL: u32 = 3 * 60;
 
-/// The schedule definition for migration detector. This will trigger on every 3rd second.
+/// The schedule definition for migration detector. This will trigger on every second.
 pub const MIGRATION_DETECTOR_SCHEDULE: &str = "*/1 * * * * * *";
+
+/// The schedule definition for presubmission. This will trigger on every hour.
+pub const PRESUBMISSION_SCHEDULE: &str = "0 0 * * * * *";
