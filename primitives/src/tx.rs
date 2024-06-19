@@ -11,8 +11,9 @@ use ethers::types::{
 use miniscript::bitcoin::address::NetworkUnchecked;
 use miniscript::bitcoin::{Address as BtcAddress, Txid};
 use subxt::{
-	tx::{Payload, TxPayload},
-	Error, Metadata,
+	ext::subxt_core::Error,
+	tx::{DefaultPayload, Payload},
+	Metadata,
 };
 use tokio::sync::mpsc::{error::SendError, UnboundedSender};
 
@@ -400,15 +401,15 @@ impl Display for XtRequestMetadata {
 
 #[derive(Clone)]
 pub enum XtRequest {
-	SubmitSignedPsbt(Payload<SubmitSignedPsbt>),
-	SubmitVaultKey(Payload<SubmitVaultKey>),
-	SubmitUnsignedPsbt(Payload<SubmitUnsignedPsbt>),
-	SubmitExecutedRequest(Payload<SubmitExecutedRequest>),
-	SubmitSystemVaultKey(Payload<SubmitSystemVaultKey>),
-	SubmitRollbackPoll(Payload<SubmitRollbackPoll>),
+	SubmitSignedPsbt(DefaultPayload<SubmitSignedPsbt>),
+	SubmitVaultKey(DefaultPayload<SubmitVaultKey>),
+	SubmitUnsignedPsbt(DefaultPayload<SubmitUnsignedPsbt>),
+	SubmitExecutedRequest(DefaultPayload<SubmitExecutedRequest>),
+	SubmitSystemVaultKey(DefaultPayload<SubmitSystemVaultKey>),
+	SubmitRollbackPoll(DefaultPayload<SubmitRollbackPoll>),
 }
 
-impl TxPayload for XtRequest {
+impl Payload for XtRequest {
 	fn encode_call_data_to(&self, metadata: &Metadata, out: &mut Vec<u8>) -> Result<(), Error> {
 		match self {
 			XtRequest::SubmitSignedPsbt(call) => call.encode_call_data_to(metadata, out),
@@ -421,7 +422,7 @@ impl TxPayload for XtRequest {
 	}
 }
 
-impl TryFrom<XtRequest> for Payload<SubmitSignedPsbt> {
+impl TryFrom<XtRequest> for DefaultPayload<SubmitSignedPsbt> {
 	type Error = ();
 
 	fn try_from(value: XtRequest) -> Result<Self, Self::Error> {
@@ -435,7 +436,7 @@ impl TryFrom<XtRequest> for Payload<SubmitSignedPsbt> {
 		}
 	}
 }
-impl TryFrom<XtRequest> for Payload<SubmitVaultKey> {
+impl TryFrom<XtRequest> for DefaultPayload<SubmitVaultKey> {
 	type Error = ();
 
 	fn try_from(value: XtRequest) -> Result<Self, Self::Error> {
@@ -450,7 +451,7 @@ impl TryFrom<XtRequest> for Payload<SubmitVaultKey> {
 	}
 }
 
-impl TryFrom<XtRequest> for Payload<SubmitUnsignedPsbt> {
+impl TryFrom<XtRequest> for DefaultPayload<SubmitUnsignedPsbt> {
 	type Error = ();
 
 	fn try_from(value: XtRequest) -> Result<Self, Self::Error> {
@@ -465,7 +466,7 @@ impl TryFrom<XtRequest> for Payload<SubmitUnsignedPsbt> {
 	}
 }
 
-impl TryFrom<XtRequest> for Payload<SubmitExecutedRequest> {
+impl TryFrom<XtRequest> for DefaultPayload<SubmitExecutedRequest> {
 	type Error = ();
 
 	fn try_from(value: XtRequest) -> Result<Self, Self::Error> {
@@ -479,7 +480,7 @@ impl TryFrom<XtRequest> for Payload<SubmitExecutedRequest> {
 		}
 	}
 }
-impl TryFrom<XtRequest> for Payload<SubmitSystemVaultKey> {
+impl TryFrom<XtRequest> for DefaultPayload<SubmitSystemVaultKey> {
 	type Error = ();
 
 	fn try_from(value: XtRequest) -> Result<Self, Self::Error> {
@@ -493,7 +494,7 @@ impl TryFrom<XtRequest> for Payload<SubmitSystemVaultKey> {
 		}
 	}
 }
-impl TryFrom<XtRequest> for Payload<SubmitRollbackPoll> {
+impl TryFrom<XtRequest> for DefaultPayload<SubmitRollbackPoll> {
 	type Error = ();
 
 	fn try_from(value: XtRequest) -> Result<Self, Self::Error> {
@@ -508,33 +509,33 @@ impl TryFrom<XtRequest> for Payload<SubmitRollbackPoll> {
 	}
 }
 
-impl From<Payload<SubmitSignedPsbt>> for XtRequest {
-	fn from(value: Payload<SubmitSignedPsbt>) -> Self {
+impl From<DefaultPayload<SubmitSignedPsbt>> for XtRequest {
+	fn from(value: DefaultPayload<SubmitSignedPsbt>) -> Self {
 		Self::SubmitSignedPsbt(value)
 	}
 }
-impl From<Payload<SubmitVaultKey>> for XtRequest {
-	fn from(value: Payload<SubmitVaultKey>) -> Self {
+impl From<DefaultPayload<SubmitVaultKey>> for XtRequest {
+	fn from(value: DefaultPayload<SubmitVaultKey>) -> Self {
 		Self::SubmitVaultKey(value)
 	}
 }
-impl From<Payload<SubmitUnsignedPsbt>> for XtRequest {
-	fn from(value: Payload<SubmitUnsignedPsbt>) -> Self {
+impl From<DefaultPayload<SubmitUnsignedPsbt>> for XtRequest {
+	fn from(value: DefaultPayload<SubmitUnsignedPsbt>) -> Self {
 		Self::SubmitUnsignedPsbt(value)
 	}
 }
-impl From<Payload<SubmitExecutedRequest>> for XtRequest {
-	fn from(value: Payload<SubmitExecutedRequest>) -> Self {
+impl From<DefaultPayload<SubmitExecutedRequest>> for XtRequest {
+	fn from(value: DefaultPayload<SubmitExecutedRequest>) -> Self {
 		Self::SubmitExecutedRequest(value)
 	}
 }
-impl From<Payload<SubmitSystemVaultKey>> for XtRequest {
-	fn from(value: Payload<SubmitSystemVaultKey>) -> Self {
+impl From<DefaultPayload<SubmitSystemVaultKey>> for XtRequest {
+	fn from(value: DefaultPayload<SubmitSystemVaultKey>) -> Self {
 		Self::SubmitSystemVaultKey(value)
 	}
 }
-impl From<Payload<SubmitRollbackPoll>> for XtRequest {
-	fn from(value: Payload<SubmitRollbackPoll>) -> Self {
+impl From<DefaultPayload<SubmitRollbackPoll>> for XtRequest {
+	fn from(value: DefaultPayload<SubmitRollbackPoll>) -> Self {
 		Self::SubmitRollbackPoll(value)
 	}
 }
