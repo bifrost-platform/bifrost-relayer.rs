@@ -32,7 +32,7 @@ const WALLET_NAME: &str = "sunouk";
 const ALITH_PRIV_KEY: &str = "0x5fb92d6e98884f76de468fa3f6278f8807c48bebc13595d45af5bdc4da702133";
 const DEFAULT_WALLET_NAME: &str = "default";
 
-const UNIFIED_BTC_ADDRESS: &str = "0x4bb70f390bfe7181179534795238784c3344c365";
+const UNIFIED_BTC_ADDRESS: &str = "0x7554b6e864400b4ec504d0d19c164d33c407b666";
 const SAT_DECIMALS: f64 = 100_000_000.0;
 
 #[tokio::test]
@@ -150,10 +150,10 @@ async fn test_numerous_inbound_request() {
 async fn test_from_multiple_inbound_request() {
 	let (wallet, _) = create_new_account().await.unwrap();
 
-	let number_of_user_request = 2;
-
 	let priv_key = wallet.signer().to_bytes();
 	let priv_key_hex = format!("0x{}", hex::encode(priv_key));
+
+	println!("priv_key_hex: {}", priv_key_hex);
 
 	let amount_in_wei = 1_000_000_000_000_000_000u128; // 1 ETH in wei
 
@@ -188,7 +188,7 @@ async fn test_from_multiple_inbound_request() {
 
 	registration(&refund_address, bfc_client.clone()).await;
 
-	sleep(Duration::from_secs(5));
+	sleep(Duration::from_secs(20));
 
 	let vault_address = check_registration(bfc_client, &refund_address).await;
 
@@ -197,38 +197,38 @@ async fn test_from_multiple_inbound_request() {
 		.expect("Invalid BTC address")
 		.assume_checked();
 
-	for _ in 0..number_of_user_request {
-		let new_address = match test_set_btc_wallet(
-			username.clone().as_str(),
-			password.clone().as_str(),
-			provider.clone().as_str(),
-			WALLET_NAME,
-		)
-		.await
-		{
-			Ok(address) => address.trim_matches('"').to_string(),
-			Err(e) => {
-				println!("Failed to set BTC wallet: {:?}", e);
-				return;
-			},
-		};
+	let new_address = match test_set_btc_wallet(
+		username.clone().as_str(),
+		password.clone().as_str(),
+		provider.clone().as_str(),
+		WALLET_NAME,
+	)
+	.await
+	{
+		Ok(address) => address.trim_matches('"').to_string(),
+		Err(e) => {
+			println!("Failed to set BTC wallet: {:?}", e);
+			return;
+		},
+	};
 
-		let parse_new_address = new_address
-			.parse::<BtcAddress<NetworkUnchecked>>()
-			.expect("Invalid BTC address")
-			.assume_checked();
+	let parse_new_address = new_address
+		.parse::<BtcAddress<NetworkUnchecked>>()
+		.expect("Invalid BTC address")
+		.assume_checked();
 
-		let _ = send_btc_transaction(
-			username.clone().as_str(),
-			password.clone().as_str(),
-			provider.clone().as_str(),
-			parse_new_address,
-			DEFAULT_WALLET_NAME,
-			AMOUNT,
-			None,
-		)
-		.await;
-	}
+	let _ = send_btc_transaction(
+		username.clone().as_str(),
+		password.clone().as_str(),
+		provider.clone().as_str(),
+		parse_new_address,
+		DEFAULT_WALLET_NAME,
+		AMOUNT,
+		None,
+	)
+	.await;
+
+	sleep(Duration::from_secs(20));
 
 	let _ = send_btc_transaction(
 		username.clone().as_str(),

@@ -11,6 +11,7 @@ repository = { workspace = true }
 [dependencies]
 # General
 hex = { workspace = true }
+hex-literal = { workspace = true }
 chrono = { workspace = true }
 cron = { workspace = true }
 ethers = { workspace = true }
@@ -27,5 +28,9 @@ tokio = { workspace = true, features = [
 ] }
 miniscript = { workspace = true }
 subxt = { workspace = true }
+subxt-signer = { workspace = true }
 bitcoincore-rpc = { workspace = true }
 url = { workspace = true }
+sp-core = { workspace = true }
+libsecp256k1 = { workspace = true }
+sp-io = { workspace = true }

@@ -1,6 +1,6 @@
 use base64::{engine::general_purpose, Engine as _};
 use br_client::btc::storage::keypair::KeypairStorage;
-use br_client::eth::wallet::WalletManager;
+use br_client::eth::wallet::{K256SigningKey, WalletManager};
 use br_client::eth::EthClient;
 use br_primitives::{
 	cli::{BTCProvider, EVMProvider, RelayerConfig},
@@ -10,16 +10,19 @@ use br_primitives::{
 	},
 	contracts::{bitcoin_socket::UnifiedBtcContract, vault::VaultContract},
 	eth::{AggregatorContracts, ProtocolContracts, ProviderMetadata},
-	substrate::{bifrost_runtime, AccountId20, CustomConfig, Public, VaultKeySubmission},
+	substrate::{
+		bifrost_runtime, AccountId20, BifrostU256, BtcSocketQueueCall, CustomConfig,
+		DevRuntimeCall, EthPair, Public, RollbackPsbtMessage, VaultKeySubmission,
+	},
 	utils::convert_ethers_to_ecdsa_signature,
 };
 
+use miniscript::bitcoin::{hashes::Hash, Address as BtcAddress};
+
 use br_primitives::contracts::vault::{Instruction, TaskParams, UserRequest};
 
-use tokio::io::AsyncWriteExt;
-
 use ethers::{
-	core::rand,
+	core::{k256::ecdsa::SigningKey, rand},
 	middleware::{MiddlewareBuilder, NonceManagerMiddleware, SignerMiddleware},
 	providers::{Http, Middleware, Provider},
 	signers::{LocalWallet, Signer},
@@ -28,11 +31,9 @@ use ethers::{
 	},
 	utils::hex,
 };
-use miniscript::bitcoin::{
-	address::NetworkUnchecked, Address as BtcAddress, Amount, Network, Psbt, PublicKey,
-};
+use miniscript::bitcoin::{address::NetworkUnchecked, Amount, Network, Psbt, PublicKey, Txid};
 use reqwest::Client;
-use serde::{Deserialize, Serialize}; // Corrected import path for sp_keyring
+use serde::{Deserialize, Serialize};
 use std::{
 	collections::HashMap,
 	io::{BufReader, Read},
@@ -43,24 +44,27 @@ use std::{
 	str::FromStr,
 	// thread::sleep
 };
+use subxt::tx::DefaultPayload;
 use subxt::{blocks::ExtrinsicEvents, OnlineClient};
-// use subxt::OnlineClient;
-// use tokio::runtime::Runtime;
-use bitcoincore_rpc::{json::WalletCreateFundedPsbtOptions, Auth, Client as BitcoinClient, RpcApi};
-use tokio::time::{sleep, Duration};
 
-#[derive(Serialize, Deserialize, Debug)]
-pub struct WalletEntry(Vec<(String, WalletDetails)>);
+use bitcoincore_rpc::{
+	json::{self, WalletCreateFundedPsbtOptions},
+	Auth, Client as BitcoinClient, RpcApi,
+};
+use tokio::time::Duration;
 
-impl WalletEntry {
-	pub fn get_details(&self) -> &[(String, WalletDetails)] {
-		&self.0
-	}
+// #[derive(Serialize, Deserialize, Debug)]
+// pub struct WalletEntry(Vec<(String, WalletDetails)>);
 
-	pub fn get_details_mut(&mut self) -> &mut [(String, WalletDetails)] {
-		&mut self.0
-	}
-}
+// impl WalletEntry {
+// 	pub fn get_details(&self) -> &[(String, WalletDetails)] {
+// 		&self.0
+// 	}
+
+// 	pub fn get_details_mut(&mut self) -> &mut [(String, WalletDetails)] {
+// 		&mut self.0
+// 	}
+// }
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct WalletDetails {
@@ -90,16 +94,72 @@ struct JsonRpcResponse {
 	id: String,
 }
 
-const TOKEN_ID_0: &str = "0x00000003000000020000bfc04bb70f390bfe7181179534795238784c3344c365";
+use base64::encode;
+
+const TOKEN_ID_0: &str = "0x00000003000000020000bfc07554b6e864400b4ec504d0d19c164d33c407b666";
 const TOKEN_ID_1: &str = "0x0000000000000000000000000000000000000000000000000000000000000000";
 const CHAIN_ID: &str = "0x00002712";
 const METHOD_ID: &str = "0x03020301000000000000000000000000";
 const SAT_DECIMALS: f64 = 100_000_000.0;
 const TIME_SLEEP: u64 = 10;
-const UNIFIED_BTC_ADDRESS: &str = "0x4bb70f390bfe7181179534795238784c3344c365";
+const UNIFIED_BTC_ADDRESS: &str = "0x7554b6e864400b4ec504d0d19c164d33c407b666";
 const DEFAULT_WALLET_NAME: &str = "default";
 
-pub async fn test_submit_vault_key(
+pub async fn submit_roll_back(
+	bfc_client: Arc<EthClient<Http>>,
+	btc_client: BitcoinClient,
+	sub_client: OnlineClient<CustomConfig>,
+	txid: &str,
+	psbt_bytes: Vec<u8>,
+	who: H160,
+	vault_address: &str,
+	amount: U256,
+) -> Result<ExtrinsicEvents<CustomConfig>, Box<dyn std::error::Error>> {
+	let tx_id = Txid::from_str(txid).unwrap();
+
+	let mut txid = tx_id.to_byte_array();
+	txid.reverse();
+
+	let tx_info = get_tx_info(btc_client, tx_id).await?;
+
+	let vault_address: Option<BtcAddress<NetworkUnchecked>> =
+		BtcAddress::from_str(vault_address).unwrap().into();
+
+	let vout = tx_info
+		.details
+		.iter()
+		.find(|detail| detail.address == vault_address)
+		.unwrap()
+		.vout;
+
+	let psbt = Psbt::deserialize(&psbt_bytes)?;
+	let unsigned_psbt = psbt_bytes.clone();
+	let msg = RollbackPsbtMessage {
+		who: AccountId20(who.0),
+		txid: txid.into(),
+		vout: BifrostU256(U256::from(vout).0),
+		amount: BifrostU256(amount.0),
+		unsigned_psbt,
+	};
+
+	let from = EthPair::alice();
+
+	// let payload = bifrost_runtime::tx().btc_socket_queue().submit_rollback_request(msg);
+
+	let call = DevRuntimeCall::BtcSocketQueue(BtcSocketQueueCall::submit_rollback_request { msg });
+	let sudo_payload = bifrost_runtime::tx().sudo().sudo(call);
+
+	let event = sub_client
+		.tx()
+		.sign_and_submit_then_watch_default(&sudo_payload, &from)
+		.await?
+		.wait_for_finalized_success()
+		.await
+		.unwrap();
+
+	Ok(event)
+}
+pub async fn submit_vault_key(
 	bfc_client: Arc<EthClient<Http>>,
 	sub_client: OnlineClient<CustomConfig>,
 	pub_key: PublicKey,
@@ -143,15 +203,47 @@ pub async fn test_create_keypair(keyapair_path: &str, keyapair_secreate: &str) -
 	keypair_storage
 }
 
-pub async fn get_btc_client(btc_provider: BTCProvider) -> BitcoinClient {
+pub async fn set_btc_client(
+	btc_provider: BTCProvider,
+	wallet: Option<&str>,
+	sub_client: Option<OnlineClient<CustomConfig>>,
+) -> BitcoinClient {
 	let auth = Auth::UserPass(
 		btc_provider.username.clone().unwrap(),
 		btc_provider.password.clone().unwrap(),
 	);
 
-	println!("btc_url: {:?}", btc_provider.provider.as_str());
+	if let Some(sub_client) = sub_client {
+		if let Some(wallet) = wallet {
+			let round = sub_client
+				.storage()
+				.at_latest()
+				.await
+				.unwrap()
+				.fetch(&bifrost_runtime::storage().btc_registration_pool().current_round())
+				.await
+				.unwrap()
+				.expect("Cannot fetch current round");
 
-	BitcoinClient::new(btc_provider.provider.as_str(), auth, None).expect(INVALID_PROVIDER_URL)
+			BitcoinClient::new(
+				btc_provider.provider.as_str(),
+				auth,
+				format!("{}{}", wallet, round).into(),
+			)
+			.expect(INVALID_PROVIDER_URL)
+		} else {
+			BitcoinClient::new(btc_provider.provider.as_str(), auth, None)
+				.expect(INVALID_PROVIDER_URL)
+		}
+	} else {
+		if let Some(wallet) = wallet {
+			BitcoinClient::new(btc_provider.provider.as_str(), auth, Some(wallet.to_string()))
+				.expect(INVALID_PROVIDER_URL)
+		} else {
+			BitcoinClient::new(btc_provider.provider.as_str(), auth, None)
+				.expect(INVALID_PROVIDER_URL)
+		}
+	}
 }
 
 pub async fn test_get_vault_contract(
@@ -187,6 +279,13 @@ pub async fn get_unified_btc(
 	);
 
 	unified_btc
+}
+
+async fn get_tx_info(
+	btc_client: BitcoinClient,
+	txid: Txid,
+) -> Result<json::GetTransactionResult, Box<dyn std::error::Error>> {
+	Ok(btc_client.get_transaction(&txid, None).await?)
 }
 
 pub async fn get_btc_wallet_balance(
@@ -229,7 +328,7 @@ pub async fn send_btc_transaction(
 	wallet_name: &str,
 	amount: &str,
 	metadata: Option<&str>, // Optional inscription data
-) {
+) -> std::option::Option<serde_json::Value> {
 	let client = Client::new();
 
 	// Create the base transaction request
@@ -260,8 +359,9 @@ pub async fn send_btc_transaction(
 		.await
 		.unwrap();
 
-	let create_new_transfer_response_text = create_new_transfer_response.text().await.unwrap();
-	println!("Create transfer response: {}", create_new_transfer_response_text);
+	let json: JsonRpcResponse = create_new_transfer_response.json().await.unwrap();
+
+	json.result
 }
 
 pub async fn test_create_new_wallet(
@@ -356,13 +456,21 @@ pub async fn test_set_btc_wallet(
 	}
 }
 
-pub async fn test_set_sub_client(sub_url: &str) -> OnlineClient<CustomConfig> {
+pub async fn set_sub_client(sub_url: &str) -> OnlineClient<CustomConfig> {
 	let sub_client = OnlineClient::<CustomConfig>::from_url(sub_url)
 		.await
 		.expect(INVALID_PROVIDER_URL);
 
 	sub_client
 }
+
+// pub async fn set_polkadot_client(sub_url: &str) -> OnlineClient<PolkadotConfig> {
+// 	let sub_client = OnlineClient::<PolkadotConfig>::from_url(sub_url)
+// 		.await
+// 		.expect(INVALID_PROVIDER_URL);
+
+// 	sub_client
+// }
 
 pub async fn test_set_bfc_client(priv_key: &str) -> (Arc<EthClient<Http>>, BTCProvider) {
 	let current_working_path: String = std::env::current_dir().unwrap().display().to_string();
@@ -435,13 +543,23 @@ pub async fn create_new_account() -> Result<(LocalWallet, Address), Box<dyn std:
 	Ok((wallet, address))
 }
 
-// pub async fn get_btc_wallet_balance(
-// 	btc_client: BitcoinClient,
-// ) -> Result<Amount, Box<dyn std::error::Error>> {
-// 	let balance = btc_client.get_balance(None, None).await?;
+/// Get the system vault address.
+pub async fn get_system_vault(bfc_client: Arc<EthClient<Http>>) -> String {
+	let registration_pool = bfc_client.protocol_contracts.registration_pool.as_ref().unwrap();
 
-// 	Ok(balance)
-// }
+	let curret_round = bfc_client
+		.contract_call(registration_pool.current_round(), "registration_pool.current_round")
+		.await;
+
+	let system_vault = bfc_client
+		.contract_call(
+			registration_pool.vault_address(registration_pool.address(), curret_round),
+			"registration_pool.vault_address",
+		)
+		.await;
+
+	system_vault
+}
 
 pub async fn build_psbt(
 	request: HashMap<BtcAddress<NetworkUnchecked>, Amount>,
@@ -452,20 +570,22 @@ pub async fn build_psbt(
 
 	for (address, amount) in request.iter() {
 		outputs.insert(address.assume_checked_ref().to_string(), *amount);
+		println!("amount: {}", amount);
 	}
 
 	let mut option = WalletCreateFundedPsbtOptions::default();
 	option.add_inputs = true.into();
 	option.change_address = BtcAddress::from_str(&system_vault).unwrap().into();
 	option.change_position = 0.into();
+	option.lock_unspent = true.into();
 
-	let psbt = btc_client
+	let psbt_str = btc_client
 		.wallet_create_funded_psbt(&vec![], &outputs, None, option.into(), true.into())
 		.await
 		.unwrap()
 		.psbt;
 
-	general_purpose::STANDARD.decode(&psbt).unwrap()
+	general_purpose::STANDARD.decode(&psbt_str).unwrap()
 }
 
 pub async fn transfer_fund(
@@ -562,8 +682,6 @@ pub async fn check_registration(bfc_client: Arc<EthClient<Http>>, refund_address
 		)
 		.await;
 
-	println!("vault_address: {:?}", vault_address);
-
 	let registration_info = bfc_client
 		.contract_call(
 			registration_pool.registration_info(bfc_client.address(), curret_round),
@@ -612,7 +730,7 @@ pub async fn user_inbound(
 	amount: &str,
 	metadata: Option<&str>,
 	vault_address: &str,
-) {
+) -> Option<serde_json::Value> {
 	let parse_vault_address = vault_address
 		.parse::<BtcAddress<NetworkUnchecked>>()
 		.expect("Invalid BTC address")
@@ -649,9 +767,16 @@ pub async fn user_inbound(
 		metadata,
 	)
 	.await;
+
+	transfer_result
 }
 
-pub async fn user_outbound(priv_key: &str, amount: &str, vault_contract_address: &str) {
+pub async fn user_outbound(
+	priv_key: &str,
+	amount: &str,
+	vault_contract_address: &str,
+	refund_bfc_address: Address,
+) {
 	let amount_in_satoshis = (amount.parse::<f64>().unwrap() * SAT_DECIMALS) as u64;
 	let amount_eth: U256 = U256::from(amount_in_satoshis);
 
@@ -673,8 +798,8 @@ pub async fn user_outbound(priv_key: &str, amount: &str, vault_contract_address:
 		params: TaskParams {
 			token_idx0: array_bytes::hex2bytes(TOKEN_ID_0).unwrap().try_into().unwrap(),
 			token_idx1: array_bytes::hex2bytes(TOKEN_ID_1).unwrap().try_into().unwrap(),
-			refund: bfc_client.address(),
-			to: bfc_client.address(),
+			refund: refund_bfc_address,
+			to: refund_bfc_address,
 			amount: amount_eth,
 			variants: Bytes::default(),
 		},
@@ -691,7 +816,7 @@ pub async fn user_outbound(priv_key: &str, amount: &str, vault_contract_address:
 		.gas(middleware.estimate_gas(&TypedTransaction::Legacy(request), None).await.unwrap());
 
 	let nonce = middleware.get_transaction_count(bfc_client.address(), None).await.unwrap();
-	println!("nonce: {:?}", nonce);
+
 	let request = request.nonce(nonce);
 
 	let request_tx = middleware.send_transaction(request, None).await;
