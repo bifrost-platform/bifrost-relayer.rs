@@ -6,12 +6,10 @@ use ethers::{
 	types::{Address, Signature, U256},
 	utils::{hex::FromHex, keccak256},
 };
-use k256::{
-	ecdsa::{SigningKey as K256SigningKey, VerifyingKey},
-	elliptic_curve::sec1::ToEncodedPoint,
-	PublicKey as K256PublicKey,
-};
+use k256::{ecdsa::VerifyingKey, elliptic_curve::sec1::ToEncodedPoint, PublicKey as K256PublicKey};
 use sha3::{Digest, Keccak256};
+
+pub use k256::ecdsa::SigningKey as K256SigningKey;
 
 type WalletResult<T = ()> = Result<T, Box<dyn std::error::Error + Send + Sync>>;
 

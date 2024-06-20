@@ -7,12 +7,12 @@ use tokio::time::sleep;
 mod utils;
 
 use crate::utils::{
-	check_registration, create_new_account, read_wallet_details, registration, test_create_keypair,
-	test_create_new_wallet, test_set_bfc_client, test_set_btc_wallet, test_set_sub_client,
-	test_submit_vault_key, transfer_fund, WalletDetails,
+	check_registration, create_new_account, read_wallet_details, registration, set_sub_client,
+	submit_vault_key, test_create_keypair, test_create_new_wallet, test_set_bfc_client,
+	test_set_btc_wallet, transfer_fund, WalletDetails,
 };
 
-const WALLET_NAME: &str = "sunouk5";
+const WALLET_NAME: &str = "sunouk";
 const PRIV_KEY: &str = "0x9b8df737e72a51ed04860e9ccf87b1f017a5703b497d5cd9031d182c6daa0774";
 const KEYPAIR_PATH: &str = "../keys";
 const KEYPAIR_SECERT: &str = "test";
@@ -69,7 +69,7 @@ async fn test_numerous_register_request() {
 	let amount_in_wei = 1_000_000_000_000_000_000u128; // 1 ETH in wei
 	let number_of_user_request = 10;
 
-	let wallet_name = "sunouk5";
+	let wallet_name = "sunouk";
 	// let wallet_name1 = "sunouk3";
 	// let wallet_name2 = "sunouk4";
 
@@ -144,15 +144,14 @@ async fn test_anauthorized_submit_vault_key() {
 	let priv_key = "0x9b8df737e72a51ed04860e9ccf87b1f017a5703b497d5cd9031d182c6daa0774";
 
 	let (bfc_client, _) = test_set_bfc_client(priv_key).await;
-	let sub_client = test_set_sub_client(SUB_URL).await;
+	let sub_client = set_sub_client(SUB_URL).await;
 	let keypair_path = KEYPAIR_PATH.to_string() + "/registration";
 	let mut keypair_storage = test_create_keypair(&keypair_path, KEYPAIR_SECERT).await;
 
 	let btc_pub_key = keypair_storage.create_new_keypair().await;
 
 	let result =
-		test_submit_vault_key(bfc_client.clone(), sub_client, btc_pub_key, bfc_client.address())
-			.await;
+		submit_vault_key(bfc_client.clone(), sub_client, btc_pub_key, bfc_client.address()).await;
 
 	match result {
 		Ok(receipt) => {
@@ -168,7 +167,7 @@ async fn test_anauthorized_submit_vault_key() {
 #[tokio::test]
 async fn test_submit_invalid_vault_key() {
 	let (bfc_client, _) = test_set_bfc_client(PRIV_KEY).await;
-	let sub_client = test_set_sub_client(SUB_URL).await;
+	let sub_client = set_sub_client(SUB_URL).await;
 	let keypair_path = KEYPAIR_PATH.to_string() + "/registration";
 
 	let mut keypair_storage = test_create_keypair(&keypair_path, KEYPAIR_SECERT).await;
@@ -176,8 +175,7 @@ async fn test_submit_invalid_vault_key() {
 	let btc_pub_key = keypair_storage.create_new_keypair().await;
 
 	let result =
-		test_submit_vault_key(bfc_client.clone(), sub_client, btc_pub_key, bfc_client.address())
-			.await;
+		submit_vault_key(bfc_client.clone(), sub_client, btc_pub_key, bfc_client.address()).await;
 
 	match result {
 		Ok(receipt) => {

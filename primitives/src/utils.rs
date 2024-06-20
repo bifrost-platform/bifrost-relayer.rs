@@ -11,8 +11,7 @@ pub fn sub_display_format(log_target: &str) -> String {
 
 /// Converts the ethers::Signature to a bifrost_runtime::Signature.
 pub fn convert_ethers_to_ecdsa_signature(ethers_signature: EthersSignature) -> EthereumSignature {
-	let sig: [u8; 65] = ethers_signature.into();
-	EthereumSignature(Signature(sig))
+	EthereumSignature(Signature(<[u8; 65]>::from(ethers_signature)))
 }
 
 /// Hash the given bytes.
