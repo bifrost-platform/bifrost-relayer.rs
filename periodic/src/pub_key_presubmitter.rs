@@ -222,6 +222,11 @@ impl<T: JsonRpcClient + 'static> PubKeyPreSubmitter<T> {
 	async fn get_presubmittable_amount(&self) -> usize {
 		loop {
 			let storage = self.get_latest_storage().await;
+			let max_presubmission = storage
+				.fetch(&bifrost_runtime::storage().btc_registration_pool().max_pre_submission())
+				.await
+				.unwrap()
+				.unwrap();
 			match storage
 				.fetch(&bifrost_runtime::storage().btc_registration_pool().pre_submitted_pub_keys(
 					self.get_current_round().await,
@@ -230,21 +235,9 @@ impl<T: JsonRpcClient + 'static> PubKeyPreSubmitter<T> {
 				.await
 			{
 				Ok(Some(submitted)) => {
-					let max_presubmission = storage
-						.fetch(
-							&bifrost_runtime::storage()
-								.btc_registration_pool()
-								.max_pre_submission(),
-						)
-						.await
-						.unwrap()
-						.unwrap();
-
 					return max_presubmission as usize - submitted.len();
 				},
-				Ok(None) => {
-					unreachable!("Should always be available.")
-				},
+				Ok(None) => return max_presubmission as usize,
 				Err(_) => {
 					tokio::time::sleep(Duration::from_millis(DEFAULT_CALL_RETRY_INTERVAL_MS)).await;
 				},
