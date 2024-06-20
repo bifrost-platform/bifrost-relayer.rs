@@ -358,12 +358,12 @@ impl Display for SubmitExecutedRequestMetadata {
 #[derive(Clone, Debug)]
 /// The metadata used for rollback poll submission.
 pub struct SubmitRollbackPollMetadata {
-	pub txid: Txid,
+	pub txid: H256,
 	pub is_approved: bool,
 }
 
 impl SubmitRollbackPollMetadata {
-	pub fn new(txid: Txid, is_approved: bool) -> Self {
+	pub fn new(txid: H256, is_approved: bool) -> Self {
 		Self { txid, is_approved }
 	}
 }
