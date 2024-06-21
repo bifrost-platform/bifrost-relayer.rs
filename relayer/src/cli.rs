@@ -1,4 +1,4 @@
-use br_primitives::sub_display_format;
+use br_primitives::utils::sub_display_format;
 use chrono::{Datelike, Local};
 use clap::{CommandFactory, FromArgMatches, Parser};
 
@@ -115,7 +115,7 @@ impl Cli {
 			"testnet" => TESTNET_CONFIG_FILE_PATH,
 			"mainnet" => MAINNET_CONFIG_FILE_PATH,
 			path => path,
-		}
+		};
 	}
 
 	/// Log information about the relayer itself.

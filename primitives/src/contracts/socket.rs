@@ -16,6 +16,7 @@ abigen!(
 	Clone,
 	ethers::contract::EthEvent,
 	ethers::contract::EthDisplay,
+	ethers::contract::EthAbiCodec,
 	Default,
 	Debug,
 	PartialEq,

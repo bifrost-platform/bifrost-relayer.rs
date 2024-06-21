@@ -1,4 +1,10 @@
+use cron::Schedule;
+use ethers::{
+	providers::JsonRpcClient,
+	types::{TransactionRequest, U256},
+};
 use std::{collections::BTreeMap, str::FromStr, sync::Arc};
+use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
 
 use br_client::eth::{traits::SocketRelayBuilder, EthClient};
 use br_primitives::{
@@ -9,15 +15,9 @@ use br_primitives::{
 	contracts::socket::{RequestID, RequestInfo, Signatures, SocketMessage},
 	eth::{ChainID, GasCoefficient, RelayDirection, SocketEventStatus},
 	periodic::{RawRequestID, RollbackableMessage},
-	sub_display_format,
 	tx::{RollbackMetadata, TxRequest, TxRequestMessage, TxRequestMetadata, TxRequestSender},
+	utils::sub_display_format,
 };
-use cron::Schedule;
-use ethers::{
-	providers::JsonRpcClient,
-	types::{TransactionRequest, U256},
-};
-use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
 
 use crate::traits::PeriodicWorker;
 
@@ -81,8 +81,8 @@ impl<T: JsonRpcClient> SocketRollbackEmitter<T> {
 			.await;
 
 		if let (Some(src_request), Some(dst_request)) = (src_request, dst_request) {
-			let src_status = SocketEventStatus::from_u8(src_request.field[0].clone().into());
-			let dst_status = SocketEventStatus::from_u8(dst_request.field[0].clone().into());
+			let src_status = SocketEventStatus::from(&src_request.field[0]);
+			let dst_status = SocketEventStatus::from(&dst_request.field[0]);
 
 			match src_status {
 				SocketEventStatus::Committed | SocketEventStatus::Rollbacked => return true,
@@ -145,7 +145,7 @@ impl<T: JsonRpcClient> SocketRollbackEmitter<T> {
 
 	/// Tries to rollback the given socket message.
 	async fn try_rollback(&self, socket_msg: &SocketMessage) {
-		let status = SocketEventStatus::from_u8(socket_msg.status);
+		let status = SocketEventStatus::from(socket_msg.status);
 		match status {
 			SocketEventStatus::Requested => self.try_rollback_inbound(socket_msg).await,
 			SocketEventStatus::Accepted => self.try_rollback_outbound(socket_msg).await,
@@ -204,6 +204,15 @@ impl<T: JsonRpcClient> SocketRollbackEmitter<T> {
 	/// The timestamp will be set to the current highest block's timestamp.
 	fn receive(&mut self, current_timestamp: U256) {
 		while let Ok(msg) = self.rollback_receiver.try_recv() {
+			// prevent rollback for bitcoin bridges
+			if let Some(bitcoin_chain_id) = self.client.get_bitcoin_chain_id() {
+				if msg.req_id.chain.as_slice() == bitcoin_chain_id.to_be_bytes()
+					|| msg.ins_code.chain.as_slice() == bitcoin_chain_id.to_be_bytes()
+				{
+					continue;
+				}
+			}
+
 			let req_id = msg.req_id.sequence;
 			// ignore if the request already exists.
 			if self.rollback_msgs.contains_key(&req_id) {
@@ -248,23 +257,16 @@ impl<T: JsonRpcClient> SocketRollbackEmitter<T> {
 				);
 			},
 			Err(error) => {
-				log::error!(
-					target: &self.client.get_chain_name(),
-					"-[{}] ❗️ Failed to try Rollback::Socket: {}, Error: {}",
+				let log_msg = format!(
+					"-[{}]-[{}] ❗️ Failed to try Rollback::Socket: {}, Error: {}",
 					sub_display_format(SUB_LOG_TARGET),
+					self.client.address(),
 					metadata,
-					error.to_string()
+					error
 				);
+				log::error!(target: &self.client.get_chain_name(), "{log_msg}");
 				sentry::capture_message(
-					format!(
-						"[{}]-[{}]-[{}] ❗️ Failed to try Rollback::Socket: {}, Error: {}",
-						&self.client.get_chain_name(),
-						SUB_LOG_TARGET,
-						self.client.address(),
-						metadata,
-						error
-					)
-					.as_str(),
+					&format!("[{}]{log_msg}", &self.client.get_chain_name()),
 					sentry::Level::Error,
 				);
 			},

@@ -18,15 +18,15 @@ use br_primitives::{
 	},
 	contracts::{
 		authority::RoundMetaData,
-		socket::{RequestID, Signatures, SocketEvents, SocketMessage},
+		socket::{Instruction, RequestID, Signatures, SocketEvents, SocketMessage},
 	},
 	eth::{
 		BootstrapState, BuiltRelayTransaction, ChainID, GasCoefficient, RelayDirection,
 		SocketEventStatus,
 	},
 	periodic::RollbackSender,
-	sub_display_format,
 	tx::{SocketRelayMetadata, TxRequest, TxRequestMessage, TxRequestMetadata, TxRequestSender},
+	utils::sub_display_format,
 };
 
 use crate::eth::{
@@ -91,7 +91,7 @@ impl<T: 'static + JsonRpcClient> Handler for SocketRelayHandler<T> {
 					let msg = socket.clone().msg;
 					let metadata = SocketRelayMetadata::new(
 						self.is_inbound_sequence(ChainID::from_be_bytes(msg.ins_code.chain)),
-						SocketEventStatus::from_u8(msg.status),
+						SocketEventStatus::from(msg.status),
 						msg.req_id.sequence,
 						ChainID::from_be_bytes(msg.req_id.chain),
 						ChainID::from_be_bytes(msg.ins_code.chain),
@@ -114,7 +114,7 @@ impl<T: 'static + JsonRpcClient> Handler for SocketRelayHandler<T> {
 						// do nothing if not selected
 						return;
 					}
-					if self.is_sequence_ended(&msg.req_id, metadata.src_chain_id).await {
+					if self.is_sequence_ended(&msg.req_id, &msg.ins_code, metadata.status).await {
 						// do nothing if protocol sequence ended
 						return;
 					}
@@ -133,13 +133,17 @@ impl<T: 'static + JsonRpcClient> Handler for SocketRelayHandler<T> {
 		}
 	}
 
+	#[inline]
 	fn is_target_contract(&self, log: &Log) -> bool {
-		if log.address == self.client.protocol_contracts.socket.address() {
-			return true;
+		if let Some(bitcoin_socket) = self.client.protocol_contracts.bitcoin_socket.as_ref() {
+			log.address == self.client.protocol_contracts.socket.address()
+				|| log.address == bitcoin_socket.address()
+		} else {
+			log.address == self.client.protocol_contracts.socket.address()
 		}
-		false
 	}
 
+	#[inline]
 	fn is_target_event(&self, topic: H256) -> bool {
 		topic == self.socket_signature
 	}
@@ -176,7 +180,7 @@ impl<T: JsonRpcClient> SocketRelayBuilder<T> for SocketRelayHandler<T> {
 	}
 
 	async fn build_inbound_signatures(&self, mut msg: SocketMessage) -> (Signatures, bool) {
-		let status = SocketEventStatus::from_u8(msg.status);
+		let status = SocketEventStatus::from(msg.status);
 		let mut is_external = false;
 		let signatures = match status {
 			SocketEventStatus::Requested | SocketEventStatus::Failed => Signatures::default(),
@@ -204,7 +208,7 @@ impl<T: JsonRpcClient> SocketRelayBuilder<T> for SocketRelayHandler<T> {
 	}
 
 	async fn build_outbound_signatures(&self, mut msg: SocketMessage) -> (Signatures, bool) {
-		let status = SocketEventStatus::from_u8(msg.status);
+		let status = SocketEventStatus::from(msg.status);
 		let mut is_external = false;
 		let signatures = match status {
 			SocketEventStatus::Requested => {
@@ -274,7 +278,7 @@ impl<T: 'static + JsonRpcClient> SocketRelayHandler<T> {
 		metadata: SocketRelayMetadata,
 		is_inbound: bool,
 	) {
-		let status = SocketEventStatus::from_u8(socket_msg.status);
+		let status = SocketEventStatus::from(socket_msg.status);
 
 		let relay_tx_chain_id = if is_inbound {
 			self.get_inbound_relay_tx_chain_id(status, metadata.src_chain_id, metadata.dst_chain_id)
@@ -351,17 +355,32 @@ impl<T: 'static + JsonRpcClient> SocketRelayHandler<T> {
 
 	/// Compare the request status recorded in source chain with event status to determine if the
 	/// event has already been committed or rollbacked.
-	async fn is_sequence_ended(&self, rid: &RequestID, src_chain_id: ChainID) -> bool {
-		if let Some(src_client) = &self.system_clients.get(&src_chain_id) {
+	async fn is_sequence_ended(
+		&self,
+		req_id: &RequestID,
+		ins_code: &Instruction,
+		status: SocketEventStatus,
+	) -> bool {
+		let src = ChainID::from_be_bytes(req_id.chain);
+		let dst = ChainID::from_be_bytes(ins_code.chain);
+
+		// if inbound::accepted/reverted and relaying to bitcoin we consider as ended
+		if let Some(bitcoin_chain_id) = self.client.get_bitcoin_chain_id() {
+			if self.is_inbound_sequence(dst) && bitcoin_chain_id == src {
+				return matches!(status, SocketEventStatus::Accepted | SocketEventStatus::Reverted);
+			}
+		}
+
+		if let Some(src_client) = &self.system_clients.get(&src) {
 			let request = src_client
 				.contract_call(
-					src_client.protocol_contracts.socket.get_request(rid.clone()),
+					src_client.protocol_contracts.socket.get_request(req_id.clone()),
 					"socket.get_request",
 				)
 				.await;
 
 			return matches!(
-				SocketEventStatus::from_u8(request.field[0].clone().into()),
+				SocketEventStatus::from(&request.field[0]),
 				SocketEventStatus::Committed | SocketEventStatus::Rollbacked
 			);
 		}
@@ -450,25 +469,17 @@ impl<T: 'static + JsonRpcClient> SocketRelayHandler<T> {
 					metadata
 				),
 				Err(error) => {
-					log::error!(
-						target: &self.client.get_chain_name(),
-						"-[{}] ❗️ Failed to send relay transaction to chain({:?}): {}, Error: {}",
+					let log_msg = format!(
+						"-[{}]-[{}] ❗️ Failed to send relay transaction to chain({:?}): {}, Error: {}",
 						sub_display_format(SUB_LOG_TARGET),
+						self.client.address(),
 						chain_id,
 						metadata,
-						error.to_string()
+						error
 					);
+					log::error!(target: &self.client.get_chain_name(), "{log_msg}");
 					sentry::capture_message(
-						format!(
-							"[{}]-[{}]-[{}] ❗️ Failed to send relay transaction to chain({:?}): {}, Error: {}",
-							&self.client.get_chain_name(),
-							SUB_LOG_TARGET,
-							self.client.address(),
-							chain_id,
-							metadata,
-							error
-						)
-						.as_str(),
+						&format!("[{}]{log_msg}", &self.client.get_chain_name()),
 						sentry::Level::Error,
 					);
 				},
@@ -493,23 +504,16 @@ impl<T: 'static + JsonRpcClient> SocketRelayHandler<T> {
 					metadata
 				),
 				Err(error) => {
-					log::error!(
-						target: &self.client.get_chain_name(),
-						"-[{}] ❗️ Failed to store rollbackable socket message: {}, Error: {}",
+					let msg = format!(
+						"-[{}]-[{}] ❗️ Failed to store rollbackable socket message: {}, Error: {}",
 						sub_display_format(SUB_LOG_TARGET),
+						self.client.address(),
 						metadata,
 						error.to_string()
 					);
+					log::error!(target: &self.client.get_chain_name(), "{msg}");
 					sentry::capture_message(
-						format!(
-							"[{}]-[{}]-[{}] ❗️ Failed to store rollbackable socket message: {}, Error: {}",
-							&self.client.get_chain_name(),
-							SUB_LOG_TARGET,
-							self.client.address(),
-							metadata,
-							error
-						)
-						.as_str(),
+						&format!("[{}]{msg}", &self.client.get_chain_name()),
 						sentry::Level::Error,
 					);
 				},
@@ -520,6 +524,10 @@ impl<T: 'static + JsonRpcClient> SocketRelayHandler<T> {
 
 #[async_trait::async_trait]
 impl<T: 'static + JsonRpcClient> BootstrapHandler for SocketRelayHandler<T> {
+	fn bootstrap_shared_data(&self) -> Arc<BootstrapSharedData> {
+		self.bootstrap_shared_data.clone()
+	}
+
 	async fn bootstrap(&self) {
 		log::info!(
 			target: &self.client.get_chain_name(),
@@ -538,7 +546,7 @@ impl<T: 'static + JsonRpcClient> BootstrapHandler for SocketRelayHandler<T> {
 		*bootstrap_count += 1;
 
 		// If All thread complete the task, starts the blockManager
-		if *bootstrap_count == self.system_clients.len() as u8 {
+		if *bootstrap_count == self.bootstrap_shared_data.system_providers_len as u8 {
 			let mut bootstrap_guard = self.bootstrap_shared_data.bootstrap_states.write().await;
 
 			for state in bootstrap_guard.iter_mut() {
@@ -599,11 +607,23 @@ impl<T: 'static + JsonRpcClient> BootstrapHandler for SocketRelayHandler<T> {
 				let chunk_to_block =
 					std::cmp::min(from_block + BOOTSTRAP_BLOCK_CHUNK_SIZE - 1, to_block);
 
-				let filter = Filter::new()
-					.address(self.client.protocol_contracts.socket.address())
-					.topic0(self.socket_signature)
-					.from_block(from_block)
-					.to_block(chunk_to_block);
+				let filter =
+					if let Some(bitcoin_socket) = &self.client.protocol_contracts.bitcoin_socket {
+						Filter::new()
+							.address(vec![
+								self.client.protocol_contracts.socket.address(),
+								bitcoin_socket.address(),
+							])
+							.topic0(self.socket_signature)
+							.from_block(from_block)
+							.to_block(chunk_to_block)
+					} else {
+						Filter::new()
+							.address(self.client.protocol_contracts.socket.address())
+							.topic0(self.socket_signature)
+							.from_block(from_block)
+							.to_block(chunk_to_block)
+					};
 				let target_logs_chunk = self.client.get_logs(&filter).await;
 				logs.extend(target_logs_chunk);
 
@@ -613,15 +633,6 @@ impl<T: 'static + JsonRpcClient> BootstrapHandler for SocketRelayHandler<T> {
 
 		logs
 	}
-
-	async fn is_bootstrap_state_synced_as(&self, state: BootstrapState) -> bool {
-		self.bootstrap_shared_data
-			.bootstrap_states
-			.read()
-			.await
-			.iter()
-			.all(|s| *s == state)
-	}
 }
 
 #[cfg(test)]
@@ -629,12 +640,13 @@ mod tests {
 	use std::{str::FromStr, sync::Arc};
 
 	use ethers::{
-		abi::ParamType,
+		abi::AbiDecode,
 		providers::{Http, Provider},
 		types::{Bytes, H160},
+		utils::hex::ToHexExt,
 	};
 
-	use br_primitives::contracts::socket::SocketContract;
+	use br_primitives::contracts::socket::{Socket, SocketContract};
 
 	use super::*;
 
@@ -664,72 +676,63 @@ mod tests {
 
 	#[test]
 	fn test_socket_event_decode() {
-		let data = Bytes::from_str("0x000000000000000000000000000000000000000000000000000000000000002000000bfc00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000032900000000000000000000000000000000000000000000000000000000000010fe00000000000000000000000000000000000000000000000000000000000000080000003800000000000000000000000000000000000000000000000000000000040207030100000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000e0000000050000000300000bfc872b347cd764d46c127ffefbcab605fff3f3a48c00000000000000000000000000000000000000000000000000000000000000000000000000000000000000007ac737b14b926f5fbbfb7bfa1dfcb01659da1e230000000000000000000000007ac737b14b926f5fbbfb7bfa1dfcb01659da1e2300000000000000000000000000000000000000000000000075d86ab5ce70b78000000000000000000000000000000000000000000000000000000000000000c00000000000000000000000000000000000000000000000000000000000000000").unwrap();
+		let data = Bytes::from_str("0x00000000000000000000000000000000000000000000000000000000000000200000bfc000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001e000000000000000000000000000000000000000000000000000000000000000200000000000000000000000000000000000000000000000000000000000000050000271200000000000000000000000000000000000000000000000000000000030203010000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000e000000003000000030000bfc0148a26ea2376f006c09b7d3163f1fc70ad4134a300000000000000000000000000000000000000000000000000000000000000000000000000000000000000006e661745856b03130d03932f683cda020d7ee9ea0000000000000000000000006e661745856b03130d03932f683cda020d7ee9ea00000000000000000000000000000000000000000000000000000000000ee5e800000000000000000000000000000000000000000000000000000000000000c00000000000000000000000000000000000000000000000000000000000000000").unwrap();
 
-		match ethers::abi::decode(
-			&[ParamType::Tuple(vec![
-				ParamType::Tuple(vec![
-					ParamType::FixedBytes(4),
-					ParamType::Uint(64),
-					ParamType::Uint(128),
-				]),
-				ParamType::Uint(8),
-				ParamType::Tuple(vec![ParamType::FixedBytes(4), ParamType::FixedBytes(16)]),
-				ParamType::Tuple(vec![
-					ParamType::FixedBytes(32),
-					ParamType::FixedBytes(32),
-					ParamType::Address,
-					ParamType::Address,
-					ParamType::Uint(256),
-					ParamType::Bytes,
-				]),
-			])],
-			&data,
-		) {
+		match Socket::decode(&data) {
 			Ok(socket) => {
-				let socket = socket[0].clone().into_tuple().unwrap();
-				let req_id = socket[0].clone().into_tuple().unwrap();
-				let status = socket[1].clone().into_uint().unwrap();
-				let ins_code = socket[2].clone().into_tuple().unwrap();
-				let params = socket[3].clone().into_tuple().unwrap();
+				let req_id = socket.msg.req_id;
+				let status = socket.msg.status;
+				let ins_code = socket.msg.ins_code;
+				let params = socket.msg.params;
 
-				println!(
-					"req_id.chain -> {:?}",
-					Bytes::from(req_id[0].clone().into_fixed_bytes().unwrap()).to_string()
-				);
-				println!("req_id.round_id -> {:?}", req_id[1].clone().into_uint().unwrap());
-				println!("req_id.sequence -> {:?}", req_id[2].clone().into_uint().unwrap());
+				println!("req_id.chain -> {:?}", req_id.chain.encode_hex_with_prefix());
+				println!("req_id.round_id -> {:?}", req_id.round_id);
+				println!("req_id.sequence -> {:?}", req_id.sequence);
 
 				println!("status -> {:?}", status);
 
-				println!(
-					"ins_code.chain -> {:?}",
-					Bytes::from(ins_code[0].clone().into_fixed_bytes().unwrap()).to_string()
-				);
-				println!(
-					"ins_code.method -> {:?}",
-					Bytes::from(ins_code[1].clone().into_fixed_bytes().unwrap()).to_string()
-				);
+				println!("ins_code.chain -> {:?}", ins_code.chain.encode_hex_with_prefix());
+				println!("ins_code.method -> {:?}", ins_code.method.encode_hex_with_prefix());
 
-				println!(
-					"params.tokenIDX0 -> {:?}",
-					Bytes::from(params[0].clone().into_fixed_bytes().unwrap()).to_string()
-				);
-				println!(
-					"params.tokenIDX1 -> {:?}",
-					Bytes::from(params[1].clone().into_fixed_bytes().unwrap()).to_string()
-				);
-				println!("params.refund -> {:?}", params[2].clone().into_address().unwrap());
-				println!("params.to -> {:?}", params[3].clone().into_address().unwrap());
-				println!("params.amount -> {:?}", params[4].clone().into_uint());
-				println!(
-					"params.variants -> {:?}",
-					Bytes::from(params[5].clone().into_bytes().unwrap()).to_string()
-				);
+				println!("params.tokenIDX0 -> {:?}", params.token_idx0.encode_hex_with_prefix());
+				println!("params.tokenIDX1 -> {:?}", params.token_idx1.encode_hex_with_prefix());
+				println!("params.refund -> {:?}", params.refund);
+				println!("params.to -> {:?}", params.to);
+				println!("params.amount -> {:?}", params.amount);
+				println!("params.variants -> {:?}", params.variants.to_string());
 			},
 			Err(error) => {
 				panic!("decode failed -> {}", error);
 			},
 		}
+	}
+
+	#[test]
+	fn test_socket_msg_decode() {
+		let req_id_chain = array_bytes::bytes2hex("0x", [0, 0, 39, 18]);
+		let ins_code_chain = array_bytes::bytes2hex("0x", [0, 0, 191, 192]);
+		let ins_code_method =
+			array_bytes::bytes2hex("0x", [3, 1, 1, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+
+		let params_tokenidx0 = array_bytes::bytes2hex(
+			"0x",
+			[
+				0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+				0, 0, 0, 0,
+			],
+		);
+		let params_tokenidx1 = array_bytes::bytes2hex(
+			"0x",
+			[
+				0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+				0, 0, 0, 0,
+			],
+		);
+
+		println!("req_id_chain -> {:?}", req_id_chain);
+		println!("ins_code_chain -> {:?}", ins_code_chain);
+		println!("ins_code_method -> {:?}", ins_code_method);
+		println!("params_tokenidx0 -> {:?}", params_tokenidx0);
+		println!("params_tokenidx1 -> {:?}", params_tokenidx1);
 	}
 }

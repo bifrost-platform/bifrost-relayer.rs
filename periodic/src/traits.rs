@@ -1,8 +1,8 @@
+use cron::Schedule;
 use std::{collections::BTreeMap, fmt::Error};
+use tokio::time::sleep;
 
 use br_primitives::periodic::PriceResponse;
-use cron::Schedule;
-use tokio::time::sleep;
 
 #[async_trait::async_trait]
 pub trait PeriodicWorker {

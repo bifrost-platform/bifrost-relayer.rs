@@ -20,8 +20,8 @@ use br_primitives::{
 	contracts::socket::get_asset_oids,
 	eth::GasCoefficient,
 	periodic::{PriceResponse, PriceSource},
-	sub_display_format,
 	tx::{PriceFeedMetadata, TxRequest, TxRequestMessage, TxRequestMetadata, TxRequestSender},
+	utils::sub_display_format,
 };
 
 use crate::{
@@ -62,7 +62,7 @@ impl<T: JsonRpcClient + 'static> PeriodicWorker for OraclePriceFeeder<T> {
 			let upcoming = self.schedule.upcoming(Utc).next().unwrap();
 			self.feed_period_spreader(upcoming, true).await;
 
-			if self.is_selected_relayer().await {
+			if self.client.is_selected_relayer().await {
 				if self.primary_source.is_empty() {
 					log::warn!(
 						target: &self.client.get_chain_name(),
@@ -148,18 +148,14 @@ impl<T: JsonRpcClient + 'static> OraclePriceFeeder<T> {
 				self.build_and_send_transaction(price_responses).await;
 			},
 			Err(_) => {
-				log::error!(
-					target: &self.client.get_chain_name(),
-					"-[{}] ❗️ Failed to fetch price feed data from secondary sources. First off, skip this feeding.",
+				let log_msg = format!(
+					"-[{}]-[{}] ❗️ Failed to fetch price feed data from secondary sources. First off, skip this feeding.",
 					sub_display_format(SUB_LOG_TARGET),
+					self.client.address()
 				);
+				log::error!(target: &self.client.get_chain_name(), "{log_msg}");
 				sentry::capture_message(
-					format!(
-						"[{}]-[{}] ❗️ Failed to fetch price feed data from secondary sources. First off, skip this feeding.",
-						SUB_LOG_TARGET,
-						self.client.address()
-					)
-					.as_str(),
+					&format!("[{}]{log_msg}", &self.client.get_chain_name()),
 					sentry::Level::Error,
 				);
 			},
@@ -308,39 +304,20 @@ impl<T: JsonRpcClient + 'static> OraclePriceFeeder<T> {
 				metadata
 			),
 			Err(error) => {
-				log::error!(
-					target: &self.client.get_chain_name(),
-					"-[{}] ❗️ Failed to request price feed transaction to chain({:?}): {}, Error: {}",
+				let log_msg = format!(
+					"-[{}]-[{}] ❗️ Failed to request price feed transaction to chain({:?}): {}, Error: {}",
 					sub_display_format(SUB_LOG_TARGET),
+					self.client.address(),
 					self.client.get_chain_id(),
 					metadata,
 					error.to_string()
 				);
+				log::error!(target: &self.client.get_chain_name(), "{log_msg}");
 				sentry::capture_message(
-					format!(
-						"[{}]-[{}]-[{}] ❗️ Failed to request price feed transaction to chain({:?}): {}, Error: {}",
-						&self.client.get_chain_name(),
-						SUB_LOG_TARGET,
-						self.client.address(),
-						self.client.get_chain_id(),
-						metadata,
-						error
-					)
-					.as_str(),
+					&format!("[{}]{log_msg}", &self.client.get_chain_name()),
 					sentry::Level::Error,
 				);
 			},
 		}
-	}
-
-	/// Verifies whether the current relayer was selected at the current round.
-	async fn is_selected_relayer(&self) -> bool {
-		let relayer_manager = self.client.protocol_contracts.relayer_manager.as_ref().unwrap();
-		self.client
-			.contract_call(
-				relayer_manager.is_selected_relayer(self.client.address(), false),
-				"relayer_manager.is_selected_relayer",
-			)
-			.await
 	}
 }

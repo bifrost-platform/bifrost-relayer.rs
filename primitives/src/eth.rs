@@ -2,14 +2,17 @@ use std::{str::FromStr, sync::Arc};
 
 use ethers::{
 	providers::{JsonRpcClient, Provider},
-	types::{Address, Signature, TransactionRequest, H160, U64},
+	types::{Address, Signature, TransactionRequest, Uint8, H160, U64},
 };
+use url::Url;
 
 use crate::{
-	constants::errors::INVALID_CONTRACT_ADDRESS,
+	constants::errors::{INVALID_CONTRACT_ADDRESS, INVALID_PROVIDER_URL, MISSING_CONTRACT_ADDRESS},
 	contracts::{
-		authority::AuthorityContract, chainlink_aggregator::ChainlinkContract,
-		relayer_manager::RelayerManagerContract, socket::SocketContract,
+		authority::AuthorityContract, bitcoin_socket::BitcoinSocketContract,
+		chainlink_aggregator::ChainlinkContract, registration_pool::RegistrationPoolContract,
+		relay_executive::RelayExecutiveContract, relayer_manager::RelayerManagerContract,
+		socket::SocketContract, socket_queue::SocketQueueContract,
 	},
 };
 
@@ -18,9 +21,14 @@ pub type ChainID = u32;
 
 /// The metadata of the EVM provider.
 pub struct ProviderMetadata {
+	/// The name of this provider.
 	pub name: String,
+	/// The provider URL. (Allowed values: `http`, `https`)
+	pub url: Url,
 	/// Id of chain which this client interact with.
 	pub id: ChainID,
+	/// The bitcoin chain ID used for CCCP.
+	pub bitcoin_chain_id: Option<ChainID>,
 	/// The total number of confirmations required for a block to be processed. (block
 	/// confirmations + eth_getLogs batch size)
 	pub block_confirmations: U64,
@@ -37,7 +45,9 @@ pub struct ProviderMetadata {
 impl ProviderMetadata {
 	pub fn new(
 		name: String,
+		url: String,
 		id: ChainID,
+		bitcoin_chain_id: Option<ChainID>,
 		block_confirmations: u64,
 		call_interval: u64,
 		get_logs_batch_size: u64,
@@ -45,7 +55,9 @@ impl ProviderMetadata {
 	) -> Self {
 		Self {
 			name,
+			url: Url::parse(&url).expect(INVALID_PROVIDER_URL),
 			id,
+			bitcoin_chain_id,
 			block_confirmations: U64::from(block_confirmations.saturating_add(get_logs_batch_size)),
 			get_logs_batch_size: U64::from(get_logs_batch_size),
 			call_interval,
@@ -97,6 +109,18 @@ impl<T: JsonRpcClient> AggregatorContracts<T> {
 	}
 }
 
+impl<T: JsonRpcClient> Default for AggregatorContracts<T> {
+	fn default() -> Self {
+		Self {
+			chainlink_usdc_usd: None,
+			chainlink_usdt_usd: None,
+			chainlink_dai_usd: None,
+			chainlink_btc_usd: None,
+			chainlink_wbtc_usd: None,
+		}
+	}
+}
+
 /// The protocol contract instances of the EVM provider.
 pub struct ProtocolContracts<T> {
 	/// SocketContract
@@ -105,16 +129,29 @@ pub struct ProtocolContracts<T> {
 	pub authority: AuthorityContract<Provider<T>>,
 	/// RelayerManagerContract (Bifrost only)
 	pub relayer_manager: Option<RelayerManagerContract<Provider<T>>>,
+	/// BitcoinSocketContract (Bifrost only)
+	pub bitcoin_socket: Option<BitcoinSocketContract<Provider<T>>>,
+	/// SocketQueueContract (Bifrost only)
+	pub socket_queue: Option<SocketQueueContract<Provider<T>>>,
+	/// RegistrationPoolContract (Bifrost only)
+	pub registration_pool: Option<RegistrationPoolContract<Provider<T>>>,
+	/// RelayExecutiveContract (Bifrost only)
+	pub relay_executive: Option<RelayExecutiveContract<Provider<T>>>,
 }
 
 impl<T: JsonRpcClient> ProtocolContracts<T> {
 	pub fn new(
+		is_native: bool,
 		provider: Arc<Provider<T>>,
 		socket_address: String,
 		authority_address: String,
 		relayer_manager_address: Option<String>,
+		bitcoin_socket_address: Option<String>,
+		socket_queue_address: Option<String>,
+		registration_pool_address: Option<String>,
+		relay_executive_address: Option<String>,
 	) -> Self {
-		Self {
+		let mut contracts = Self {
 			socket: SocketContract::new(
 				H160::from_str(&socket_address).expect(INVALID_CONTRACT_ADDRESS),
 				provider.clone(),
@@ -123,13 +160,40 @@ impl<T: JsonRpcClient> ProtocolContracts<T> {
 				H160::from_str(&authority_address).expect(INVALID_CONTRACT_ADDRESS),
 				provider.clone(),
 			),
-			relayer_manager: relayer_manager_address.map(|address| {
-				RelayerManagerContract::new(
-					H160::from_str(&address).expect(INVALID_CONTRACT_ADDRESS),
-					provider.clone(),
-				)
-			}),
+			relayer_manager: None,
+			bitcoin_socket: None,
+			socket_queue: None,
+			registration_pool: None,
+			relay_executive: None,
+		};
+		if is_native {
+			contracts.relayer_manager = Some(RelayerManagerContract::new(
+				H160::from_str(&relayer_manager_address.expect(MISSING_CONTRACT_ADDRESS))
+					.expect(INVALID_CONTRACT_ADDRESS),
+				provider.clone(),
+			));
+			contracts.bitcoin_socket = Some(BitcoinSocketContract::new(
+				H160::from_str(&bitcoin_socket_address.expect(MISSING_CONTRACT_ADDRESS))
+					.expect(INVALID_CONTRACT_ADDRESS),
+				provider.clone(),
+			));
+			contracts.socket_queue = Some(SocketQueueContract::new(
+				H160::from_str(&socket_queue_address.expect(MISSING_CONTRACT_ADDRESS))
+					.expect(INVALID_CONTRACT_ADDRESS),
+				provider.clone(),
+			));
+			contracts.registration_pool = Some(RegistrationPoolContract::new(
+				H160::from_str(&registration_pool_address.expect(MISSING_CONTRACT_ADDRESS))
+					.expect(INVALID_CONTRACT_ADDRESS),
+				provider.clone(),
+			));
+			contracts.relay_executive = Some(RelayExecutiveContract::new(
+				H160::from_str(&relay_executive_address.expect(MISSING_CONTRACT_ADDRESS))
+					.expect(INVALID_CONTRACT_ADDRESS),
+				provider.clone(),
+			));
 		}
+		contracts
 	}
 }
 
@@ -146,7 +210,13 @@ pub enum GasCoefficient {
 
 impl GasCoefficient {
 	pub fn into_f64(&self) -> f64 {
-		match self {
+		f64::from(self)
+	}
+}
+
+impl From<&GasCoefficient> for f64 {
+	fn from(value: &GasCoefficient) -> Self {
+		match value {
 			GasCoefficient::Low => 1.2,
 			GasCoefficient::Mid => 7.0,
 			GasCoefficient::High => 10.0,
@@ -198,8 +268,8 @@ pub enum SocketEventStatus {
 	Rollbacked,
 }
 
-impl SocketEventStatus {
-	pub fn from_u8(status: u8) -> Self {
+impl From<u8> for SocketEventStatus {
+	fn from(status: u8) -> Self {
 		match status {
 			0 => SocketEventStatus::None,
 			1 => SocketEventStatus::Requested,
@@ -212,6 +282,12 @@ impl SocketEventStatus {
 			8 => SocketEventStatus::Rollbacked,
 			_ => panic!("Unknown socket event status received: {:?}", status),
 		}
+	}
+}
+
+impl From<&Uint8> for SocketEventStatus {
+	fn from(value: &Uint8) -> Self {
+		Self::from(u8::from(value.clone()))
 	}
 }
 
