@@ -458,7 +458,6 @@ impl TryFrom<XtRequest> for DefaultPayload<SubmitSignedPsbt> {
 		}
 	}
 }
-
 impl TryFrom<XtRequest> for DefaultPayload<SubmitVaultKey> {
 	type Error = ();
 
