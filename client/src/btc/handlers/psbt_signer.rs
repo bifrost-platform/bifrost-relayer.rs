@@ -7,6 +7,7 @@ use br_primitives::{
 };
 use ethers::{providers::JsonRpcClient, types::Bytes};
 use miniscript::bitcoin::{Address as BtcAddress, Network, Psbt};
+use sp_core::H256;
 use std::{str::FromStr, sync::Arc};
 use tokio::sync::{broadcast::Receiver, RwLock};
 use tokio_stream::StreamExt;
@@ -113,6 +114,17 @@ impl<T: JsonRpcClient> PsbtSigner<T> {
 		let mut psbt = unsigned_psbt.clone();
 		if self.keypair_storage.read().await.sign_psbt(&mut psbt) {
 			let signed_psbt = psbt.serialize();
+
+			if self
+				.is_signed_psbt_submitted(
+					H256::from_str(&psbt.unsigned_tx.txid().to_string()).unwrap(),
+					signed_psbt.clone(),
+				)
+				.await
+			{
+				return None;
+			}
+
 			let msg = SignedPsbtMessage {
 				authority_id: AccountId20(self.client.address().0),
 				unsigned_psbt: unsigned_psbt.serialize(),
@@ -168,6 +180,20 @@ impl<T: JsonRpcClient> PsbtSigner<T> {
 		let registration_pool = self.client.protocol_contracts.registration_pool.as_ref().unwrap();
 		self.client
 			.contract_call(registration_pool.current_round(), "registration_pool.current_round")
+			.await
+	}
+
+	async fn is_signed_psbt_submitted(&self, txid: H256, psbt: Vec<u8>) -> bool {
+		let socket_queue = self.client.protocol_contracts.socket_queue.as_ref().unwrap();
+		self.client
+			.contract_call(
+				socket_queue.is_signed_psbt_submitted(
+					txid.into(),
+					psbt.into(),
+					self.client.address(),
+				),
+				"socket_queue.is_signed_psbt_submitted",
+			)
 			.await
 	}
 }

@@ -57,6 +57,9 @@ pub trait XtRequester<T: JsonRpcClient> {
 			XtRequest::SubmitRollbackPoll(call) => {
 				XtRequestMessage::new(call.into(), metadata.clone())
 			},
+			XtRequest::VaultKeyPresubmission(call) => {
+				XtRequestMessage::new(call.into(), metadata.clone())
+			},
 		};
 		match self.xt_request_sender().send(msg) {
 			Ok(_) => log::info!(

@@ -18,8 +18,8 @@ pub use bifrost_runtime::runtime_types::bifrost_dev_runtime::RuntimeCall as DevR
 pub use runtime_types::bp_multi_sig::{MigrationSequence, Public};
 pub use runtime_types::fp_account::{AccountId20, EthereumSignature};
 pub use runtime_types::pallet_btc_registration_pool::{
-	pallet::pallet::Call::{submit_system_vault_key, submit_vault_key},
-	VaultKeySubmission,
+	pallet::pallet::Call::{submit_system_vault_key, submit_vault_key, vault_key_presubmission},
+	VaultKeyPreSubmission, VaultKeySubmission,
 };
 pub use runtime_types::pallet_btc_socket_queue::{
 	pallet::pallet::Call::submit_unsigned_psbt, RollbackPollMessage, RollbackPsbtMessage,

@@ -67,7 +67,6 @@ tokio = "1.33.0"
 tokio-stream = "0.1.14"
 
 subxt = "0.37.0"
-subxt-signer = "0.37.0"
 
 # Substrate Clients
 sc-cli = { git = "https://github.com/bifrost-platform/polkadot-sdk", default-features = false, branch = "bifrost-polkadot-v1.3.0" }

@@ -151,11 +151,8 @@ impl<T: JsonRpcClient> PeriodicWorker for BitcoinRollbackVerifier<T> {
 				let mut stream = tokio_stream::iter(pending_rollback_psbts);
 				while let Some(raw_psbt) = stream.next().await {
 					let psbt = Psbt::deserialize(&raw_psbt).unwrap();
-					let request = self
-						.get_rollback_request(
-							H256::from_str(&psbt.unsigned_tx.txid().to_string()).unwrap(),
-						)
-						.await;
+					let txid = H256::from_str(&psbt.unsigned_tx.txid().to_string()).unwrap();
+					let request = self.get_rollback_request(txid).await;
 
 					// the request must exist
 					if request.who.is_zero() {
@@ -180,7 +177,7 @@ impl<T: JsonRpcClient> PeriodicWorker for BitcoinRollbackVerifier<T> {
 								target: &self.bfc_client.get_chain_name(),
 								"-[{}] ⚠️  Failed to fetch rollback transaction: {}",
 								sub_display_format(SUB_LOG_TARGET),
-								&request.txid
+								&txid
 							);
 						},
 					}
@@ -193,7 +190,7 @@ impl<T: JsonRpcClient> PeriodicWorker for BitcoinRollbackVerifier<T> {
 					}
 
 					// build payload
-					let (call, metadata) = self.build_unsigned_tx(psbt, is_approved);
+					let (call, metadata) = self.build_unsigned_tx(txid, is_approved);
 					self.request_send_transaction(
 						call,
 						XtRequestMetadata::SubmitRollbackPoll(metadata),
@@ -245,29 +242,27 @@ impl<T: JsonRpcClient> BitcoinRollbackVerifier<T> {
 	/// Build the payload for the unsigned transaction. (`submit_rollback_poll()`)
 	fn build_payload(
 		&self,
-		unsigned_psbt: Vec<u8>,
+		txid: H256,
 		is_approved: bool,
 	) -> (RollbackPollMessage<AccountId20>, EthereumSignature) {
 		let msg = RollbackPollMessage {
 			authority_id: AccountId20(self.bfc_client.address().0),
-			unsigned_psbt: unsigned_psbt.clone(),
+			txid,
 			is_approved,
 		};
-		let signature = convert_ethers_to_ecdsa_signature(
-			self.bfc_client.wallet.sign_message(unsigned_psbt.as_ref()),
-		);
+		let signature =
+			convert_ethers_to_ecdsa_signature(self.bfc_client.wallet.sign_message(txid.as_bytes()));
 		return (msg, signature);
 	}
 
 	/// Build the calldata for the unsigned transaction. (`submit_rollback_poll()`)
 	fn build_unsigned_tx(
 		&self,
-		unsigned_psbt: Psbt,
+		txid: H256,
 		is_approved: bool,
 	) -> (XtRequest, SubmitRollbackPollMetadata) {
-		let (msg, signature) = self.build_payload(unsigned_psbt.serialize(), is_approved);
-		let metadata =
-			SubmitRollbackPollMetadata::new(unsigned_psbt.unsigned_tx.txid(), is_approved);
+		let (msg, signature) = self.build_payload(txid, is_approved);
+		let metadata = SubmitRollbackPollMetadata::new(txid, is_approved);
 		return (
 			XtRequest::from(
 				bifrost_runtime::tx().btc_socket_queue().submit_rollback_poll(msg, signature),

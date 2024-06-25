@@ -132,9 +132,12 @@ impl<T: JsonRpcClient> PubKeySubmitter<T> {
 			who: AccountId20(who.0),
 			pub_key: Public(converted_pub_key),
 		};
-		let message = array_bytes::bytes2hex("0x", converted_pub_key);
-		let signature =
-			convert_ethers_to_ecdsa_signature(self.client.wallet.sign_message(&message.as_bytes()));
+		let signature = convert_ethers_to_ecdsa_signature(
+			self.client
+				.wallet
+				.sign_message(&array_bytes::bytes2hex("0x", converted_pub_key).as_bytes()),
+		);
+
 		(msg, signature)
 	}
 
