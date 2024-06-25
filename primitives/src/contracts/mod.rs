@@ -6,3 +6,4 @@ pub mod relay_executive;
 pub mod relayer_manager;
 pub mod socket;
 pub mod socket_queue;
+pub mod vault;

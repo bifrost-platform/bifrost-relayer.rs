@@ -47,6 +47,9 @@ rand = "0.8.5"
 lazy_static = "1.4.0"
 url = "2.5.0"
 array-bytes = "6.1"
+base64 = "0.22.0"
+libsecp256k1 = "0.5"
+hex-literal = "0.3"
 
 serde_yaml = "0.9.25"
 serde = "1.0.188"
@@ -76,6 +79,7 @@ prometheus-endpoint = { package = "substrate-prometheus-endpoint", default-featu
 # Substrate Primitives
 sp-core = { git = "https://github.com/bifrost-platform/polkadot-sdk", default-features = false, branch = "bifrost-polkadot-v1.3.0" }
 sp-application-crypto = { git = "https://github.com/bifrost-platform/polkadot-sdk", default-features = false, branch = "bifrost-polkadot-v1.3.0" }
+sp-io = { git = "https://github.com/bifrost-platform/polkadot-sdk", default-features = false, branch = "bifrost-polkadot-v1.3.0" }
 
 # Substrate Builds
 substrate-build-script-utils = { git = "https://github.com/bifrost-platform/polkadot-sdk", default-features = false, branch = "bifrost-polkadot-v1.3.0" }
