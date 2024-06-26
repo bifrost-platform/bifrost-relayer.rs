@@ -1,3 +1,8 @@
+mod utils;
+use crate::utils::{
+	check_registration, create_new_account, get_unified_btc, read_wallet_details, registration,
+	send_btc_transaction, test_set_bfc_client, test_set_btc_wallet, transfer_fund, user_inbound, *,
+};
 use br_client::btc::block::Event;
 use ethers::{
 	middleware::{MiddlewareBuilder, NonceManagerMiddleware, SignerMiddleware},
@@ -7,44 +12,14 @@ use ethers::{
 };
 use miniscript::bitcoin::hashes::Hash;
 use miniscript::bitcoin::{address::NetworkUnchecked, Address as BtcAddress, Amount, Txid};
-use std::{
-	// str::FromStr,
-	fs::File,
-	io::Write,
-	str::FromStr,
-	thread::sleep,
-	time::Duration,
-};
-mod utils;
-
-use crate::utils::{
-	check_registration, create_new_account, get_unified_btc, read_wallet_details, registration,
-	send_btc_transaction, test_set_bfc_client, test_set_btc_wallet, transfer_fund, user_inbound,
-};
-
-const PUB_KEY: &str = "0xa70e72d66101e4834796115b492b3c650b4b6fb1";
-const PRIV_KEY: &str = "0x7d8b5db3afafe575f45841a5d5a1f4bb0ea735416d3b731c089d22d8cd967da2";
-const VAULT_ADDRESS: &str = "bcrt1q7nv8cqculhzvgx0mylvqf8wh0epqlylmj436eep6yc4u6d2cemashvehq5";
-const AMOUNT: &str = "0.1";
-const KEYPAIR_PATH: &str = "../keys";
-
-const WALLET_NAME: &str = "sunouk";
-const ALITH_PRIV_KEY: &str = "0x5fb92d6e98884f76de468fa3f6278f8807c48bebc13595d45af5bdc4da702133";
-const DEFAULT_WALLET_NAME: &str = "default";
-
-const UNIFIED_BTC_ADDRESS: &str = "0x7554b6e864400b4ec504d0d19c164d33c407b666";
-const SAT_DECIMALS: f64 = 100_000_000.0;
+use std::{fs::File, io::Write, str::FromStr, thread::sleep, time::Duration};
 
 #[tokio::test]
 async fn test_user_inbound() {
 	let amount_in_satoshis = (AMOUNT.parse::<f64>().unwrap() * SAT_DECIMALS) as u64;
 	let amount_eth: U256 = U256::from(amount_in_satoshis);
-	let parse_vault_address = VAULT_ADDRESS
-		.parse::<BtcAddress<NetworkUnchecked>>()
-		.expect("Invalid BTC address")
-		.assume_checked();
 
-	let (bfc_client, btc_provider) = test_set_bfc_client(PRIV_KEY).await;
+	let (bfc_client, _) = test_set_bfc_client(PRIV_KEY).await;
 
 	let unified_btc = get_unified_btc(bfc_client.clone(), UNIFIED_BTC_ADDRESS).await;
 

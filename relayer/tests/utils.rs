@@ -22,7 +22,7 @@ use miniscript::bitcoin::{hashes::Hash, Address as BtcAddress};
 use br_primitives::contracts::vault::{Instruction, TaskParams, UserRequest};
 
 use ethers::{
-	core::{k256::ecdsa::SigningKey, rand},
+	core::rand,
 	middleware::{MiddlewareBuilder, NonceManagerMiddleware, SignerMiddleware},
 	providers::{Http, Middleware, Provider},
 	signers::{LocalWallet, Signer},
@@ -34,17 +34,12 @@ use ethers::{
 use miniscript::bitcoin::{address::NetworkUnchecked, Amount, Network, Psbt, PublicKey, Txid};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
-use std::{
-	collections::HashMap,
-	io::{BufReader, Read},
-	path::Path,
-};
+use std::{collections::HashMap, io::BufReader, path::Path};
 use std::{fs::File, sync::Arc};
 use std::{
 	str::FromStr,
 	// thread::sleep
 };
-use subxt::tx::DefaultPayload;
 use subxt::{blocks::ExtrinsicEvents, OnlineClient};
 
 use bitcoincore_rpc::{
@@ -53,18 +48,36 @@ use bitcoincore_rpc::{
 };
 use tokio::time::Duration;
 
-// #[derive(Serialize, Deserialize, Debug)]
-// pub struct WalletEntry(Vec<(String, WalletDetails)>);
+pub const TOKEN_ID_0: &str = "0x00000003000000020000bfc07554b6e864400b4ec504d0d19c164d33c407b666";
+pub const TOKEN_ID_1: &str = "0x0000000000000000000000000000000000000000000000000000000000000000";
+pub const CHAIN_ID: &str = "0x00002712";
+pub const METHOD_ID: &str = "0x03020301000000000000000000000000";
+pub const SAT_DECIMALS: f64 = 100_000_000.0;
+pub const TIME_SLEEP: u64 = 10;
+pub const UNIFIED_BTC_ADDRESS: &str = "0x7554b6e864400b4ec504d0d19c164d33c407b666";
+pub const DEFAULT_WALLET_NAME: &str = "default";
 
-// impl WalletEntry {
-// 	pub fn get_details(&self) -> &[(String, WalletDetails)] {
-// 		&self.0
-// 	}
+pub const PUB_KEY: &str = "0xa70e72d66101e4834796115b492b3c650b4b6fb1";
+pub const PRIV_KEY: &str = "0x7d8b5db3afafe575f45841a5d5a1f4bb0ea735416d3b731c089d22d8cd967da2";
+pub const VAULT_ADDRESS: &str = "bcrt1q7nv8cqculhzvgx0mylvqf8wh0epqlylmj436eep6yc4u6d2cemashvehq5";
+pub const AMOUNT: &str = "0.1";
+pub const KEYPAIR_PATH: &str = "../keys";
+pub const KEYPAIR_SECERT: &str = "test";
 
-// 	pub fn get_details_mut(&mut self) -> &mut [(String, WalletDetails)] {
-// 		&mut self.0
-// 	}
-// }
+pub const WALLET_NAME: &str = "sunouk";
+pub const ALITH_PRIV_KEY: &str =
+	"0x5fb92d6e98884f76de468fa3f6278f8807c48bebc13595d45af5bdc4da702133";
+
+pub const VAULT_CONTRACT_ADDRESS: &str = "0x9f24feAf7E3c193511537371CBA969dA25B26752";
+
+pub const SUB_URL: &str = "ws://127.0.0.1:9934";
+
+pub const WALLET_NAME_PREFIX: &str = "BRP-";
+
+pub const REFUND_ADDRESS: &str = "bcrt1qujsq6pdrxt0nznv657ltjtrk97932l7axgj7mk";
+
+pub const MINIMUM_AMOUNT: &str = "0.000235";
+pub const MAXIMUM_AMOUNT: &str = "5.1";
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct WalletDetails {
@@ -93,17 +106,6 @@ struct JsonRpcResponse {
 	error: Option<serde_json::Value>,
 	id: String,
 }
-
-use base64::encode;
-
-const TOKEN_ID_0: &str = "0x00000003000000020000bfc07554b6e864400b4ec504d0d19c164d33c407b666";
-const TOKEN_ID_1: &str = "0x0000000000000000000000000000000000000000000000000000000000000000";
-const CHAIN_ID: &str = "0x00002712";
-const METHOD_ID: &str = "0x03020301000000000000000000000000";
-const SAT_DECIMALS: f64 = 100_000_000.0;
-const TIME_SLEEP: u64 = 10;
-const UNIFIED_BTC_ADDRESS: &str = "0x7554b6e864400b4ec504d0d19c164d33c407b666";
-const DEFAULT_WALLET_NAME: &str = "default";
 
 pub async fn submit_roll_back(
 	bfc_client: Arc<EthClient<Http>>,
@@ -463,14 +465,6 @@ pub async fn set_sub_client(sub_url: &str) -> OnlineClient<CustomConfig> {
 
 	sub_client
 }
-
-// pub async fn set_polkadot_client(sub_url: &str) -> OnlineClient<PolkadotConfig> {
-// 	let sub_client = OnlineClient::<PolkadotConfig>::from_url(sub_url)
-// 		.await
-// 		.expect(INVALID_PROVIDER_URL);
-
-// 	sub_client
-// }
 
 pub async fn test_set_bfc_client(priv_key: &str) -> (Arc<EthClient<Http>>, BTCProvider) {
 	let current_working_path: String = std::env::current_dir().unwrap().display().to_string();

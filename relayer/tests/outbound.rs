@@ -1,15 +1,9 @@
 use bitcoincore_rpc::RpcApi;
 use br_primitives::{
-	contracts::vault::{Instruction, TaskParams, UserRequest},
 	substrate::{bifrost_runtime, AccountId20, SignedPsbtMessage},
 	utils::convert_ethers_to_ecdsa_signature,
 };
-use ethers::{
-	middleware::{MiddlewareBuilder, NonceManagerMiddleware, SignerMiddleware},
-	providers::Middleware,
-	types::{transaction::eip2718::TypedTransaction, Bytes, TransactionRequest, H160, U256},
-};
-use miniscript::bitcoin::{address::NetworkUnchecked, Address as BtcAddress, Amount, Txid};
+use miniscript::bitcoin::{Address as BtcAddress, Amount};
 use miniscript::bitcoin::{Psbt, TxOut};
 
 use std::{str::FromStr, thread::sleep};
@@ -18,24 +12,11 @@ use tokio::time::Duration;
 mod utils;
 
 use crate::utils::{
-	get_btc_wallet_balance, get_unified_btc, read_wallet_details, set_btc_client, set_sub_client,
-	test_create_keypair, test_get_vault_contract, test_set_bfc_client, transfer_fund,
-	user_outbound,
+	get_btc_wallet_balance, read_wallet_details, set_btc_client, set_sub_client,
+	test_create_keypair, test_set_bfc_client, transfer_fund, user_outbound, *,
 };
-const KEYPAIR_PATH: &str = "../keys";
-const KEYPAIR_SECERT: &str = "test";
 
-const PRIV_KEY: &str = "0x74f37e4466d643b54fb7432420c88944b0e004b3f2e181c15caf4eb5e407da58";
-const VAULT_CONTRACT_ADDRESS: &str = "0x9f24feAf7E3c193511537371CBA969dA25B26752";
 const AMOUNT: &str = "0.01";
-const WALLET_NAME: &str = "sunouk";
-const SAT_DECIMALS: f64 = 100_000_000.0;
-
-const ALITH_PRIV_KEY: &str = "0x5fb92d6e98884f76de468fa3f6278f8807c48bebc13595d45af5bdc4da702133";
-
-const SUB_URL: &str = "ws://127.0.0.1:9934";
-
-const WALLET_NAME_PREFIX: &str = "BRP-";
 
 #[tokio::test]
 async fn test_user_outbound_request() {
@@ -85,12 +66,11 @@ async fn test_numerous_outbound_request() {
 	let amount_in_wei = 1_000_000_000_000_000_000u128; // 1 ETH in wei
 
 	for wallet_details in &mut wallet_details_list {
-		let receipt = transfer_fund(&wallet_details.priv_key, amount_in_wei, ALITH_PRIV_KEY)
+		let _ = transfer_fund(&wallet_details.priv_key, amount_in_wei, ALITH_PRIV_KEY)
 			.await
 			.unwrap();
 
-		let (bfc_client, btc_provider) =
-			test_set_bfc_client(&wallet_details.priv_key.clone()).await;
+		let (bfc_client, _) = test_set_bfc_client(&wallet_details.priv_key.clone()).await;
 
 		user_outbound(
 			&wallet_details.priv_key,
@@ -108,11 +88,7 @@ async fn test_from_multiple_outbound_request() {
 
 	let mut wallet_details_list = read_wallet_details(&keypair_path).await;
 
-	let amount_in_wei = 1_000_000_000_000_000_000u128; // 1 ETH in wei
-
-	let (bfc_client, btc_provider) =
-		test_set_bfc_client("0x4a1a45af850c37293da1a8804ab8b20e103db087d6699e90add1b7a64a4a70cb")
-			.await;
+	let (bfc_client, _) = test_set_bfc_client(PRIV_KEY).await;
 
 	for wallet_details in &mut wallet_details_list {
 		// let receipt = transfer_fund(&wallet_details.priv_key, amount_in_wei, ALITH_PRIV_KEY)
@@ -131,8 +107,6 @@ async fn test_from_multiple_outbound_request() {
 
 #[tokio::test]
 async fn test_replay_submit() {
-	let amount_btc: Amount = Amount::from_str("0.01 BTC").unwrap();
-	let amount_in_satoshis = amount_btc.to_sat();
 	let amount_in_wei = 1_000_000_000_000_000_000u128;
 
 	let (bfc_client, btc_provider) = test_set_bfc_client(PRIV_KEY).await;
@@ -141,16 +115,7 @@ async fn test_replay_submit() {
 		set_btc_client(btc_provider.clone(), Some(WALLET_NAME_PREFIX), Some(sub_client.clone()))
 			.await;
 
-	let before_balance = get_btc_wallet_balance(
-		btc_provider.username.clone().unwrap().as_str(),
-		btc_provider.password.clone().unwrap().as_str(),
-		btc_provider.provider.clone().as_str(),
-		WALLET_NAME,
-	)
-	.await
-	.unwrap();
-
-	let receipt = transfer_fund(&PRIV_KEY, amount_in_wei, ALITH_PRIV_KEY).await.unwrap();
+	let _ = transfer_fund(&PRIV_KEY, amount_in_wei, ALITH_PRIV_KEY).await.unwrap();
 
 	user_outbound(PRIV_KEY, AMOUNT, VAULT_CONTRACT_ADDRESS, bfc_client.address()).await;
 
@@ -187,18 +152,14 @@ async fn test_replay_submit() {
 #[tokio::test]
 async fn test_manipulate_submit() {
 	let amount_btc: Amount = Amount::from_str("0.01 BTC").unwrap();
-	let amount_in_satoshis = amount_btc.to_sat();
 	let amount_in_wei = 1_000_000_000_000_000_000u128;
 
-	let (bfc_client, btc_provider) = test_set_bfc_client(PRIV_KEY).await;
+	let (bfc_client, _) = test_set_bfc_client(PRIV_KEY).await;
 	let sub_client = set_sub_client(SUB_URL).await;
-	let btc_client =
-		set_btc_client(btc_provider.clone(), Some(WALLET_NAME_PREFIX), Some(sub_client.clone()))
-			.await;
 	let keypair_path = KEYPAIR_PATH.to_string() + "/registration";
-	let mut keypair_storage = test_create_keypair(&keypair_path, KEYPAIR_SECERT).await;
+	let keypair_storage = test_create_keypair(&keypair_path, KEYPAIR_SECERT).await;
 
-	let receipt = transfer_fund(&PRIV_KEY, amount_in_wei, ALITH_PRIV_KEY).await.unwrap();
+	let _ = transfer_fund(&PRIV_KEY, amount_in_wei, ALITH_PRIV_KEY).await.unwrap();
 
 	user_outbound(PRIV_KEY, AMOUNT, VAULT_CONTRACT_ADDRESS, bfc_client.address()).await;
 

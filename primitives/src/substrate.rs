@@ -32,7 +32,6 @@ pub use bifrost_runtime::btc_registration_pool::calls::types::*;
 pub use bifrost_runtime::btc_socket_queue::calls::types::*;
 pub use bifrost_runtime::runtime_types::bounded_collections::bounded_vec::BoundedVec;
 
-use hex_literal::hex;
 use subxt::config::{Config, DefaultExtrinsicParams, SubstrateConfig};
 use subxt::tx::Signer;
 
@@ -48,13 +47,11 @@ pub enum CustomConfig {}
 
 impl Config for CustomConfig {
 	type Hash = <SubstrateConfig as Config>::Hash;
-	// type AccountId = <SubstrateConfig as Config>::AccountId;
 	type AccountId = AccountId20;
 	type Address = Self::AccountId;
 	type Signature = EthereumSignature;
 	type Hasher = <SubstrateConfig as Config>::Hasher;
 	type Header = <SubstrateConfig as Config>::Header;
-	// type ExtrinsicParams = DefaultExtrinsicParams<CustomConfig>;
 	type ExtrinsicParams = DefaultExtrinsicParams<Self>;
 	type AssetId = u32;
 }
@@ -118,7 +115,7 @@ impl Signer<CustomConfig> for EthPair {
 		// Verify the signature
 		{
 			let m = keccak_256(signer_payload);
-			let validity = match sp_io::crypto::secp256k1_ecdsa_recover(signature.as_ref(), &m) {
+			let _ = match sp_io::crypto::secp256k1_ecdsa_recover(signature.as_ref(), &m) {
 				Ok(pubkey) => {
 					let found_account = AccountId20(H160::from(H256::from(keccak_256(&pubkey))).0);
 					found_account == self.account_id
