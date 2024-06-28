@@ -12,7 +12,8 @@ use br_primitives::{
 	eth::{AggregatorContracts, ProtocolContracts, ProviderMetadata},
 	substrate::{
 		bifrost_runtime, AccountId20, BifrostU256, BtcSocketQueueCall, CustomConfig,
-		DevRuntimeCall, EthPair, Public, RollbackPsbtMessage, VaultKeySubmission,
+		DevRuntimeCall, EthereumSignature, Public, RollbackPsbtMessage, Signature,
+		VaultKeySubmission,
 	},
 	utils::convert_ethers_to_ecdsa_signature,
 };
@@ -40,6 +41,8 @@ use std::{
 	str::FromStr,
 	// thread::sleep
 };
+use subxt::config::Config;
+use subxt::tx::Signer as SubxtSigner;
 use subxt::{blocks::ExtrinsicEvents, OnlineClient};
 
 use bitcoincore_rpc::{
@@ -47,6 +50,9 @@ use bitcoincore_rpc::{
 	Auth, Client as BitcoinClient, RpcApi,
 };
 use tokio::time::Duration;
+
+use libsecp256k1;
+use sp_core::{ecdsa::Pair as EcdsaPair, keccak_256, Pair, H256};
 
 pub const TOKEN_ID_0: &str = "0x00000003000000020000bfc07554b6e864400b4ec504d0d19c164d33c407b666";
 pub const TOKEN_ID_1: &str = "0x0000000000000000000000000000000000000000000000000000000000000000";
@@ -105,6 +111,80 @@ struct JsonRpcResponse {
 	result: Option<serde_json::Value>,
 	error: Option<serde_json::Value>,
 	id: String,
+}
+
+pub struct EthPair {
+	pub account_id: AccountId20,
+	pub pair: EcdsaPair,
+}
+
+// issue of connect eth signer to customconfig: https://github.com/paritytech/subxt/issues/1180
+impl EthPair {
+	pub fn alice() -> EthPair {
+		let seed_bytes: [u8; 32] = hex::decode(ALITH_PRIV_KEY)
+			.expect("Invalid hex seed")
+			.try_into()
+			.expect("Invalid length");
+
+		let pair = EcdsaPair::from_seed(&seed_bytes);
+		EthPair::from_pair(pair)
+	}
+}
+
+impl EthPair {
+	pub fn from_pair(pair: EcdsaPair) -> EthPair {
+		let public_key = pair.public();
+
+		let account_id = {
+			let decompressed = libsecp256k1::PublicKey::parse_compressed(&public_key.0)
+				.expect("Wrong compressed public key provided")
+				.serialize();
+
+			let mut m = [0u8; 64];
+			m.copy_from_slice(&decompressed[1..65]);
+			let account = H160::from(H256::from(sp_core::hashing::keccak_256(&m)));
+			let account_id: [u8; 20] = account.into();
+			AccountId20(account_id)
+		};
+
+		EthPair { account_id, pair }
+	}
+
+	pub fn from_string(s: &str) -> EthPair {
+		let pair = EcdsaPair::from_string(s, None).expect("valid");
+		EthPair::from_pair(pair)
+	}
+}
+
+impl SubxtSigner<CustomConfig> for EthPair {
+	fn account_id(&self) -> <CustomConfig as Config>::AccountId {
+		self.account_id
+	}
+
+	fn address(&self) -> <CustomConfig as Config>::Address {
+		self.account_id
+	}
+
+	fn sign(&self, signer_payload: &[u8]) -> <CustomConfig as Config>::Signature {
+		let message = keccak_256(signer_payload);
+		let signature = self.pair.sign_prehashed(&message);
+
+		// Verify the signature
+		{
+			let m = keccak_256(signer_payload);
+			let _ = match sp_io::crypto::secp256k1_ecdsa_recover(signature.as_ref(), &m) {
+				Ok(pubkey) => {
+					let found_account = AccountId20(H160::from(H256::from(keccak_256(&pubkey))).0);
+					found_account == self.account_id
+				},
+				Err(sp_io::EcdsaVerifyError::BadRS) => false,
+				Err(sp_io::EcdsaVerifyError::BadV) => false,
+				Err(sp_io::EcdsaVerifyError::BadSignature) => false,
+			};
+		}
+
+		EthereumSignature(Signature(<[u8; 65]>::from(signature)))
+	}
 }
 
 pub async fn submit_roll_back(

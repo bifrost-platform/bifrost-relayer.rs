@@ -47,6 +47,9 @@ serde_json = { workspace = true }
 once_cell = { workspace = true }
 array-bytes = { workspace = true }
 base64 = { workspace = true }
+libsecp256k1 = { workspace = true }
+sp-core = { workspace = true }
+sp-io = { workspace = true }
 
 [build-dependencies]
 substrate-build-script-utils = { workspace = true }

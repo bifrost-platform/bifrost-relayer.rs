@@ -29,7 +29,4 @@ miniscript = { workspace = true }
 subxt = { workspace = true }
 bitcoincore-rpc = { workspace = true }
 url = { workspace = true }
-sp-io = { workspace = true }
 hex-literal = { workspace = true }
-libsecp256k1 = { workspace = true }
-sp-core = { workspace = true }
