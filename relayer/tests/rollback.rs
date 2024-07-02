@@ -29,8 +29,6 @@ async fn test_minimum_rollback() {
 	.await
 	.unwrap();
 
-	sleep(Duration::from_secs(20));
-
 	let (bfc_client, btc_provider) = test_set_bfc_client(PRIV_KEY).await;
 
 	let sub_client = set_sub_client(SUB_URL).await;
@@ -85,8 +83,6 @@ async fn test_maximum_rollback() {
 	.await
 	.unwrap();
 
-	sleep(Duration::from_secs(20));
-
 	let system_vault = get_system_vault(bfc_client.clone()).await;
 
 	let mut request = HashMap::new();
@@ -134,8 +130,6 @@ async fn test_replay_rollback_submit() {
 	)
 	.await
 	.unwrap();
-
-	sleep(Duration::from_secs(20));
 
 	let system_vault = get_system_vault(bfc_client.clone()).await;
 

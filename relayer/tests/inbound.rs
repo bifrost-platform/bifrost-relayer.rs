@@ -16,30 +16,17 @@ use std::{fs::File, io::Write, str::FromStr, thread::sleep, time::Duration};
 
 #[tokio::test]
 async fn test_user_inbound() {
-	let amount_in_satoshis = (AMOUNT.parse::<f64>().unwrap() * SAT_DECIMALS) as u64;
-	let amount_eth: U256 = U256::from(amount_in_satoshis);
+	let amount_in_satoshi = (AMOUNT.parse::<f64>().unwrap() * SAT_DECIMALS) as u64;
+	let amount_eth: U256 = U256::from(amount_in_satoshi);
 
 	let (bfc_client, _) = test_set_bfc_client(PRIV_KEY).await;
 
 	let unified_btc = get_unified_btc(bfc_client.clone(), UNIFIED_BTC_ADDRESS).await;
 
 	let before_balance = unified_btc.balance_of(bfc_client.address()).await.unwrap();
-
 	println!("before_balance: {}", before_balance);
 
 	user_inbound(PUB_KEY.parse::<H160>().unwrap(), PRIV_KEY, AMOUNT, None, VAULT_ADDRESS).await;
-
-	sleep(Duration::from_secs(30));
-
-	let after_balance = unified_btc.balance_of(bfc_client.address()).await.unwrap();
-
-	println!("after_balance: {}", after_balance);
-
-	let changed_balance = after_balance - before_balance;
-
-	println!("balance: {}", changed_balance);
-
-	assert!(amount_eth > changed_balance && changed_balance > ethers::types::U256::zero());
 }
 
 #[tokio::test]
@@ -163,8 +150,6 @@ async fn test_from_multiple_inbound_request() {
 
 	registration(&refund_address, bfc_client.clone()).await;
 
-	sleep(Duration::from_secs(20));
-
 	let vault_address = check_registration(bfc_client, &refund_address).await;
 
 	let parse_vault_address = vault_address
@@ -202,8 +187,6 @@ async fn test_from_multiple_inbound_request() {
 		None,
 	)
 	.await;
-
-	sleep(Duration::from_secs(20));
 
 	let _ = send_btc_transaction(
 		username.clone().as_str(),

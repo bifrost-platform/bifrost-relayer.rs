@@ -6,12 +6,6 @@ abigen!(
 	event_derives(serde::Deserialize, serde::Serialize)
 );
 
-abigen!(
-	UnifiedBtcContract,
-	"../abi/abi.unified.erc20.json",
-	event_derives(serde::Deserialize, serde::Serialize)
-);
-
 #[derive(Debug, Clone, PartialEq, ethers::contract::EthEvent, ethers::contract::EthDisplay)]
 #[ethevent(
 	name = "Socket",

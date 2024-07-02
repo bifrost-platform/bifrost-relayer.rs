@@ -36,8 +36,6 @@ async fn test_user_outbound_request() {
 
 	user_outbound(PRIV_KEY, AMOUNT, VAULT_CONTRACT_ADDRESS, bfc_client.address()).await;
 
-	sleep(Duration::from_secs(20));
-
 	let after_balance = get_btc_wallet_balance(
 		btc_provider.username.clone().unwrap().as_str(),
 		btc_provider.password.clone().unwrap().as_str(),
@@ -119,22 +117,12 @@ async fn test_replay_submit() {
 
 	user_outbound(PRIV_KEY, AMOUNT, VAULT_CONTRACT_ADDRESS, bfc_client.address()).await;
 
-	sleep(Duration::from_secs(20));
-
-	let finalized_vec = loop {
-		let vec = bfc_client
-			.contract_call(
-				bfc_client.protocol_contracts.socket_queue.as_ref().unwrap().finalized_psbts(),
-				"socket_queue.finalized_psbts",
-			)
-			.await;
-
-		if vec.len() > 0 {
-			break vec;
-		} else {
-			sleep(Duration::from_secs(1));
-		}
-	};
+	let finalized_vec = bfc_client
+		.contract_call(
+			bfc_client.protocol_contracts.socket_queue.as_ref().unwrap().finalized_psbts(),
+			"socket_queue.finalized_psbts",
+		)
+		.await;
 
 	println!("finalized_vec: {:?}", finalized_vec);
 
@@ -157,26 +145,18 @@ async fn test_manipulate_submit() {
 	let (bfc_client, _) = test_set_bfc_client(PRIV_KEY).await;
 	let sub_client = set_sub_client(SUB_URL).await;
 	let keypair_path = KEYPAIR_PATH.to_string() + "/registration";
-	let keypair_storage = test_create_keypair(&keypair_path, KEYPAIR_SECERT).await;
+	let keypair_storage = test_create_keypair(&keypair_path, KEYPAIR_SECRET).await;
 
 	let _ = transfer_fund(&PRIV_KEY, amount_in_wei, ALITH_PRIV_KEY).await.unwrap();
 
 	user_outbound(PRIV_KEY, AMOUNT, VAULT_CONTRACT_ADDRESS, bfc_client.address()).await;
 
-	let unsigned_vec = loop {
-		let vec = bfc_client
-			.contract_call(
-				bfc_client.protocol_contracts.socket_queue.as_ref().unwrap().unsigned_psbts(),
-				"socket_queue.unsigned_psbts",
-			)
-			.await;
-
-		if vec.len() > 0 {
-			break vec;
-		} else {
-			sleep(Duration::from_secs(1));
-		}
-	};
+	let unsigned_vec = bfc_client
+		.contract_call(
+			bfc_client.protocol_contracts.socket_queue.as_ref().unwrap().unsigned_psbts(),
+			"socket_queue.unsigned_psbts",
+		)
+		.await;
 
 	let unsigned_psbt = unsigned_vec.first().unwrap();
 

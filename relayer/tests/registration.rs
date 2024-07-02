@@ -151,7 +151,7 @@ async fn test_anauthorized_submit_vault_key() {
 	let (bfc_client, _) = test_set_bfc_client(priv_key).await;
 	let sub_client = set_sub_client(SUB_URL).await;
 	let keypair_path = KEYPAIR_PATH.to_string() + "/registration";
-	let mut keypair_storage = test_create_keypair(&keypair_path, KEYPAIR_SECERT).await;
+	let mut keypair_storage = test_create_keypair(&keypair_path, KEYPAIR_SECRET).await;
 
 	let btc_pub_key = keypair_storage.create_new_keypair().await;
 
@@ -175,7 +175,7 @@ async fn test_submit_invalid_vault_key() {
 	let sub_client = set_sub_client(SUB_URL).await;
 	let keypair_path = KEYPAIR_PATH.to_string() + "/registration";
 
-	let mut keypair_storage = test_create_keypair(&keypair_path, KEYPAIR_SECERT).await;
+	let mut keypair_storage = test_create_keypair(&keypair_path, KEYPAIR_SECRET).await;
 
 	let btc_pub_key = keypair_storage.create_new_keypair().await;
 

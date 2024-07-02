@@ -8,7 +8,7 @@ use br_primitives::{
 		INVALID_CONFIG_FILE_PATH, INVALID_CONFIG_FILE_STRUCTURE, INVALID_PRIVATE_KEY,
 		INVALID_PROVIDER_URL,
 	},
-	contracts::{bitcoin_socket::UnifiedBtcContract, vault::VaultContract},
+	contracts::{unified_btc::UnifiedBtcContract, vault::VaultContract},
 	eth::{AggregatorContracts, ProtocolContracts, ProviderMetadata},
 	substrate::{
 		bifrost_runtime, AccountId20, BifrostU256, BtcSocketQueueCall, CustomConfig,
@@ -67,10 +67,10 @@ pub const PUB_KEY: &str = "0xa70e72d66101e4834796115b492b3c650b4b6fb1";
 pub const PRIV_KEY: &str = "0x7d8b5db3afafe575f45841a5d5a1f4bb0ea735416d3b731c089d22d8cd967da2";
 pub const VAULT_ADDRESS: &str = "bcrt1q7nv8cqculhzvgx0mylvqf8wh0epqlylmj436eep6yc4u6d2cemashvehq5";
 pub const AMOUNT: &str = "0.1";
-pub const KEYPAIR_PATH: &str = "../keys";
-pub const KEYPAIR_SECERT: &str = "test";
+pub const KEYPAIR_PATH: &str = "../keys/test";
+pub const KEYPAIR_SECRET: &str = "test";
 
-pub const WALLET_NAME: &str = "sunouk";
+pub const WALLET_NAME: &str = "test_wallet";
 pub const ALITH_PRIV_KEY: &str =
 	"0x5fb92d6e98884f76de468fa3f6278f8807c48bebc13595d45af5bdc4da702133";
 
@@ -272,13 +272,10 @@ pub async fn submit_vault_key(
 	Ok(events)
 }
 
-pub async fn test_create_keypair(keyapair_path: &str, keyapair_secreate: &str) -> KeypairStorage {
-	// let keypair_storage =
-	// 	KeypairStorage::new("../localkeystore_test", Some("test".to_string()), Network::Regtest);
-
+pub async fn test_create_keypair(keypair_path: &str, keypair_secreate: &str) -> KeypairStorage {
 	let keypair_storage = KeypairStorage::new(
-		keyapair_path.to_string(),
-		Some(keyapair_secreate.to_string()),
+		keypair_path.to_string(),
+		Some(keypair_secreate.to_string()),
 		Network::Regtest,
 	);
 
@@ -621,13 +618,13 @@ pub async fn create_new_account() -> Result<(LocalWallet, Address), Box<dyn std:
 pub async fn get_system_vault(bfc_client: Arc<EthClient<Http>>) -> String {
 	let registration_pool = bfc_client.protocol_contracts.registration_pool.as_ref().unwrap();
 
-	let curret_round = bfc_client
+	let current_round = bfc_client
 		.contract_call(registration_pool.current_round(), "registration_pool.current_round")
 		.await;
 
 	let system_vault = bfc_client
 		.contract_call(
-			registration_pool.vault_address(registration_pool.address(), curret_round),
+			registration_pool.vault_address(registration_pool.address(), current_round),
 			"registration_pool.vault_address",
 		)
 		.await;
@@ -697,68 +694,25 @@ pub async fn transfer_fund(
 	Ok(receipt)
 }
 
-pub async fn approve_contract_tx(
-	bfc_client: Arc<EthClient<Http>>,
-	amount_eth: U256,
-	contract_address: &str,
-) {
-	let unified_btc = get_unified_btc(bfc_client.clone(), UNIFIED_BTC_ADDRESS).await;
-	let contract = test_get_vault_contract(bfc_client.clone(), contract_address).await;
-
-	let middleware = bfc_client
-		.get_provider()
-		.clone()
-		.wrap_into(|p| SignerMiddleware::new(p, bfc_client.wallet.signer.clone()))
-		.wrap_into(|p| NonceManagerMiddleware::new(p, bfc_client.address()));
-
-	let approve = TransactionRequest::new()
-		.data(unified_btc.approve(contract.address(), amount_eth).calldata().unwrap())
-		.to(unified_btc.address())
-		.from(bfc_client.address());
-
-	let approve = approve
-		.clone()
-		.gas(middleware.estimate_gas(&TypedTransaction::Legacy(approve), None).await.unwrap());
-
-	let approve_tx = middleware.send_transaction(approve, None).await;
-	match approve_tx {
-		Ok(pending_tx) => match pending_tx.await {
-			Ok(receipt) => {
-				println!(
-					"⚡️ Approved UnifiedBTC: {:?}:{:?}",
-					amount_eth,
-					receipt.unwrap().transaction_hash
-				)
-			},
-			Err(error) => {
-				panic!("approve failed: {:?}", error);
-			},
-		},
-		Err(error) => {
-			panic!("approve failed: {:?}", error);
-		},
-	}
-}
-
 /// Returns current pool round.
 
 pub async fn check_registration(bfc_client: Arc<EthClient<Http>>, refund_address: &str) -> String {
 	let registration_pool = bfc_client.protocol_contracts.registration_pool.as_ref().unwrap();
 
-	let curret_round = bfc_client
+	let current_round = bfc_client
 		.contract_call(registration_pool.current_round(), "registration_pool.current_round")
 		.await;
 
 	let vault_address = bfc_client
 		.contract_call(
-			registration_pool.vault_address(bfc_client.address(), curret_round),
+			registration_pool.vault_address(bfc_client.address(), current_round),
 			"registration_pool.vault_address",
 		)
 		.await;
 
 	let registration_info = bfc_client
 		.contract_call(
-			registration_pool.registration_info(bfc_client.address(), curret_round),
+			registration_pool.registration_info(bfc_client.address(), current_round),
 			"registration_pool.registration_info",
 		)
 		.await;
@@ -818,13 +772,13 @@ pub async fn user_inbound(
 		.as_ref()
 		.expect("Failed to get registration pool");
 
-	let curret_round = bfc_client
+	let current_round = bfc_client
 		.contract_call(registration_pool.current_round(), "registration_pool.current_round")
 		.await;
 
 	let vault_address = bfc_client
 		.contract_call(
-			registration_pool.vault_address(pub_key, curret_round),
+			registration_pool.vault_address(pub_key, current_round),
 			"registration_pool.vault_address",
 		)
 		.await;
@@ -912,28 +866,4 @@ pub async fn user_outbound(
 			return;
 		},
 	}
-
-	// sleep(Duration::from_secs(TIME_SLEEP));
-
-	// let btc_client = test_create_btc_wallet(
-	// 	btc_provider.username.unwrap().as_str(),
-	// 	btc_provider.password.unwrap().as_str(),
-	// 	btc_provider.provider.as_str(),
-	// )
-	// .await;
-
-	// let finalized_vec = bfc_client
-	// 	.contract_call(
-	// 		bfc_client.protocol_contracts.socket_queue.as_ref().unwrap().finalized_psbts(),
-	// 		"socket_queue.finalized_psbts",
-	// 	)
-	// 	.await;
-
-	// let psbt =
-	// 	Psbt::deserialize(&finalized_vec.first().unwrap()).expect("error on psbt deserialize");
-
-	// let binding = psbt.unsigned_tx.txid();
-	// let tx = btc_client.get_raw_transaction(&binding, None).await.unwrap();
-
-	// println!("tx : {:?}", tx);
 }
