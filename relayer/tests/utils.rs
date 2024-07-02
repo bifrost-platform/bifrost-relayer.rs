@@ -618,13 +618,9 @@ pub async fn create_new_account() -> Result<(LocalWallet, Address), Box<dyn std:
 pub async fn get_system_vault(bfc_client: Arc<EthClient<Http>>) -> String {
 	let registration_pool = bfc_client.protocol_contracts.registration_pool.as_ref().unwrap();
 
-	let current_round = bfc_client
-		.contract_call(registration_pool.current_round(), "registration_pool.current_round")
-		.await;
-
 	let system_vault = bfc_client
 		.contract_call(
-			registration_pool.vault_address(registration_pool.address(), current_round),
+			registration_pool.vault_address(registration_pool.address(), 0),
 			"registration_pool.vault_address",
 		)
 		.await;
@@ -699,20 +695,16 @@ pub async fn transfer_fund(
 pub async fn check_registration(bfc_client: Arc<EthClient<Http>>, refund_address: &str) -> String {
 	let registration_pool = bfc_client.protocol_contracts.registration_pool.as_ref().unwrap();
 
-	let current_round = bfc_client
-		.contract_call(registration_pool.current_round(), "registration_pool.current_round")
-		.await;
-
 	let vault_address = bfc_client
 		.contract_call(
-			registration_pool.vault_address(bfc_client.address(), current_round),
+			registration_pool.vault_address(bfc_client.address(), 0),
 			"registration_pool.vault_address",
 		)
 		.await;
 
 	let registration_info = bfc_client
 		.contract_call(
-			registration_pool.registration_info(bfc_client.address(), current_round),
+			registration_pool.registration_info(bfc_client.address(), 0),
 			"registration_pool.registration_info",
 		)
 		.await;
@@ -772,13 +764,9 @@ pub async fn user_inbound(
 		.as_ref()
 		.expect("Failed to get registration pool");
 
-	let current_round = bfc_client
-		.contract_call(registration_pool.current_round(), "registration_pool.current_round")
-		.await;
-
 	let vault_address = bfc_client
 		.contract_call(
-			registration_pool.vault_address(pub_key, current_round),
+			registration_pool.vault_address(pub_key, 0),
 			"registration_pool.vault_address",
 		)
 		.await;
@@ -805,8 +793,8 @@ pub async fn user_outbound(
 	vault_contract_address: &str,
 	refund_bfc_address: Address,
 ) {
-	let amount_in_satoshis = (amount.parse::<f64>().unwrap() * SAT_DECIMALS) as u64;
-	let amount_eth: U256 = U256::from(amount_in_satoshis);
+	let amount_in_satoshi = (amount.parse::<f64>().unwrap() * SAT_DECIMALS) as u64;
+	let amount_eth: U256 = U256::from(amount_in_satoshi);
 
 	let (bfc_client, btc_provider) = test_set_bfc_client(priv_key).await;
 
