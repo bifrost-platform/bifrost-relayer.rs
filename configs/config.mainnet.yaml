@@ -1,28 +1,18 @@
 system:
   private_key: "<YOUR_RELAYER_PRIVATE_KEY>"
-  keystore_path: "<YOUR_KEYSTORE_PATH>"
-  keystore_password: "<YOUR_KEYSTORE_PASSWORD>"
   debug_mode: false
-
-btc_provider:
-  provider: "<YOUR_BITCOIN_RPC_ENDPOINT>"
-  chain: "main"
 
 evm_providers:
   - name: "bifrost"
     id: 3068
     provider: "<YOUR_BIFROST_RPC_ENDPOINT>"
     call_interval: 3000
-    block_confirmations: 5
+    block_confirmations: 3
     is_native: true
     is_relay_target: true
     socket_address: "0xd551F33Ca8eCb0Be83d8799D9C68a368BA36Dd52"
     authority_address: "0x0000000000000000000000000000000000000400"
     relayer_manager_address: "0x0000000000000000000000000000000000002000"
-    bitcoin_socket_address: "TODO"
-    socket_queue_address: "TODO"
-    registration_pool_address: "TODO"
-    relay_executive_address: "TODO"
   - name: "ethereum"
     id: 1
     provider: "<YOUR_ETHEREUM_RPC_ENDPOINT>"
@@ -87,7 +77,6 @@ handler_configs:
 bootstrap_config:
   is_enabled: true
   round_offset: 3
-  btc_block_offset: 72
 
 sentry_config:
   environment: "<YOUR_SENTRY_ENVIRONMENT>"
