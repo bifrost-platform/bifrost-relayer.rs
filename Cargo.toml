@@ -1,12 +1,12 @@
 [workspace]
 resolver = "2"
 members = [
-    "client",
-    "client/cli",
-    "metrics",
-    "periodic",
-    "primitives",
-    "relayer",
+	"client",
+	"client/cli",
+	"metrics",
+	"periodic",
+	"primitives",
+	"relayer",
 ]
 
 [profile.release]
@@ -24,14 +24,13 @@ repository = "https://github.com/bifrost-platform/bifrost-relayer.rs"
 log = "0.4.20"
 env_logger = "0.10.0"
 sentry = { version = "0.32.1", default-features = false, features = [
-    "reqwest",
-    "rustls",
-    "backtrace",
-    "contexts",
-    "panic",
+	"reqwest",
+	"rustls",
+	"backtrace",
+	"contexts",
+	"panic",
 ] }
 
-anyhow = "1.0.81"
 async-trait = "0.1.73"
 async-recursion = "1.0.5"
 clap = "4.4.6"
@@ -40,9 +39,9 @@ chrono = "0.4.31"
 thiserror = "1.0.49"
 futures = "0.3.28"
 reqwest = { version = "0.12.5", default-features = false, features = [
-    "rustls-tls",
-    "json",
-    "http2"
+	"rustls-tls",
+	"json",
+	"http2",
 ] }
 rand = "0.8.5"
 lazy_static = "1.4.0"

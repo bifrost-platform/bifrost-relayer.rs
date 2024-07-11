@@ -10,7 +10,6 @@ repository = { workspace = true }
 
 [dependencies]
 # General
-anyhow = { workspace = true }
 bitcoincore-rpc = { workspace = true }
 miniscript = { workspace = true }
 log = { workspace = true }
