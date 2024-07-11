@@ -5,8 +5,7 @@ pub const DEFAULT_KEYSTORE_PATH: &str = "./keys";
 pub const DEFAULT_BOOTSTRAP_ROUND_OFFSET: u32 = 3;
 
 /// The default bootstrap offset for Bitcoin (in blocks)
-/// (=blocks per round)
-pub const DEFAULT_BITCOIN_BOOTSTRAP_BLOCK_OFFSET: u32 = 72;
+pub const DEFAULT_BITCOIN_BOOTSTRAP_BLOCK_OFFSET: u32 = 3;
 
 /// The default port used for prometheus.
 pub const DEFAULT_PROMETHEUS_PORT: u16 = 8000;
