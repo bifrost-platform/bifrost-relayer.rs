@@ -6,8 +6,9 @@ system:
 
 btc_provider:
   id: 10001
-  provider: "<YOUR_BITCOIN_RPC_ENDPOINT>"
   chain: "test"
+  provider: "<YOUR_BITCOIN_RPC_ENDPOINT>"
+  call_interval: 10000
 
 evm_providers:
   - name: "bifrost-testnet"

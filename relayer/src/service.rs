@@ -322,6 +322,7 @@ fn construct_btc_deps(
 		bfc_client.clone(),
 		pending_outbounds.clone(),
 		bootstrap_shared_data.clone(),
+		config.relayer_config.btc_provider.call_interval.clone(),
 	);
 	let inbound = InboundHandler::new(
 		bfc_client.clone(),
