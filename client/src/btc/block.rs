@@ -104,6 +104,8 @@ pub struct BlockManager<T> {
 	block_confirmations: u64,
 	/// The block that is waiting for confirmations.
 	waiting_block: u64,
+	/// The `getblockcount` request interval in milliseconds.
+	call_interval: u64,
 	/// The bootstrap shared data.
 	bootstrap_shared_data: Arc<BootstrapSharedData>,
 	/// The bootstrap offset in blocks.
@@ -147,6 +149,7 @@ impl<T: JsonRpcClient + 'static> BlockManager<T> {
 		bfc_client: Arc<EthClient<T>>,
 		_pending_outbounds: PendingOutboundPool,
 		bootstrap_shared_data: Arc<BootstrapSharedData>,
+		call_interval: u64,
 	) -> Self {
 		let (sender, _receiver) = broadcast::channel(512);
 
@@ -165,6 +168,7 @@ impl<T: JsonRpcClient + 'static> BlockManager<T> {
 			sender,
 			block_confirmations: 0,
 			waiting_block: 0,
+			call_interval,
 			bootstrap_shared_data,
 			bootstrap_offset,
 			_pending_outbounds,
@@ -198,7 +202,7 @@ impl<T: JsonRpcClient + 'static> BlockManager<T> {
 				}
 			}
 
-			self.wait_for_new_block(0).await.unwrap();
+			sleep(Duration::from_millis(self.call_interval)).await;
 		}
 	}
 

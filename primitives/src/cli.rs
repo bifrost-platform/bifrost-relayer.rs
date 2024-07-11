@@ -135,6 +135,8 @@ pub struct BTCProvider {
 	pub id: u32,
 	/// The Bitcoin provider URL.
 	pub provider: String,
+	/// The time interval(ms) used when to request a new block
+	pub call_interval: u64,
 	/// The chain network. (Allowed values: `main`, `test`, `signet`, `regtest`)
 	pub chain: String,
 	/// Optional. The provider username credential.
