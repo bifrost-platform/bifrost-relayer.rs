@@ -11,8 +11,8 @@ use br_primitives::{
 		errors::{INSUFFICIENT_FUNDS, NETWORK_DOES_NOT_SUPPORT_EIP1559, PROVIDER_INTERNAL_ERROR},
 		tx::DEFAULT_TX_RETRIES,
 	},
-	sub_display_format,
 	tx::{TxRequest, TxRequestMessage},
+	utils::sub_display_format,
 };
 use ethers::{
 	middleware::{MiddlewareBuilder, NonceManagerMiddleware, SignerMiddleware},
@@ -141,13 +141,8 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> for LegacyTransactionMana
 			self.min_gas_price,
 			self.duplicate_confirm_delay,
 		);
-		if msg.is_bootstrap {
-			task.try_send_transaction(msg).await;
-		} else {
-			self.get_spawn_handle().spawn("send_transaction", None, async move {
-				task.try_send_transaction(msg).await
-			});
-		}
+		self.get_spawn_handle()
+			.spawn("send_transaction", None, async move { task.try_send_transaction(msg).await });
 	}
 
 	fn is_txpool_enabled(&self) -> bool {

@@ -31,6 +31,7 @@ sentry = { version = "0.32.1", default-features = false, features = [
 	"panic",
 ] }
 
+anyhow = "1.0.81"
 async-trait = "0.1.73"
 async-recursion = "1.0.5"
 clap = "4.4.6"
@@ -44,6 +45,8 @@ reqwest = { version = "0.11.22", default-features = false, features = [
 ] }
 rand = "0.8.5"
 lazy_static = "1.4.0"
+url = "2.5.0"
+array-bytes = "6.1"
 
 serde_yaml = "0.9.25"
 serde = "1.0.188"
@@ -54,15 +57,25 @@ ethers = { git = "https://github.com/bifrost-platform/ethers-rs", tag = "ethers-
 k256 = "0.13.1"
 sha3 = "0.10.8"
 
+miniscript = "11.0.0"
+bitcoincore-rpc = { git = "https://github.com/bifrost-platform/rust-bitcoincore-rpc", branch = "reqwest-migration" }
+
 tokio = "1.33.0"
 tokio-stream = "0.1.14"
 
-# Substrate Client
+subxt = "0.37.0"
+
+# Substrate Clients
 sc-cli = { git = "https://github.com/bifrost-platform/polkadot-sdk", default-features = false, branch = "bifrost-polkadot-v1.3.0" }
 sc-utils = { git = "https://github.com/bifrost-platform/polkadot-sdk", default-features = false, branch = "bifrost-polkadot-v1.3.0" }
 sc-service = { git = "https://github.com/bifrost-platform/polkadot-sdk", default-features = false, branch = "bifrost-polkadot-v1.3.0" }
 sc-sysinfo = { git = "https://github.com/bifrost-platform/polkadot-sdk", default-features = false, branch = "bifrost-polkadot-v1.3.0" }
+sc-keystore = { git = "https://github.com/bifrost-platform/polkadot-sdk", default-features = false, branch = "bifrost-polkadot-v1.3.0" }
 prometheus-endpoint = { package = "substrate-prometheus-endpoint", default-features = false, git = "https://github.com/bifrost-platform/polkadot-sdk", branch = "bifrost-polkadot-v1.3.0" }
+
+# Substrate Primitives
+sp-core = { git = "https://github.com/bifrost-platform/polkadot-sdk", default-features = false, branch = "bifrost-polkadot-v1.3.0" }
+sp-application-crypto = { git = "https://github.com/bifrost-platform/polkadot-sdk", default-features = false, branch = "bifrost-polkadot-v1.3.0" }
 
 # Substrate Builds
 substrate-build-script-utils = { git = "https://github.com/bifrost-platform/polkadot-sdk", default-features = false, branch = "bifrost-polkadot-v1.3.0" }

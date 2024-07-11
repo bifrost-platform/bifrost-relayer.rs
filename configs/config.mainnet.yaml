@@ -7,7 +7,7 @@ evm_providers:
     id: 3068
     provider: "<YOUR_BIFROST_RPC_ENDPOINT>"
     call_interval: 3000
-    block_confirmations: 5
+    block_confirmations: 3
     is_native: true
     is_relay_target: true
     socket_address: "0xd551F33Ca8eCb0Be83d8799D9C68a368BA36Dd52"
