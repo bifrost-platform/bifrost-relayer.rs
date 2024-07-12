@@ -223,7 +223,7 @@ impl<T: JsonRpcClient> Handler for PsbtSigner<T> {
 			}
 
 			log::info!(
-				target: &self.client.get_chain_name(),
+				target: &crate::btc::SUB_LOG_TARGET,
 				"-[{}] 📦 Imported #{:?} with target logs({:?})",
 				sub_display_format(SUB_LOG_TARGET),
 				msg.block_number,
