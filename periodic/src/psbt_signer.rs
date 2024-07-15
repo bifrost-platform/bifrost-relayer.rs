@@ -1,24 +1,25 @@
 use crate::traits::PeriodicWorker;
-use br_client::btc::handlers::XtRequester;
-use br_client::{btc::storage::keypair::KeypairStorage, eth::EthClient};
-use br_primitives::tx::XtRequestMetadata;
-use br_primitives::utils::sub_display_format;
+use br_client::{
+	btc::{handlers::XtRequester, storage::keypair::KeypairStorage},
+	eth::EthClient,
+};
 use br_primitives::{
 	constants::{errors::INVALID_PERIODIC_SCHEDULE, schedule::PSBT_SIGNER_SCHEDULE},
 	substrate::{
 		bifrost_runtime, AccountId20, EthereumSignature, MigrationSequence, SignedPsbtMessage,
 	},
-	tx::{SubmitSignedPsbtMetadata, XtRequest, XtRequestSender},
-	utils::{convert_ethers_to_ecdsa_signature, hash_bytes},
+	tx::{SubmitSignedPsbtMetadata, XtRequest, XtRequestMetadata, XtRequestSender},
+	utils::{convert_ethers_to_ecdsa_signature, hash_bytes, sub_display_format},
 };
 use cron::Schedule;
 use ethers::prelude::{Bytes, JsonRpcClient, H256};
 use miniscript::bitcoin::{Address as BtcAddress, Network, Psbt};
-use std::{str::FromStr, sync::Arc};
+use std::{collections::VecDeque, str::FromStr, sync::Arc};
 use tokio::sync::RwLock;
 use tokio_stream::StreamExt;
 
 const SUB_LOG_TARGET: &str = "psbt-signer";
+const CACHE_CAPACITY: usize = 10;
 
 /// The essential task that submits signed PSBT's.
 pub struct PsbtSigner<T> {
@@ -34,6 +35,8 @@ pub struct PsbtSigner<T> {
 	btc_network: Network,
 	/// Loop schedule.
 	schedule: Schedule,
+	/// Signed psbt cache.
+	signed: VecDeque<Bytes>,
 }
 
 impl<T: JsonRpcClient> PsbtSigner<T> {
@@ -52,6 +55,7 @@ impl<T: JsonRpcClient> PsbtSigner<T> {
 			migration_sequence,
 			btc_network,
 			schedule: Schedule::from_str(PSBT_SIGNER_SCHEDULE).expect(INVALID_PERIODIC_SCHEDULE),
+			signed: VecDeque::with_capacity(CACHE_CAPACITY),
 		}
 	}
 
@@ -225,15 +229,28 @@ impl<T: 'static + JsonRpcClient> PeriodicWorker for PsbtSigner<T> {
 
 				let mut stream = tokio_stream::iter(unsigned_psbts);
 				while let Some(unsigned_psbt) = stream.next().await {
+					// Skip the unsigned PSBT if it's already signed.
+					if self.signed.contains(&unsigned_psbt) {
+						continue;
+					}
+
+					// Build the unsigned transaction.
 					if let Some((call, metadata)) = self
 						.build_unsigned_tx(&mut Psbt::deserialize(&unsigned_psbt).unwrap())
 						.await
 					{
+						// Send the unsigned transaction.
 						self.request_send_transaction(
 							call,
 							XtRequestMetadata::SubmitSignedPsbt(metadata),
 							SUB_LOG_TARGET,
 						);
+
+						// Cache the signed PSBT.
+						if self.signed.capacity() == self.signed.len() {
+							self.signed.pop_front();
+						}
+						self.signed.push_back(unsigned_psbt);
 					}
 				}
 			}
