@@ -15,7 +15,7 @@ use tokio::sync::RwLock;
 use br_client::{
 	btc::{
 		block::BlockManager,
-		handlers::{Handler as BitcoinHandler, InboundHandler, OutboundHandler, PsbtSigner},
+		handlers::{Handler as BitcoinHandler, InboundHandler, OutboundHandler},
 		storage::keypair::KeypairStorage,
 		storage::pending_outbound::PendingOutboundPool,
 	},
@@ -31,7 +31,8 @@ use br_client::{
 };
 use br_periodic::{
 	traits::PeriodicWorker, BitcoinRollbackVerifier, HeartbeatSender, KeypairMigrator,
-	OraclePriceFeeder, PubKeyPreSubmitter, PubKeySubmitter, RoundupEmitter, SocketRollbackEmitter,
+	OraclePriceFeeder, PsbtSigner, PubKeyPreSubmitter, PubKeySubmitter, RoundupEmitter,
+	SocketRollbackEmitter,
 };
 use br_primitives::{
 	bootstrap::BootstrapSharedData,
@@ -340,7 +341,6 @@ fn construct_btc_deps(
 	let psbt_signer = PsbtSigner::new(
 		bfc_client.clone(),
 		substrate_deps.xt_request_sender.clone(),
-		block_manager.subscribe(),
 		keypair_storage.clone(),
 		migration_sequence.clone(),
 		network,

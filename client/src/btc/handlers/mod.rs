@@ -1,10 +1,8 @@
 mod inbound;
 mod outbound;
-mod psbt_signer;
 
 pub use inbound::*;
 pub use outbound::*;
-pub use psbt_signer::*;
 
 use crate::{
 	btc::{

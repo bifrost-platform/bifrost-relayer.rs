@@ -1,27 +1,22 @@
+use crate::traits::PeriodicWorker;
+use br_client::btc::handlers::XtRequester;
+use br_client::{btc::storage::keypair::KeypairStorage, eth::EthClient};
+use br_primitives::tx::XtRequestMetadata;
+use br_primitives::utils::sub_display_format;
 use br_primitives::{
+	constants::{errors::INVALID_PERIODIC_SCHEDULE, schedule::PSBT_SIGNER_SCHEDULE},
 	substrate::{
 		bifrost_runtime, AccountId20, EthereumSignature, MigrationSequence, SignedPsbtMessage,
 	},
-	tx::{SubmitSignedPsbtMetadata, XtRequest, XtRequestMetadata, XtRequestSender},
-	utils::{convert_ethers_to_ecdsa_signature, hash_bytes, sub_display_format},
+	tx::{SubmitSignedPsbtMetadata, XtRequest, XtRequestSender},
+	utils::{convert_ethers_to_ecdsa_signature, hash_bytes},
 };
-use ethers::{providers::JsonRpcClient, types::Bytes};
+use cron::Schedule;
+use ethers::prelude::{Bytes, JsonRpcClient, H256};
 use miniscript::bitcoin::{Address as BtcAddress, Network, Psbt};
-use sp_core::H256;
 use std::{str::FromStr, sync::Arc};
-use tokio::sync::{broadcast::Receiver, RwLock};
+use tokio::sync::RwLock;
 use tokio_stream::StreamExt;
-
-use crate::{
-	btc::{
-		block::{Event, EventMessage as BTCEventMessage, EventType},
-		handlers::Handler,
-		storage::keypair::KeypairStorage,
-	},
-	eth::EthClient,
-};
-
-use super::XtRequester;
 
 const SUB_LOG_TARGET: &str = "psbt-signer";
 
@@ -31,16 +26,14 @@ pub struct PsbtSigner<T> {
 	client: Arc<EthClient<T>>,
 	/// The unsigned transaction message sender.
 	xt_request_sender: Arc<XtRequestSender>,
-	/// The Bitcoin event receiver.
-	event_receiver: Receiver<BTCEventMessage>,
-	/// The target Bitcoin event.
-	target_event: EventType,
 	/// The public and private keypair local storage.
 	keypair_storage: Arc<RwLock<KeypairStorage>>,
 	/// The migration sequence.
 	migration_sequence: Arc<RwLock<MigrationSequence>>,
 	/// The Bitcoin network.
 	btc_network: Network,
+	/// Loop schedule.
+	schedule: Schedule,
 }
 
 impl<T: JsonRpcClient> PsbtSigner<T> {
@@ -48,7 +41,6 @@ impl<T: JsonRpcClient> PsbtSigner<T> {
 	pub fn new(
 		client: Arc<EthClient<T>>,
 		xt_request_sender: Arc<XtRequestSender>,
-		event_receiver: Receiver<BTCEventMessage>,
 		keypair_storage: Arc<RwLock<KeypairStorage>>,
 		migration_sequence: Arc<RwLock<MigrationSequence>>,
 		btc_network: Network,
@@ -56,11 +48,10 @@ impl<T: JsonRpcClient> PsbtSigner<T> {
 		Self {
 			client,
 			xt_request_sender,
-			event_receiver,
-			target_event: EventType::NewBlock,
 			keypair_storage,
 			migration_sequence,
 			btc_network,
+			schedule: Schedule::from_str(PSBT_SIGNER_SCHEDULE).expect(INVALID_PERIODIC_SCHEDULE),
 		}
 	}
 
@@ -99,7 +90,11 @@ impl<T: JsonRpcClient> PsbtSigner<T> {
 					BtcAddress::from_script(x.script_pubkey.as_script(), self.btc_network).unwrap()
 						== system_vault
 				}) {
-					let log_msg = format!("-[{}] ❕ Only transfer to new system vault is allowed on `UTXOTransfer` sequence: {:?}", sub_display_format(SUB_LOG_TARGET), unsigned_psbt);
+					let log_msg = format!(
+						"-[{}] ❕ Only transfer to new system vault is allowed on `UTXOTransfer` sequence: {:?}",
+						sub_display_format(SUB_LOG_TARGET),
+						unsigned_psbt
+					);
 					log::warn!(target: &self.client.get_chain_name(), "{log_msg}");
 					sentry::capture_message(
 						&format!("[{}]{log_msg}", &self.client.get_chain_name()),
@@ -210,48 +205,38 @@ impl<T: JsonRpcClient> XtRequester<T> for PsbtSigner<T> {
 }
 
 #[async_trait::async_trait]
-impl<T: JsonRpcClient> Handler for PsbtSigner<T> {
+impl<T: 'static + JsonRpcClient> PeriodicWorker for PsbtSigner<T> {
+	fn schedule(&self) -> Schedule {
+		self.schedule.clone()
+	}
+
 	async fn run(&mut self) {
 		loop {
-			let msg = self.event_receiver.recv().await.unwrap();
+			self.wait_until_next_time().await;
 
-			if !self.is_target_event(msg.event_type) {
-				continue;
-			}
-			if !self.is_relay_executive().await {
-				continue;
-			}
+			if self.is_relay_executive().await {
+				let unsigned_psbts = self.get_unsigned_psbts().await;
+				log::info!(
+					target: &self.client.get_chain_name(),
+					"-[{}] 🔐 {} unsigned PSBT exists.",
+					sub_display_format(SUB_LOG_TARGET),
+					unsigned_psbts.len()
+				);
 
-			log::info!(
-				target: &crate::btc::SUB_LOG_TARGET,
-				"-[{}] 📦 Imported #{:?} with target logs({:?})",
-				sub_display_format(SUB_LOG_TARGET),
-				msg.block_number,
-				msg.events.len()
-			);
-
-			let unsigned_psbts = self.get_unsigned_psbts().await;
-			let mut stream = tokio_stream::iter(unsigned_psbts);
-			while let Some(unsigned_psbt) = stream.next().await {
-				if let Some((call, metadata)) =
-					self.build_unsigned_tx(&mut Psbt::deserialize(&unsigned_psbt).unwrap()).await
-				{
-					self.request_send_transaction(
-						call,
-						XtRequestMetadata::SubmitSignedPsbt(metadata),
-						SUB_LOG_TARGET,
-					);
+				let mut stream = tokio_stream::iter(unsigned_psbts);
+				while let Some(unsigned_psbt) = stream.next().await {
+					if let Some((call, metadata)) = self
+						.build_unsigned_tx(&mut Psbt::deserialize(&unsigned_psbt).unwrap())
+						.await
+					{
+						self.request_send_transaction(
+							call,
+							XtRequestMetadata::SubmitSignedPsbt(metadata),
+							SUB_LOG_TARGET,
+						);
+					}
 				}
 			}
 		}
-	}
-
-	async fn process_event(&self, _event_tx: Event) {
-		unreachable!("unimplemented")
-	}
-
-	#[inline]
-	fn is_target_event(&self, event_type: EventType) -> bool {
-		event_type == self.target_event
 	}
 }

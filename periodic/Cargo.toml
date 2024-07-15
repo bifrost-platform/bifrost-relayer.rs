@@ -26,6 +26,7 @@ tokio-stream = { workspace = true }
 bitcoincore-rpc = { workspace = true }
 subxt = { workspace = true }
 array-bytes = { workspace = true }
+miniscript = { workspace = true }
 
 # Bifrost Relayer
 br-cli = { path = "../client/cli", default-features = false }
