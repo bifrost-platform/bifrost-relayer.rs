@@ -25,5 +25,5 @@ pub const MIGRATION_DETECTOR_SCHEDULE: &str = "*/1 * * * * * *";
 /// The schedule definition for presubmission. This will trigger on every hour.
 pub const PRESUBMISSION_SCHEDULE: &str = "0 0 * * * * *";
 
-/// The schedule definition for PSBT signer. This will trigger on every 3rd second.
-pub const PSBT_SIGNER_SCHEDULE: &str = "*/3 * * * * * *";
+/// The schedule definition for PSBT signer. This will trigger on every 9th second.
+pub const PSBT_SIGNER_SCHEDULE: &str = "*/9 * * * * * *";
