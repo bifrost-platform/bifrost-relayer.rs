@@ -42,8 +42,6 @@ pub enum EventType {
 	Inbound,
 	/// An outbound action.
 	Outbound,
-	/// A new block mined.
-	NewBlock,
 }
 
 #[derive(Debug, Clone)]
@@ -84,11 +82,6 @@ impl EventMessage {
 	/// Instantiates an `Outbound` typed `EventMessage` instance.
 	pub fn outbound(block_number: u64) -> Self {
 		Self::new(block_number, EventType::Outbound, vec![])
-	}
-
-	/// Instantiates an `NewBlock` typed `EventMessage` instance.
-	pub fn new_block(block_number: u64) -> Self {
-		Self::new(block_number, EventType::NewBlock, vec![])
 	}
 }
 
@@ -280,11 +273,8 @@ impl<T: JsonRpcClient + 'static> BlockManager<T> {
 		let from_block = self.waiting_block;
 
 		for num in from_block..=to_block {
-			let (mut inbound, mut outbound, new_block) = (
-				EventMessage::inbound(num),
-				EventMessage::outbound(num),
-				EventMessage::new_block(num),
-			);
+			let (mut inbound, mut outbound) =
+				(EventMessage::inbound(num), EventMessage::outbound(num));
 
 			let block_hash = self.get_block_hash(num).await.unwrap();
 			let txs = self.get_block_info_with_txs(&block_hash).await.unwrap().tx;
@@ -313,7 +303,6 @@ impl<T: JsonRpcClient + 'static> BlockManager<T> {
 
 			self.sender.send(inbound).unwrap();
 			self.sender.send(outbound).unwrap();
-			self.sender.send(new_block).unwrap();
 		}
 
 		self.increment_waiting_block(to_block);
