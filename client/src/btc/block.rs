@@ -175,13 +175,14 @@ impl<T: JsonRpcClient + 'static> BlockManager<T> {
 
 	/// Starts the block manager.
 	pub async fn run(&mut self) {
-		self.waiting_block = self.get_block_count().await.unwrap().saturating_add(1);
+		let latest_block = self.get_block_count().await.unwrap();
+		self.waiting_block = latest_block.saturating_add(1);
 
 		log::info!(
 			target: LOG_TARGET,
 			"-[{}] 💤 Idle, best: #{:?}",
 			sub_display_format(SUB_LOG_TARGET),
-			self.waiting_block.saturating_sub(1)
+			latest_block
 		);
 
 		loop {
