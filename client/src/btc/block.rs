@@ -175,13 +175,14 @@ impl<T: JsonRpcClient + 'static> BlockManager<T> {
 
 	/// Starts the block manager.
 	pub async fn run(&mut self) {
-		self.waiting_block = self.get_block_count().await.unwrap();
+		let latest_block = self.get_block_count().await.unwrap();
+		self.waiting_block = latest_block.saturating_add(1);
 
 		log::info!(
 			target: LOG_TARGET,
 			"-[{}] 💤 Idle, best: #{:?}",
 			sub_display_format(SUB_LOG_TARGET),
-			self.waiting_block
+			latest_block
 		);
 
 		loop {
@@ -259,6 +260,9 @@ impl<T: JsonRpcClient + 'static> BlockManager<T> {
 	/// Verifies if the stored waiting block has waited enough.
 	#[inline]
 	fn is_block_confirmed(&self, latest_block_num: u64) -> bool {
+		if self.waiting_block > latest_block_num {
+			return false;
+		}
 		latest_block_num.saturating_sub(self.waiting_block) >= self.block_confirmations
 	}
 
