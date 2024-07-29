@@ -86,13 +86,14 @@ impl<T: JsonRpcClient> EventManager<T> {
 		self.client.verify_chain_id().await;
 		self.client.verify_minimum_balance().await;
 
-		// initialize waiting block to the latest block
-		self.waiting_block = self.client.get_latest_block_number().await;
+		// initialize waiting block to the latest block + 1
+		let latest_block = self.client.get_latest_block_number().await;
+		self.waiting_block = latest_block.saturating_add(U64::from(1u64));
 		log::info!(
 			target: &self.client.get_chain_name(),
 			"-[{}] 💤 Idle, best: #{:?}",
 			sub_display_format(SUB_LOG_TARGET),
-			self.waiting_block
+			latest_block
 		);
 
 		if self.is_balance_sync_enabled {
@@ -178,6 +179,9 @@ impl<T: JsonRpcClient> EventManager<T> {
 	/// Verifies if the stored waiting block has waited enough.
 	#[inline]
 	fn is_block_confirmed(&self, latest_block: U64) -> bool {
+		if self.waiting_block > latest_block {
+			return false;
+		}
 		latest_block.saturating_sub(self.waiting_block) >= self.client.metadata.block_confirmations
 	}
 
