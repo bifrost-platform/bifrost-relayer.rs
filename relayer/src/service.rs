@@ -302,6 +302,7 @@ fn construct_btc_deps(
 		&config.relayer_config.btc_provider.provider,
 		auth,
 		config.relayer_config.btc_provider.wallet.clone(),
+		Some(60),
 	)
 	.expect(INVALID_PROVIDER_URL);
 
