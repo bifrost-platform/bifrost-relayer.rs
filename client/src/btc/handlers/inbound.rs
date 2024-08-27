@@ -86,7 +86,6 @@ impl<T: JsonRpcClient + 'static> InboundHandler<T> {
 		let socket_queue = self.bfc_client.protocol_contracts.socket_queue.as_ref().unwrap();
 
 		let mut slice: [u8; 32] = txid.to_byte_array();
-		slice.reverse();
 
 		let psbt_txid = self
 			.bfc_client
@@ -191,8 +190,11 @@ impl<T: JsonRpcClient + 'static> Handler for InboundHandler<T> {
 		}
 	}
 
-	async fn process_event(&self, event: Event) {
+	async fn process_event(&self, mut event: Event) {
 		if let Some(user_bfc_address) = self.get_user_bfc_address(&event.address).await {
+			// txid from event is in little endian, convert it to big endian
+			event.txid = event.txid.reverse();
+
 			// check if transaction has been submitted to be rollbacked
 			if self.is_rollback_output(event.txid, event.index).await {
 				return;
