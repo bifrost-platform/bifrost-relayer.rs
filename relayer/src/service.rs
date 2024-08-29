@@ -39,8 +39,8 @@ use br_primitives::{
 	cli::{Configuration, HandlerType},
 	constants::{
 		cli::{
-			DEFAULT_GET_LOGS_BATCH_SIZE, DEFAULT_KEYSTORE_PATH, DEFAULT_MIN_PRIORITY_FEE,
-			DEFAULT_PROMETHEUS_PORT,
+			DEFAULT_BITCOIN_BLOCK_CONFIRMATIONS, DEFAULT_GET_LOGS_BATCH_SIZE,
+			DEFAULT_KEYSTORE_PATH, DEFAULT_MIN_PRIORITY_FEE, DEFAULT_PROMETHEUS_PORT,
 		},
 		errors::{
 			INVALID_BIFROST_NATIVENESS, INVALID_BITCOIN_NETWORK, INVALID_CHAIN_ID,
@@ -325,6 +325,11 @@ fn construct_btc_deps(
 		pending_outbounds.clone(),
 		bootstrap_shared_data.clone(),
 		config.relayer_config.btc_provider.call_interval.clone(),
+		config
+			.relayer_config
+			.btc_provider
+			.block_confirmations
+			.unwrap_or(DEFAULT_BITCOIN_BLOCK_CONFIRMATIONS),
 	);
 	let inbound = InboundHandler::new(
 		bfc_client.clone(),
