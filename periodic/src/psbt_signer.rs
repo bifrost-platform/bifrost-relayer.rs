@@ -5,11 +5,9 @@ use br_client::{
 };
 use br_primitives::{
 	constants::{errors::INVALID_PERIODIC_SCHEDULE, schedule::PSBT_SIGNER_SCHEDULE},
-	substrate::{
-		bifrost_runtime, AccountId20, EthereumSignature, MigrationSequence, SignedPsbtMessage,
-	},
+	substrate::{bifrost_runtime, MigrationSequence, SignedPsbtMessage},
 	tx::{SubmitSignedPsbtMetadata, XtRequest, XtRequestMetadata, XtRequestSender},
-	utils::{convert_ethers_to_ecdsa_signature, hash_bytes, sub_display_format},
+	utils::{hash_bytes, sub_display_format},
 };
 use cron::Schedule;
 use ethers::prelude::{Bytes, JsonRpcClient, H256};
@@ -74,13 +72,10 @@ impl<T: JsonRpcClient> PsbtSigner<T> {
 	}
 
 	/// Build the payload for the unsigned transaction. (`submit_signed_psbt()`)
-	async fn build_payload(
-		&self,
-		unsigned_psbt: &mut Psbt,
-	) -> Option<(SignedPsbtMessage<AccountId20>, EthereumSignature)> {
+	async fn build_payload(&self, unsigned_psbt: &mut Psbt) -> Option<SignedPsbtMessage> {
 		match *self.migration_sequence.read().await {
 			MigrationSequence::Normal => {},
-			MigrationSequence::PrepareNextSystemVault => {
+			MigrationSequence::SetExecutiveMembers | MigrationSequence::PrepareNextSystemVault => {
 				return None;
 			},
 			MigrationSequence::UTXOTransfer => {
@@ -121,14 +116,10 @@ impl<T: JsonRpcClient> PsbtSigner<T> {
 			}
 
 			let msg = SignedPsbtMessage {
-				authority_id: AccountId20(self.client.address().0),
 				unsigned_psbt: unsigned_psbt.serialize(),
 				signed_psbt: signed_psbt.clone(),
 			};
-			let signature = convert_ethers_to_ecdsa_signature(
-				self.client.wallet.sign_message(signed_psbt.as_ref()),
-			);
-			return Some((msg, signature));
+			return Some(msg);
 		}
 		log::warn!(
 			target: &self.client.get_chain_name(),
@@ -144,12 +135,10 @@ impl<T: JsonRpcClient> PsbtSigner<T> {
 		&self,
 		unsigned_psbt: &mut Psbt,
 	) -> Option<(XtRequest, SubmitSignedPsbtMetadata)> {
-		if let Some((msg, signature)) = self.build_payload(unsigned_psbt).await {
+		if let Some(msg) = self.build_payload(unsigned_psbt).await {
 			let metadata = SubmitSignedPsbtMetadata::new(hash_bytes(&msg.unsigned_psbt));
 			return Some((
-				XtRequest::from(
-					bifrost_runtime::tx().btc_socket_queue().submit_signed_psbt(msg, signature),
-				),
+				XtRequest::from(bifrost_runtime::tx().btc_socket_queue().submit_signed_psbt(msg)),
 				metadata,
 			));
 		}

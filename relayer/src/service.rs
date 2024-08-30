@@ -27,7 +27,7 @@ use br_client::{
 		wallet::WalletManager,
 		EthClient,
 	},
-	substrate::tx::UnsignedTransactionManager,
+	substrate::tx::ExtrinsicManager,
 };
 use br_periodic::{
 	traits::PeriodicWorker, BitcoinRollbackVerifier, HeartbeatSender, KeypairMigrator,
@@ -373,12 +373,12 @@ fn construct_substrate_deps(
 		.expect(INVALID_BIFROST_NATIVENESS)
 		.clone();
 
-	let (unsigned_tx_manager, sender) =
-		UnsignedTransactionManager::new(bfc_client.clone(), task_manager.spawn_handle());
+	let (xt_manager, sender) =
+		ExtrinsicManager::new(bfc_client.clone(), task_manager.spawn_handle());
 
 	let xt_request_sender = Arc::new(XtRequestSender::new(sender));
 
-	SubstrateDeps { unsigned_tx_manager, xt_request_sender }
+	SubstrateDeps { xt_manager, xt_request_sender }
 }
 
 /// Spawn relayer service tasks by the `TaskManager`.
@@ -410,7 +410,7 @@ fn spawn_relayer_tasks(
 		..
 	} = periodic_deps;
 	let HandlerDeps { socket_relay_handlers, roundup_relay_handlers } = handler_deps;
-	let SubstrateDeps { mut unsigned_tx_manager, .. } = substrate_deps;
+	let SubstrateDeps { mut xt_manager, .. } = substrate_deps;
 	let BtcDeps {
 		mut outbound,
 		mut inbound,
@@ -456,11 +456,11 @@ fn spawn_relayer_tasks(
 			async move { tx_manager.run().await },
 		)
 	});
-	// spawn unsigned transaction manager
+	// spawn extrinsic manager
 	task_manager.spawn_essential_handle().spawn(
-		"unsigned-transaction-manager",
+		"extrinsic-manager",
 		Some("transaction-managers"),
-		async move { unsigned_tx_manager.run().await },
+		async move { xt_manager.run().await },
 	);
 
 	// spawn heartbeat sender
@@ -757,8 +757,8 @@ struct BtcDeps {
 }
 
 struct SubstrateDeps {
-	/// The `UnsignedTransactionManager` for Bifrost.
-	unsigned_tx_manager: UnsignedTransactionManager<Http>,
+	/// The `ExtrinsicManager` for Bifrost.
+	xt_manager: ExtrinsicManager<Http>,
 	/// The `XtRequestSender` for Bifrost.
 	xt_request_sender: Arc<XtRequestSender>,
 }

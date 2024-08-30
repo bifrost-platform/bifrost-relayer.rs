@@ -9,10 +9,10 @@ use br_primitives::{
 		bifrost_runtime::{
 			self, btc_registration_pool::storage::types::service_state::ServiceState,
 		},
-		AccountId20, EthereumSignature, MigrationSequence, Public, VaultKeySubmission,
+		AccountId20, MigrationSequence, Public, VaultKeySubmission,
 	},
 	tx::{SubmitVaultKeyMetadata, XtRequest, XtRequestMessage, XtRequestMetadata, XtRequestSender},
-	utils::{convert_ethers_to_ecdsa_signature, sub_display_format},
+	utils::sub_display_format,
 };
 use cron::Schedule;
 use ethers::{
@@ -123,22 +123,10 @@ impl<T: JsonRpcClient> PubKeySubmitter<T> {
 		&self,
 		who: Address,
 		pub_key: PublicKey,
-	) -> (VaultKeySubmission<AccountId20>, EthereumSignature) {
+	) -> VaultKeySubmission<bifrost_runtime::runtime_types::fp_account::AccountId20> {
 		let mut converted_pub_key = [0u8; 33];
 		converted_pub_key.copy_from_slice(&pub_key.to_bytes());
-		// submit public key
-		let msg = VaultKeySubmission {
-			authority_id: AccountId20(self.client.address().0),
-			who: AccountId20(who.0),
-			pub_key: Public(converted_pub_key),
-		};
-		let signature = convert_ethers_to_ecdsa_signature(
-			self.client
-				.wallet
-				.sign_message(&array_bytes::bytes2hex("0x", converted_pub_key).as_bytes()),
-		);
-
-		(msg, signature)
+		VaultKeySubmission { who: AccountId20(who.0).into(), pub_key: Public(converted_pub_key) }
 	}
 
 	/// Build the calldata for the unsigned transaction.
@@ -148,21 +136,19 @@ impl<T: JsonRpcClient> PubKeySubmitter<T> {
 		who: Address,
 		pub_key: PublicKey,
 	) -> (XtRequest, SubmitVaultKeyMetadata) {
-		let (msg, signature) = self.build_payload(who, pub_key);
+		let msg = self.build_payload(who, pub_key);
 		let metadata = SubmitVaultKeyMetadata::new(who, pub_key);
 		if self.is_system_vault(who) {
 			(
 				XtRequest::from(
-					bifrost_runtime::tx()
-						.btc_registration_pool()
-						.submit_system_vault_key(msg, signature),
+					bifrost_runtime::tx().btc_registration_pool().submit_system_vault_key(msg),
 				),
 				metadata,
 			)
 		} else {
 			(
 				XtRequest::from(
-					bifrost_runtime::tx().btc_registration_pool().submit_vault_key(msg, signature),
+					bifrost_runtime::tx().btc_registration_pool().submit_vault_key(msg),
 				),
 				metadata,
 			)

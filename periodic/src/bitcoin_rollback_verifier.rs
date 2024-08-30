@@ -13,9 +13,9 @@ use br_primitives::{
 		tx::{DEFAULT_CALL_RETRIES, DEFAULT_CALL_RETRY_INTERVAL_MS},
 	},
 	contracts::socket_queue::SocketQueueContract,
-	substrate::{bifrost_runtime, AccountId20, EthereumSignature, RollbackPollMessage},
+	substrate::{bifrost_runtime, RollbackPollMessage},
 	tx::{SubmitRollbackPollMetadata, XtRequest, XtRequestMetadata, XtRequestSender},
-	utils::{convert_ethers_to_ecdsa_signature, sub_display_format},
+	utils::sub_display_format,
 };
 use cron::Schedule;
 use ethers::{
@@ -239,34 +239,16 @@ impl<T: JsonRpcClient> BitcoinRollbackVerifier<T> {
 		return false;
 	}
 
-	/// Build the payload for the unsigned transaction. (`submit_rollback_poll()`)
-	fn build_payload(
-		&self,
-		txid: H256,
-		is_approved: bool,
-	) -> (RollbackPollMessage<AccountId20>, EthereumSignature) {
-		let msg = RollbackPollMessage {
-			authority_id: AccountId20(self.bfc_client.address().0),
-			txid,
-			is_approved,
-		};
-		let signature =
-			convert_ethers_to_ecdsa_signature(self.bfc_client.wallet.sign_message(txid.as_bytes()));
-		return (msg, signature);
-	}
-
 	/// Build the calldata for the unsigned transaction. (`submit_rollback_poll()`)
 	fn build_unsigned_tx(
 		&self,
 		txid: H256,
 		is_approved: bool,
 	) -> (XtRequest, SubmitRollbackPollMetadata) {
-		let (msg, signature) = self.build_payload(txid, is_approved);
+		let msg = RollbackPollMessage { txid, is_approved };
 		let metadata = SubmitRollbackPollMetadata::new(txid, is_approved);
 		return (
-			XtRequest::from(
-				bifrost_runtime::tx().btc_socket_queue().submit_rollback_poll(msg, signature),
-			),
+			XtRequest::from(bifrost_runtime::tx().btc_socket_queue().submit_rollback_poll(msg)),
 			metadata,
 		);
 	}

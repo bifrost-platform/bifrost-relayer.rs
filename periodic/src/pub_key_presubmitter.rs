@@ -9,14 +9,13 @@ use br_primitives::{
 	substrate::{
 		bifrost_runtime,
 		bifrost_runtime::btc_registration_pool::storage::types::service_state::ServiceState,
-		AccountId20, CustomConfig, EthereumSignature, MigrationSequence, Public,
-		VaultKeyPreSubmission,
+		AccountId20, CustomConfig, MigrationSequence, Public,
 	},
 	tx::{
 		VaultKeyPresubmissionMetadata, XtRequest, XtRequestMessage, XtRequestMetadata,
 		XtRequestSender,
 	},
-	utils::{convert_ethers_to_ecdsa_signature, sub_display_format},
+	utils::sub_display_format,
 };
 use cron::Schedule;
 use ethers::prelude::JsonRpcClient;
@@ -111,23 +110,18 @@ impl<T: JsonRpcClient + 'static> PubKeyPreSubmitter<T> {
 		&self,
 		pub_keys: Vec<PublicKey>,
 	) -> (XtRequest, VaultKeyPresubmissionMetadata) {
-		let (msg, signature) = self.build_payload(&pub_keys);
+		let msg = self.build_payload(&pub_keys);
 		let metadata = VaultKeyPresubmissionMetadata { keys: pub_keys.len() };
 
 		(
 			XtRequest::from(
-				bifrost_runtime::tx()
-					.btc_registration_pool()
-					.vault_key_presubmission(msg, signature),
+				bifrost_runtime::tx().btc_registration_pool().vault_key_presubmission(msg),
 			),
 			metadata,
 		)
 	}
 
-	fn build_payload(
-		&self,
-		pub_keys: &Vec<PublicKey>,
-	) -> (VaultKeyPreSubmission<AccountId20>, EthereumSignature) {
+	fn build_payload(&self, pub_keys: &Vec<PublicKey>) -> Vec<Public> {
 		let converted_pub_keys = pub_keys
 			.iter()
 			.map(|k| {
@@ -137,22 +131,7 @@ impl<T: JsonRpcClient + 'static> PubKeyPreSubmitter<T> {
 			})
 			.collect::<Vec<[u8; 33]>>();
 
-		let msg = VaultKeyPreSubmission {
-			authority_id: AccountId20(self.bfc_client.address().0),
-			pub_keys: converted_pub_keys.iter().map(|x| Public(*x)).collect(),
-		};
-		let signature = convert_ethers_to_ecdsa_signature(
-			self.bfc_client.wallet.sign_message(
-				&converted_pub_keys
-					.iter()
-					.map(|x| array_bytes::bytes2hex("0x", *x))
-					.collect::<Vec<String>>()
-					.concat()
-					.as_bytes(),
-			),
-		);
-
-		(msg, signature)
+		converted_pub_keys.iter().map(|x| Public(*x)).collect()
 	}
 
 	/// Send the transaction request message to the channel.
@@ -230,7 +209,7 @@ impl<T: JsonRpcClient + 'static> PubKeyPreSubmitter<T> {
 			match storage
 				.fetch(&bifrost_runtime::storage().btc_registration_pool().pre_submitted_pub_keys(
 					self.get_current_round().await,
-					AccountId20(self.bfc_client.address().0),
+					&AccountId20(self.bfc_client.address().0).into(),
 				))
 				.await
 			{

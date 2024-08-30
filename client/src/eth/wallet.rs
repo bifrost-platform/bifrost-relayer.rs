@@ -12,6 +12,7 @@ use k256::{
 	PublicKey as K256PublicKey,
 };
 use sha3::{Digest, Keccak256};
+use subxt_signer::eth::Keypair;
 
 type WalletResult<T = ()> = Result<T, Box<dyn std::error::Error + Send + Sync>>;
 
@@ -21,6 +22,7 @@ type WalletResult<T = ()> = Result<T, Box<dyn std::error::Error + Send + Sync>>;
 pub struct WalletManager {
 	/// The wallet instantiated with a locally stored private key.
 	pub signer: ethers::signers::Wallet<SigningKey>,
+	pub subxt_signer: Keypair,
 	/// The ECDSA/secp256k1 signing key.
 	secret_key: Option<K256SigningKey>,
 }
@@ -37,7 +39,11 @@ impl WalletManager {
 			.expect(INVALID_PRIVATE_KEY);
 		let signing_key = K256SigningKey::from_bytes(&pk_bytes.into()).expect(INVALID_PRIVATE_KEY);
 
-		Ok(Self { signer: wallet.with_chain_id(chain_id), secret_key: Some(signing_key) })
+		Ok(Self {
+			signer: wallet.with_chain_id(chain_id),
+			subxt_signer: Keypair::from_secret_key(pk_bytes).expect(INVALID_PRIVATE_KEY),
+			secret_key: Some(signing_key),
+		})
 	}
 
 	/// Signs the given message and returns the generated signature.

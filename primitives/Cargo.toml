@@ -27,5 +27,6 @@ tokio = { workspace = true, features = [
 ] }
 miniscript = { workspace = true }
 subxt = { workspace = true }
+subxt-signer = { workspace = true, features = ["unstable-eth"] }
 bitcoincore-rpc = { workspace = true }
 url = { workspace = true }
