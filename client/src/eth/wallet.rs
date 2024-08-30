@@ -22,6 +22,7 @@ type WalletResult<T = ()> = Result<T, Box<dyn std::error::Error + Send + Sync>>;
 pub struct WalletManager {
 	/// The wallet instantiated with a locally stored private key.
 	pub signer: ethers::signers::Wallet<SigningKey>,
+	/// The signer used when sending Substrate extrinsics.
 	pub subxt_signer: Keypair,
 	/// The ECDSA/secp256k1 signing key.
 	secret_key: Option<K256SigningKey>,
