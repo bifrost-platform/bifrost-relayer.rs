@@ -190,7 +190,7 @@ impl<T: JsonRpcClient + 'static> PeriodicWorker for BitcoinRollbackVerifier<T> {
 					}
 
 					// build payload
-					let (call, metadata) = self.build_unsigned_tx(txid, is_approved);
+					let (call, metadata) = self.build_extrinsic(txid, is_approved);
 					self.request_send_transaction(
 						call,
 						XtRequestMetadata::SubmitRollbackPoll(metadata),
@@ -240,7 +240,7 @@ impl<T: JsonRpcClient + 'static> BitcoinRollbackVerifier<T> {
 	}
 
 	/// Build the calldata for the extrinsic. (`submit_rollback_poll()`)
-	fn build_unsigned_tx(
+	fn build_extrinsic(
 		&self,
 		txid: H256,
 		is_approved: bool,

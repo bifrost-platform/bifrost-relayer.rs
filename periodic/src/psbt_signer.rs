@@ -131,7 +131,7 @@ impl<T: 'static + JsonRpcClient> PsbtSigner<T> {
 	}
 
 	/// Build the calldata for the extrinsic. (`submit_signed_psbt()`)
-	async fn build_unsigned_tx(
+	async fn build_extrinsic(
 		&self,
 		unsigned_psbt: &mut Psbt,
 	) -> Option<(XtRequest, SubmitSignedPsbtMetadata)> {
@@ -215,9 +215,8 @@ impl<T: 'static + JsonRpcClient> PeriodicWorker for PsbtSigner<T> {
 				let mut stream = tokio_stream::iter(unsigned_psbts);
 				while let Some(unsigned_psbt) = stream.next().await {
 					// Build the extrinsic.
-					if let Some((call, metadata)) = self
-						.build_unsigned_tx(&mut Psbt::deserialize(&unsigned_psbt).unwrap())
-						.await
+					if let Some((call, metadata)) =
+						self.build_extrinsic(&mut Psbt::deserialize(&unsigned_psbt).unwrap()).await
 					{
 						// Send the extrinsic.
 						self.request_send_transaction(

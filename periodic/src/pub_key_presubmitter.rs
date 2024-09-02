@@ -65,7 +65,7 @@ impl<T: JsonRpcClient + 'static> PeriodicWorker for PubKeyPreSubmitter<T> {
 						n,
 					);
 
-					let (call, metadata) = self.build_unsigned_tx(self.create_pub_keys(n).await);
+					let (call, metadata) = self.build_extrinsic(self.create_pub_keys(n).await);
 					self.request_send_transaction(call, metadata);
 				}
 			}
@@ -106,7 +106,7 @@ impl<T: JsonRpcClient + 'static> PubKeyPreSubmitter<T> {
 		);
 	}
 
-	fn build_unsigned_tx(
+	fn build_extrinsic(
 		&self,
 		pub_keys: Vec<PublicKey>,
 	) -> (XtRequest, VaultKeyPresubmissionMetadata) {

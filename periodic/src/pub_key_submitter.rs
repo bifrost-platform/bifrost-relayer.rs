@@ -91,7 +91,7 @@ impl<T: JsonRpcClient + 'static> PeriodicWorker for PubKeySubmitter<T> {
 					}
 
 					let pub_key = self.keypair_storage.write().await.create_new_keypair().await;
-					let (call, metadata) = self.build_unsigned_tx(who, pub_key);
+					let (call, metadata) = self.build_extrinsic(who, pub_key);
 					self.request_send_transaction(call, metadata);
 				}
 			}
@@ -131,7 +131,7 @@ impl<T: JsonRpcClient + 'static> PubKeySubmitter<T> {
 
 	/// Build the calldata for the extrinsic.
 	/// (`submit_vault_key()` or `submit_system_vault_key()`)
-	fn build_unsigned_tx(
+	fn build_extrinsic(
 		&self,
 		who: Address,
 		pub_key: PublicKey,
