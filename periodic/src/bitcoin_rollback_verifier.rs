@@ -220,6 +220,12 @@ impl<T: JsonRpcClient> BitcoinRollbackVerifier<T> {
 
 	/// Verifies whether the pending request information matches with on-chain data.
 	fn is_rollback_valid(&self, tx: GetRawTransactionResult, request: &RollbackRequest) -> bool {
+		// confirmations must be satisfied (we consider at least 6 blocks of confirmation)
+		if let Some(confirmations) = tx.confirmations {
+			if confirmations < 6 {
+				return false;
+			}
+		}
 		// output[index] must exist
 		if tx.vout.len() < request.vout {
 			return false;
