@@ -62,13 +62,13 @@ pub trait XtRequester<T: JsonRpcClient> {
 		match self.xt_request_sender().send(msg) {
 			Ok(_) => log::info!(
 				target: &self.bfc_client().get_chain_name(),
-				"-[{}] 🔖 Request unsigned transaction: {}",
+				"-[{}] 🔖 Request extrinsic: {}",
 				sub_display_format(sub_log_target),
 				metadata
 			),
 			Err(error) => {
 				let log_msg = format!(
-					"-[{}]-[{}] ❗️ Failed to send unsigned transaction: {}, Error: {}",
+					"-[{}]-[{}] ❗️ Failed to send extrinsic: {}, Error: {}",
 					sub_display_format(sub_log_target),
 					self.bfc_client().address(),
 					metadata,

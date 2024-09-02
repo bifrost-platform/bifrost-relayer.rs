@@ -22,7 +22,7 @@ const SUB_LOG_TARGET: &str = "psbt-signer";
 pub struct PsbtSigner<T> {
 	/// The Bifrost client.
 	client: Arc<EthClient<T>>,
-	/// The unsigned transaction message sender.
+	/// The extrinsic message sender.
 	xt_request_sender: Arc<XtRequestSender>,
 	/// The public and private keypair local storage.
 	keypair_storage: Arc<RwLock<KeypairStorage>>,
@@ -71,7 +71,7 @@ impl<T: JsonRpcClient> PsbtSigner<T> {
 			.await
 	}
 
-	/// Build the payload for the unsigned transaction. (`submit_signed_psbt()`)
+	/// Build the payload for the extrinsic. (`submit_signed_psbt()`)
 	async fn build_payload(&self, unsigned_psbt: &mut Psbt) -> Option<SignedPsbtMessage> {
 		match *self.migration_sequence.read().await {
 			MigrationSequence::Normal => {},
@@ -79,7 +79,7 @@ impl<T: JsonRpcClient> PsbtSigner<T> {
 				return None;
 			},
 			MigrationSequence::UTXOTransfer => {
-				// Ensure that the unsigned transaction is for the system vault.
+				// Ensure that the extrinsic is for the system vault.
 				let system_vault = self.get_system_vault(self.get_current_round().await + 1).await;
 				if !unsigned_psbt.unsigned_tx.output.iter().all(|x| {
 					BtcAddress::from_script(x.script_pubkey.as_script(), self.btc_network).unwrap()
@@ -130,7 +130,7 @@ impl<T: JsonRpcClient> PsbtSigner<T> {
 		None
 	}
 
-	/// Build the calldata for the unsigned transaction. (`submit_signed_psbt()`)
+	/// Build the calldata for the extrinsic. (`submit_signed_psbt()`)
 	async fn build_unsigned_tx(
 		&self,
 		unsigned_psbt: &mut Psbt,
@@ -214,12 +214,12 @@ impl<T: 'static + JsonRpcClient> PeriodicWorker for PsbtSigner<T> {
 
 				let mut stream = tokio_stream::iter(unsigned_psbts);
 				while let Some(unsigned_psbt) = stream.next().await {
-					// Build the unsigned transaction.
+					// Build the extrinsic.
 					if let Some((call, metadata)) = self
 						.build_unsigned_tx(&mut Psbt::deserialize(&unsigned_psbt).unwrap())
 						.await
 					{
-						// Send the unsigned transaction.
+						// Send the extrinsic.
 						self.request_send_transaction(
 							call,
 							XtRequestMetadata::SubmitSignedPsbt(metadata),

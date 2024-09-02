@@ -29,7 +29,7 @@ const SUB_LOG_TARGET: &str = "pubkey-submitter";
 pub struct PubKeySubmitter<T> {
 	/// The Bifrost client.
 	client: Arc<EthClient<T>>,
-	/// The unsigned transaction message sender.
+	/// The extrinsic message sender.
 	xt_request_sender: Arc<XtRequestSender>,
 	/// The public and private keypair local storage.
 	keypair_storage: Arc<RwLock<KeypairStorage>>,
@@ -117,7 +117,7 @@ impl<T: JsonRpcClient> PubKeySubmitter<T> {
 		}
 	}
 
-	/// Build the payload for the unsigned transaction.
+	/// Build the payload for the extrinsic.
 	/// (`submit_vault_key()` or `submit_system_vault_key()`)
 	fn build_payload(
 		&self,
@@ -129,7 +129,7 @@ impl<T: JsonRpcClient> PubKeySubmitter<T> {
 		VaultKeySubmission { who: AccountId20(who.0).into(), pub_key: Public(converted_pub_key) }
 	}
 
-	/// Build the calldata for the unsigned transaction.
+	/// Build the calldata for the extrinsic.
 	/// (`submit_vault_key()` or `submit_system_vault_key()`)
 	fn build_unsigned_tx(
 		&self,
@@ -163,13 +163,13 @@ impl<T: JsonRpcClient> PubKeySubmitter<T> {
 		{
 			Ok(_) => log::info!(
 				target: &self.client.get_chain_name(),
-				"-[{}] 🔖 Request unsigned transaction: {}",
+				"-[{}] 🔖 Request extrinsic: {}",
 				sub_display_format(SUB_LOG_TARGET),
 				metadata
 			),
 			Err(error) => {
 				let log_msg = format!(
-					"-[{}]-[{}] ❗️ Failed to send unsigned transaction: {}, Error: {}",
+					"-[{}]-[{}] ❗️ Failed to send extrinsic: {}, Error: {}",
 					sub_display_format(SUB_LOG_TARGET),
 					self.client.address(),
 					metadata,

@@ -90,7 +90,7 @@ pub struct BitcoinRollbackVerifier<T> {
 	btc_client: BtcClient,
 	/// The Bifrost client.
 	bfc_client: Arc<EthClient<T>>,
-	/// The unsigned transaction message sender.
+	/// The extrinsic message sender.
 	xt_request_sender: Arc<XtRequestSender>,
 	/// The periodic schedule.
 	schedule: Schedule,
@@ -239,7 +239,7 @@ impl<T: JsonRpcClient> BitcoinRollbackVerifier<T> {
 		return false;
 	}
 
-	/// Build the calldata for the unsigned transaction. (`submit_rollback_poll()`)
+	/// Build the calldata for the extrinsic. (`submit_rollback_poll()`)
 	fn build_unsigned_tx(
 		&self,
 		txid: H256,

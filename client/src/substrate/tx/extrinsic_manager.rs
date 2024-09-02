@@ -58,7 +58,7 @@ impl<T: 'static + JsonRpcClient> ExtrinsicManager<T> {
 		while let Some(msg) = self.receiver.recv().await {
 			log::info!(
 				target: &self.bfc_client.get_chain_name(),
-				"-[{}] 🔖 Received unsigned transaction request: {}",
+				"-[{}] 🔖 Received extrinsic request: {}",
 				sub_display_format(SUB_LOG_TARGET),
 				msg.metadata,
 			);

@@ -29,7 +29,7 @@ pub struct PubKeyPreSubmitter<T> {
 	bfc_client: Arc<EthClient<T>>,
 	/// The Bifrost client.
 	sub_client: Option<OnlineClient<CustomConfig>>,
-	/// The unsigned transaction message sender.
+	/// The extrinsic message sender.
 	xt_request_sender: Arc<XtRequestSender>,
 	/// The public and private keypair local storage.
 	keypair_storage: Arc<RwLock<KeypairStorage>>,
@@ -142,13 +142,13 @@ impl<T: JsonRpcClient + 'static> PubKeyPreSubmitter<T> {
 		)) {
 			Ok(_) => log::info!(
 				target: &self.bfc_client.get_chain_name(),
-				"-[{}] 🔖 Request unsigned transaction: {}",
+				"-[{}] 🔖 Request extrinsic: {}",
 				sub_display_format(SUB_LOG_TARGET),
 				metadata
 			),
 			Err(error) => {
 				let log_msg = format!(
-					"-[{}]-[{}] ❗️ Failed to send unsigned transaction: {}, Error: {}",
+					"-[{}]-[{}] ❗️ Failed to send extrinsic: {}, Error: {}",
 					sub_display_format(SUB_LOG_TARGET),
 					self.bfc_client.address(),
 					metadata,
