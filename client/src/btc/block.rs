@@ -326,13 +326,10 @@ impl<T: JsonRpcClient + 'static> BlockManager<T> {
 		let mut stream = tokio_stream::iter(vouts.iter());
 		while let Some(vout) = stream.next().await {
 			if let Some(address) = vout.script_pub_key.address.clone() {
+				// address can only be contained in either one set.
 				if vault_set.contains(&address) {
-					inbound_events.push(Event {
-						txid,
-						index: vout.n,
-						address: address.clone(),
-						amount: vout.value,
-					});
+					inbound_events.push(Event { txid, index: vout.n, address, amount: vout.value });
+					continue;
 				}
 				if refund_set.contains(&address) {
 					outbound_events.push(Event {
