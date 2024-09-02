@@ -364,10 +364,10 @@ impl<T: 'static + JsonRpcClient> SocketRelayHandler<T> {
 		let src = ChainID::from_be_bytes(req_id.chain);
 		let dst = ChainID::from_be_bytes(ins_code.chain);
 
-		// if inbound::accepted/reverted and relaying to bitcoin we consider as ended
+		// if inbound::accepted and relaying to bitcoin we consider as ended
 		if let Some(bitcoin_chain_id) = self.client.get_bitcoin_chain_id() {
 			if self.is_inbound_sequence(dst) && bitcoin_chain_id == src {
-				return matches!(status, SocketEventStatus::Accepted | SocketEventStatus::Reverted);
+				return matches!(status, SocketEventStatus::Accepted);
 			}
 		}
 
