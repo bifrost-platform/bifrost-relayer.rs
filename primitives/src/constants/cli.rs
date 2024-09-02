@@ -7,6 +7,9 @@ pub const DEFAULT_BOOTSTRAP_ROUND_OFFSET: u32 = 3;
 /// The default bootstrap offset for Bitcoin (in blocks)
 pub const DEFAULT_BITCOIN_BOOTSTRAP_BLOCK_OFFSET: u32 = 3;
 
+/// The default count required for Bitcoin block confirmations (in blocks)
+pub const DEFAULT_BITCOIN_BLOCK_CONFIRMATIONS: u64 = 0;
+
 /// The default port used for prometheus.
 pub const DEFAULT_PROMETHEUS_PORT: u16 = 8000;
 

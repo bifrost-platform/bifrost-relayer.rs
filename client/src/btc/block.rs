@@ -143,6 +143,7 @@ impl<T: JsonRpcClient + 'static> BlockManager<T> {
 		_pending_outbounds: PendingOutboundPool,
 		bootstrap_shared_data: Arc<BootstrapSharedData>,
 		call_interval: u64,
+		block_confirmations: u64,
 	) -> Self {
 		let (sender, _receiver) = broadcast::channel(512);
 
@@ -159,8 +160,8 @@ impl<T: JsonRpcClient + 'static> BlockManager<T> {
 			btc_client,
 			bfc_client,
 			sender,
-			block_confirmations: 0,
-			waiting_block: 0,
+			block_confirmations,
+			waiting_block: Default::default(),
 			call_interval,
 			bootstrap_shared_data,
 			bootstrap_offset,

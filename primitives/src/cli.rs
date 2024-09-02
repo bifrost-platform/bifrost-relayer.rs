@@ -137,6 +137,8 @@ pub struct BTCProvider {
 	pub provider: String,
 	/// The time interval(ms) used when to request a new block
 	pub call_interval: u64,
+	/// The number of confirmations required for a block to be processed.
+	pub block_confirmations: Option<u64>,
 	/// The chain network. (Allowed values: `main`, `test`, `signet`, `regtest`)
 	pub chain: String,
 	/// Optional. The provider username credential.
