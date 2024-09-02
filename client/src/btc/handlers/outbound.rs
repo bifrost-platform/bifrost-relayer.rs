@@ -40,7 +40,7 @@ pub struct OutboundHandler<T> {
 	bootstrap_shared_data: Arc<BootstrapSharedData>,
 }
 
-impl<T: JsonRpcClient> OutboundHandler<T> {
+impl<T: JsonRpcClient + 'static> OutboundHandler<T> {
 	pub fn new(
 		bfc_client: Arc<EthClient<T>>,
 		tx_request_sender: Arc<TxRequestSender>,
@@ -79,7 +79,7 @@ impl<T: JsonRpcClient> OutboundHandler<T> {
 }
 
 #[async_trait::async_trait]
-impl<T: JsonRpcClient> TxRequester<T> for OutboundHandler<T> {
+impl<T: JsonRpcClient + 'static> TxRequester<T> for OutboundHandler<T> {
 	fn tx_request_sender(&self) -> Arc<TxRequestSender> {
 		self.tx_request_sender.clone()
 	}

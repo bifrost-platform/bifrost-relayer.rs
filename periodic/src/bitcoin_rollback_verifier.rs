@@ -118,7 +118,7 @@ impl<C: JsonRpcClient> RpcApi for BitcoinRollbackVerifier<C> {
 }
 
 #[async_trait::async_trait]
-impl<T: JsonRpcClient> XtRequester<T> for BitcoinRollbackVerifier<T> {
+impl<T: JsonRpcClient + 'static> XtRequester<T> for BitcoinRollbackVerifier<T> {
 	fn xt_request_sender(&self) -> Arc<XtRequestSender> {
 		self.xt_request_sender.clone()
 	}
@@ -129,7 +129,7 @@ impl<T: JsonRpcClient> XtRequester<T> for BitcoinRollbackVerifier<T> {
 }
 
 #[async_trait::async_trait]
-impl<T: JsonRpcClient> PeriodicWorker for BitcoinRollbackVerifier<T> {
+impl<T: JsonRpcClient + 'static> PeriodicWorker for BitcoinRollbackVerifier<T> {
 	fn schedule(&self) -> Schedule {
 		self.schedule.clone()
 	}
@@ -202,7 +202,7 @@ impl<T: JsonRpcClient> PeriodicWorker for BitcoinRollbackVerifier<T> {
 	}
 }
 
-impl<T: JsonRpcClient> BitcoinRollbackVerifier<T> {
+impl<T: JsonRpcClient + 'static> BitcoinRollbackVerifier<T> {
 	/// Instantiates a new `BitcoinRollbackVerifier` instance.
 	pub fn new(
 		btc_client: BtcClient,

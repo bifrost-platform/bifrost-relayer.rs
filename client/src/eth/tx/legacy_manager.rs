@@ -15,7 +15,6 @@ use br_primitives::{
 	utils::sub_display_format,
 };
 use ethers::{
-	middleware::{MiddlewareBuilder, NonceManagerMiddleware, SignerMiddleware},
 	providers::{JsonRpcClient, Middleware},
 	types::{BlockId, BlockNumber, Transaction, TransactionRequest, U256},
 };
@@ -37,8 +36,6 @@ const SUB_LOG_TARGET: &str = "legacy-tx-manager";
 pub struct LegacyTransactionManager<T> {
 	/// The ethereum client for the connected chain.
 	pub client: Arc<EthClient<T>>,
-	/// The client signs transaction for the connected chain with local nonce manager.
-	middleware: Arc<TransactionMiddleware<T>>,
 	/// The receiver connected to the tx request channel.
 	receiver: UnboundedReceiver<TxRequestMessage>,
 	/// The flag whether the client has enabled txpool namespace.
@@ -78,15 +75,9 @@ impl<T: 'static + JsonRpcClient> LegacyTransactionManager<T> {
 			}
 		};
 
-		let middleware = client
-			.get_provider()
-			.wrap_into(|p| SignerMiddleware::new(p, client.wallet.signer.clone()))
-			.wrap_into(|p| NonceManagerMiddleware::new(p, client.address()));
-
 		(
 			Self {
 				client,
-				middleware: Arc::new(middleware),
 				receiver,
 				is_txpool_enabled: false,
 				is_initially_escalated,
@@ -134,7 +125,7 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> for LegacyTransactionMana
 	async fn spawn_send_transaction(&self, msg: TxRequestMessage) {
 		let task = LegacyTransactionTask::new(
 			self.get_client(),
-			self.middleware.clone(),
+			self.get_client().middleware.clone(),
 			self.is_txpool_enabled(),
 			self.is_initially_escalated,
 			self.gas_price_coefficient,
@@ -245,7 +236,7 @@ impl<T: JsonRpcClient> LegacyTransactionTask<T> {
 }
 
 #[async_trait::async_trait]
-impl<T: JsonRpcClient> TransactionTask<T> for LegacyTransactionTask<T> {
+impl<T: 'static + JsonRpcClient> TransactionTask<T> for LegacyTransactionTask<T> {
 	fn is_txpool_enabled(&self) -> bool {
 		self.is_txpool_enabled
 	}

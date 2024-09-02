@@ -24,7 +24,7 @@ pub struct KeypairMigrator<T> {
 	schedule: Schedule,
 }
 
-impl<T: JsonRpcClient> KeypairMigrator<T> {
+impl<T: JsonRpcClient + 'static> KeypairMigrator<T> {
 	/// Instantiates a new `KeypairMigrator` instance.
 	pub fn new(
 		bfc_client: Arc<EthClient<T>>,
@@ -127,7 +127,7 @@ impl<T: JsonRpcClient> KeypairMigrator<T> {
 }
 
 #[async_trait::async_trait]
-impl<T: JsonRpcClient> PeriodicWorker for KeypairMigrator<T> {
+impl<T: JsonRpcClient + 'static> PeriodicWorker for KeypairMigrator<T> {
 	fn schedule(&self) -> Schedule {
 		self.schedule.clone()
 	}

@@ -150,7 +150,7 @@ impl<T: 'static + JsonRpcClient> Handler for SocketRelayHandler<T> {
 }
 
 #[async_trait::async_trait]
-impl<T: JsonRpcClient> SocketRelayBuilder<T> for SocketRelayHandler<T> {
+impl<T: 'static + JsonRpcClient> SocketRelayBuilder<T> for SocketRelayHandler<T> {
 	fn get_client(&self) -> Arc<EthClient<T>> {
 		self.client.clone()
 	}

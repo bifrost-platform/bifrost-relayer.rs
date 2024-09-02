@@ -99,7 +99,7 @@ impl<T: JsonRpcClient + 'static> PeriodicWorker for PubKeySubmitter<T> {
 	}
 }
 
-impl<T: JsonRpcClient> PubKeySubmitter<T> {
+impl<T: JsonRpcClient + 'static> PubKeySubmitter<T> {
 	/// Instantiates a new `PubKeySubmitter` instance.
 	pub fn new(
 		client: Arc<EthClient<T>>,

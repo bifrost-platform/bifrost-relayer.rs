@@ -13,7 +13,7 @@ use br_primitives::{
 
 use ethers::{
 	abi::Detokenize,
-	prelude::ContractCall,
+	prelude::{ContractCall, MiddlewareBuilder, NonceManagerMiddleware, SignerMiddleware},
 	providers::{JsonRpcClient, Middleware, Provider},
 	types::{
 		Address, Block, BlockId, Filter, Log, SyncingStatus, Transaction, TransactionReceipt,
@@ -27,6 +27,7 @@ use url::Url;
 
 use self::{
 	traits::{Eip1559GasMiddleware, LegacyGasMiddleware},
+	tx::TransactionMiddleware,
 	wallet::WalletManager,
 };
 
@@ -44,6 +45,8 @@ pub struct EthClient<T> {
 	pub wallet: WalletManager,
 	/// The metadata of the provider.
 	pub metadata: ProviderMetadata,
+	/// The middleware used when signing transactions and nonce management.
+	pub middleware: Arc<TransactionMiddleware<T>>,
 	/// the protocol contract instances of the provider.
 	pub protocol_contracts: ProtocolContracts<T>,
 	/// the aggregator contract instances of the provider.
@@ -55,7 +58,7 @@ pub struct EthClient<T> {
 	debug_mode: bool,
 }
 
-impl<T: JsonRpcClient> EthClient<T> {
+impl<T: 'static + JsonRpcClient> EthClient<T> {
 	/// Instantiates a new `EthClient` instance for the given chain.
 	pub fn new(
 		wallet: WalletManager,
@@ -65,7 +68,21 @@ impl<T: JsonRpcClient> EthClient<T> {
 		aggregator_contracts: AggregatorContracts<T>,
 		debug_mode: bool,
 	) -> Self {
-		Self { wallet, provider, metadata, protocol_contracts, aggregator_contracts, debug_mode }
+		let middleware = Arc::new(
+			provider
+				.clone()
+				.wrap_into(|p| SignerMiddleware::new(p, wallet.signer.clone()))
+				.wrap_into(|p| NonceManagerMiddleware::new(p, wallet.address())),
+		);
+		Self {
+			wallet,
+			provider,
+			metadata,
+			middleware,
+			protocol_contracts,
+			aggregator_contracts,
+			debug_mode,
+		}
 	}
 
 	/// Returns the relayer address.
@@ -298,7 +315,7 @@ impl<T: JsonRpcClient> EthClient<T> {
 }
 
 #[async_trait::async_trait]
-impl<T: JsonRpcClient> LegacyGasMiddleware for EthClient<T> {
+impl<T: 'static + JsonRpcClient> LegacyGasMiddleware for EthClient<T> {
 	async fn get_gas_price(&self) -> U256 {
 		match self.provider.get_gas_price().await {
 			Ok(gas_price) => {
@@ -382,7 +399,7 @@ impl<T: JsonRpcClient> LegacyGasMiddleware for EthClient<T> {
 }
 
 #[async_trait::async_trait]
-impl<T: JsonRpcClient> Eip1559GasMiddleware for EthClient<T> {
+impl<T: 'static + JsonRpcClient> Eip1559GasMiddleware for EthClient<T> {
 	async fn get_estimated_eip1559_fees(&self) -> (U256, U256) {
 		match self.provider.estimate_eip1559_fees(None).await {
 			Ok(fees) => {

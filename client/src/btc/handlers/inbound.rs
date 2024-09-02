@@ -151,7 +151,7 @@ impl<T: JsonRpcClient + 'static> InboundHandler<T> {
 }
 
 #[async_trait::async_trait]
-impl<T: JsonRpcClient> TxRequester<T> for InboundHandler<T> {
+impl<T: JsonRpcClient + 'static> TxRequester<T> for InboundHandler<T> {
 	fn tx_request_sender(&self) -> Arc<TxRequestSender> {
 		self.tx_request_sender.clone()
 	}

@@ -14,7 +14,7 @@ use crate::eth::EthClient;
 #[async_trait::async_trait]
 pub trait ExtrinsicTask<T>
 where
-	T: JsonRpcClient,
+	T: JsonRpcClient + 'static,
 {
 	/// Get the substrate client.
 	fn get_sub_client(&self) -> Arc<OnlineClient<CustomConfig>>;

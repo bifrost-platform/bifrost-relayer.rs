@@ -27,7 +27,7 @@ use std::sync::Arc;
 use super::block::EventMessage;
 
 #[async_trait::async_trait]
-pub trait XtRequester<T: JsonRpcClient> {
+pub trait XtRequester<T: 'static + JsonRpcClient> {
 	fn xt_request_sender(&self) -> Arc<XtRequestSender>;
 
 	fn bfc_client(&self) -> Arc<EthClient<T>>;
@@ -85,7 +85,7 @@ pub trait XtRequester<T: JsonRpcClient> {
 }
 
 #[async_trait::async_trait]
-pub trait TxRequester<T: JsonRpcClient> {
+pub trait TxRequester<T: 'static + JsonRpcClient> {
 	fn tx_request_sender(&self) -> Arc<TxRequestSender>;
 
 	fn bfc_client(&self) -> Arc<EthClient<T>>;

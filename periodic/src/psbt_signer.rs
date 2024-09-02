@@ -34,7 +34,7 @@ pub struct PsbtSigner<T> {
 	schedule: Schedule,
 }
 
-impl<T: JsonRpcClient> PsbtSigner<T> {
+impl<T: 'static + JsonRpcClient> PsbtSigner<T> {
 	/// Instantiates a new `PsbtSigner` instance.
 	pub fn new(
 		client: Arc<EthClient<T>>,
@@ -183,7 +183,7 @@ impl<T: JsonRpcClient> PsbtSigner<T> {
 }
 
 #[async_trait::async_trait]
-impl<T: JsonRpcClient> XtRequester<T> for PsbtSigner<T> {
+impl<T: 'static + JsonRpcClient> XtRequester<T> for PsbtSigner<T> {
 	fn xt_request_sender(&self) -> Arc<XtRequestSender> {
 		self.xt_request_sender.clone()
 	}

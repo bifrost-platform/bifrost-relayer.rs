@@ -93,7 +93,7 @@ impl<T: JsonRpcClient> ExtrinsicTask<T> {
 }
 
 #[async_trait::async_trait]
-impl<T: JsonRpcClient> ExtrinsicTaskT<T> for ExtrinsicTask<T> {
+impl<T: 'static + JsonRpcClient> ExtrinsicTaskT<T> for ExtrinsicTask<T> {
 	fn get_sub_client(&self) -> Arc<OnlineClient<CustomConfig>> {
 		self.sub_client.clone()
 	}
@@ -107,12 +107,14 @@ impl<T: JsonRpcClient> ExtrinsicTaskT<T> for ExtrinsicTask<T> {
 			return;
 		}
 
-		match self
+		let progress = self
 			.sub_client
 			.tx()
 			.sign_and_submit_then_watch_default(&msg.call, &self.bfc_client.wallet.subxt_signer)
-			.await
-		{
+			.await;
+		self.bfc_client.middleware.next();
+
+		match progress {
 			Ok(progress) => match progress.wait_for_finalized_success().await {
 				Ok(events) => {
 					self.handle_success_xt_request(SUB_LOG_TARGET, events, msg.metadata).await

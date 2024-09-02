@@ -53,7 +53,7 @@ pub struct RoundupRelayHandler<T> {
 }
 
 #[async_trait]
-impl<T: JsonRpcClient> Handler for RoundupRelayHandler<T> {
+impl<T: JsonRpcClient + 'static> Handler for RoundupRelayHandler<T> {
 	async fn run(&mut self) {
 		loop {
 			if self.is_bootstrap_state_synced_as(BootstrapState::BootstrapRoundUpPhase2).await {
@@ -145,7 +145,7 @@ impl<T: JsonRpcClient> Handler for RoundupRelayHandler<T> {
 	}
 }
 
-impl<T: JsonRpcClient> RoundupRelayHandler<T> {
+impl<T: JsonRpcClient + 'static> RoundupRelayHandler<T> {
 	/// Instantiates a new `RoundupRelayHandler` instance.
 	pub fn new(
 		mut tx_request_senders_vec: Vec<Arc<TxRequestSender>>,
@@ -353,7 +353,7 @@ impl<T: JsonRpcClient> RoundupRelayHandler<T> {
 }
 
 #[async_trait]
-impl<T: JsonRpcClient> BootstrapHandler for RoundupRelayHandler<T> {
+impl<T: JsonRpcClient + 'static> BootstrapHandler for RoundupRelayHandler<T> {
 	fn bootstrap_shared_data(&self) -> Arc<BootstrapSharedData> {
 		self.bootstrap_shared_data.clone()
 	}

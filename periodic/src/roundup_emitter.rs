@@ -44,7 +44,7 @@ pub struct RoundupEmitter<T> {
 }
 
 #[async_trait::async_trait]
-impl<T: JsonRpcClient> PeriodicWorker for RoundupEmitter<T> {
+impl<T: JsonRpcClient + 'static> PeriodicWorker for RoundupEmitter<T> {
 	fn schedule(&self) -> Schedule {
 		self.schedule.clone()
 	}
@@ -93,7 +93,7 @@ impl<T: JsonRpcClient> PeriodicWorker for RoundupEmitter<T> {
 	}
 }
 
-impl<T: JsonRpcClient> RoundupEmitter<T> {
+impl<T: JsonRpcClient + 'static> RoundupEmitter<T> {
 	/// Instantiates a new `RoundupEmitter` instance.
 	pub fn new(
 		tx_request_senders: Vec<Arc<TxRequestSender>>,
@@ -220,7 +220,7 @@ impl<T: JsonRpcClient> RoundupEmitter<T> {
 }
 
 #[async_trait::async_trait]
-impl<T: JsonRpcClient> BootstrapHandler for RoundupEmitter<T> {
+impl<T: JsonRpcClient + 'static> BootstrapHandler for RoundupEmitter<T> {
 	fn bootstrap_shared_data(&self) -> Arc<BootstrapSharedData> {
 		self.bootstrap_shared_data.clone()
 	}

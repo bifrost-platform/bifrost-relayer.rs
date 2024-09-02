@@ -14,7 +14,6 @@ use br_primitives::{
 	utils::sub_display_format,
 };
 use ethers::{
-	middleware::{MiddlewareBuilder, NonceManagerMiddleware, SignerMiddleware},
 	prelude::Transaction,
 	providers::{JsonRpcClient, Middleware},
 	types::{
@@ -40,8 +39,6 @@ const SUB_LOG_TARGET: &str = "eip1559-tx-manager";
 pub struct Eip1559TransactionManager<T> {
 	/// The ethereum client for the connected chain.
 	pub client: Arc<EthClient<T>>,
-	/// The client signs transaction for the connected chain with local nonce manager.
-	middleware: Arc<TransactionMiddleware<T>>,
 	/// The receiver connected to the tx request channel.
 	receiver: UnboundedReceiver<TxRequestMessage>,
 	/// The flag whether the client has enabled txpool namespace.
@@ -65,17 +62,9 @@ impl<T: 'static + JsonRpcClient> Eip1559TransactionManager<T> {
 	) -> (Self, UnboundedSender<TxRequestMessage>) {
 		let (sender, receiver) = mpsc::unbounded_channel::<TxRequestMessage>();
 
-		let middleware = Arc::new(
-			client
-				.get_provider()
-				.wrap_into(|p| SignerMiddleware::new(p, client.wallet.signer.clone()))
-				.wrap_into(|p| NonceManagerMiddleware::new(p, client.address())),
-		);
-
 		(
 			Self {
 				client,
-				middleware,
 				receiver,
 				is_txpool_enabled: false,
 				min_priority_fee,
@@ -121,7 +110,7 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> for Eip1559TransactionMan
 	async fn spawn_send_transaction(&self, msg: TxRequestMessage) {
 		let task = Eip1559TransactionTask::new(
 			self.get_client(),
-			self.middleware.clone(),
+			self.get_client().middleware.clone(),
 			self.is_txpool_enabled(),
 			self.min_priority_fee,
 			self.duplicate_confirm_delay,
@@ -183,6 +172,7 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> for Eip1559TransactionMan
 		};
 
 		if self
+			.get_client()
 			.middleware
 			.estimate_gas(&TypedTransaction::Eip1559(request.clone()), None)
 			.await
@@ -224,7 +214,7 @@ impl<T: JsonRpcClient> Eip1559TransactionTask<T> {
 }
 
 #[async_trait::async_trait]
-impl<T: JsonRpcClient> TransactionTask<T> for Eip1559TransactionTask<T> {
+impl<T: 'static + JsonRpcClient> TransactionTask<T> for Eip1559TransactionTask<T> {
 	fn is_txpool_enabled(&self) -> bool {
 		self.is_txpool_enabled
 	}

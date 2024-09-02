@@ -63,7 +63,7 @@ pub struct EventManager<T> {
 	is_balance_sync_enabled: bool,
 }
 
-impl<T: JsonRpcClient> EventManager<T> {
+impl<T: JsonRpcClient + 'static> EventManager<T> {
 	/// Instantiates a new `EventManager` instance.
 	pub fn new(
 		client: Arc<EthClient<T>>,

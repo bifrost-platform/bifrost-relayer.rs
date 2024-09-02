@@ -27,7 +27,7 @@ pub struct HeartbeatSender<T> {
 }
 
 #[async_trait::async_trait]
-impl<T: JsonRpcClient> PeriodicWorker for HeartbeatSender<T> {
+impl<T: JsonRpcClient + 'static> PeriodicWorker for HeartbeatSender<T> {
 	fn schedule(&self) -> Schedule {
 		self.schedule.clone()
 	}
@@ -74,7 +74,7 @@ impl<T: JsonRpcClient> PeriodicWorker for HeartbeatSender<T> {
 	}
 }
 
-impl<T: JsonRpcClient> HeartbeatSender<T> {
+impl<T: JsonRpcClient + 'static> HeartbeatSender<T> {
 	/// Instantiates a new `HeartbeatSender` instance.
 	pub fn new(
 		tx_request_senders: Vec<Arc<TxRequestSender>>,

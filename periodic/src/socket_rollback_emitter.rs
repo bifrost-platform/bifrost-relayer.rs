@@ -41,7 +41,7 @@ pub struct SocketRollbackEmitter<T> {
 	schedule: Schedule,
 }
 
-impl<T: JsonRpcClient> SocketRollbackEmitter<T> {
+impl<T: JsonRpcClient + 'static> SocketRollbackEmitter<T> {
 	/// Instantiates a new `SocketRollbackEmitter`.
 	pub fn new(
 		tx_request_sender: Arc<TxRequestSender>,
@@ -275,7 +275,7 @@ impl<T: JsonRpcClient> SocketRollbackEmitter<T> {
 }
 
 #[async_trait::async_trait]
-impl<T: JsonRpcClient> SocketRelayBuilder<T> for SocketRollbackEmitter<T> {
+impl<T: JsonRpcClient + 'static> SocketRelayBuilder<T> for SocketRollbackEmitter<T> {
 	fn get_client(&self) -> Arc<EthClient<T>> {
 		// This will always return the Bifrost client.
 		// Used only for `get_sorted_signatures()` on `Outbound::Accepted` rollbacks.
@@ -289,7 +289,7 @@ impl<T: JsonRpcClient> SocketRelayBuilder<T> for SocketRollbackEmitter<T> {
 }
 
 #[async_trait::async_trait]
-impl<T: JsonRpcClient> PeriodicWorker for SocketRollbackEmitter<T> {
+impl<T: JsonRpcClient + 'static> PeriodicWorker for SocketRollbackEmitter<T> {
 	fn schedule(&self) -> Schedule {
 		self.schedule.clone()
 	}

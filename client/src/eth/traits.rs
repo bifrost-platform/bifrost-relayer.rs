@@ -34,7 +34,10 @@ pub trait Handler {
 
 #[async_trait::async_trait]
 /// The client to interact with the `Socket` contract instance.
-pub trait SocketRelayBuilder<T> {
+pub trait SocketRelayBuilder<T>
+where
+	T: 'static,
+{
 	/// Get the `EthClient` of the implemented handler.
 	fn get_client(&self) -> Arc<EthClient<T>>;
 
@@ -207,7 +210,7 @@ pub trait Eip1559GasMiddleware {
 /// The manager trait for Legacy and Eip1559 transactions.
 pub trait TransactionManager<T>
 where
-	T: JsonRpcClient,
+	T: JsonRpcClient + 'static,
 {
 	/// Starts the transaction manager. Listens to every new consumed tx request message.
 	async fn run(&mut self);
@@ -265,7 +268,7 @@ where
 #[async_trait::async_trait]
 pub trait TransactionTask<T>
 where
-	T: JsonRpcClient,
+	T: JsonRpcClient + 'static,
 {
 	/// The flag whether the client has enabled txpool namespace.
 	fn is_txpool_enabled(&self) -> bool;
