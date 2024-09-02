@@ -31,7 +31,7 @@ use tokio::{
 	time::sleep,
 };
 
-use super::{generate_delay, TransactionMiddleware};
+use super::generate_delay;
 
 const SUB_LOG_TARGET: &str = "eip1559-tx-manager";
 
@@ -110,7 +110,6 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> for Eip1559TransactionMan
 	async fn spawn_send_transaction(&self, msg: TxRequestMessage) {
 		let task = Eip1559TransactionTask::new(
 			self.get_client(),
-			self.get_client().middleware.clone(),
 			self.is_txpool_enabled(),
 			self.min_priority_fee,
 			self.duplicate_confirm_delay,
@@ -189,8 +188,6 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> for Eip1559TransactionMan
 pub struct Eip1559TransactionTask<T> {
 	/// The ethereum client for the connected chain.
 	client: Arc<EthClient<T>>,
-	/// The client signs transaction for the connected chain with local nonce manager.
-	middleware: Arc<TransactionMiddleware<T>>,
 	/// The flag whether the client has enabled txpool namespace.
 	is_txpool_enabled: bool,
 	/// The minimum priority fee required.
@@ -204,12 +201,11 @@ impl<T: JsonRpcClient> Eip1559TransactionTask<T> {
 	/// Build an Eip1559 transaction task.
 	pub fn new(
 		client: Arc<EthClient<T>>,
-		middleware: Arc<TransactionMiddleware<T>>,
 		is_txpool_enabled: bool,
 		min_priority_fee: U256,
 		duplicate_confirm_delay: Option<u64>,
 	) -> Self {
-		Self { client, middleware, is_txpool_enabled, min_priority_fee, duplicate_confirm_delay }
+		Self { client, is_txpool_enabled, min_priority_fee, duplicate_confirm_delay }
 	}
 }
 
@@ -257,21 +253,23 @@ impl<T: 'static + JsonRpcClient> TransactionTask<T> for Eip1559TransactionTask<T
 		match msg.tx_request.get_gas() {
 			None => {
 				// estimate the gas amount to be used
-				let estimated_gas =
-					match self.middleware.estimate_gas(&msg.tx_request.to_typed(), None).await {
-						Ok(estimated_gas) => {
-							br_metrics::increase_rpc_calls(&self.client.get_chain_name());
-							U256::from(
-								(estimated_gas.as_u64() as f64 * msg.gas_coefficient.into_f64())
-									.ceil() as u64,
-							)
-						},
-						Err(error) => {
-							return self
-								.handle_failed_gas_estimation(SUB_LOG_TARGET, msg, &error)
-								.await
-						},
-					};
+				let estimated_gas = match self
+					.client
+					.middleware
+					.estimate_gas(&msg.tx_request.to_typed(), None)
+					.await
+				{
+					Ok(estimated_gas) => {
+						br_metrics::increase_rpc_calls(&self.client.get_chain_name());
+						U256::from(
+							(estimated_gas.as_u64() as f64 * msg.gas_coefficient.into_f64()).ceil()
+								as u64,
+						)
+					},
+					Err(error) => {
+						return self.handle_failed_gas_estimation(SUB_LOG_TARGET, msg, &error).await
+					},
+				};
 				msg.tx_request.gas(estimated_gas);
 			},
 			Some(_) => {},
@@ -293,7 +291,8 @@ impl<T: 'static + JsonRpcClient> TransactionTask<T> for Eip1559TransactionTask<T
 				);
 			}
 
-			let result = self.middleware.send_transaction(msg.tx_request.to_eip1559(), None).await;
+			let result =
+				self.client.middleware.send_transaction(msg.tx_request.to_eip1559(), None).await;
 			br_metrics::increase_rpc_calls(&self.client.get_chain_name());
 
 			match result {
