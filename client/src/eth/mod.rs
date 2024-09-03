@@ -22,6 +22,7 @@ use ethers::{
 	utils::{format_units, WEI_IN_ETHER},
 };
 use serde::{de::DeserializeOwned, Serialize};
+use subxt_signer::eth::Keypair;
 use tokio::time::{sleep, Duration};
 use url::Url;
 
@@ -42,7 +43,7 @@ const SUB_LOG_TARGET: &str = "eth-client";
 /// The core client for EVM-based chain interactions.
 pub struct EthClient<T> {
 	/// The wallet manager for the connected relayer.
-	pub wallet: WalletManager,
+	pub wallet: WalletManager<Keypair>,
 	/// The metadata of the provider.
 	pub metadata: ProviderMetadata,
 	/// The middleware used when signing transactions and nonce management.
@@ -61,7 +62,7 @@ pub struct EthClient<T> {
 impl<T: 'static + JsonRpcClient> EthClient<T> {
 	/// Instantiates a new `EthClient` instance for the given chain.
 	pub fn new(
-		wallet: WalletManager,
+		wallet: WalletManager<Keypair>,
 		provider: Arc<Provider<T>>,
 		metadata: ProviderMetadata,
 		protocol_contracts: ProtocolContracts<T>,

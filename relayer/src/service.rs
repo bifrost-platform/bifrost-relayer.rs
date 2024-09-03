@@ -6,10 +6,14 @@ use std::{
 };
 
 use bitcoincore_rpc::{Auth, Client as BitcoinClient};
-use ethers::providers::{Http, Provider};
+use ethers::{
+	providers::{Http, Provider},
+	utils::hex::FromHex,
+};
 use futures::FutureExt;
 use miniscript::bitcoin::Network;
 use sc_service::{config::PrometheusConfig, Error as ServiceError, TaskManager};
+use subxt_signer::eth::Keypair;
 use tokio::sync::RwLock;
 
 use br_client::{
@@ -195,8 +199,15 @@ fn construct_managers(
 			.interval(Duration::from_millis(evm_provider.call_interval));
 
 		let client = Arc::new(EthClient::new(
-			WalletManager::from_private_key(system.private_key.as_str(), evm_provider.id)
+			WalletManager::from_private_key(
+				system.private_key.as_str(),
+				evm_provider.id,
+				Keypair::from_secret_key(
+					<[u8; 32]>::from_hex(system.private_key.to_string().trim_start_matches("0x"))
+						.expect(INVALID_PRIVATE_KEY),
+				)
 				.expect(INVALID_PRIVATE_KEY),
+			),
 			Arc::new(provider.clone()),
 			ProviderMetadata::new(
 				evm_provider.name.clone(),

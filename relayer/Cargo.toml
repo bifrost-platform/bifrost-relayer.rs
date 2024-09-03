@@ -26,6 +26,7 @@ tokio = { workspace = true, features = [
 miniscript = { workspace = true }
 bitcoincore-rpc = { workspace = true }
 subxt = { workspace = true }
+subxt-signer = { workspace = true, features = ["unstable-eth"] }
 
 # Bifrost Relayer
 br-cli = { path = "../client/cli", default-features = false }

@@ -7,7 +7,7 @@ use br_primitives::{
 			MAX_BOOTSTRAP_ROUND_OFFSET, MAX_CALL_INTERVAL_MS, MAX_DUPLICATE_CONFIRM_DELAY_MS,
 			MAX_ESCALATE_PERCENTAGE, MIN_GET_LOGS_BATCH_SIZE,
 		},
-		errors::PARAMETER_OUT_OF_RANGE,
+		errors::{INVALID_PRIVATE_KEY, PARAMETER_OUT_OF_RANGE},
 	},
 };
 
@@ -16,6 +16,11 @@ use br_primitives::{
 pub(super) fn assert_configuration_validity(config: &Configuration) {
 	let bootstrap_config = &config.relayer_config.bootstrap_config;
 	let evm_providers = &config.relayer_config.evm_providers;
+	let system = &config.relayer_config.system;
+
+	// assert `system`
+	assert_eq!(system.private_key.len(), 66, "{}", INVALID_PRIVATE_KEY);
+	assert!(system.private_key.starts_with("0x"), "{}", INVALID_PRIVATE_KEY);
 
 	// assert `bootstrap_config`
 	if let Some(bootstrap_config) = bootstrap_config {

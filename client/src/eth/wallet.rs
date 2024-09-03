@@ -1,4 +1,6 @@
-use br_primitives::{constants::errors::INVALID_PRIVATE_KEY, eth::ChainID};
+use br_primitives::{
+	constants::errors::INVALID_PRIVATE_KEY, eth::ChainID, substrate::CustomConfig,
+};
 
 use ethers::{
 	prelude::k256::ecdsa::SigningKey,
@@ -12,39 +14,33 @@ use k256::{
 	PublicKey as K256PublicKey,
 };
 use sha3::{Digest, Keccak256};
-use subxt_signer::eth::Keypair;
-
-type WalletResult<T = ()> = Result<T, Box<dyn std::error::Error + Send + Sync>>;
 
 #[derive(Debug)]
-/// The component that contains anEthereum private-public key pair
+/// The component that contains an Ethereum private-public key pair
 /// which can be used for signing messages.
-pub struct WalletManager {
+pub struct WalletManager<SignerT> {
 	/// The wallet instantiated with a locally stored private key.
 	pub signer: ethers::signers::Wallet<SigningKey>,
 	/// The signer used when sending Substrate extrinsics.
-	pub subxt_signer: Keypair,
+	pub subxt_signer: SignerT,
 	/// The ECDSA/secp256k1 signing key.
 	secret_key: Option<K256SigningKey>,
 }
 
-impl WalletManager {
+impl<SignerT: subxt::tx::Signer<CustomConfig>> WalletManager<SignerT> {
 	/// Initialize `WalletManager` by the given private key.
-	pub fn from_private_key(private_key: &str, chain_id: ChainID) -> WalletResult<Self> {
-		assert_eq!(private_key.len(), 66, "{}", INVALID_PRIVATE_KEY);
-		assert!(private_key.starts_with("0x"), "{}", INVALID_PRIVATE_KEY);
-
+	pub fn from_private_key(
+		private_key: &str,
+		chain_id: ChainID,
+		subxt_signer: SignerT,
+	) -> WalletManager<SignerT> {
 		let wallet = private_key.parse::<LocalWallet>().expect(INVALID_PRIVATE_KEY);
 
 		let pk_bytes = <[u8; 32]>::from_hex(private_key.to_string().trim_start_matches("0x"))
 			.expect(INVALID_PRIVATE_KEY);
 		let signing_key = K256SigningKey::from_bytes(&pk_bytes.into()).expect(INVALID_PRIVATE_KEY);
 
-		Ok(Self {
-			signer: wallet.with_chain_id(chain_id),
-			subxt_signer: Keypair::from_secret_key(pk_bytes).expect(INVALID_PRIVATE_KEY),
-			secret_key: Some(signing_key),
-		})
+		Self { signer: wallet.with_chain_id(chain_id), subxt_signer, secret_key: Some(signing_key) }
 	}
 
 	/// Signs the given message and returns the generated signature.
