@@ -15,7 +15,6 @@ use k256::{
 };
 use sha3::{Digest, Keccak256};
 
-#[derive(Debug)]
 /// The component that contains an Ethereum private-public key pair
 /// which can be used for signing messages.
 pub struct WalletManager<SignerT> {
