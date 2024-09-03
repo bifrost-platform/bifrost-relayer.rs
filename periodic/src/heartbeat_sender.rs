@@ -1,3 +1,4 @@
+use crate::traits::PeriodicWorker;
 use br_client::eth::EthClient;
 use br_primitives::{
 	constants::{
@@ -5,29 +6,33 @@ use br_primitives::{
 		schedule::HEARTBEAT_SCHEDULE,
 	},
 	eth::GasCoefficient,
+	substrate::CustomConfig,
 	tx::{HeartbeatMetadata, TxRequest, TxRequestMessage, TxRequestMetadata, TxRequestSender},
 	utils::sub_display_format,
 };
 use cron::Schedule;
 use ethers::{providers::JsonRpcClient, types::TransactionRequest};
 use std::{str::FromStr, sync::Arc};
-
-use crate::traits::PeriodicWorker;
+use subxt::tx::Signer;
 
 const SUB_LOG_TARGET: &str = "heartbeat-sender";
 
 /// The essential task that sending heartbeat transaction.
-pub struct HeartbeatSender<T> {
+pub struct HeartbeatSender<T, S> {
 	/// The time schedule that represents when to check heartbeat pulsed.
 	schedule: Schedule,
 	/// The sender that sends messages to the tx request channel.
 	tx_request_sender: Arc<TxRequestSender>,
 	/// The `EthClient` to interact with the bifrost network.
-	client: Arc<EthClient<T>>,
+	client: Arc<EthClient<T, S>>,
 }
 
 #[async_trait::async_trait]
-impl<T: JsonRpcClient + 'static> PeriodicWorker for HeartbeatSender<T> {
+impl<T, S> PeriodicWorker for HeartbeatSender<T, S>
+where
+	T: JsonRpcClient + 'static,
+	S: Signer<CustomConfig> + 'static + Send + Sync,
+{
 	fn schedule(&self) -> Schedule {
 		self.schedule.clone()
 	}
@@ -74,11 +79,15 @@ impl<T: JsonRpcClient + 'static> PeriodicWorker for HeartbeatSender<T> {
 	}
 }
 
-impl<T: JsonRpcClient + 'static> HeartbeatSender<T> {
+impl<T, S> HeartbeatSender<T, S>
+where
+	T: JsonRpcClient + 'static,
+	S: Signer<CustomConfig> + 'static + Send + Sync,
+{
 	/// Instantiates a new `HeartbeatSender` instance.
 	pub fn new(
 		tx_request_senders: Vec<Arc<TxRequestSender>>,
-		system_clients: Vec<Arc<EthClient<T>>>,
+		system_clients: Vec<Arc<EthClient<T, S>>>,
 	) -> Self {
 		Self {
 			schedule: Schedule::from_str(HEARTBEAT_SCHEDULE).expect(INVALID_PERIODIC_SCHEDULE),

@@ -6,21 +6,23 @@ use br_primitives::{
 
 use ethers::providers::JsonRpcClient;
 use std::{error::Error, sync::Arc, time::Duration};
+use subxt::tx::Signer;
 use subxt::{blocks::ExtrinsicEvents, Config, OnlineClient};
 use tokio::time::sleep;
 
 use crate::eth::EthClient;
 
 #[async_trait::async_trait]
-pub trait ExtrinsicTask<T>
+pub trait ExtrinsicTask<T, S>
 where
 	T: JsonRpcClient + 'static,
+	S: Signer<CustomConfig>,
 {
 	/// Get the substrate client.
 	fn get_sub_client(&self) -> Arc<OnlineClient<CustomConfig>>;
 
 	/// Get the Bifrost client.
-	fn get_bfc_client(&self) -> Arc<EthClient<T>>;
+	fn get_bfc_client(&self) -> Arc<EthClient<T, S>>;
 
 	/// Sends the consumed extrinsic request to the Bifrost network.
 	async fn try_send_extrinsic(&self, msg: XtRequestMessage);

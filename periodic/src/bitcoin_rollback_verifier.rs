@@ -1,5 +1,6 @@
 use std::{collections::BTreeMap, str::FromStr, sync::Arc, time::Duration};
 
+use crate::traits::PeriodicWorker;
 use bitcoincore_rpc::{
 	bitcoin::{hashes::sha256d::Hash, Address, Amount, Psbt, Txid},
 	bitcoincore_rpc_json::GetRawTransactionResult,
@@ -13,6 +14,7 @@ use br_primitives::{
 		tx::{DEFAULT_CALL_RETRIES, DEFAULT_CALL_RETRY_INTERVAL_MS},
 	},
 	contracts::socket_queue::SocketQueueContract,
+	substrate::CustomConfig,
 	substrate::{bifrost_runtime, RollbackPollMessage},
 	tx::{SubmitRollbackPollMetadata, XtRequest, XtRequestMetadata, XtRequestSender},
 	utils::sub_display_format,
@@ -24,10 +26,9 @@ use ethers::{
 };
 use serde::Deserialize;
 use serde_json::Value;
+use subxt::tx::Signer;
 use tokio::time::sleep;
 use tokio_stream::StreamExt;
-
-use crate::traits::PeriodicWorker;
 
 const SUB_LOG_TARGET: &str = "rollback-verifier";
 
@@ -85,11 +86,11 @@ impl From<EvmRollbackRequestOf> for RollbackRequest {
 	}
 }
 
-pub struct BitcoinRollbackVerifier<T> {
+pub struct BitcoinRollbackVerifier<T, S> {
 	/// The Bitcoin client.
 	btc_client: BtcClient,
 	/// The Bifrost client.
-	bfc_client: Arc<EthClient<T>>,
+	bfc_client: Arc<EthClient<T, S>>,
 	/// The extrinsic message sender.
 	xt_request_sender: Arc<XtRequestSender>,
 	/// The periodic schedule.
@@ -97,7 +98,11 @@ pub struct BitcoinRollbackVerifier<T> {
 }
 
 #[async_trait::async_trait]
-impl<C: JsonRpcClient> RpcApi for BitcoinRollbackVerifier<C> {
+impl<C, S> RpcApi for BitcoinRollbackVerifier<C, S>
+where
+	C: JsonRpcClient,
+	S: Signer<CustomConfig> + Send + Sync,
+{
 	async fn call<T: for<'a> Deserialize<'a> + Send>(
 		&self,
 		cmd: &str,
@@ -118,18 +123,26 @@ impl<C: JsonRpcClient> RpcApi for BitcoinRollbackVerifier<C> {
 }
 
 #[async_trait::async_trait]
-impl<T: JsonRpcClient + 'static> XtRequester<T> for BitcoinRollbackVerifier<T> {
+impl<T, S> XtRequester<T, S> for BitcoinRollbackVerifier<T, S>
+where
+	T: JsonRpcClient + 'static,
+	S: Signer<CustomConfig> + 'static + Send + Sync,
+{
 	fn xt_request_sender(&self) -> Arc<XtRequestSender> {
 		self.xt_request_sender.clone()
 	}
 
-	fn bfc_client(&self) -> Arc<EthClient<T>> {
+	fn bfc_client(&self) -> Arc<EthClient<T, S>> {
 		self.bfc_client.clone()
 	}
 }
 
 #[async_trait::async_trait]
-impl<T: JsonRpcClient + 'static> PeriodicWorker for BitcoinRollbackVerifier<T> {
+impl<T, S> PeriodicWorker for BitcoinRollbackVerifier<T, S>
+where
+	T: JsonRpcClient + 'static,
+	S: Signer<CustomConfig> + 'static + Send + Sync,
+{
 	fn schedule(&self) -> Schedule {
 		self.schedule.clone()
 	}
@@ -202,11 +215,15 @@ impl<T: JsonRpcClient + 'static> PeriodicWorker for BitcoinRollbackVerifier<T> {
 	}
 }
 
-impl<T: JsonRpcClient + 'static> BitcoinRollbackVerifier<T> {
+impl<T, S> BitcoinRollbackVerifier<T, S>
+where
+	T: JsonRpcClient + 'static,
+	S: Signer<CustomConfig> + 'static + Send + Sync,
+{
 	/// Instantiates a new `BitcoinRollbackVerifier` instance.
 	pub fn new(
 		btc_client: BtcClient,
-		bfc_client: Arc<EthClient<T>>,
+		bfc_client: Arc<EthClient<T, S>>,
 		xt_request_sender: Arc<XtRequestSender>,
 	) -> Self {
 		Self {
@@ -247,10 +264,10 @@ impl<T: JsonRpcClient + 'static> BitcoinRollbackVerifier<T> {
 	) -> (XtRequest, SubmitRollbackPollMetadata) {
 		let msg = RollbackPollMessage { txid, is_approved };
 		let metadata = SubmitRollbackPollMetadata::new(txid, is_approved);
-		return (
+		(
 			XtRequest::from(bifrost_runtime::tx().btc_socket_queue().submit_rollback_poll(msg)),
 			metadata,
-		);
+		)
 	}
 
 	/// Get the pending rollback PSBT's.

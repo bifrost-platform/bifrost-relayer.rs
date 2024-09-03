@@ -20,13 +20,14 @@ use br_primitives::{
 use cron::Schedule;
 use ethers::prelude::JsonRpcClient;
 use std::{str::FromStr, sync::Arc, time::Duration};
+use subxt::tx::Signer;
 use subxt::{storage::Storage, OnlineClient};
 use tokio::sync::RwLock;
 
 const SUB_LOG_TARGET: &str = "pubkey-presubmitter";
 
-pub struct PubKeyPreSubmitter<T> {
-	bfc_client: Arc<EthClient<T>>,
+pub struct PubKeyPreSubmitter<T, S> {
+	bfc_client: Arc<EthClient<T, S>>,
 	/// The Bifrost client.
 	sub_client: Option<OnlineClient<CustomConfig>>,
 	/// The extrinsic message sender.
@@ -40,7 +41,11 @@ pub struct PubKeyPreSubmitter<T> {
 }
 
 #[async_trait::async_trait]
-impl<T: JsonRpcClient + 'static> PeriodicWorker for PubKeyPreSubmitter<T> {
+impl<T, S> PeriodicWorker for PubKeyPreSubmitter<T, S>
+where
+	T: JsonRpcClient + 'static,
+	S: Signer<CustomConfig> + 'static + Send + Sync,
+{
 	fn schedule(&self) -> Schedule {
 		self.schedule.clone()
 	}
@@ -73,10 +78,14 @@ impl<T: JsonRpcClient + 'static> PeriodicWorker for PubKeyPreSubmitter<T> {
 	}
 }
 
-impl<T: JsonRpcClient + 'static> PubKeyPreSubmitter<T> {
+impl<T, S> PubKeyPreSubmitter<T, S>
+where
+	T: JsonRpcClient + 'static,
+	S: Signer<CustomConfig> + 'static + Send + Sync,
+{
 	/// Instantiates a new `PubKeyPreSubmitter` instance.
 	pub fn new(
-		bfc_client: Arc<EthClient<T>>,
+		bfc_client: Arc<EthClient<T, S>>,
 		xt_request_sender: Arc<XtRequestSender>,
 		keypair_storage: Arc<RwLock<KeypairStorage>>,
 		migration_sequence: Arc<RwLock<MigrationSequence>>,

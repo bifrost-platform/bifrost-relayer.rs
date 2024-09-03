@@ -12,9 +12,11 @@ use crate::{
 	eth::EthClient,
 };
 
+use super::block::EventMessage;
 use br_primitives::{
 	bootstrap::BootstrapSharedData,
 	eth::{BootstrapState, GasCoefficient},
+	substrate::CustomConfig,
 	tx::{
 		TxRequest, TxRequestMessage, TxRequestMetadata, TxRequestSender, XtRequest,
 		XtRequestMessage, XtRequestMetadata, XtRequestSender,
@@ -23,14 +25,17 @@ use br_primitives::{
 };
 use ethers::{prelude::TransactionRequest, providers::JsonRpcClient};
 use std::sync::Arc;
-
-use super::block::EventMessage;
+use subxt::tx::Signer;
 
 #[async_trait::async_trait]
-pub trait XtRequester<T: 'static + JsonRpcClient> {
+pub trait XtRequester<T, S>
+where
+	T: 'static + JsonRpcClient,
+	S: Signer<CustomConfig>,
+{
 	fn xt_request_sender(&self) -> Arc<XtRequestSender>;
 
-	fn bfc_client(&self) -> Arc<EthClient<T>>;
+	fn bfc_client(&self) -> Arc<EthClient<T, S>>;
 
 	fn request_send_transaction(
 		&self,
@@ -85,10 +90,14 @@ pub trait XtRequester<T: 'static + JsonRpcClient> {
 }
 
 #[async_trait::async_trait]
-pub trait TxRequester<T: 'static + JsonRpcClient> {
+pub trait TxRequester<T, S>
+where
+	T: 'static + JsonRpcClient,
+	S: Signer<CustomConfig>,
+{
 	fn tx_request_sender(&self) -> Arc<TxRequestSender>;
 
-	fn bfc_client(&self) -> Arc<EthClient<T>>;
+	fn bfc_client(&self) -> Arc<EthClient<T, S>>;
 
 	async fn request_send_transaction(
 		&self,

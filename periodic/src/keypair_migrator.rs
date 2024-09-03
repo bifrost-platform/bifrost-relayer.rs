@@ -13,21 +13,26 @@ use br_primitives::{
 use cron::Schedule;
 use ethers::prelude::JsonRpcClient;
 use std::{str::FromStr, sync::Arc, time::Duration};
+use subxt::tx::Signer;
 use subxt::OnlineClient;
 use tokio::sync::RwLock;
 
-pub struct KeypairMigrator<T> {
+pub struct KeypairMigrator<T, S> {
 	sub_client: Option<OnlineClient<CustomConfig>>,
-	bfc_client: Arc<EthClient<T>>,
+	bfc_client: Arc<EthClient<T, S>>,
 	migration_sequence: Arc<RwLock<MigrationSequence>>,
 	keypair_storage: Arc<RwLock<KeypairStorage>>,
 	schedule: Schedule,
 }
 
-impl<T: JsonRpcClient + 'static> KeypairMigrator<T> {
+impl<T, S> KeypairMigrator<T, S>
+where
+	T: JsonRpcClient + 'static,
+	S: Signer<CustomConfig> + 'static + Send + Sync,
+{
 	/// Instantiates a new `KeypairMigrator` instance.
 	pub fn new(
-		bfc_client: Arc<EthClient<T>>,
+		bfc_client: Arc<EthClient<T, S>>,
 		migration_sequence: Arc<RwLock<MigrationSequence>>,
 		keypair_storage: Arc<RwLock<KeypairStorage>>,
 	) -> Self {
@@ -127,7 +132,11 @@ impl<T: JsonRpcClient + 'static> KeypairMigrator<T> {
 }
 
 #[async_trait::async_trait]
-impl<T: JsonRpcClient + 'static> PeriodicWorker for KeypairMigrator<T> {
+impl<T, S> PeriodicWorker for KeypairMigrator<T, S>
+where
+	T: JsonRpcClient + 'static,
+	S: Signer<CustomConfig> + 'static + Send + Sync,
+{
 	fn schedule(&self) -> Schedule {
 		self.schedule.clone()
 	}

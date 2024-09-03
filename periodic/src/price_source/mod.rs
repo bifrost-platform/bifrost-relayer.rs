@@ -1,12 +1,5 @@
 use std::{collections::BTreeMap, fmt::Error, ops::Mul, sync::Arc};
 
-use async_trait::async_trait;
-use ethers::{providers::JsonRpcClient, types::U256};
-use serde::Deserialize;
-
-use br_client::eth::EthClient;
-use br_primitives::periodic::{PriceResponse, PriceSource};
-
 use crate::{
 	price_source::{
 		binance::BinancePriceFetcher, chainlink::ChainlinkPriceFetcher,
@@ -15,6 +8,13 @@ use crate::{
 	},
 	traits::PriceFetcher,
 };
+use async_trait::async_trait;
+use br_client::eth::EthClient;
+use br_primitives::periodic::{PriceResponse, PriceSource};
+use br_primitives::substrate::CustomConfig;
+use ethers::{providers::JsonRpcClient, types::U256};
+use serde::Deserialize;
+use subxt::tx::Signer;
 
 mod binance;
 mod chainlink;
@@ -26,9 +26,9 @@ mod upbit;
 const LOG_TARGET: &str = "price-fetcher";
 
 #[derive(Clone)]
-pub enum PriceFetchers<T> {
+pub enum PriceFetchers<T, S> {
 	Binance(BinancePriceFetcher<T>),
-	Chainlink(ChainlinkPriceFetcher<T>),
+	Chainlink(ChainlinkPriceFetcher<T, S>),
 	CoinGecko(CoingeckoPriceFetcher<T>),
 	Gateio(GateioPriceFetcher<T>),
 	Kucoin(KucoinPriceFetcher<T>),
@@ -73,10 +73,14 @@ pub async fn krw_to_usd(krw_amount: U256) -> Result<U256, Error> {
 	}
 }
 
-impl<T: JsonRpcClient> PriceFetchers<T> {
+impl<T, S> PriceFetchers<T, S>
+where
+	T: JsonRpcClient,
+	S: Signer<CustomConfig>,
+{
 	pub async fn new(
 		exchange: PriceSource,
-		client: Option<Arc<EthClient<T>>>,
+		client: Option<Arc<EthClient<T, S>>>,
 	) -> Result<Self, Error> {
 		match exchange {
 			PriceSource::Binance => Ok(PriceFetchers::Binance(BinancePriceFetcher::new().await?)),
@@ -94,7 +98,11 @@ impl<T: JsonRpcClient> PriceFetchers<T> {
 }
 
 #[async_trait]
-impl<T: JsonRpcClient + 'static> PriceFetcher for PriceFetchers<T> {
+impl<T, S> PriceFetcher for PriceFetchers<T, S>
+where
+	T: JsonRpcClient + 'static,
+	S: Signer<CustomConfig> + 'static + Send + Sync,
+{
 	async fn get_ticker_with_symbol(&self, symbol: String) -> Result<PriceResponse, Error> {
 		match self {
 			PriceFetchers::Binance(fetcher) => fetcher.get_ticker_with_symbol(symbol).await,

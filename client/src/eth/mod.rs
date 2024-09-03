@@ -11,6 +11,12 @@ use br_primitives::{
 	utils::sub_display_format,
 };
 
+use self::{
+	traits::{Eip1559GasMiddleware, LegacyGasMiddleware},
+	tx::TransactionMiddleware,
+	wallet::WalletManager,
+};
+use br_primitives::substrate::CustomConfig;
 use ethers::{
 	abi::Detokenize,
 	prelude::{ContractCall, MiddlewareBuilder, NonceManagerMiddleware, SignerMiddleware},
@@ -22,15 +28,9 @@ use ethers::{
 	utils::{format_units, WEI_IN_ETHER},
 };
 use serde::{de::DeserializeOwned, Serialize};
-use subxt_signer::eth::Keypair;
+use subxt::tx::Signer;
 use tokio::time::{sleep, Duration};
 use url::Url;
-
-use self::{
-	traits::{Eip1559GasMiddleware, LegacyGasMiddleware},
-	tx::TransactionMiddleware,
-	wallet::WalletManager,
-};
 
 pub mod events;
 pub mod handlers;
@@ -41,9 +41,9 @@ pub mod wallet;
 const SUB_LOG_TARGET: &str = "eth-client";
 
 /// The core client for EVM-based chain interactions.
-pub struct EthClient<T> {
+pub struct EthClient<T, S> {
 	/// The wallet manager for the connected relayer.
-	pub wallet: WalletManager<Keypair>,
+	pub wallet: WalletManager<S>,
 	/// The metadata of the provider.
 	pub metadata: ProviderMetadata,
 	/// The middleware used when signing transactions and nonce management.
@@ -59,10 +59,14 @@ pub struct EthClient<T> {
 	debug_mode: bool,
 }
 
-impl<T: 'static + JsonRpcClient> EthClient<T> {
+impl<T, S> EthClient<T, S>
+where
+	T: 'static + JsonRpcClient,
+	S: Signer<CustomConfig>,
+{
 	/// Instantiates a new `EthClient` instance for the given chain.
 	pub fn new(
-		wallet: WalletManager<Keypair>,
+		wallet: WalletManager<S>,
 		provider: Arc<Provider<T>>,
 		metadata: ProviderMetadata,
 		protocol_contracts: ProtocolContracts<T>,
@@ -75,7 +79,7 @@ impl<T: 'static + JsonRpcClient> EthClient<T> {
 				.wrap_into(|p| SignerMiddleware::new(p, wallet.signer.clone()))
 				.wrap_into(|p| NonceManagerMiddleware::new(p, wallet.address())),
 		);
-		Self {
+		EthClient {
 			wallet,
 			provider,
 			metadata,
@@ -316,7 +320,11 @@ impl<T: 'static + JsonRpcClient> EthClient<T> {
 }
 
 #[async_trait::async_trait]
-impl<T: 'static + JsonRpcClient> LegacyGasMiddleware for EthClient<T> {
+impl<T, S> LegacyGasMiddleware for EthClient<T, S>
+where
+	T: 'static + JsonRpcClient,
+	S: Signer<CustomConfig> + Send + Sync,
+{
 	async fn get_gas_price(&self) -> U256 {
 		match self.provider.get_gas_price().await {
 			Ok(gas_price) => {
@@ -400,7 +408,11 @@ impl<T: 'static + JsonRpcClient> LegacyGasMiddleware for EthClient<T> {
 }
 
 #[async_trait::async_trait]
-impl<T: 'static + JsonRpcClient> Eip1559GasMiddleware for EthClient<T> {
+impl<T, S> Eip1559GasMiddleware for EthClient<T, S>
+where
+	T: 'static + JsonRpcClient,
+	S: Signer<CustomConfig> + Send + Sync,
+{
 	async fn get_estimated_eip1559_fees(&self) -> (U256, U256) {
 		match self.provider.estimate_eip1559_fees(None).await {
 			Ok(fees) => {

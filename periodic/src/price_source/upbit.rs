@@ -46,7 +46,7 @@ impl<T: JsonRpcClient> PriceFetcher for UpbitPriceFetcher<T> {
 		let mut url = self.base_url.join("ticker").unwrap();
 		url.query_pairs_mut().append_pair("markets", self.symbols.as_str());
 
-		return match self._send_request(url).await {
+		match self._send_request(url).await {
 			Ok(responses) => {
 				let mut ret = BTreeMap::new();
 				for response in responses {
@@ -60,7 +60,7 @@ impl<T: JsonRpcClient> PriceFetcher for UpbitPriceFetcher<T> {
 				Ok(ret)
 			},
 			Err(_) => Err(Error),
-		};
+		}
 	}
 }
 

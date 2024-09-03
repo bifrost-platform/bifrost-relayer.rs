@@ -3,6 +3,7 @@ use crate::eth::{
 	Eip1559GasMiddleware, EthClient,
 };
 
+use super::generate_delay;
 use async_trait::async_trait;
 use br_primitives::{
 	constants::{
@@ -10,6 +11,7 @@ use br_primitives::{
 		errors::{INSUFFICIENT_FUNDS, NETWORK_DOES_NOT_SUPPORT_EIP1559, PROVIDER_INTERNAL_ERROR},
 		tx::{DEFAULT_TX_RETRIES, MAX_FEE_COEFFICIENT, MAX_PRIORITY_FEE_COEFFICIENT},
 	},
+	substrate::CustomConfig,
 	tx::{TxRequest, TxRequestMessage},
 	utils::sub_display_format,
 };
@@ -23,6 +25,7 @@ use ethers::{
 };
 use sc_service::SpawnTaskHandle;
 use std::{cmp::max, sync::Arc, time::Duration};
+use subxt::tx::Signer;
 use tokio::{
 	sync::{
 		mpsc,
@@ -31,14 +34,12 @@ use tokio::{
 	time::sleep,
 };
 
-use super::generate_delay;
-
 const SUB_LOG_TARGET: &str = "eip1559-tx-manager";
 
 /// The essential task that sends eip1559 transactions asynchronously.
-pub struct Eip1559TransactionManager<T> {
+pub struct Eip1559TransactionManager<T, S> {
 	/// The ethereum client for the connected chain.
-	pub client: Arc<EthClient<T>>,
+	pub client: Arc<EthClient<T, S>>,
 	/// The receiver connected to the tx request channel.
 	receiver: UnboundedReceiver<TxRequestMessage>,
 	/// The flag whether the client has enabled txpool namespace.
@@ -52,10 +53,14 @@ pub struct Eip1559TransactionManager<T> {
 	tx_spawn_handle: SpawnTaskHandle,
 }
 
-impl<T: 'static + JsonRpcClient> Eip1559TransactionManager<T> {
+impl<T, S> Eip1559TransactionManager<T, S>
+where
+	T: 'static + JsonRpcClient,
+	S: Signer<CustomConfig>,
+{
 	/// Instantiates a new `Eip1559TransactionManager` instance.
 	pub fn new(
-		client: Arc<EthClient<T>>,
+		client: Arc<EthClient<T, S>>,
 		min_priority_fee: U256,
 		duplicate_confirm_delay: Option<u64>,
 		tx_spawn_handle: SpawnTaskHandle,
@@ -77,7 +82,11 @@ impl<T: 'static + JsonRpcClient> Eip1559TransactionManager<T> {
 }
 
 #[async_trait]
-impl<T: 'static + JsonRpcClient> TransactionManager<T> for Eip1559TransactionManager<T> {
+impl<T, S> TransactionManager<T, S> for Eip1559TransactionManager<T, S>
+where
+	T: 'static + JsonRpcClient,
+	S: Signer<CustomConfig> + 'static + Send + Sync,
+{
 	async fn run(&mut self) {
 		self.initialize().await;
 
@@ -99,7 +108,7 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> for Eip1559TransactionMan
 		self.flush_stuck_transaction().await;
 	}
 
-	fn get_client(&self) -> Arc<EthClient<T>> {
+	fn get_client(&self) -> Arc<EthClient<T, S>> {
 		self.client.clone()
 	}
 
@@ -185,9 +194,9 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> for Eip1559TransactionMan
 }
 
 /// The transaction task for Eip1559 transactions.
-pub struct Eip1559TransactionTask<T> {
+pub struct Eip1559TransactionTask<T, S> {
 	/// The ethereum client for the connected chain.
-	client: Arc<EthClient<T>>,
+	client: Arc<EthClient<T, S>>,
 	/// The flag whether the client has enabled txpool namespace.
 	is_txpool_enabled: bool,
 	/// The minimum priority fee required.
@@ -197,10 +206,14 @@ pub struct Eip1559TransactionTask<T> {
 	duplicate_confirm_delay: Option<u64>,
 }
 
-impl<T: JsonRpcClient> Eip1559TransactionTask<T> {
+impl<T, S> Eip1559TransactionTask<T, S>
+where
+	T: JsonRpcClient,
+	S: Signer<CustomConfig> + Send + Sync,
+{
 	/// Build an Eip1559 transaction task.
 	pub fn new(
-		client: Arc<EthClient<T>>,
+		client: Arc<EthClient<T, S>>,
 		is_txpool_enabled: bool,
 		min_priority_fee: U256,
 		duplicate_confirm_delay: Option<u64>,
@@ -210,12 +223,16 @@ impl<T: JsonRpcClient> Eip1559TransactionTask<T> {
 }
 
 #[async_trait::async_trait]
-impl<T: 'static + JsonRpcClient> TransactionTask<T> for Eip1559TransactionTask<T> {
+impl<T, S> TransactionTask<T, S> for Eip1559TransactionTask<T, S>
+where
+	T: 'static + JsonRpcClient,
+	S: Signer<CustomConfig> + 'static + Send + Sync,
+{
 	fn is_txpool_enabled(&self) -> bool {
 		self.is_txpool_enabled
 	}
 
-	fn get_client(&self) -> Arc<EthClient<T>> {
+	fn get_client(&self) -> Arc<EthClient<T, S>> {
 		self.client.clone()
 	}
 

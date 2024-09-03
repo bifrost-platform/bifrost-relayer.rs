@@ -6,8 +6,10 @@ use ethers::{
 	types::{Address, Filter, Log, TransactionRequest, U256},
 };
 use std::{str::FromStr, sync::Arc, time::Duration};
+use subxt::tx::Signer;
 use tokio::time::sleep;
 
+use crate::traits::PeriodicWorker;
 use br_client::eth::{traits::BootstrapHandler, EthClient};
 use br_primitives::{
 	bootstrap::BootstrapSharedData,
@@ -22,19 +24,18 @@ use br_primitives::{
 		socket::{RoundUpSubmit, SerializedRoundUp, Signatures, SocketContractEvents},
 	},
 	eth::{BootstrapState, GasCoefficient, RoundUpEventStatus},
+	substrate::CustomConfig,
 	tx::{TxRequest, TxRequestMessage, TxRequestMetadata, TxRequestSender, VSPPhase1Metadata},
 	utils::sub_display_format,
 };
 
-use crate::traits::PeriodicWorker;
-
 const SUB_LOG_TARGET: &str = "roundup-emitter";
 
-pub struct RoundupEmitter<T> {
+pub struct RoundupEmitter<T, S> {
 	/// Current round number
 	current_round: U256,
 	/// The ethereum client for the Bifrost network.
-	client: Arc<EthClient<T>>,
+	client: Arc<EthClient<T, S>>,
 	/// The sender that sends messages to the tx request channel.
 	tx_request_sender: Arc<TxRequestSender>,
 	/// The time schedule that represents when to check round info.
@@ -44,7 +45,11 @@ pub struct RoundupEmitter<T> {
 }
 
 #[async_trait::async_trait]
-impl<T: JsonRpcClient + 'static> PeriodicWorker for RoundupEmitter<T> {
+impl<T, S> PeriodicWorker for RoundupEmitter<T, S>
+where
+	T: JsonRpcClient + 'static,
+	S: Signer<CustomConfig> + 'static + Send + Sync,
+{
 	fn schedule(&self) -> Schedule {
 		self.schedule.clone()
 	}
@@ -93,11 +98,15 @@ impl<T: JsonRpcClient + 'static> PeriodicWorker for RoundupEmitter<T> {
 	}
 }
 
-impl<T: JsonRpcClient + 'static> RoundupEmitter<T> {
+impl<T, S> RoundupEmitter<T, S>
+where
+	T: JsonRpcClient + 'static,
+	S: Signer<CustomConfig> + 'static + Send + Sync,
+{
 	/// Instantiates a new `RoundupEmitter` instance.
 	pub fn new(
 		tx_request_senders: Vec<Arc<TxRequestSender>>,
-		clients: Vec<Arc<EthClient<T>>>,
+		clients: Vec<Arc<EthClient<T, S>>>,
 		bootstrap_shared_data: Arc<BootstrapSharedData>,
 	) -> Self {
 		let client = clients
@@ -220,7 +229,11 @@ impl<T: JsonRpcClient + 'static> RoundupEmitter<T> {
 }
 
 #[async_trait::async_trait]
-impl<T: JsonRpcClient + 'static> BootstrapHandler for RoundupEmitter<T> {
+impl<T, S> BootstrapHandler for RoundupEmitter<T, S>
+where
+	T: JsonRpcClient + 'static,
+	S: Signer<CustomConfig> + 'static + Send + Sync,
+{
 	fn bootstrap_shared_data(&self) -> Arc<BootstrapSharedData> {
 		self.bootstrap_shared_data.clone()
 	}

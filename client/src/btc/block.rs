@@ -14,14 +14,17 @@ use br_primitives::{
 	utils::sub_display_format,
 };
 
+use super::handlers::BootstrapHandler;
 use bitcoincore_rpc::{
 	bitcoincore_rpc_json::GetRawTransactionResultVout, Client as BtcClient, RpcApi,
 };
+use br_primitives::substrate::CustomConfig;
 use ethers::providers::JsonRpcClient;
 use miniscript::bitcoin::{address::NetworkUnchecked, Address, Amount, Txid};
 use serde::Deserialize;
 use serde_json::Value;
 use std::{collections::BTreeSet, str::FromStr, sync::Arc};
+use subxt::tx::Signer;
 use tokio::{
 	sync::{
 		broadcast,
@@ -30,8 +33,6 @@ use tokio::{
 	time::{sleep, Duration},
 };
 use tokio_stream::StreamExt;
-
-use super::handlers::BootstrapHandler;
 
 const SUB_LOG_TARGET: &str = "block-manager";
 
@@ -86,11 +87,11 @@ impl EventMessage {
 }
 
 /// A module that reads every new Bitcoin block and filters `Inbound`, `Outbound` events.
-pub struct BlockManager<T> {
+pub struct BlockManager<T, S> {
 	/// The Bitcoin client.
 	btc_client: BtcClient,
 	/// The Bifrost client.
-	bfc_client: Arc<EthClient<T>>,
+	bfc_client: Arc<EthClient<T, S>>,
 	/// The event message sender.
 	sender: Sender<EventMessage>,
 	/// The configured minimum block confirmations required to process a block.
@@ -108,7 +109,11 @@ pub struct BlockManager<T> {
 }
 
 #[async_trait::async_trait]
-impl<C: JsonRpcClient> RpcApi for BlockManager<C> {
+impl<C, S> RpcApi for BlockManager<C, S>
+where
+	C: JsonRpcClient,
+	S: Signer<CustomConfig> + Send + Sync,
+{
 	async fn call<T: for<'a> Deserialize<'a> + Send>(
 		&self,
 		cmd: &str,
@@ -135,11 +140,15 @@ impl<C: JsonRpcClient> RpcApi for BlockManager<C> {
 	}
 }
 
-impl<T: JsonRpcClient + 'static> BlockManager<T> {
+impl<T, S> BlockManager<T, S>
+where
+	T: JsonRpcClient + 'static,
+	S: Signer<CustomConfig> + Send + Sync,
+{
 	/// Instantiates a new `BlockManager` instance.
 	pub fn new(
 		btc_client: BtcClient,
-		bfc_client: Arc<EthClient<T>>,
+		bfc_client: Arc<EthClient<T, S>>,
 		_pending_outbounds: PendingOutboundPool,
 		bootstrap_shared_data: Arc<BootstrapSharedData>,
 		call_interval: u64,
@@ -354,7 +363,11 @@ impl<T: JsonRpcClient + 'static> BlockManager<T> {
 }
 
 #[async_trait::async_trait]
-impl<T: JsonRpcClient + 'static> BootstrapHandler for BlockManager<T> {
+impl<T, S> BootstrapHandler for BlockManager<T, S>
+where
+	T: JsonRpcClient + 'static,
+	S: Signer<CustomConfig> + Send + Sync,
+{
 	fn bootstrap_shared_data(&self) -> Arc<BootstrapSharedData> {
 		self.bootstrap_shared_data.clone()
 	}

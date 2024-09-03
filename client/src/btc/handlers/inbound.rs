@@ -11,10 +11,12 @@ use br_primitives::{
 	bootstrap::BootstrapSharedData,
 	contracts::bitcoin_socket::BitcoinSocketContract,
 	eth::BootstrapState,
+	substrate::CustomConfig,
 	tx::{BitcoinRelayMetadata, TxRequestMetadata, TxRequestSender},
 	utils::sub_display_format,
 };
 
+use super::{BootstrapHandler, EventMessage, TxRequester};
 use ethers::{
 	providers::{JsonRpcClient, Provider},
 	types::{Address as EthAddress, Address, TransactionRequest},
@@ -22,16 +24,15 @@ use ethers::{
 use miniscript::bitcoin::{address::NetworkUnchecked, hashes::Hash, Address as BtcAddress};
 use sp_core::H256;
 use std::sync::Arc;
+use subxt::tx::Signer;
 use tokio::sync::broadcast::Receiver;
 use tokio_stream::StreamExt;
 
-use super::{BootstrapHandler, EventMessage, TxRequester};
-
 const SUB_LOG_TARGET: &str = "inbound-handler";
 
-pub struct InboundHandler<T> {
+pub struct InboundHandler<T, S> {
 	/// `EthClient` for interact with Bifrost network.
-	bfc_client: Arc<EthClient<T>>,
+	bfc_client: Arc<EthClient<T, S>>,
 	/// Sender that sends messages to tx request channel (Bifrost network)
 	tx_request_sender: Arc<TxRequestSender>,
 	/// The receiver that consumes new events from the block channel.
@@ -42,9 +43,13 @@ pub struct InboundHandler<T> {
 	bootstrap_shared_data: Arc<BootstrapSharedData>,
 }
 
-impl<T: JsonRpcClient + 'static> InboundHandler<T> {
+impl<T, S> InboundHandler<T, S>
+where
+	T: JsonRpcClient + 'static,
+	S: Signer<CustomConfig>,
+{
 	pub fn new(
-		bfc_client: Arc<EthClient<T>>,
+		bfc_client: Arc<EthClient<T, S>>,
 		tx_request_sender: Arc<TxRequestSender>,
 		event_receiver: Receiver<BTCEventMessage>,
 		bootstrap_shared_data: Arc<BootstrapSharedData>,
@@ -151,18 +156,26 @@ impl<T: JsonRpcClient + 'static> InboundHandler<T> {
 }
 
 #[async_trait::async_trait]
-impl<T: JsonRpcClient + 'static> TxRequester<T> for InboundHandler<T> {
+impl<T, S> TxRequester<T, S> for InboundHandler<T, S>
+where
+	T: JsonRpcClient + 'static,
+	S: Signer<CustomConfig>,
+{
 	fn tx_request_sender(&self) -> Arc<TxRequestSender> {
 		self.tx_request_sender.clone()
 	}
 
-	fn bfc_client(&self) -> Arc<EthClient<T>> {
+	fn bfc_client(&self) -> Arc<EthClient<T, S>> {
 		self.bfc_client.clone()
 	}
 }
 
 #[async_trait::async_trait]
-impl<T: JsonRpcClient + 'static> Handler for InboundHandler<T> {
+impl<T, S> Handler for InboundHandler<T, S>
+where
+	T: JsonRpcClient + 'static,
+	S: Signer<CustomConfig> + Send + Sync,
+{
 	async fn run(&mut self) {
 		loop {
 			if self.is_bootstrap_state_synced_as(BootstrapState::NormalStart).await {
@@ -226,7 +239,11 @@ impl<T: JsonRpcClient + 'static> Handler for InboundHandler<T> {
 }
 
 #[async_trait::async_trait]
-impl<T: JsonRpcClient> BootstrapHandler for InboundHandler<T> {
+impl<T, S> BootstrapHandler for InboundHandler<T, S>
+where
+	T: JsonRpcClient,
+	S: Signer<CustomConfig> + Send + Sync,
+{
 	fn bootstrap_shared_data(&self) -> Arc<BootstrapSharedData> {
 		self.bootstrap_shared_data.clone()
 	}

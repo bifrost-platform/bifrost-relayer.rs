@@ -5,6 +5,7 @@ use br_client::{
 };
 use br_primitives::{
 	constants::{errors::INVALID_PERIODIC_SCHEDULE, schedule::PSBT_SIGNER_SCHEDULE},
+	substrate::CustomConfig,
 	substrate::{bifrost_runtime, MigrationSequence, SignedPsbtMessage},
 	tx::{SubmitSignedPsbtMetadata, XtRequest, XtRequestMetadata, XtRequestSender},
 	utils::{hash_bytes, sub_display_format},
@@ -13,15 +14,16 @@ use cron::Schedule;
 use ethers::prelude::{Bytes, JsonRpcClient, H256};
 use miniscript::bitcoin::{Address as BtcAddress, Network, Psbt};
 use std::{str::FromStr, sync::Arc};
+use subxt::tx::Signer;
 use tokio::sync::RwLock;
 use tokio_stream::StreamExt;
 
 const SUB_LOG_TARGET: &str = "psbt-signer";
 
 /// The essential task that submits signed PSBT's.
-pub struct PsbtSigner<T> {
+pub struct PsbtSigner<T, S> {
 	/// The Bifrost client.
-	client: Arc<EthClient<T>>,
+	client: Arc<EthClient<T, S>>,
 	/// The extrinsic message sender.
 	xt_request_sender: Arc<XtRequestSender>,
 	/// The public and private keypair local storage.
@@ -34,10 +36,14 @@ pub struct PsbtSigner<T> {
 	schedule: Schedule,
 }
 
-impl<T: 'static + JsonRpcClient> PsbtSigner<T> {
+impl<T, S> PsbtSigner<T, S>
+where
+	T: 'static + JsonRpcClient,
+	S: Signer<CustomConfig> + 'static + Send + Sync,
+{
 	/// Instantiates a new `PsbtSigner` instance.
 	pub fn new(
-		client: Arc<EthClient<T>>,
+		client: Arc<EthClient<T, S>>,
 		xt_request_sender: Arc<XtRequestSender>,
 		keypair_storage: Arc<RwLock<KeypairStorage>>,
 		migration_sequence: Arc<RwLock<MigrationSequence>>,
@@ -183,18 +189,26 @@ impl<T: 'static + JsonRpcClient> PsbtSigner<T> {
 }
 
 #[async_trait::async_trait]
-impl<T: 'static + JsonRpcClient> XtRequester<T> for PsbtSigner<T> {
+impl<T, S> XtRequester<T, S> for PsbtSigner<T, S>
+where
+	T: 'static + JsonRpcClient,
+	S: Signer<CustomConfig> + 'static + Send + Sync,
+{
 	fn xt_request_sender(&self) -> Arc<XtRequestSender> {
 		self.xt_request_sender.clone()
 	}
 
-	fn bfc_client(&self) -> Arc<EthClient<T>> {
+	fn bfc_client(&self) -> Arc<EthClient<T, S>> {
 		self.client.clone()
 	}
 }
 
 #[async_trait::async_trait]
-impl<T: 'static + JsonRpcClient> PeriodicWorker for PsbtSigner<T> {
+impl<T, S> PeriodicWorker for PsbtSigner<T, S>
+where
+	T: 'static + JsonRpcClient,
+	S: Signer<CustomConfig> + 'static + Send + Sync,
+{
 	fn schedule(&self) -> Schedule {
 		self.schedule.clone()
 	}

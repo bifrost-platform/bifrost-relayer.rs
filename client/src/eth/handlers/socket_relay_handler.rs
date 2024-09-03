@@ -6,9 +6,15 @@ use ethers::{
 	providers::JsonRpcClient,
 	types::{Filter, Log, TransactionRequest, H256, U256},
 };
+use subxt::tx::Signer;
 use tokio::{sync::broadcast::Receiver, time::sleep};
 use tokio_stream::StreamExt;
 
+use crate::eth::{
+	events::EventMessage,
+	traits::{BootstrapHandler, Handler, SocketRelayBuilder},
+	EthClient,
+};
 use br_primitives::{
 	bootstrap::BootstrapSharedData,
 	constants::{
@@ -25,22 +31,17 @@ use br_primitives::{
 		SocketEventStatus,
 	},
 	periodic::RollbackSender,
+	substrate::CustomConfig,
 	tx::{SocketRelayMetadata, TxRequest, TxRequestMessage, TxRequestMetadata, TxRequestSender},
 	utils::sub_display_format,
-};
-
-use crate::eth::{
-	events::EventMessage,
-	traits::{BootstrapHandler, Handler, SocketRelayBuilder},
-	EthClient,
 };
 
 const SUB_LOG_TARGET: &str = "socket-handler";
 
 /// The essential task that handles `socket relay` related events.
-pub struct SocketRelayHandler<T> {
+pub struct SocketRelayHandler<T, S> {
 	/// The `EthClient` to interact with the connected blockchain.
-	pub client: Arc<EthClient<T>>,
+	pub client: Arc<EthClient<T, S>>,
 	/// The senders that sends messages to the tx request channel.
 	tx_request_senders: BTreeMap<ChainID, Arc<TxRequestSender>>,
 	/// The rollback senders that sends rollbackable socket messages.
@@ -48,7 +49,7 @@ pub struct SocketRelayHandler<T> {
 	/// The receiver that consumes new events from the block channel.
 	event_receiver: Receiver<EventMessage>,
 	/// The entire clients instantiated in the system. <chain_id, Arc<EthClient>>
-	system_clients: BTreeMap<ChainID, Arc<EthClient<T>>>,
+	system_clients: BTreeMap<ChainID, Arc<EthClient<T, S>>>,
 	/// Signature of the `Socket` Event.
 	socket_signature: H256,
 	/// The bootstrap shared data.
@@ -56,7 +57,11 @@ pub struct SocketRelayHandler<T> {
 }
 
 #[async_trait::async_trait]
-impl<T: 'static + JsonRpcClient> Handler for SocketRelayHandler<T> {
+impl<T, S> Handler for SocketRelayHandler<T, S>
+where
+	T: 'static + JsonRpcClient,
+	S: Signer<CustomConfig> + 'static + Send + Sync,
+{
 	async fn run(&mut self) {
 		loop {
 			if self.is_bootstrap_state_synced_as(BootstrapState::BootstrapSocketRelay).await {
@@ -150,8 +155,12 @@ impl<T: 'static + JsonRpcClient> Handler for SocketRelayHandler<T> {
 }
 
 #[async_trait::async_trait]
-impl<T: 'static + JsonRpcClient> SocketRelayBuilder<T> for SocketRelayHandler<T> {
-	fn get_client(&self) -> Arc<EthClient<T>> {
+impl<T, S> SocketRelayBuilder<T, S> for SocketRelayHandler<T, S>
+where
+	T: 'static + JsonRpcClient,
+	S: Signer<CustomConfig> + 'static + Send + Sync,
+{
+	fn get_client(&self) -> Arc<EthClient<T, S>> {
 		self.client.clone()
 	}
 
@@ -232,17 +241,21 @@ impl<T: 'static + JsonRpcClient> SocketRelayBuilder<T> for SocketRelayHandler<T>
 	}
 }
 
-impl<T: 'static + JsonRpcClient> SocketRelayHandler<T> {
+impl<T, S> SocketRelayHandler<T, S>
+where
+	T: 'static + JsonRpcClient,
+	S: Signer<CustomConfig> + 'static + Send + Sync,
+{
 	/// Instantiates a new `SocketRelayHandler` instance.
 	pub fn new(
 		id: ChainID,
 		tx_request_senders_vec: Vec<Arc<TxRequestSender>>,
 		rollback_senders: BTreeMap<ChainID, Arc<RollbackSender>>,
 		event_receiver: Receiver<EventMessage>,
-		system_clients_vec: Vec<Arc<EthClient<T>>>,
+		system_clients_vec: Vec<Arc<EthClient<T, S>>>,
 		bootstrap_shared_data: Arc<BootstrapSharedData>,
 	) -> Self {
-		let system_clients: BTreeMap<ChainID, Arc<EthClient<T>>> = system_clients_vec
+		let system_clients: BTreeMap<ChainID, Arc<EthClient<T, S>>> = system_clients_vec
 			.iter()
 			.map(|client| (client.get_chain_id(), client.clone()))
 			.collect();
@@ -523,7 +536,11 @@ impl<T: 'static + JsonRpcClient> SocketRelayHandler<T> {
 }
 
 #[async_trait::async_trait]
-impl<T: 'static + JsonRpcClient> BootstrapHandler for SocketRelayHandler<T> {
+impl<T, S> BootstrapHandler for SocketRelayHandler<T, S>
+where
+	T: 'static + JsonRpcClient,
+	S: Signer<CustomConfig> + 'static + Send + Sync,
+{
 	fn bootstrap_shared_data(&self) -> Arc<BootstrapSharedData> {
 		self.bootstrap_shared_data.clone()
 	}

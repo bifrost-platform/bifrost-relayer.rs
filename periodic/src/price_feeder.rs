@@ -9,8 +9,13 @@ use ethers::{
 	utils::parse_ether,
 };
 use rand::Rng;
+use subxt::tx::Signer;
 use tokio::time::sleep;
 
+use crate::{
+	price_source::PriceFetchers,
+	traits::{PeriodicWorker, PriceFetcher},
+};
 use br_client::eth::EthClient;
 use br_primitives::{
 	constants::{
@@ -20,37 +25,37 @@ use br_primitives::{
 	contracts::socket::get_asset_oids,
 	eth::GasCoefficient,
 	periodic::{PriceResponse, PriceSource},
+	substrate::CustomConfig,
 	tx::{PriceFeedMetadata, TxRequest, TxRequestMessage, TxRequestMetadata, TxRequestSender},
 	utils::sub_display_format,
-};
-
-use crate::{
-	price_source::PriceFetchers,
-	traits::{PeriodicWorker, PriceFetcher},
 };
 
 const SUB_LOG_TARGET: &str = "price-feeder";
 
 /// The essential task that handles oracle price feedings.
-pub struct OraclePriceFeeder<T> {
+pub struct OraclePriceFeeder<T, S> {
 	/// The `EthClient` to interact with the bifrost network.
-	pub client: Arc<EthClient<T>>,
+	pub client: Arc<EthClient<T, S>>,
 	/// The time schedule that represents when to send price feeds.
 	schedule: Schedule,
 	/// The primary source for fetching prices. (Coingecko)
-	primary_source: Vec<PriceFetchers<T>>,
+	primary_source: Vec<PriceFetchers<T, S>>,
 	/// The secondary source for fetching prices. (aggregated from external sources)
-	secondary_sources: Vec<PriceFetchers<T>>,
+	secondary_sources: Vec<PriceFetchers<T, S>>,
 	/// The sender that sends messages to the tx request channel.
 	tx_request_sender: Arc<TxRequestSender>,
 	/// The pre-defined oracle ID's for each asset.
 	asset_oid: BTreeMap<&'static str, H256>,
 	/// The vector that contains each `EthClient`.
-	system_clients: Vec<Arc<EthClient<T>>>,
+	system_clients: Vec<Arc<EthClient<T, S>>>,
 }
 
 #[async_trait]
-impl<T: JsonRpcClient + 'static> PeriodicWorker for OraclePriceFeeder<T> {
+impl<T, S> PeriodicWorker for OraclePriceFeeder<T, S>
+where
+	T: JsonRpcClient + 'static,
+	S: Signer<CustomConfig> + 'static + Send + Sync,
+{
 	fn schedule(&self) -> Schedule {
 		self.schedule.clone()
 	}
@@ -80,10 +85,14 @@ impl<T: JsonRpcClient + 'static> PeriodicWorker for OraclePriceFeeder<T> {
 	}
 }
 
-impl<T: JsonRpcClient + 'static> OraclePriceFeeder<T> {
+impl<T, S> OraclePriceFeeder<T, S>
+where
+	T: JsonRpcClient + 'static,
+	S: Signer<CustomConfig> + 'static + Send + Sync,
+{
 	pub fn new(
 		tx_request_senders: Vec<Arc<TxRequestSender>>,
-		system_clients: Vec<Arc<EthClient<T>>>,
+		system_clients: Vec<Arc<EthClient<T, S>>>,
 	) -> Self {
 		let asset_oid = get_asset_oids();
 
