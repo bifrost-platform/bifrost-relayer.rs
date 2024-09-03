@@ -1,19 +1,21 @@
 use std::{collections::BTreeMap, fmt::Error, sync::Arc};
 
-use br_primitives::periodic::PriceResponse;
-use ethers::{providers::JsonRpcClient, types::U256};
-
-use br_client::eth::EthClient;
-
 use crate::traits::PriceFetcher;
+use br_client::eth::EthClient;
+use br_primitives::periodic::PriceResponse;
+use br_primitives::substrate::CustomConfig;
+use ethers::{providers::JsonRpcClient, types::U256};
+use subxt::tx::Signer;
 
 #[derive(Clone)]
-pub struct ChainlinkPriceFetcher<T> {
-	client: Option<Arc<EthClient<T>>>,
+pub struct ChainlinkPriceFetcher<T, S> {
+	client: Option<Arc<EthClient<T, S>>>,
 }
 
 #[async_trait::async_trait]
-impl<T: JsonRpcClient + 'static> PriceFetcher for ChainlinkPriceFetcher<T> {
+impl<T: JsonRpcClient + 'static, S: Signer<CustomConfig> + 'static + Send + Sync> PriceFetcher
+	for ChainlinkPriceFetcher<T, S>
+{
 	/// Should use only when requesting USDC/USDT/DAI (stable coins) price.
 	async fn get_ticker_with_symbol(&self, symbol: String) -> Result<PriceResponse, Error> {
 		if let Some(client) = &self.client {
@@ -21,7 +23,7 @@ impl<T: JsonRpcClient + 'static> PriceFetcher for ChainlinkPriceFetcher<T> {
 
 			match symbol_str {
 				"USDC" | "USDT" | "DAI" | "BTC" | "WBTC" => {
-					return if let Some(contract) = match symbol_str {
+					if let Some(contract) = match symbol_str {
 						"USDC" => &client.aggregator_contracts.chainlink_usdc_usd,
 						"USDT" => &client.aggregator_contracts.chainlink_usdt_usd,
 						"DAI" => &client.aggregator_contracts.chainlink_dai_usd,
@@ -47,7 +49,7 @@ impl<T: JsonRpcClient + 'static> PriceFetcher for ChainlinkPriceFetcher<T> {
 				},
 			}
 		} else {
-			return Err(Error);
+			Err(Error)
 		}
 	}
 
@@ -62,12 +64,16 @@ impl<T: JsonRpcClient + 'static> PriceFetcher for ChainlinkPriceFetcher<T> {
 			};
 		}
 
-		return if ret.is_empty() { Err(Error) } else { Ok(ret) };
+		if ret.is_empty() {
+			Err(Error)
+		} else {
+			Ok(ret)
+		}
 	}
 }
 
-impl<T: JsonRpcClient> ChainlinkPriceFetcher<T> {
-	pub async fn new(client: Option<Arc<EthClient<T>>>) -> Self {
+impl<T: JsonRpcClient, S: Signer<CustomConfig>> ChainlinkPriceFetcher<T, S> {
+	pub async fn new(client: Option<Arc<EthClient<T, S>>>) -> Self {
 		ChainlinkPriceFetcher { client }
 	}
 }

@@ -3,7 +3,9 @@ use crate::eth::{
 	EthClient, LegacyGasMiddleware,
 };
 
+use super::generate_delay;
 use async_trait::async_trait;
+use br_primitives::substrate::CustomConfig;
 use br_primitives::{
 	constants::{
 		cli::{DEFAULT_ESCALATE_PERCENTAGE, DEFAULT_MIN_GAS_PRICE},
@@ -20,6 +22,7 @@ use ethers::{
 };
 use sc_service::SpawnTaskHandle;
 use std::{sync::Arc, time::Duration};
+use subxt::tx::Signer;
 use tokio::{
 	sync::{
 		mpsc,
@@ -28,14 +31,12 @@ use tokio::{
 	time::sleep,
 };
 
-use super::generate_delay;
-
 const SUB_LOG_TARGET: &str = "legacy-tx-manager";
 
 /// The essential task that sends legacy transactions asynchronously.
-pub struct LegacyTransactionManager<T> {
+pub struct LegacyTransactionManager<T, S> {
 	/// The ethereum client for the connected chain.
-	pub client: Arc<EthClient<T>>,
+	pub client: Arc<EthClient<T, S>>,
 	/// The receiver connected to the tx request channel.
 	receiver: UnboundedReceiver<TxRequestMessage>,
 	/// The flag whether the client has enabled txpool namespace.
@@ -55,10 +56,10 @@ pub struct LegacyTransactionManager<T> {
 	tx_spawn_handle: SpawnTaskHandle,
 }
 
-impl<T: 'static + JsonRpcClient> LegacyTransactionManager<T> {
+impl<T: 'static + JsonRpcClient, S: Signer<CustomConfig>> LegacyTransactionManager<T, S> {
 	/// Instantiates a new `LegacyTransactionManager` instance.
 	pub fn new(
-		client: Arc<EthClient<T>>,
+		client: Arc<EthClient<T, S>>,
 		escalate_percentage: Option<f64>,
 		min_gas_price: Option<u64>,
 		is_initially_escalated: bool,
@@ -92,7 +93,11 @@ impl<T: 'static + JsonRpcClient> LegacyTransactionManager<T> {
 }
 
 #[async_trait]
-impl<T: 'static + JsonRpcClient> TransactionManager<T> for LegacyTransactionManager<T> {
+impl<T: 'static + JsonRpcClient, S: Signer<CustomConfig>> TransactionManager<T, S>
+	for LegacyTransactionManager<T, S>
+where
+	S: 'static + Send + Sync,
+{
 	async fn run(&mut self) {
 		self.initialize().await;
 
@@ -114,7 +119,7 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> for LegacyTransactionMana
 		self.flush_stuck_transaction().await;
 	}
 
-	fn get_client(&self) -> Arc<EthClient<T>> {
+	fn get_client(&self) -> Arc<EthClient<T, S>> {
 		self.client.clone()
 	}
 
@@ -145,7 +150,7 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> for LegacyTransactionMana
 	) -> TxRequest {
 		let request: TransactionRequest = transaction.into();
 
-		return if let Some(gas_price) = transaction.gas_price {
+		if let Some(gas_price) = transaction.gas_price {
 			TxRequest::Legacy(
 				request.gas_price(
 					self.client
@@ -186,14 +191,14 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> for LegacyTransactionMana
 					PROVIDER_INTERNAL_ERROR,
 				);
 			}
-		};
+		}
 	}
 }
 
 /// The transaction task for Legacy transactions.
-pub struct LegacyTransactionTask<T> {
+pub struct LegacyTransactionTask<T, S> {
 	/// The ethereum client for the connected chain.
-	client: Arc<EthClient<T>>,
+	client: Arc<EthClient<T, S>>,
 	/// The flag whether the client has enabled txpool namespace.
 	is_txpool_enabled: bool,
 	/// The flag whether if the gas price will be initially escalated. The `escalate_percentage`
@@ -209,10 +214,10 @@ pub struct LegacyTransactionTask<T> {
 	duplicate_confirm_delay: Option<u64>,
 }
 
-impl<T: JsonRpcClient> LegacyTransactionTask<T> {
+impl<T: JsonRpcClient, S: Signer<CustomConfig>> LegacyTransactionTask<T, S> {
 	/// Build an Legacy transaction task.
 	pub fn new(
-		client: Arc<EthClient<T>>,
+		client: Arc<EthClient<T, S>>,
 		is_txpool_enabled: bool,
 		is_initially_escalated: bool,
 		gas_price_coefficient: f64,
@@ -231,12 +236,14 @@ impl<T: JsonRpcClient> LegacyTransactionTask<T> {
 }
 
 #[async_trait::async_trait]
-impl<T: 'static + JsonRpcClient> TransactionTask<T> for LegacyTransactionTask<T> {
+impl<T: 'static + JsonRpcClient, S: Signer<CustomConfig> + Send + Sync + 'static>
+	TransactionTask<T, S> for LegacyTransactionTask<T, S>
+{
 	fn is_txpool_enabled(&self) -> bool {
 		self.is_txpool_enabled
 	}
 
-	fn get_client(&self) -> Arc<EthClient<T>> {
+	fn get_client(&self) -> Arc<EthClient<T, S>> {
 		self.client.clone()
 	}
 

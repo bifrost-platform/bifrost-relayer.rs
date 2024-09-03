@@ -4,9 +4,12 @@ use ethers::{
 	types::{TransactionRequest, U256},
 };
 use std::{collections::BTreeMap, str::FromStr, sync::Arc};
+use subxt::tx::Signer;
 use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
 
+use crate::traits::PeriodicWorker;
 use br_client::eth::{traits::SocketRelayBuilder, EthClient};
+use br_primitives::substrate::CustomConfig;
 use br_primitives::{
 	constants::{
 		errors::{INVALID_BIFROST_NATIVENESS, INVALID_CHAIN_ID, INVALID_PERIODIC_SCHEDULE},
@@ -19,18 +22,16 @@ use br_primitives::{
 	utils::sub_display_format,
 };
 
-use crate::traits::PeriodicWorker;
-
 const SUB_LOG_TARGET: &str = "rollback-emitter";
 
 /// The essential task that handles `Socket` event rollbacks.
 /// This only handles requests that are relayed to the target client.
 /// (`client` and `tx_request_sender` are connected to the same chain)
-pub struct SocketRollbackEmitter<T> {
+pub struct SocketRollbackEmitter<T, S> {
 	/// The `EthClient` to interact with the connected blockchain.
-	pub client: Arc<EthClient<T>>,
+	pub client: Arc<EthClient<T, S>>,
 	/// The entire clients instantiated in the system. <chain_id, Arc<EthClient>>
-	system_clients: BTreeMap<ChainID, Arc<EthClient<T>>>,
+	system_clients: BTreeMap<ChainID, Arc<EthClient<T, S>>>,
 	/// The receiver connected to the socket rollback channel.
 	rollback_receiver: UnboundedReceiver<SocketMessage>,
 	/// The local storage saving emitted `Socket` event messages.
@@ -41,15 +42,17 @@ pub struct SocketRollbackEmitter<T> {
 	schedule: Schedule,
 }
 
-impl<T: JsonRpcClient + 'static> SocketRollbackEmitter<T> {
+impl<T: JsonRpcClient + 'static, S: Signer<CustomConfig> + 'static + Send + Sync>
+	SocketRollbackEmitter<T, S>
+{
 	/// Instantiates a new `SocketRollbackEmitter`.
 	pub fn new(
 		tx_request_sender: Arc<TxRequestSender>,
-		system_clients_vec: Vec<Arc<EthClient<T>>>,
+		system_clients_vec: Vec<Arc<EthClient<T, S>>>,
 	) -> (Self, UnboundedSender<SocketMessage>) {
 		let (sender, rollback_receiver) = mpsc::unbounded_channel::<SocketMessage>();
 
-		let system_clients: BTreeMap<ChainID, Arc<EthClient<T>>> = system_clients_vec
+		let system_clients: BTreeMap<ChainID, Arc<EthClient<T, S>>> = system_clients_vec
 			.iter()
 			.map(|client| (client.get_chain_id(), client.clone()))
 			.collect();
@@ -275,8 +278,10 @@ impl<T: JsonRpcClient + 'static> SocketRollbackEmitter<T> {
 }
 
 #[async_trait::async_trait]
-impl<T: JsonRpcClient + 'static> SocketRelayBuilder<T> for SocketRollbackEmitter<T> {
-	fn get_client(&self) -> Arc<EthClient<T>> {
+impl<T: JsonRpcClient + 'static, S: Signer<CustomConfig> + 'static + Send + Sync>
+	SocketRelayBuilder<T, S> for SocketRollbackEmitter<T, S>
+{
+	fn get_client(&self) -> Arc<EthClient<T, S>> {
 		// This will always return the Bifrost client.
 		// Used only for `get_sorted_signatures()` on `Outbound::Accepted` rollbacks.
 		self.system_clients
@@ -289,7 +294,9 @@ impl<T: JsonRpcClient + 'static> SocketRelayBuilder<T> for SocketRollbackEmitter
 }
 
 #[async_trait::async_trait]
-impl<T: JsonRpcClient + 'static> PeriodicWorker for SocketRollbackEmitter<T> {
+impl<T: JsonRpcClient + 'static, S: Signer<CustomConfig> + 'static + Send + Sync> PeriodicWorker
+	for SocketRollbackEmitter<T, S>
+{
 	fn schedule(&self) -> Schedule {
 		self.schedule.clone()
 	}

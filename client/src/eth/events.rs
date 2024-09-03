@@ -4,18 +4,19 @@ use ethers::{
 	providers::JsonRpcClient,
 	types::{BlockNumber, Filter, Log, SyncingStatus, U64},
 };
+use subxt::tx::Signer;
 use tokio::{
 	sync::broadcast::{self, Receiver, Sender},
 	time::{sleep, Duration},
 };
 
+use super::{traits::BootstrapHandler, EthClient};
+use br_primitives::substrate::CustomConfig;
 use br_primitives::{
 	bootstrap::BootstrapSharedData,
 	eth::{BootstrapState, ChainID},
 	utils::sub_display_format,
 };
-
-use super::{traits::BootstrapHandler, EthClient};
 
 #[derive(Clone, Debug)]
 /// The message format passed through the block channel.
@@ -49,9 +50,9 @@ impl EventReceiver {
 const SUB_LOG_TARGET: &str = "event-manager";
 
 /// The essential task that listens and handle new events.
-pub struct EventManager<T> {
+pub struct EventManager<T, S> {
 	/// The ethereum client for the connected chain.
-	pub client: Arc<EthClient<T>>,
+	pub client: Arc<EthClient<T, S>>,
 	/// The channel sending event messages.
 	pub sender: Sender<EventMessage>,
 	/// The block waiting for enough confirmations.
@@ -63,10 +64,10 @@ pub struct EventManager<T> {
 	is_balance_sync_enabled: bool,
 }
 
-impl<T: JsonRpcClient + 'static> EventManager<T> {
+impl<T: JsonRpcClient + 'static, S: Signer<CustomConfig> + Send + Sync> EventManager<T, S> {
 	/// Instantiates a new `EventManager` instance.
 	pub fn new(
-		client: Arc<EthClient<T>>,
+		client: Arc<EthClient<T, S>>,
 		bootstrap_shared_data: Arc<BootstrapSharedData>,
 		is_balance_sync_enabled: bool,
 	) -> Self {
@@ -225,7 +226,11 @@ impl<T: JsonRpcClient + 'static> EventManager<T> {
 }
 
 #[async_trait::async_trait]
-impl<T: JsonRpcClient> BootstrapHandler for EventManager<T> {
+impl<T: JsonRpcClient, S: Signer<CustomConfig>> BootstrapHandler for EventManager<T, S>
+where
+	S: Sync,
+	S: Send,
+{
 	fn bootstrap_shared_data(&self) -> Arc<BootstrapSharedData> {
 		self.bootstrap_shared_data.clone()
 	}

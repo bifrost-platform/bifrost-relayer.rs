@@ -1,7 +1,9 @@
 use std::{str::FromStr, sync::Arc};
 
+use crate::traits::PeriodicWorker;
 use bitcoincore_rpc::bitcoin::PublicKey;
 use br_client::{btc::storage::keypair::KeypairStorage, eth::EthClient};
+use br_primitives::substrate::CustomConfig;
 use br_primitives::{
 	constants::{errors::INVALID_PERIODIC_SCHEDULE, schedule::PUB_KEY_SUBMITTER_SCHEDULE},
 	contracts::registration_pool::RegistrationPoolContract,
@@ -19,16 +21,15 @@ use ethers::{
 	providers::{JsonRpcClient, Provider},
 	types::{Address, Bytes},
 };
+use subxt::tx::Signer;
 use tokio::sync::RwLock;
 use tokio_stream::StreamExt;
 
-use crate::traits::PeriodicWorker;
-
 const SUB_LOG_TARGET: &str = "pubkey-submitter";
 
-pub struct PubKeySubmitter<T> {
+pub struct PubKeySubmitter<T, S> {
 	/// The Bifrost client.
-	client: Arc<EthClient<T>>,
+	client: Arc<EthClient<T, S>>,
 	/// The extrinsic message sender.
 	xt_request_sender: Arc<XtRequestSender>,
 	/// The public and private keypair local storage.
@@ -40,7 +41,9 @@ pub struct PubKeySubmitter<T> {
 }
 
 #[async_trait::async_trait]
-impl<T: JsonRpcClient + 'static> PeriodicWorker for PubKeySubmitter<T> {
+impl<T: JsonRpcClient + 'static, S: Signer<CustomConfig> + 'static + Send + Sync> PeriodicWorker
+	for PubKeySubmitter<T, S>
+{
 	fn schedule(&self) -> Schedule {
 		self.schedule.clone()
 	}
@@ -99,10 +102,12 @@ impl<T: JsonRpcClient + 'static> PeriodicWorker for PubKeySubmitter<T> {
 	}
 }
 
-impl<T: JsonRpcClient + 'static> PubKeySubmitter<T> {
+impl<T: JsonRpcClient + 'static, S: Signer<CustomConfig> + 'static + Send + Sync>
+	PubKeySubmitter<T, S>
+{
 	/// Instantiates a new `PubKeySubmitter` instance.
 	pub fn new(
-		client: Arc<EthClient<T>>,
+		client: Arc<EthClient<T, S>>,
 		xt_request_sender: Arc<XtRequestSender>,
 		keypair_storage: Arc<RwLock<KeypairStorage>>,
 		migration_sequence: Arc<RwLock<MigrationSequence>>,

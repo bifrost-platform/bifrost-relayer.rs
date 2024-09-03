@@ -6,6 +6,7 @@ use br_primitives::{
 use ethers::providers::JsonRpcClient;
 use sc_service::SpawnTaskHandle;
 use std::sync::Arc;
+use subxt::tx::Signer;
 use subxt::OnlineClient;
 use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
 
@@ -14,21 +15,25 @@ use crate::{eth::EthClient, substrate::traits::ExtrinsicTask as ExtrinsicTaskT};
 const SUB_LOG_TARGET: &str = "extrinsic-manager";
 
 /// The essential task that sends extrinsics asynchronously.
-pub struct ExtrinsicManager<T> {
+pub struct ExtrinsicManager<T, S> {
 	/// The substrate client.
 	sub_client: Option<OnlineClient<CustomConfig>>,
 	/// The Bifrost client.
-	bfc_client: Arc<EthClient<T>>,
+	bfc_client: Arc<EthClient<T, S>>,
 	/// The receiver connected to the tx request channel.
 	receiver: UnboundedReceiver<XtRequestMessage>,
 	/// A handle for spawning transaction tasks in the service.
 	xt_spawn_handle: SpawnTaskHandle,
 }
 
-impl<T: 'static + JsonRpcClient> ExtrinsicManager<T> {
+impl<T: 'static + JsonRpcClient, S: Signer<CustomConfig> + 'static> ExtrinsicManager<T, S>
+where
+	S: Send,
+	S: Sync,
+{
 	/// Instantiates a new `ExtrinsicManager`.
 	pub fn new(
-		bfc_client: Arc<EthClient<T>>,
+		bfc_client: Arc<EthClient<T, S>>,
 		xt_spawn_handle: SpawnTaskHandle,
 	) -> (Self, UnboundedSender<XtRequestMessage>) {
 		let (sender, receiver) = mpsc::unbounded_channel::<XtRequestMessage>();
@@ -78,27 +83,35 @@ impl<T: 'static + JsonRpcClient> ExtrinsicManager<T> {
 }
 
 /// The transaction task for extrinsics.
-pub struct ExtrinsicTask<T> {
+pub struct ExtrinsicTask<T, S> {
 	/// The substrate client.
 	sub_client: Arc<OnlineClient<CustomConfig>>,
 	/// The Bifrost client.
-	bfc_client: Arc<EthClient<T>>,
+	bfc_client: Arc<EthClient<T, S>>,
 }
 
-impl<T: JsonRpcClient> ExtrinsicTask<T> {
+impl<T: JsonRpcClient, S: Signer<CustomConfig>> ExtrinsicTask<T, S> {
 	/// Build an `ExtrinsicTask` instance.
-	pub fn new(sub_client: Arc<OnlineClient<CustomConfig>>, bfc_client: Arc<EthClient<T>>) -> Self {
+	pub fn new(
+		sub_client: Arc<OnlineClient<CustomConfig>>,
+		bfc_client: Arc<EthClient<T, S>>,
+	) -> Self {
 		Self { sub_client, bfc_client }
 	}
 }
 
 #[async_trait::async_trait]
-impl<T: 'static + JsonRpcClient> ExtrinsicTaskT<T> for ExtrinsicTask<T> {
+impl<T: 'static + JsonRpcClient, S: Signer<CustomConfig>> ExtrinsicTaskT<T, S>
+	for ExtrinsicTask<T, S>
+where
+	S: Send,
+	S: Sync,
+{
 	fn get_sub_client(&self) -> Arc<OnlineClient<CustomConfig>> {
 		self.sub_client.clone()
 	}
 
-	fn get_bfc_client(&self) -> Arc<EthClient<T>> {
+	fn get_bfc_client(&self) -> Arc<EthClient<T, S>> {
 		self.bfc_client.clone()
 	}
 

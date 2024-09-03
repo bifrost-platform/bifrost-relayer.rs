@@ -743,59 +743,62 @@ struct RelayBase {
 
 struct ManagerDeps {
 	/// The `EthClient`'s for each specified chain.
-	clients: Vec<Arc<EthClient<Http>>>,
+	clients: Vec<Arc<EthClient<Http, Keypair>>>,
 	/// The `TransactionManager`'s for each specified chain.
-	tx_managers: (Vec<LegacyTransactionManager<Http>>, Vec<Eip1559TransactionManager<Http>>),
+	tx_managers: (
+		Vec<LegacyTransactionManager<Http, Keypair>>,
+		Vec<Eip1559TransactionManager<Http, Keypair>>,
+	),
 	/// The `EventManager`'s for each specified chain.
-	event_managers: BTreeMap<ChainID, EventManager<Http>>,
+	event_managers: BTreeMap<ChainID, EventManager<Http, Keypair>>,
 	/// The `TxRequestSender`'s for each specified chain.
 	tx_request_senders: Vec<Arc<TxRequestSender>>,
 }
 
 struct BtcDeps {
 	/// The Bitcoin outbound handler.
-	outbound: OutboundHandler<Http>,
+	outbound: OutboundHandler<Http, Keypair>,
 	/// The Bitcoin inbound handler.
-	inbound: InboundHandler<Http>,
+	inbound: InboundHandler<Http, Keypair>,
 	/// The Bitcoin block manager.
-	block_manager: BlockManager<Http>,
+	block_manager: BlockManager<Http, Keypair>,
 	/// The Bitcoin PSBT signer.
-	psbt_signer: PsbtSigner<Http>,
+	psbt_signer: PsbtSigner<Http, Keypair>,
 	/// The Bitcoin vault public key submitter.
-	pub_key_submitter: PubKeySubmitter<Http>,
+	pub_key_submitter: PubKeySubmitter<Http, Keypair>,
 	/// The Bitcoin rollback verifier.
-	rollback_verifier: BitcoinRollbackVerifier<Http>,
+	rollback_verifier: BitcoinRollbackVerifier<Http, Keypair>,
 }
 
 struct SubstrateDeps {
 	/// The `ExtrinsicManager` for Bifrost.
-	xt_manager: ExtrinsicManager<Http>,
+	xt_manager: ExtrinsicManager<Http, Keypair>,
 	/// The `XtRequestSender` for Bifrost.
 	xt_request_sender: Arc<XtRequestSender>,
 }
 
 struct PeriodicDeps {
 	/// The `HeartbeatSender` used for system health checks.
-	heartbeat_sender: HeartbeatSender<Http>,
+	heartbeat_sender: HeartbeatSender<Http, Keypair>,
 	/// The `OraclePriceFeeder` used for price feeding.
-	oracle_price_feeder: OraclePriceFeeder<Http>,
+	oracle_price_feeder: OraclePriceFeeder<Http, Keypair>,
 	/// The `RoundupEmitter` used for detecting and emitting new round updates.
-	roundup_emitter: RoundupEmitter<Http>,
+	roundup_emitter: RoundupEmitter<Http, Keypair>,
 	/// The `SocketRollbackEmitter`'s for each specified chain.
-	rollback_emitters: Vec<SocketRollbackEmitter<Http>>,
+	rollback_emitters: Vec<SocketRollbackEmitter<Http, Keypair>>,
 	/// The `RollbackSender`'s for each specified chain.
 	rollback_senders: BTreeMap<ChainID, Arc<RollbackSender>>,
 	/// The `KeypairMigrator` used for detecting migration sequences.
-	keypair_migrator: KeypairMigrator<Http>,
+	keypair_migrator: KeypairMigrator<Http, Keypair>,
 	/// The `PubKeyPreSubmitter` used for presubmitting public keys.
-	presubmitter: PubKeyPreSubmitter<Http>,
+	presubmitter: PubKeyPreSubmitter<Http, Keypair>,
 }
 
 struct HandlerDeps {
 	/// The `SocketRelayHandler`'s for each specified chain.
-	socket_relay_handlers: Vec<SocketRelayHandler<Http>>,
+	socket_relay_handlers: Vec<SocketRelayHandler<Http, Keypair>>,
 	/// The `RoundupRelayHandler`'s for each specified chain.
-	roundup_relay_handlers: Vec<RoundupRelayHandler<Http>>,
+	roundup_relay_handlers: Vec<RoundupRelayHandler<Http, Keypair>>,
 }
 
 /// The relayer client dependencies.

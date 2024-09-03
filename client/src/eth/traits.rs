@@ -1,5 +1,7 @@
 use std::{error::Error, str::FromStr, sync::Arc, time::Duration};
 
+use super::EthClient;
+use br_primitives::substrate::CustomConfig;
 use br_primitives::{
 	bootstrap::BootstrapSharedData,
 	contracts::socket::{PollSubmit, Signatures, SocketMessage},
@@ -13,9 +15,8 @@ use ethers::{
 	types::{Bytes, Log, Signature, Transaction, TransactionReceipt, TxHash, H256, U256},
 };
 use sc_service::SpawnTaskHandle;
+use subxt::tx::Signer;
 use tokio::time::sleep;
-
-use super::EthClient;
 
 #[async_trait::async_trait]
 pub trait Handler {
@@ -34,12 +35,15 @@ pub trait Handler {
 
 #[async_trait::async_trait]
 /// The client to interact with the `Socket` contract instance.
-pub trait SocketRelayBuilder<T>
+pub trait SocketRelayBuilder<T, S>
 where
 	T: 'static,
+	S: Signer<CustomConfig> + 'static,
+	S: Send,
+	S: Sync,
 {
 	/// Get the `EthClient` of the implemented handler.
-	fn get_client(&self) -> Arc<EthClient<T>>;
+	fn get_client(&self) -> Arc<EthClient<T, S>>;
 
 	/// Builds the `poll()` function call data.
 	fn build_poll_call_data(&self, msg: SocketMessage, sigs: Signatures) -> Bytes
@@ -208,9 +212,10 @@ pub trait Eip1559GasMiddleware {
 
 #[async_trait::async_trait]
 /// The manager trait for Legacy and Eip1559 transactions.
-pub trait TransactionManager<T>
+pub trait TransactionManager<T, S>
 where
 	T: JsonRpcClient + 'static,
+	S: Signer<CustomConfig> + 'static + Send + Sync,
 {
 	/// Starts the transaction manager. Listens to every new consumed tx request message.
 	async fn run(&mut self);
@@ -219,7 +224,7 @@ where
 	async fn initialize(&mut self);
 
 	/// Get the `EthClient`.
-	fn get_client(&self) -> Arc<EthClient<T>>;
+	fn get_client(&self) -> Arc<EthClient<T, S>>;
 
 	/// Get the transaction spawn handle.
 	fn get_spawn_handle(&self) -> SpawnTaskHandle;
@@ -266,15 +271,16 @@ where
 }
 
 #[async_trait::async_trait]
-pub trait TransactionTask<T>
+pub trait TransactionTask<T, S>
 where
 	T: JsonRpcClient + 'static,
+	S: Signer<CustomConfig> + 'static + Send + Sync,
 {
 	/// The flag whether the client has enabled txpool namespace.
 	fn is_txpool_enabled(&self) -> bool;
 
 	/// Get the `EthClient`.
-	fn get_client(&self) -> Arc<EthClient<T>>;
+	fn get_client(&self) -> Arc<EthClient<T, S>>;
 
 	/// If first relay transaction is stuck in mempool after waiting for this amount of time(ms),
 	/// ignore duplicate prevent logic. (default: 12s)

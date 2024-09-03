@@ -7,9 +7,16 @@ use ethers::{
 	providers::{JsonRpcClient, Provider},
 	types::{Address, Bytes, Filter, Log, Signature, TransactionRequest, H256, U256},
 };
+use subxt::tx::Signer;
 use tokio::{sync::broadcast::Receiver, time::sleep};
 use tokio_stream::StreamExt;
 
+use crate::eth::{
+	events::EventMessage,
+	traits::{BootstrapHandler, Handler},
+	EthClient,
+};
+use br_primitives::substrate::CustomConfig;
 use br_primitives::{
 	bootstrap::BootstrapSharedData,
 	constants::{
@@ -28,24 +35,18 @@ use br_primitives::{
 	utils::sub_display_format,
 };
 
-use crate::eth::{
-	events::EventMessage,
-	traits::{BootstrapHandler, Handler},
-	EthClient,
-};
-
 const SUB_LOG_TARGET: &str = "roundup-handler";
 
 /// The essential task that handles `roundup relay` related events.
-pub struct RoundupRelayHandler<T> {
+pub struct RoundupRelayHandler<T, S> {
 	/// The `EthClient` to interact with the bifrost network.
-	pub client: Arc<EthClient<T>>,
+	pub client: Arc<EthClient<T, S>>,
 	/// The senders that sends messages to each tx request channel.
 	tx_request_senders: BTreeMap<ChainID, Arc<TxRequestSender>>,
 	/// The receiver that consumes new events from the block channel.
 	event_receiver: Receiver<EventMessage>,
 	/// `EthClient`s to interact with provided networks except bifrost network.
-	external_clients: Vec<Arc<EthClient<T>>>,
+	external_clients: Vec<Arc<EthClient<T, S>>>,
 	/// Signature of RoundUp Event.
 	roundup_signature: H256,
 	/// The bootstrap shared data.
@@ -53,7 +54,9 @@ pub struct RoundupRelayHandler<T> {
 }
 
 #[async_trait]
-impl<T: JsonRpcClient + 'static> Handler for RoundupRelayHandler<T> {
+impl<T: JsonRpcClient + 'static, S: Signer<CustomConfig> + Send + Sync> Handler
+	for RoundupRelayHandler<T, S>
+{
 	async fn run(&mut self) {
 		loop {
 			if self.is_bootstrap_state_synced_as(BootstrapState::BootstrapRoundUpPhase2).await {
@@ -145,12 +148,12 @@ impl<T: JsonRpcClient + 'static> Handler for RoundupRelayHandler<T> {
 	}
 }
 
-impl<T: JsonRpcClient + 'static> RoundupRelayHandler<T> {
+impl<T: JsonRpcClient + 'static, S: Signer<CustomConfig>> RoundupRelayHandler<T, S> {
 	/// Instantiates a new `RoundupRelayHandler` instance.
 	pub fn new(
 		mut tx_request_senders_vec: Vec<Arc<TxRequestSender>>,
 		event_receiver: Receiver<EventMessage>,
-		clients: Vec<Arc<EthClient<T>>>,
+		clients: Vec<Arc<EthClient<T, S>>>,
 		bootstrap_shared_data: Arc<BootstrapSharedData>,
 	) -> Self {
 		// Only broadcast to external chains
@@ -353,7 +356,9 @@ impl<T: JsonRpcClient + 'static> RoundupRelayHandler<T> {
 }
 
 #[async_trait]
-impl<T: JsonRpcClient + 'static> BootstrapHandler for RoundupRelayHandler<T> {
+impl<T: JsonRpcClient + 'static, S: Signer<CustomConfig> + Send + Sync> BootstrapHandler
+	for RoundupRelayHandler<T, S>
+{
 	fn bootstrap_shared_data(&self) -> Arc<BootstrapSharedData> {
 		self.bootstrap_shared_data.clone()
 	}
