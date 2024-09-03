@@ -3,7 +3,6 @@ use std::{str::FromStr, sync::Arc};
 use crate::traits::PeriodicWorker;
 use bitcoincore_rpc::bitcoin::PublicKey;
 use br_client::{btc::storage::keypair::KeypairStorage, eth::EthClient};
-use br_primitives::substrate::CustomConfig;
 use br_primitives::{
 	constants::{errors::INVALID_PERIODIC_SCHEDULE, schedule::PUB_KEY_SUBMITTER_SCHEDULE},
 	contracts::registration_pool::RegistrationPoolContract,
@@ -11,7 +10,7 @@ use br_primitives::{
 		bifrost_runtime::{
 			self, btc_registration_pool::storage::types::service_state::ServiceState,
 		},
-		AccountId20, MigrationSequence, Public, VaultKeySubmission,
+		AccountId20, CustomConfig, MigrationSequence, Public, VaultKeySubmission,
 	},
 	tx::{SubmitVaultKeyMetadata, XtRequest, XtRequestMessage, XtRequestMetadata, XtRequestSender},
 	utils::sub_display_format,

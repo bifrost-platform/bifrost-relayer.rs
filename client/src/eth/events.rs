@@ -11,10 +11,10 @@ use tokio::{
 };
 
 use super::{traits::BootstrapHandler, EthClient};
-use br_primitives::substrate::CustomConfig;
 use br_primitives::{
 	bootstrap::BootstrapSharedData,
 	eth::{BootstrapState, ChainID},
+	substrate::CustomConfig,
 	utils::sub_display_format,
 };
 

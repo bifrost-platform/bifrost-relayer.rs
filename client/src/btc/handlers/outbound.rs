@@ -7,7 +7,6 @@ use crate::{
 };
 
 use super::{BootstrapHandler, EventMessage, TxRequester};
-use br_primitives::substrate::CustomConfig;
 use br_primitives::{
 	bootstrap::BootstrapSharedData,
 	contracts::{
@@ -15,6 +14,7 @@ use br_primitives::{
 		socket_queue::SocketQueueContract,
 	},
 	eth::{BootstrapState, BuiltRelayTransaction, ChainID, SocketEventStatus},
+	substrate::CustomConfig,
 	tx::{SocketRelayMetadata, TxRequestMetadata, TxRequestSender},
 	utils::sub_display_format,
 };

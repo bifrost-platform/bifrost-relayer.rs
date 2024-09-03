@@ -9,7 +9,6 @@ use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
 
 use crate::traits::PeriodicWorker;
 use br_client::eth::{traits::SocketRelayBuilder, EthClient};
-use br_primitives::substrate::CustomConfig;
 use br_primitives::{
 	constants::{
 		errors::{INVALID_BIFROST_NATIVENESS, INVALID_CHAIN_ID, INVALID_PERIODIC_SCHEDULE},
@@ -18,6 +17,7 @@ use br_primitives::{
 	contracts::socket::{RequestID, RequestInfo, Signatures, SocketMessage},
 	eth::{ChainID, GasCoefficient, RelayDirection, SocketEventStatus},
 	periodic::{RawRequestID, RollbackableMessage},
+	substrate::CustomConfig,
 	tx::{RollbackMetadata, TxRequest, TxRequestMessage, TxRequestMetadata, TxRequestSender},
 	utils::sub_display_format,
 };

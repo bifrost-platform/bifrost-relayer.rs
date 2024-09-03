@@ -2,8 +2,7 @@ use std::{collections::BTreeMap, fmt::Error, sync::Arc};
 
 use crate::traits::PriceFetcher;
 use br_client::eth::EthClient;
-use br_primitives::periodic::PriceResponse;
-use br_primitives::substrate::CustomConfig;
+use br_primitives::{periodic::PriceResponse, substrate::CustomConfig};
 use ethers::{providers::JsonRpcClient, types::U256};
 use subxt::tx::Signer;
 

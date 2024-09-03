@@ -5,7 +5,6 @@ use crate::eth::{
 
 use super::generate_delay;
 use async_trait::async_trait;
-use br_primitives::substrate::CustomConfig;
 use br_primitives::{
 	constants::{
 		cli::{DEFAULT_ESCALATE_PERCENTAGE, DEFAULT_MIN_GAS_PRICE},
@@ -13,6 +12,7 @@ use br_primitives::{
 		errors::{INSUFFICIENT_FUNDS, NETWORK_DOES_NOT_SUPPORT_EIP1559, PROVIDER_INTERNAL_ERROR},
 		tx::DEFAULT_TX_RETRIES,
 	},
+	substrate::CustomConfig,
 	tx::{TxRequest, TxRequestMessage},
 	utils::sub_display_format,
 };

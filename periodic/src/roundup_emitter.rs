@@ -11,7 +11,6 @@ use tokio::time::sleep;
 
 use crate::traits::PeriodicWorker;
 use br_client::eth::{traits::BootstrapHandler, EthClient};
-use br_primitives::substrate::CustomConfig;
 use br_primitives::{
 	bootstrap::BootstrapSharedData,
 	constants::{
@@ -25,6 +24,7 @@ use br_primitives::{
 		socket::{RoundUpSubmit, SerializedRoundUp, Signatures, SocketContractEvents},
 	},
 	eth::{BootstrapState, GasCoefficient, RoundUpEventStatus},
+	substrate::CustomConfig,
 	tx::{TxRequest, TxRequestMessage, TxRequestMetadata, TxRequestSender, VSPPhase1Metadata},
 	utils::sub_display_format,
 };

@@ -11,12 +11,12 @@ use br_primitives::{
 	bootstrap::BootstrapSharedData,
 	contracts::bitcoin_socket::BitcoinSocketContract,
 	eth::BootstrapState,
+	substrate::CustomConfig,
 	tx::{BitcoinRelayMetadata, TxRequestMetadata, TxRequestSender},
 	utils::sub_display_format,
 };
 
 use super::{BootstrapHandler, EventMessage, TxRequester};
-use br_primitives::substrate::CustomConfig;
 use ethers::{
 	providers::{JsonRpcClient, Provider},
 	types::{Address as EthAddress, Address, TransactionRequest},

@@ -1,12 +1,12 @@
 use crate::traits::PeriodicWorker;
 use br_client::eth::EthClient;
-use br_primitives::substrate::CustomConfig;
 use br_primitives::{
 	constants::{
 		errors::{INVALID_BIFROST_NATIVENESS, INVALID_PERIODIC_SCHEDULE},
 		schedule::HEARTBEAT_SCHEDULE,
 	},
 	eth::GasCoefficient,
+	substrate::CustomConfig,
 	tx::{HeartbeatMetadata, TxRequest, TxRequestMessage, TxRequestMetadata, TxRequestSender},
 	utils::sub_display_format,
 };

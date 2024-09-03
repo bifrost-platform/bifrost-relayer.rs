@@ -16,7 +16,6 @@ use crate::eth::{
 	traits::{BootstrapHandler, Handler},
 	EthClient,
 };
-use br_primitives::substrate::CustomConfig;
 use br_primitives::{
 	bootstrap::BootstrapSharedData,
 	constants::{
@@ -31,6 +30,7 @@ use br_primitives::{
 		},
 	},
 	eth::{BootstrapState, ChainID, GasCoefficient, RecoveredSignature, RoundUpEventStatus},
+	substrate::CustomConfig,
 	tx::{TxRequest, TxRequestMessage, TxRequestMetadata, TxRequestSender, VSPPhase2Metadata},
 	utils::sub_display_format,
 };

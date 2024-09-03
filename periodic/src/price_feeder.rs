@@ -17,7 +17,6 @@ use crate::{
 	traits::{PeriodicWorker, PriceFetcher},
 };
 use br_client::eth::EthClient;
-use br_primitives::substrate::CustomConfig;
 use br_primitives::{
 	constants::{
 		errors::{INVALID_BIFROST_NATIVENESS, INVALID_PERIODIC_SCHEDULE},
@@ -26,6 +25,7 @@ use br_primitives::{
 	contracts::socket::get_asset_oids,
 	eth::GasCoefficient,
 	periodic::{PriceResponse, PriceSource},
+	substrate::CustomConfig,
 	tx::{PriceFeedMetadata, TxRequest, TxRequestMessage, TxRequestMetadata, TxRequestSender},
 	utils::sub_display_format,
 };

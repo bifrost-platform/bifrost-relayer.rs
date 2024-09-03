@@ -3,9 +3,9 @@ use br_client::{
 	btc::{handlers::XtRequester, storage::keypair::KeypairStorage},
 	eth::EthClient,
 };
-use br_primitives::substrate::CustomConfig;
 use br_primitives::{
 	constants::{errors::INVALID_PERIODIC_SCHEDULE, schedule::PSBT_SIGNER_SCHEDULE},
+	substrate::CustomConfig,
 	substrate::{bifrost_runtime, MigrationSequence, SignedPsbtMessage},
 	tx::{SubmitSignedPsbtMetadata, XtRequest, XtRequestMetadata, XtRequestSender},
 	utils::{hash_bytes, sub_display_format},

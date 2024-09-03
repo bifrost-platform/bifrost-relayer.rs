@@ -15,7 +15,6 @@ use crate::eth::{
 	traits::{BootstrapHandler, Handler, SocketRelayBuilder},
 	EthClient,
 };
-use br_primitives::substrate::CustomConfig;
 use br_primitives::{
 	bootstrap::BootstrapSharedData,
 	constants::{
@@ -32,6 +31,7 @@ use br_primitives::{
 		SocketEventStatus,
 	},
 	periodic::RollbackSender,
+	substrate::CustomConfig,
 	tx::{SocketRelayMetadata, TxRequest, TxRequestMessage, TxRequestMetadata, TxRequestSender},
 	utils::sub_display_format,
 };

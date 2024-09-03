@@ -1,11 +1,11 @@
 use std::{error::Error, str::FromStr, sync::Arc, time::Duration};
 
 use super::EthClient;
-use br_primitives::substrate::CustomConfig;
 use br_primitives::{
 	bootstrap::BootstrapSharedData,
 	contracts::socket::{PollSubmit, Signatures, SocketMessage},
 	eth::{BootstrapState, BuiltRelayTransaction, ChainID, GasCoefficient, RecoveredSignature},
+	substrate::CustomConfig,
 	tx::{FlushMetadata, TxRequest, TxRequestMessage, TxRequestMetadata},
 	utils::sub_display_format,
 };

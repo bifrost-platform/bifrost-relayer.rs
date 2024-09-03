@@ -13,10 +13,10 @@ use crate::{
 };
 
 use super::block::EventMessage;
-use br_primitives::substrate::CustomConfig;
 use br_primitives::{
 	bootstrap::BootstrapSharedData,
 	eth::{BootstrapState, GasCoefficient},
+	substrate::CustomConfig,
 	tx::{
 		TxRequest, TxRequestMessage, TxRequestMetadata, TxRequestSender, XtRequest,
 		XtRequestMessage, XtRequestMetadata, XtRequestSender,

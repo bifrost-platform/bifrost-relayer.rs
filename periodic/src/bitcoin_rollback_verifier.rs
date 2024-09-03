@@ -7,7 +7,6 @@ use bitcoincore_rpc::{
 	Client as BtcClient, Error, RpcApi,
 };
 use br_client::{btc::handlers::XtRequester, eth::EthClient};
-use br_primitives::substrate::CustomConfig;
 use br_primitives::{
 	constants::{
 		errors::{INVALID_PERIODIC_SCHEDULE, PROVIDER_INTERNAL_ERROR},
@@ -15,6 +14,7 @@ use br_primitives::{
 		tx::{DEFAULT_CALL_RETRIES, DEFAULT_CALL_RETRY_INTERVAL_MS},
 	},
 	contracts::socket_queue::SocketQueueContract,
+	substrate::CustomConfig,
 	substrate::{bifrost_runtime, RollbackPollMessage},
 	tx::{SubmitRollbackPollMetadata, XtRequest, XtRequestMetadata, XtRequestSender},
 	utils::sub_display_format,
