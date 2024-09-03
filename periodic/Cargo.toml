@@ -32,3 +32,6 @@ miniscript = { workspace = true }
 br-cli = { path = "../client/cli", default-features = false }
 br-client = { path = "../client", default-features = false }
 br-primitives = { path = "../primitives", default-features = false }
+
+[dev-dependencies]
+subxt-signer = { workspace = true, features = ["unstable-eth"] }

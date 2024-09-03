@@ -129,12 +129,13 @@ where
 #[cfg(test)]
 mod tests {
 	use ethers::{providers::Http, utils::parse_ether};
+	use subxt_signer::eth::Keypair;
 
 	use super::*;
 
 	#[tokio::test]
 	async fn fetcher_enum_matching() {
-		let fetchers: Vec<PriceFetchers<Http>> = vec![
+		let fetchers: Vec<PriceFetchers<Http, Keypair>> = vec![
 			PriceFetchers::new(PriceSource::Binance, None).await.unwrap(),
 			PriceFetchers::new(PriceSource::Coingecko, None).await.unwrap(),
 			PriceFetchers::new(PriceSource::Gateio, None).await.unwrap(),
