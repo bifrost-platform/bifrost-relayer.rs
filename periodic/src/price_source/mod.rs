@@ -73,7 +73,11 @@ pub async fn krw_to_usd(krw_amount: U256) -> Result<U256, Error> {
 	}
 }
 
-impl<T: JsonRpcClient, S: Signer<CustomConfig>> PriceFetchers<T, S> {
+impl<T, S> PriceFetchers<T, S>
+where
+	T: JsonRpcClient,
+	S: Signer<CustomConfig>,
+{
 	pub async fn new(
 		exchange: PriceSource,
 		client: Option<Arc<EthClient<T, S>>>,
@@ -94,8 +98,10 @@ impl<T: JsonRpcClient, S: Signer<CustomConfig>> PriceFetchers<T, S> {
 }
 
 #[async_trait]
-impl<T: JsonRpcClient + 'static, S: Signer<CustomConfig> + 'static + Send + Sync> PriceFetcher
-	for PriceFetchers<T, S>
+impl<T, S> PriceFetcher for PriceFetchers<T, S>
+where
+	T: JsonRpcClient + 'static,
+	S: Signer<CustomConfig> + 'static + Send + Sync,
 {
 	async fn get_ticker_with_symbol(&self, symbol: String) -> Result<PriceResponse, Error> {
 		match self {

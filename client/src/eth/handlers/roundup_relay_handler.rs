@@ -54,8 +54,10 @@ pub struct RoundupRelayHandler<T, S> {
 }
 
 #[async_trait]
-impl<T: JsonRpcClient + 'static, S: Signer<CustomConfig> + Send + Sync> Handler
-	for RoundupRelayHandler<T, S>
+impl<T, S> Handler for RoundupRelayHandler<T, S>
+where
+	T: JsonRpcClient + 'static,
+	S: Signer<CustomConfig> + Send + Sync,
 {
 	async fn run(&mut self) {
 		loop {
@@ -148,7 +150,11 @@ impl<T: JsonRpcClient + 'static, S: Signer<CustomConfig> + Send + Sync> Handler
 	}
 }
 
-impl<T: JsonRpcClient + 'static, S: Signer<CustomConfig>> RoundupRelayHandler<T, S> {
+impl<T, S> RoundupRelayHandler<T, S>
+where
+	T: JsonRpcClient + 'static,
+	S: Signer<CustomConfig>,
+{
 	/// Instantiates a new `RoundupRelayHandler` instance.
 	pub fn new(
 		mut tx_request_senders_vec: Vec<Arc<TxRequestSender>>,
@@ -356,8 +362,10 @@ impl<T: JsonRpcClient + 'static, S: Signer<CustomConfig>> RoundupRelayHandler<T,
 }
 
 #[async_trait]
-impl<T: JsonRpcClient + 'static, S: Signer<CustomConfig> + Send + Sync> BootstrapHandler
-	for RoundupRelayHandler<T, S>
+impl<T, S> BootstrapHandler for RoundupRelayHandler<T, S>
+where
+	T: JsonRpcClient + 'static,
+	S: Signer<CustomConfig> + Send + Sync,
 {
 	fn bootstrap_shared_data(&self) -> Arc<BootstrapSharedData> {
 		self.bootstrap_shared_data.clone()

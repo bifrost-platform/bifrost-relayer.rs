@@ -53,7 +53,11 @@ pub struct Eip1559TransactionManager<T, S> {
 	tx_spawn_handle: SpawnTaskHandle,
 }
 
-impl<T: 'static + JsonRpcClient, S: Signer<CustomConfig>> Eip1559TransactionManager<T, S> {
+impl<T, S> Eip1559TransactionManager<T, S>
+where
+	T: 'static + JsonRpcClient,
+	S: Signer<CustomConfig>,
+{
 	/// Instantiates a new `Eip1559TransactionManager` instance.
 	pub fn new(
 		client: Arc<EthClient<T, S>>,
@@ -78,11 +82,10 @@ impl<T: 'static + JsonRpcClient, S: Signer<CustomConfig>> Eip1559TransactionMana
 }
 
 #[async_trait]
-impl<T: 'static + JsonRpcClient, S: Signer<CustomConfig> + 'static> TransactionManager<T, S>
-	for Eip1559TransactionManager<T, S>
+impl<T, S> TransactionManager<T, S> for Eip1559TransactionManager<T, S>
 where
-	S: Send,
-	S: Sync,
+	T: 'static + JsonRpcClient,
+	S: Signer<CustomConfig> + 'static + Send + Sync,
 {
 	async fn run(&mut self) {
 		self.initialize().await;
@@ -203,10 +206,10 @@ pub struct Eip1559TransactionTask<T, S> {
 	duplicate_confirm_delay: Option<u64>,
 }
 
-impl<T: JsonRpcClient, S: Signer<CustomConfig>> Eip1559TransactionTask<T, S>
+impl<T, S> Eip1559TransactionTask<T, S>
 where
-	S: Send,
-	S: Sync,
+	T: JsonRpcClient,
+	S: Signer<CustomConfig> + Send + Sync,
 {
 	/// Build an Eip1559 transaction task.
 	pub fn new(
@@ -220,11 +223,10 @@ where
 }
 
 #[async_trait::async_trait]
-impl<T: 'static + JsonRpcClient, S: Signer<CustomConfig> + 'static> TransactionTask<T, S>
-	for Eip1559TransactionTask<T, S>
+impl<T, S> TransactionTask<T, S> for Eip1559TransactionTask<T, S>
 where
-	S: Send,
-	S: Sync,
+	T: 'static + JsonRpcClient,
+	S: Signer<CustomConfig> + 'static + Send + Sync,
 {
 	fn is_txpool_enabled(&self) -> bool {
 		self.is_txpool_enabled

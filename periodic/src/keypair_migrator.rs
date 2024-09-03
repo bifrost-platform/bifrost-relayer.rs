@@ -25,8 +25,10 @@ pub struct KeypairMigrator<T, S> {
 	schedule: Schedule,
 }
 
-impl<T: JsonRpcClient + 'static, S: Signer<CustomConfig> + 'static + Send + Sync>
-	KeypairMigrator<T, S>
+impl<T, S> KeypairMigrator<T, S>
+where
+	T: JsonRpcClient + 'static,
+	S: Signer<CustomConfig> + 'static + Send + Sync,
 {
 	/// Instantiates a new `KeypairMigrator` instance.
 	pub fn new(
@@ -130,8 +132,10 @@ impl<T: JsonRpcClient + 'static, S: Signer<CustomConfig> + 'static + Send + Sync
 }
 
 #[async_trait::async_trait]
-impl<T: JsonRpcClient + 'static, S: Signer<CustomConfig> + 'static + Send + Sync> PeriodicWorker
-	for KeypairMigrator<T, S>
+impl<T, S> PeriodicWorker for KeypairMigrator<T, S>
+where
+	T: JsonRpcClient + 'static,
+	S: Signer<CustomConfig> + 'static + Send + Sync,
 {
 	fn schedule(&self) -> Schedule {
 		self.schedule.clone()

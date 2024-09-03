@@ -59,7 +59,11 @@ pub struct EthClient<T, S> {
 	debug_mode: bool,
 }
 
-impl<T: 'static + JsonRpcClient, S: Signer<CustomConfig>> EthClient<T, S> {
+impl<T, S> EthClient<T, S>
+where
+	T: 'static + JsonRpcClient,
+	S: Signer<CustomConfig>,
+{
 	/// Instantiates a new `EthClient` instance for the given chain.
 	pub fn new(
 		wallet: WalletManager<S>,
@@ -316,8 +320,10 @@ impl<T: 'static + JsonRpcClient, S: Signer<CustomConfig>> EthClient<T, S> {
 }
 
 #[async_trait::async_trait]
-impl<T: 'static + JsonRpcClient, S: Signer<CustomConfig> + Send + Sync> LegacyGasMiddleware
-	for EthClient<T, S>
+impl<T, S> LegacyGasMiddleware for EthClient<T, S>
+where
+	T: 'static + JsonRpcClient,
+	S: Signer<CustomConfig> + Send + Sync,
 {
 	async fn get_gas_price(&self) -> U256 {
 		match self.provider.get_gas_price().await {
@@ -402,8 +408,10 @@ impl<T: 'static + JsonRpcClient, S: Signer<CustomConfig> + Send + Sync> LegacyGa
 }
 
 #[async_trait::async_trait]
-impl<T: 'static + JsonRpcClient, S: Signer<CustomConfig> + Send + Sync> Eip1559GasMiddleware
-	for EthClient<T, S>
+impl<T, S> Eip1559GasMiddleware for EthClient<T, S>
+where
+	T: 'static + JsonRpcClient,
+	S: Signer<CustomConfig> + Send + Sync,
 {
 	async fn get_estimated_eip1559_fees(&self) -> (U256, U256) {
 		match self.provider.estimate_eip1559_fees(None).await {

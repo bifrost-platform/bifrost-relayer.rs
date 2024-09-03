@@ -98,8 +98,10 @@ pub struct BitcoinRollbackVerifier<T, S> {
 }
 
 #[async_trait::async_trait]
-impl<C: JsonRpcClient, S: Signer<CustomConfig> + Send + Sync> RpcApi
-	for BitcoinRollbackVerifier<C, S>
+impl<C, S> RpcApi for BitcoinRollbackVerifier<C, S>
+where
+	C: JsonRpcClient,
+	S: Signer<CustomConfig> + Send + Sync,
 {
 	async fn call<T: for<'a> Deserialize<'a> + Send>(
 		&self,
@@ -121,8 +123,10 @@ impl<C: JsonRpcClient, S: Signer<CustomConfig> + Send + Sync> RpcApi
 }
 
 #[async_trait::async_trait]
-impl<T: JsonRpcClient + 'static, S: Signer<CustomConfig> + 'static + Send + Sync> XtRequester<T, S>
-	for BitcoinRollbackVerifier<T, S>
+impl<T, S> XtRequester<T, S> for BitcoinRollbackVerifier<T, S>
+where
+	T: JsonRpcClient + 'static,
+	S: Signer<CustomConfig> + 'static + Send + Sync,
 {
 	fn xt_request_sender(&self) -> Arc<XtRequestSender> {
 		self.xt_request_sender.clone()
@@ -134,8 +138,10 @@ impl<T: JsonRpcClient + 'static, S: Signer<CustomConfig> + 'static + Send + Sync
 }
 
 #[async_trait::async_trait]
-impl<T: JsonRpcClient + 'static, S: Signer<CustomConfig> + 'static + Send + Sync> PeriodicWorker
-	for BitcoinRollbackVerifier<T, S>
+impl<T, S> PeriodicWorker for BitcoinRollbackVerifier<T, S>
+where
+	T: JsonRpcClient + 'static,
+	S: Signer<CustomConfig> + 'static + Send + Sync,
 {
 	fn schedule(&self) -> Schedule {
 		self.schedule.clone()
@@ -209,8 +215,10 @@ impl<T: JsonRpcClient + 'static, S: Signer<CustomConfig> + 'static + Send + Sync
 	}
 }
 
-impl<T: JsonRpcClient + 'static, S: Signer<CustomConfig> + 'static + Send + Sync>
-	BitcoinRollbackVerifier<T, S>
+impl<T, S> BitcoinRollbackVerifier<T, S>
+where
+	T: JsonRpcClient + 'static,
+	S: Signer<CustomConfig> + 'static + Send + Sync,
 {
 	/// Instantiates a new `BitcoinRollbackVerifier` instance.
 	pub fn new(

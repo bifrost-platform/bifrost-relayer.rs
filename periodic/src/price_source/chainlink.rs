@@ -12,8 +12,10 @@ pub struct ChainlinkPriceFetcher<T, S> {
 }
 
 #[async_trait::async_trait]
-impl<T: JsonRpcClient + 'static, S: Signer<CustomConfig> + 'static + Send + Sync> PriceFetcher
-	for ChainlinkPriceFetcher<T, S>
+impl<T, S> PriceFetcher for ChainlinkPriceFetcher<T, S>
+where
+	T: JsonRpcClient + 'static,
+	S: Signer<CustomConfig> + 'static + Send + Sync,
 {
 	/// Should use only when requesting USDC/USDT/DAI (stable coins) price.
 	async fn get_ticker_with_symbol(&self, symbol: String) -> Result<PriceResponse, Error> {
@@ -71,7 +73,11 @@ impl<T: JsonRpcClient + 'static, S: Signer<CustomConfig> + 'static + Send + Sync
 	}
 }
 
-impl<T: JsonRpcClient, S: Signer<CustomConfig>> ChainlinkPriceFetcher<T, S> {
+impl<T, S> ChainlinkPriceFetcher<T, S>
+where
+	T: JsonRpcClient,
+	S: Signer<CustomConfig>,
+{
 	pub async fn new(client: Option<Arc<EthClient<T, S>>>) -> Self {
 		ChainlinkPriceFetcher { client }
 	}

@@ -57,11 +57,10 @@ pub struct SocketRelayHandler<T, S> {
 }
 
 #[async_trait::async_trait]
-impl<T: 'static + JsonRpcClient, S: Signer<CustomConfig> + 'static> Handler
-	for SocketRelayHandler<T, S>
+impl<T, S> Handler for SocketRelayHandler<T, S>
 where
-	S: Send,
-	S: Sync,
+	T: 'static + JsonRpcClient,
+	S: Signer<CustomConfig> + 'static + Send + Sync,
 {
 	async fn run(&mut self) {
 		loop {
@@ -156,11 +155,10 @@ where
 }
 
 #[async_trait::async_trait]
-impl<T: 'static + JsonRpcClient, S: Signer<CustomConfig> + 'static> SocketRelayBuilder<T, S>
-	for SocketRelayHandler<T, S>
+impl<T, S> SocketRelayBuilder<T, S> for SocketRelayHandler<T, S>
 where
-	S: Send,
-	S: Sync,
+	T: 'static + JsonRpcClient,
+	S: Signer<CustomConfig> + 'static + Send + Sync,
 {
 	fn get_client(&self) -> Arc<EthClient<T, S>> {
 		self.client.clone()
@@ -243,10 +241,10 @@ where
 	}
 }
 
-impl<T: 'static + JsonRpcClient, S: Signer<CustomConfig> + 'static> SocketRelayHandler<T, S>
+impl<T, S> SocketRelayHandler<T, S>
 where
-	S: Send,
-	S: Sync,
+	T: 'static + JsonRpcClient,
+	S: Signer<CustomConfig> + 'static + Send + Sync,
 {
 	/// Instantiates a new `SocketRelayHandler` instance.
 	pub fn new(
@@ -538,11 +536,10 @@ where
 }
 
 #[async_trait::async_trait]
-impl<T: 'static + JsonRpcClient, S: Signer<CustomConfig> + 'static> BootstrapHandler
-	for SocketRelayHandler<T, S>
+impl<T, S> BootstrapHandler for SocketRelayHandler<T, S>
 where
-	S: Send,
-	S: Sync,
+	T: 'static + JsonRpcClient,
+	S: Signer<CustomConfig> + 'static + Send + Sync,
 {
 	fn bootstrap_shared_data(&self) -> Arc<BootstrapSharedData> {
 		self.bootstrap_shared_data.clone()

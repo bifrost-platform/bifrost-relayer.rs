@@ -41,8 +41,10 @@ pub struct PubKeyPreSubmitter<T, S> {
 }
 
 #[async_trait::async_trait]
-impl<T: JsonRpcClient + 'static, S: Signer<CustomConfig> + 'static + Send + Sync> PeriodicWorker
-	for PubKeyPreSubmitter<T, S>
+impl<T, S> PeriodicWorker for PubKeyPreSubmitter<T, S>
+where
+	T: JsonRpcClient + 'static,
+	S: Signer<CustomConfig> + 'static + Send + Sync,
 {
 	fn schedule(&self) -> Schedule {
 		self.schedule.clone()
@@ -76,8 +78,10 @@ impl<T: JsonRpcClient + 'static, S: Signer<CustomConfig> + 'static + Send + Sync
 	}
 }
 
-impl<T: JsonRpcClient + 'static, S: Signer<CustomConfig> + 'static + Send + Sync>
-	PubKeyPreSubmitter<T, S>
+impl<T, S> PubKeyPreSubmitter<T, S>
+where
+	T: JsonRpcClient + 'static,
+	S: Signer<CustomConfig> + 'static + Send + Sync,
 {
 	/// Instantiates a new `PubKeyPreSubmitter` instance.
 	pub fn new(

@@ -109,7 +109,11 @@ pub struct BlockManager<T, S> {
 }
 
 #[async_trait::async_trait]
-impl<C: JsonRpcClient, S: Signer<CustomConfig> + Send + Sync> RpcApi for BlockManager<C, S> {
+impl<C, S> RpcApi for BlockManager<C, S>
+where
+	C: JsonRpcClient,
+	S: Signer<CustomConfig> + Send + Sync,
+{
 	async fn call<T: for<'a> Deserialize<'a> + Send>(
 		&self,
 		cmd: &str,
@@ -136,7 +140,11 @@ impl<C: JsonRpcClient, S: Signer<CustomConfig> + Send + Sync> RpcApi for BlockMa
 	}
 }
 
-impl<T: JsonRpcClient + 'static, S: Signer<CustomConfig> + Send + Sync> BlockManager<T, S> {
+impl<T, S> BlockManager<T, S>
+where
+	T: JsonRpcClient + 'static,
+	S: Signer<CustomConfig> + Send + Sync,
+{
 	/// Instantiates a new `BlockManager` instance.
 	pub fn new(
 		btc_client: BtcClient,
@@ -355,10 +363,10 @@ impl<T: JsonRpcClient + 'static, S: Signer<CustomConfig> + Send + Sync> BlockMan
 }
 
 #[async_trait::async_trait]
-impl<T: JsonRpcClient + 'static, S: Signer<CustomConfig>> BootstrapHandler for BlockManager<T, S>
+impl<T, S> BootstrapHandler for BlockManager<T, S>
 where
-	S: Sync,
-	S: Send,
+	T: JsonRpcClient + 'static,
+	S: Signer<CustomConfig> + Send + Sync,
 {
 	fn bootstrap_shared_data(&self) -> Arc<BootstrapSharedData> {
 		self.bootstrap_shared_data.clone()

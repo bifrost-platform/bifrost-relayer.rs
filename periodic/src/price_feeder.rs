@@ -51,8 +51,10 @@ pub struct OraclePriceFeeder<T, S> {
 }
 
 #[async_trait]
-impl<T: JsonRpcClient + 'static, S: Signer<CustomConfig> + 'static + Send + Sync> PeriodicWorker
-	for OraclePriceFeeder<T, S>
+impl<T, S> PeriodicWorker for OraclePriceFeeder<T, S>
+where
+	T: JsonRpcClient + 'static,
+	S: Signer<CustomConfig> + 'static + Send + Sync,
 {
 	fn schedule(&self) -> Schedule {
 		self.schedule.clone()
@@ -83,8 +85,10 @@ impl<T: JsonRpcClient + 'static, S: Signer<CustomConfig> + 'static + Send + Sync
 	}
 }
 
-impl<T: JsonRpcClient + 'static, S: Signer<CustomConfig> + 'static + Send + Sync>
-	OraclePriceFeeder<T, S>
+impl<T, S> OraclePriceFeeder<T, S>
+where
+	T: JsonRpcClient + 'static,
+	S: Signer<CustomConfig> + 'static + Send + Sync,
 {
 	pub fn new(
 		tx_request_senders: Vec<Arc<TxRequestSender>>,

@@ -28,7 +28,11 @@ use std::sync::Arc;
 use subxt::tx::Signer;
 
 #[async_trait::async_trait]
-pub trait XtRequester<T: 'static + JsonRpcClient, S: Signer<CustomConfig>> {
+pub trait XtRequester<T, S>
+where
+	T: 'static + JsonRpcClient,
+	S: Signer<CustomConfig>,
+{
 	fn xt_request_sender(&self) -> Arc<XtRequestSender>;
 
 	fn bfc_client(&self) -> Arc<EthClient<T, S>>;
@@ -86,7 +90,11 @@ pub trait XtRequester<T: 'static + JsonRpcClient, S: Signer<CustomConfig>> {
 }
 
 #[async_trait::async_trait]
-pub trait TxRequester<T: 'static + JsonRpcClient, S: Signer<CustomConfig>> {
+pub trait TxRequester<T, S>
+where
+	T: 'static + JsonRpcClient,
+	S: Signer<CustomConfig>,
+{
 	fn tx_request_sender(&self) -> Arc<TxRequestSender>;
 
 	fn bfc_client(&self) -> Arc<EthClient<T, S>>;

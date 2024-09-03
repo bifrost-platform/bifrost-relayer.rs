@@ -43,7 +43,11 @@ pub struct InboundHandler<T, S> {
 	bootstrap_shared_data: Arc<BootstrapSharedData>,
 }
 
-impl<T: JsonRpcClient + 'static, S: Signer<CustomConfig>> InboundHandler<T, S> {
+impl<T, S> InboundHandler<T, S>
+where
+	T: JsonRpcClient + 'static,
+	S: Signer<CustomConfig>,
+{
 	pub fn new(
 		bfc_client: Arc<EthClient<T, S>>,
 		tx_request_sender: Arc<TxRequestSender>,
@@ -152,8 +156,10 @@ impl<T: JsonRpcClient + 'static, S: Signer<CustomConfig>> InboundHandler<T, S> {
 }
 
 #[async_trait::async_trait]
-impl<T: JsonRpcClient + 'static, S: Signer<CustomConfig>> TxRequester<T, S>
-	for InboundHandler<T, S>
+impl<T, S> TxRequester<T, S> for InboundHandler<T, S>
+where
+	T: JsonRpcClient + 'static,
+	S: Signer<CustomConfig>,
 {
 	fn tx_request_sender(&self) -> Arc<TxRequestSender> {
 		self.tx_request_sender.clone()
@@ -165,10 +171,10 @@ impl<T: JsonRpcClient + 'static, S: Signer<CustomConfig>> TxRequester<T, S>
 }
 
 #[async_trait::async_trait]
-impl<T: JsonRpcClient + 'static, S: Signer<CustomConfig>> Handler for InboundHandler<T, S>
+impl<T, S> Handler for InboundHandler<T, S>
 where
-	S: Send,
-	S: Sync,
+	T: JsonRpcClient + 'static,
+	S: Signer<CustomConfig> + Send + Sync,
 {
 	async fn run(&mut self) {
 		loop {
@@ -233,10 +239,10 @@ where
 }
 
 #[async_trait::async_trait]
-impl<T: JsonRpcClient, S: Signer<CustomConfig>> BootstrapHandler for InboundHandler<T, S>
+impl<T, S> BootstrapHandler for InboundHandler<T, S>
 where
-	S: Send,
-	S: Sync,
+	T: JsonRpcClient,
+	S: Signer<CustomConfig> + Send + Sync,
 {
 	fn bootstrap_shared_data(&self) -> Arc<BootstrapSharedData> {
 		self.bootstrap_shared_data.clone()

@@ -26,10 +26,10 @@ pub struct ExtrinsicManager<T, S> {
 	xt_spawn_handle: SpawnTaskHandle,
 }
 
-impl<T: 'static + JsonRpcClient, S: Signer<CustomConfig> + 'static> ExtrinsicManager<T, S>
+impl<T, S> ExtrinsicManager<T, S>
 where
-	S: Send,
-	S: Sync,
+	T: 'static + JsonRpcClient,
+	S: Signer<CustomConfig> + 'static + Send + Sync,
 {
 	/// Instantiates a new `ExtrinsicManager`.
 	pub fn new(
@@ -90,7 +90,11 @@ pub struct ExtrinsicTask<T, S> {
 	bfc_client: Arc<EthClient<T, S>>,
 }
 
-impl<T: JsonRpcClient, S: Signer<CustomConfig>> ExtrinsicTask<T, S> {
+impl<T, S> ExtrinsicTask<T, S>
+where
+	T: JsonRpcClient,
+	S: Signer<CustomConfig>,
+{
 	/// Build an `ExtrinsicTask` instance.
 	pub fn new(
 		sub_client: Arc<OnlineClient<CustomConfig>>,
@@ -101,11 +105,10 @@ impl<T: JsonRpcClient, S: Signer<CustomConfig>> ExtrinsicTask<T, S> {
 }
 
 #[async_trait::async_trait]
-impl<T: 'static + JsonRpcClient, S: Signer<CustomConfig>> ExtrinsicTaskT<T, S>
-	for ExtrinsicTask<T, S>
+impl<T, S> ExtrinsicTaskT<T, S> for ExtrinsicTask<T, S>
 where
-	S: Send,
-	S: Sync,
+	T: 'static + JsonRpcClient,
+	S: Signer<CustomConfig> + Send + Sync,
 {
 	fn get_sub_client(&self) -> Arc<OnlineClient<CustomConfig>> {
 		self.sub_client.clone()

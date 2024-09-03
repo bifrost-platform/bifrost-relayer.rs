@@ -36,7 +36,11 @@ pub struct PsbtSigner<T, S> {
 	schedule: Schedule,
 }
 
-impl<T: 'static + JsonRpcClient, S: Signer<CustomConfig> + 'static + Send + Sync> PsbtSigner<T, S> {
+impl<T, S> PsbtSigner<T, S>
+where
+	T: 'static + JsonRpcClient,
+	S: Signer<CustomConfig> + 'static + Send + Sync,
+{
 	/// Instantiates a new `PsbtSigner` instance.
 	pub fn new(
 		client: Arc<EthClient<T, S>>,
@@ -185,8 +189,10 @@ impl<T: 'static + JsonRpcClient, S: Signer<CustomConfig> + 'static + Send + Sync
 }
 
 #[async_trait::async_trait]
-impl<T: 'static + JsonRpcClient, S: Signer<CustomConfig> + 'static + Send + Sync> XtRequester<T, S>
-	for PsbtSigner<T, S>
+impl<T, S> XtRequester<T, S> for PsbtSigner<T, S>
+where
+	T: 'static + JsonRpcClient,
+	S: Signer<CustomConfig> + 'static + Send + Sync,
 {
 	fn xt_request_sender(&self) -> Arc<XtRequestSender> {
 		self.xt_request_sender.clone()
@@ -198,8 +204,10 @@ impl<T: 'static + JsonRpcClient, S: Signer<CustomConfig> + 'static + Send + Sync
 }
 
 #[async_trait::async_trait]
-impl<T: 'static + JsonRpcClient, S: Signer<CustomConfig> + 'static + Send + Sync> PeriodicWorker
-	for PsbtSigner<T, S>
+impl<T, S> PeriodicWorker for PsbtSigner<T, S>
+where
+	T: 'static + JsonRpcClient,
+	S: Signer<CustomConfig> + 'static + Send + Sync,
 {
 	fn schedule(&self) -> Schedule {
 		self.schedule.clone()

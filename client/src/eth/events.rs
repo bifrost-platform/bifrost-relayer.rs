@@ -64,7 +64,11 @@ pub struct EventManager<T, S> {
 	is_balance_sync_enabled: bool,
 }
 
-impl<T: JsonRpcClient + 'static, S: Signer<CustomConfig> + Send + Sync> EventManager<T, S> {
+impl<T, S> EventManager<T, S>
+where
+	T: JsonRpcClient + 'static,
+	S: Signer<CustomConfig> + Send + Sync,
+{
 	/// Instantiates a new `EventManager` instance.
 	pub fn new(
 		client: Arc<EthClient<T, S>>,
@@ -226,10 +230,10 @@ impl<T: JsonRpcClient + 'static, S: Signer<CustomConfig> + Send + Sync> EventMan
 }
 
 #[async_trait::async_trait]
-impl<T: JsonRpcClient, S: Signer<CustomConfig>> BootstrapHandler for EventManager<T, S>
+impl<T, S> BootstrapHandler for EventManager<T, S>
 where
-	S: Sync,
-	S: Send,
+	T: JsonRpcClient,
+	S: Signer<CustomConfig> + Send + Sync,
 {
 	fn bootstrap_shared_data(&self) -> Arc<BootstrapSharedData> {
 		self.bootstrap_shared_data.clone()

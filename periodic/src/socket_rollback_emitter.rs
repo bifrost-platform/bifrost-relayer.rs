@@ -42,8 +42,10 @@ pub struct SocketRollbackEmitter<T, S> {
 	schedule: Schedule,
 }
 
-impl<T: JsonRpcClient + 'static, S: Signer<CustomConfig> + 'static + Send + Sync>
-	SocketRollbackEmitter<T, S>
+impl<T, S> SocketRollbackEmitter<T, S>
+where
+	T: JsonRpcClient + 'static,
+	S: Signer<CustomConfig> + 'static + Send + Sync,
 {
 	/// Instantiates a new `SocketRollbackEmitter`.
 	pub fn new(
@@ -278,8 +280,10 @@ impl<T: JsonRpcClient + 'static, S: Signer<CustomConfig> + 'static + Send + Sync
 }
 
 #[async_trait::async_trait]
-impl<T: JsonRpcClient + 'static, S: Signer<CustomConfig> + 'static + Send + Sync>
-	SocketRelayBuilder<T, S> for SocketRollbackEmitter<T, S>
+impl<T, S> SocketRelayBuilder<T, S> for SocketRollbackEmitter<T, S>
+where
+	T: JsonRpcClient + 'static,
+	S: Signer<CustomConfig> + 'static + Send + Sync,
 {
 	fn get_client(&self) -> Arc<EthClient<T, S>> {
 		// This will always return the Bifrost client.
@@ -294,8 +298,10 @@ impl<T: JsonRpcClient + 'static, S: Signer<CustomConfig> + 'static + Send + Sync
 }
 
 #[async_trait::async_trait]
-impl<T: JsonRpcClient + 'static, S: Signer<CustomConfig> + 'static + Send + Sync> PeriodicWorker
-	for SocketRollbackEmitter<T, S>
+impl<T, S> PeriodicWorker for SocketRollbackEmitter<T, S>
+where
+	T: JsonRpcClient + 'static,
+	S: Signer<CustomConfig> + 'static + Send + Sync,
 {
 	fn schedule(&self) -> Schedule {
 		self.schedule.clone()

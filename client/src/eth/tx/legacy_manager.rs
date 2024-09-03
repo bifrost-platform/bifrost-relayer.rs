@@ -56,7 +56,11 @@ pub struct LegacyTransactionManager<T, S> {
 	tx_spawn_handle: SpawnTaskHandle,
 }
 
-impl<T: 'static + JsonRpcClient, S: Signer<CustomConfig>> LegacyTransactionManager<T, S> {
+impl<T, S> LegacyTransactionManager<T, S>
+where
+	T: 'static + JsonRpcClient,
+	S: Signer<CustomConfig>,
+{
 	/// Instantiates a new `LegacyTransactionManager` instance.
 	pub fn new(
 		client: Arc<EthClient<T, S>>,
@@ -93,10 +97,10 @@ impl<T: 'static + JsonRpcClient, S: Signer<CustomConfig>> LegacyTransactionManag
 }
 
 #[async_trait]
-impl<T: 'static + JsonRpcClient, S: Signer<CustomConfig>> TransactionManager<T, S>
-	for LegacyTransactionManager<T, S>
+impl<T, S> TransactionManager<T, S> for LegacyTransactionManager<T, S>
 where
-	S: 'static + Send + Sync,
+	T: 'static + JsonRpcClient,
+	S: Signer<CustomConfig> + 'static + Send + Sync,
 {
 	async fn run(&mut self) {
 		self.initialize().await;
@@ -214,7 +218,11 @@ pub struct LegacyTransactionTask<T, S> {
 	duplicate_confirm_delay: Option<u64>,
 }
 
-impl<T: JsonRpcClient, S: Signer<CustomConfig>> LegacyTransactionTask<T, S> {
+impl<T, S> LegacyTransactionTask<T, S>
+where
+	T: JsonRpcClient,
+	S: Signer<CustomConfig>,
+{
 	/// Build an Legacy transaction task.
 	pub fn new(
 		client: Arc<EthClient<T, S>>,
@@ -236,8 +244,10 @@ impl<T: JsonRpcClient, S: Signer<CustomConfig>> LegacyTransactionTask<T, S> {
 }
 
 #[async_trait::async_trait]
-impl<T: 'static + JsonRpcClient, S: Signer<CustomConfig> + Send + Sync + 'static>
-	TransactionTask<T, S> for LegacyTransactionTask<T, S>
+impl<T, S> TransactionTask<T, S> for LegacyTransactionTask<T, S>
+where
+	T: 'static + JsonRpcClient,
+	S: Signer<CustomConfig> + Send + Sync + 'static,
 {
 	fn is_txpool_enabled(&self) -> bool {
 		self.is_txpool_enabled

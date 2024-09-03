@@ -41,7 +41,11 @@ pub struct OutboundHandler<T, S> {
 	bootstrap_shared_data: Arc<BootstrapSharedData>,
 }
 
-impl<T: JsonRpcClient + 'static, S: Signer<CustomConfig>> OutboundHandler<T, S> {
+impl<T, S> OutboundHandler<T, S>
+where
+	T: JsonRpcClient + 'static,
+	S: Signer<CustomConfig>,
+{
 	pub fn new(
 		bfc_client: Arc<EthClient<T, S>>,
 		tx_request_sender: Arc<TxRequestSender>,
@@ -80,8 +84,10 @@ impl<T: JsonRpcClient + 'static, S: Signer<CustomConfig>> OutboundHandler<T, S> 
 }
 
 #[async_trait::async_trait]
-impl<T: JsonRpcClient + 'static, S: Signer<CustomConfig>> TxRequester<T, S>
-	for OutboundHandler<T, S>
+impl<T, S> TxRequester<T, S> for OutboundHandler<T, S>
+where
+	T: JsonRpcClient + 'static,
+	S: Signer<CustomConfig>,
 {
 	fn tx_request_sender(&self) -> Arc<TxRequestSender> {
 		self.tx_request_sender.clone()
@@ -93,11 +99,10 @@ impl<T: JsonRpcClient + 'static, S: Signer<CustomConfig>> TxRequester<T, S>
 }
 
 #[async_trait::async_trait]
-impl<T: JsonRpcClient + 'static, S: Signer<CustomConfig> + 'static> Handler
-	for OutboundHandler<T, S>
+impl<T, S> Handler for OutboundHandler<T, S>
 where
-	S: Send,
-	S: Sync,
+	T: JsonRpcClient + 'static,
+	S: Signer<CustomConfig> + 'static + Send + Sync,
 {
 	async fn run(&mut self) {
 		loop {
@@ -159,11 +164,10 @@ where
 }
 
 #[async_trait::async_trait]
-impl<T: JsonRpcClient + 'static, S: Signer<CustomConfig> + 'static> SocketRelayBuilder<T, S>
-	for OutboundHandler<T, S>
+impl<T, S> SocketRelayBuilder<T, S> for OutboundHandler<T, S>
 where
-	S: Send,
-	S: Sync,
+	T: JsonRpcClient + 'static,
+	S: Signer<CustomConfig> + 'static + Send + Sync,
 {
 	fn get_client(&self) -> Arc<EthClient<T, S>> {
 		self.bfc_client.clone()
@@ -187,8 +191,10 @@ where
 }
 
 #[async_trait::async_trait]
-impl<T: JsonRpcClient, S: Signer<CustomConfig> + Send + Sync> BootstrapHandler
-	for OutboundHandler<T, S>
+impl<T, S> BootstrapHandler for OutboundHandler<T, S>
+where
+	T: JsonRpcClient,
+	S: Signer<CustomConfig> + Send + Sync,
 {
 	fn bootstrap_shared_data(&self) -> Arc<BootstrapSharedData> {
 		self.bootstrap_shared_data.clone()
