@@ -80,7 +80,7 @@ impl<T: JsonRpcClient> PsbtSigner<T> {
 	) -> Option<(SignedPsbtMessage<AccountId20>, EthereumSignature)> {
 		match *self.migration_sequence.read().await {
 			MigrationSequence::Normal => {},
-			MigrationSequence::PrepareNextSystemVault => {
+			MigrationSequence::SetExecutiveMembers | MigrationSequence::PrepareNextSystemVault => {
 				return None;
 			},
 			MigrationSequence::UTXOTransfer => {
