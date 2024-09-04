@@ -66,7 +66,8 @@ impl<T: JsonRpcClient + 'static> PeriodicWorker for PubKeyPreSubmitter<T> {
 						n,
 					);
 
-					let (call, metadata) = self.build_unsigned_tx(self.create_pub_keys(n).await);
+					let (call, metadata) =
+						self.build_unsigned_tx(self.create_pub_keys(n).await).await;
 					self.request_send_transaction(call, metadata);
 				}
 			}
@@ -107,11 +108,11 @@ impl<T: JsonRpcClient + 'static> PubKeyPreSubmitter<T> {
 		);
 	}
 
-	fn build_unsigned_tx(
+	async fn build_unsigned_tx(
 		&self,
 		pub_keys: Vec<PublicKey>,
 	) -> (XtRequest, VaultKeyPresubmissionMetadata) {
-		let (msg, signature) = self.build_payload(&pub_keys);
+		let (msg, signature) = self.build_payload(&pub_keys).await;
 		let metadata = VaultKeyPresubmissionMetadata { keys: pub_keys.len() };
 
 		(
@@ -124,7 +125,7 @@ impl<T: JsonRpcClient + 'static> PubKeyPreSubmitter<T> {
 		)
 	}
 
-	fn build_payload(
+	async fn build_payload(
 		&self,
 		pub_keys: &Vec<PublicKey>,
 	) -> (VaultKeyPreSubmission<AccountId20>, EthereumSignature) {
@@ -137,18 +138,24 @@ impl<T: JsonRpcClient + 'static> PubKeyPreSubmitter<T> {
 			})
 			.collect::<Vec<[u8; 33]>>();
 
+		let pool_round = self.get_current_round().await;
 		let msg = VaultKeyPreSubmission {
 			authority_id: AccountId20(self.bfc_client.address().0),
 			pub_keys: converted_pub_keys.iter().map(|x| Public(*x)).collect(),
+			pool_round,
 		};
 		let signature = convert_ethers_to_ecdsa_signature(
 			self.bfc_client.wallet.sign_message(
-				&converted_pub_keys
-					.iter()
-					.map(|x| array_bytes::bytes2hex("0x", *x))
-					.collect::<Vec<String>>()
-					.concat()
-					.as_bytes(),
+				&format!(
+					"{}:{}",
+					pool_round,
+					converted_pub_keys
+						.iter()
+						.map(|x| array_bytes::bytes2hex("0x", *x))
+						.collect::<Vec<String>>()
+						.concat()
+				)
+				.as_bytes(),
 			),
 		);
 
