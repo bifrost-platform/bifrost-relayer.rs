@@ -6,6 +6,9 @@ use br_primitives::{
 use ethers::providers::JsonRpcClient;
 use sc_service::SpawnTaskHandle;
 use std::sync::Arc;
+use subxt::blocks::BlockRef;
+use subxt::client::{OfflineClientT, OnlineClientT};
+use subxt::config::DefaultExtrinsicParamsBuilder;
 use subxt::tx::Signer;
 use subxt::OnlineClient;
 use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
@@ -126,7 +129,13 @@ where
 		let progress = self
 			.sub_client
 			.tx()
-			.sign_and_submit_then_watch_default(&msg.call, &self.bfc_client.wallet.subxt_signer)
+			.sign_and_submit_then_watch_no_refine(
+				&msg.call,
+				&self.bfc_client.wallet.subxt_signer,
+				DefaultExtrinsicParamsBuilder::new()
+					.nonce(self.bfc_client.middleware.next().as_u64())
+					.build(),
+			)
 			.await;
 		self.bfc_client.middleware.next();
 
