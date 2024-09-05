@@ -21,6 +21,7 @@ use cron::Schedule;
 use ethers::{
 	providers::{JsonRpcClient, Provider},
 	types::{Bytes, H160, H256, U256},
+	utils::keccak256,
 };
 use serde::Deserialize;
 use serde_json::Value;
@@ -256,8 +257,11 @@ impl<T: JsonRpcClient> BitcoinRollbackVerifier<T> {
 			txid,
 			is_approved,
 		};
-		let signature =
-			convert_ethers_to_ecdsa_signature(self.bfc_client.wallet.sign_message(txid.as_bytes()));
+		let signature = convert_ethers_to_ecdsa_signature(
+			self.bfc_client
+				.wallet
+				.sign_message(&[keccak256("RollbackPoll").as_slice(), txid.as_ref()].concat()),
+		);
 		return (msg, signature);
 	}
 
