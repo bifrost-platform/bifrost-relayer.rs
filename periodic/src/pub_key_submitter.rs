@@ -91,7 +91,7 @@ impl<T: JsonRpcClient + 'static> PeriodicWorker for PubKeySubmitter<T> {
 					}
 
 					let pub_key = self.keypair_storage.write().await.create_new_keypair().await;
-					let (call, metadata) = self.build_unsigned_tx(who, pub_key);
+					let (call, metadata) = self.build_unsigned_tx(who, pub_key).await;
 					self.request_send_transaction(call, metadata);
 				}
 			}
@@ -119,23 +119,31 @@ impl<T: JsonRpcClient> PubKeySubmitter<T> {
 
 	/// Build the payload for the unsigned transaction.
 	/// (`submit_vault_key()` or `submit_system_vault_key()`)
-	fn build_payload(
+	async fn build_payload(
 		&self,
 		who: Address,
 		pub_key: PublicKey,
 	) -> (VaultKeySubmission<AccountId20>, EthereumSignature) {
 		let mut converted_pub_key = [0u8; 33];
 		converted_pub_key.copy_from_slice(&pub_key.to_bytes());
-		// submit public key
+
+		let pool_round = if *self.migration_sequence.read().await == ServiceState::Normal {
+			self.get_current_round().await
+		} else {
+			self.get_current_round().await.saturating_add(1)
+		};
+
 		let msg = VaultKeySubmission {
 			authority_id: AccountId20(self.client.address().0),
 			who: AccountId20(who.0),
 			pub_key: Public(converted_pub_key),
+			pool_round,
 		};
 		let signature = convert_ethers_to_ecdsa_signature(
-			self.client
-				.wallet
-				.sign_message(&array_bytes::bytes2hex("0x", converted_pub_key).as_bytes()),
+			self.client.wallet.sign_message(
+				&format!("{}:{}", pool_round, array_bytes::bytes2hex("0x", converted_pub_key))
+					.as_bytes(),
+			),
 		);
 
 		(msg, signature)
@@ -143,12 +151,12 @@ impl<T: JsonRpcClient> PubKeySubmitter<T> {
 
 	/// Build the calldata for the unsigned transaction.
 	/// (`submit_vault_key()` or `submit_system_vault_key()`)
-	fn build_unsigned_tx(
+	async fn build_unsigned_tx(
 		&self,
 		who: Address,
 		pub_key: PublicKey,
 	) -> (XtRequest, SubmitVaultKeyMetadata) {
-		let (msg, signature) = self.build_payload(who, pub_key);
+		let (msg, signature) = self.build_payload(who, pub_key).await;
 		let metadata = SubmitVaultKeyMetadata::new(who, pub_key);
 		if self.is_system_vault(who) {
 			(
