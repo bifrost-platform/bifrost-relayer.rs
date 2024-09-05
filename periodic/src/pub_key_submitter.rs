@@ -127,7 +127,12 @@ impl<T: JsonRpcClient> PubKeySubmitter<T> {
 		let mut converted_pub_key = [0u8; 33];
 		converted_pub_key.copy_from_slice(&pub_key.to_bytes());
 
-		let pool_round = self.get_current_round().await;
+		let pool_round = if *self.migration_sequence.read().await == ServiceState::Normal {
+			self.get_current_round().await
+		} else {
+			self.get_current_round().await.saturating_add(1)
+		};
+
 		let msg = VaultKeySubmission {
 			authority_id: AccountId20(self.client.address().0),
 			who: AccountId20(who.0),
