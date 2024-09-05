@@ -12,7 +12,10 @@ use br_primitives::{
 	utils::{convert_ethers_to_ecdsa_signature, hash_bytes, sub_display_format},
 };
 use cron::Schedule;
-use ethers::prelude::{Bytes, JsonRpcClient, H256};
+use ethers::{
+	prelude::{Bytes, JsonRpcClient, H256},
+	utils::keccak256,
+};
 use miniscript::bitcoin::{Address as BtcAddress, Network, Psbt};
 use std::{str::FromStr, sync::Arc};
 use tokio::sync::RwLock;
@@ -125,9 +128,9 @@ impl<T: JsonRpcClient> PsbtSigner<T> {
 				unsigned_psbt: unsigned_psbt.serialize(),
 				signed_psbt: signed_psbt.clone(),
 			};
-			let signature = convert_ethers_to_ecdsa_signature(
-				self.client.wallet.sign_message(signed_psbt.as_ref()),
-			);
+			let signature = convert_ethers_to_ecdsa_signature(self.client.wallet.sign_message(
+				&[keccak256("SignedPsbt").as_slice(), signed_psbt.as_ref()].concat(),
+			));
 			return Some((msg, signature));
 		}
 		log::warn!(
