@@ -293,5 +293,41 @@
     ],
     "stateMutability": "view",
     "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint32",
+        "name": "pool_round",
+        "type": "uint32"
+      }
+    ],
+    "name": "pending_refunds",
+    "outputs": [
+      {
+        "internalType": "struct pending_refund_state[]",
+        "name": "",
+        "type": "tuple[]",
+        "components": [
+          {
+            "internalType": "address",
+            "name": "who",
+            "type": "address"
+          },
+          {
+            "internalType": "string",
+            "name": "old_refund",
+            "type": "string"
+          },
+          {
+            "internalType": "string",
+            "name": "new_refund",
+            "type": "string"
+          }
+        ]
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
   }
 ]
