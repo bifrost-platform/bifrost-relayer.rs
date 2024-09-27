@@ -30,7 +30,7 @@ impl PendingOutboundPool {
 		value: PendingOutboundValue,
 	) -> Option<PendingOutboundValue> {
 		let mut write_lock = self.inner.write().await;
-		return match write_lock.get_mut(&key) {
+		match write_lock.get_mut(&key) {
 			Some(t) => {
 				// If the socket message is already in the list, we don't want to add it again
 				if t.socket_messages.iter().any(|x| value.socket_messages.contains(x)) {
@@ -45,7 +45,7 @@ impl PendingOutboundPool {
 				Some(t.clone())
 			},
 			None => write_lock.insert(key, value),
-		};
+		}
 	}
 
 	pub async fn get(&self, key: &Address<NetworkUnchecked>) -> Option<PendingOutboundValue> {

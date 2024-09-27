@@ -243,7 +243,8 @@ impl<T: JsonRpcClient> BitcoinRollbackVerifier<T> {
 			}
 			return true;
 		}
-		return false;
+
+		false
 	}
 
 	/// Build the payload for the unsigned transaction. (`submit_rollback_poll()`)
@@ -257,12 +258,11 @@ impl<T: JsonRpcClient> BitcoinRollbackVerifier<T> {
 			txid,
 			is_approved,
 		};
-		let signature = convert_ethers_to_ecdsa_signature(
-			self.bfc_client
-				.wallet
-				.sign_message(&[keccak256("RollbackPoll").as_slice(), txid.as_ref()].concat()),
-		);
-		return (msg, signature);
+		let signature = convert_ethers_to_ecdsa_signature(self.bfc_client.wallet.sign_message(
+			&[keccak256("RollbackPoll").as_slice(), txid.as_ref(), &[is_approved as u8]].concat(),
+		));
+
+		(msg, signature)
 	}
 
 	/// Build the calldata for the unsigned transaction. (`submit_rollback_poll()`)
@@ -273,12 +273,13 @@ impl<T: JsonRpcClient> BitcoinRollbackVerifier<T> {
 	) -> (XtRequest, SubmitRollbackPollMetadata) {
 		let (msg, signature) = self.build_payload(txid, is_approved);
 		let metadata = SubmitRollbackPollMetadata::new(txid, is_approved);
-		return (
+
+		(
 			XtRequest::from(
 				bifrost_runtime::tx().btc_socket_queue().submit_rollback_poll(msg, signature),
 			),
 			metadata,
-		);
+		)
 	}
 
 	/// Get the pending rollback PSBT's.
