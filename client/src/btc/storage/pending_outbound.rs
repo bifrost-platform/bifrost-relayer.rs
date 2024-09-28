@@ -15,13 +15,13 @@ pub struct PendingOutboundValue {
 }
 
 #[derive(Debug, Clone)]
-pub struct PendingOutboundPool {
-	inner: Arc<RwLock<BTreeMap<Address<NetworkUnchecked>, PendingOutboundValue>>>,
-}
+pub struct PendingOutboundPool(
+	Arc<RwLock<BTreeMap<Address<NetworkUnchecked>, PendingOutboundValue>>>,
+);
 
 impl PendingOutboundPool {
 	pub fn new() -> Self {
-		Self { inner: Default::default() }
+		Self(Default::default())
 	}
 
 	pub async fn insert(
@@ -29,7 +29,7 @@ impl PendingOutboundPool {
 		key: Address<NetworkUnchecked>,
 		value: PendingOutboundValue,
 	) -> Option<PendingOutboundValue> {
-		let mut write_lock = self.inner.write().await;
+		let mut write_lock = self.0.write().await;
 		match write_lock.get_mut(&key) {
 			Some(t) => {
 				// If the socket message is already in the list, we don't want to add it again
@@ -49,7 +49,7 @@ impl PendingOutboundPool {
 	}
 
 	pub async fn get(&self, key: &Address<NetworkUnchecked>) -> Option<PendingOutboundValue> {
-		self.inner.read().await.get(key).cloned()
+		self.0.read().await.get(key).cloned()
 	}
 
 	pub async fn pop_next_outputs(
@@ -59,7 +59,7 @@ impl PendingOutboundPool {
 		let mut socket_messages = vec![];
 		let mut keys_to_remove = vec![];
 
-		let mut write_lock = self.inner.write().await;
+		let mut write_lock = self.0.write().await;
 		for (address, value) in write_lock.iter_mut() {
 			outputs.insert(address.assume_checked_ref().to_string(), value.amount);
 			socket_messages.push((
