@@ -63,7 +63,6 @@ impl<T: JsonRpcClient> KeypairMigrator<T> {
 					.load(self.get_current_round().await + 1)
 					.await;
 			},
-			_ => {},
 		}
 	}
 
@@ -176,7 +175,6 @@ impl<T: JsonRpcClient> PeriodicWorker for KeypairMigrator<T> {
 						},
 						_ => {},
 					},
-					_ => {},
 				}
 				*write_lock = service_state;
 			}
