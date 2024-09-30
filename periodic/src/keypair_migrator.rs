@@ -51,7 +51,9 @@ impl<T: JsonRpcClient> KeypairMigrator<T> {
 		self.sub_client = Some(OnlineClient::<CustomConfig>::from_url(url.as_str()).await.unwrap());
 
 		match self.get_service_state().await {
-			ServiceState::Normal | ServiceState::UTXOTransfer => {
+			ServiceState::Normal
+			| MigrationSequence::SetExecutiveMembers
+			| ServiceState::UTXOTransfer => {
 				self.keypair_storage.write().await.load(self.get_current_round().await).await;
 			},
 			ServiceState::PrepareNextSystemVault => {
@@ -142,15 +144,17 @@ impl<T: JsonRpcClient> PeriodicWorker for KeypairMigrator<T> {
 
 				let mut write_lock = self.migration_sequence.write().await;
 				match *write_lock {
-					MigrationSequence::Normal => match service_state {
-						ServiceState::PrepareNextSystemVault => {
-							self.keypair_storage
-								.write()
-								.await
-								.load(self.get_current_round().await + 1)
-								.await;
-						},
-						_ => {},
+					MigrationSequence::Normal | MigrationSequence::SetExecutiveMembers => {
+						match service_state {
+							ServiceState::PrepareNextSystemVault => {
+								self.keypair_storage
+									.write()
+									.await
+									.load(self.get_current_round().await + 1)
+									.await;
+							},
+							_ => {},
+						}
 					},
 					MigrationSequence::PrepareNextSystemVault => match service_state {
 						ServiceState::UTXOTransfer => {
