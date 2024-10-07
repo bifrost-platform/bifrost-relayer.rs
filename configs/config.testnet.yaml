@@ -21,7 +21,7 @@ evm_providers:
     is_relay_target: false
     eip1559: true
     socket_address: "0xdAcc4aeea580F782bB991eA862e1a57827Ea9D68"
-    authority_address: "0x891360Bcc47855ae6BBFc57f98290ECB2D1E0254"
+    authority_address: "0xff95B9861eE5d44eC0b489B0DCB73932c7C7074B"
   - name: "bsc-testnet"
     id: 97
     provider: "<YOUR_BSC_TESTNET_RPC_ENDPOINT>"
