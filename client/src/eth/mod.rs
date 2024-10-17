@@ -8,8 +8,9 @@ use br_primitives::{
 	},
 	contracts::authority::RoundMetaData,
 	eth::{AggregatorContracts, ChainID, ProtocolContracts, ProviderMetadata},
-	sub_display_format,
+	utils::sub_display_format,
 };
+
 use ethers::{
 	abi::Detokenize,
 	prelude::ContractCall,
@@ -22,6 +23,7 @@ use ethers::{
 };
 use serde::{de::DeserializeOwned, Serialize};
 use tokio::time::{sleep, Duration};
+use url::Url;
 
 use self::{
 	traits::{Eip1559GasMiddleware, LegacyGasMiddleware},
@@ -79,6 +81,15 @@ impl<T: JsonRpcClient> EthClient<T> {
 	/// Returns id which chain this client interacts with.
 	pub fn get_chain_id(&self) -> ChainID {
 		self.metadata.id
+	}
+
+	pub fn get_bitcoin_chain_id(&self) -> Option<ChainID> {
+		self.metadata.bitcoin_chain_id
+	}
+
+	/// Returns the provider URL.
+	pub fn get_url(&self) -> Url {
+		self.metadata.url.clone()
 	}
 
 	/// Returns `Arc<Provider>`.
@@ -238,18 +249,20 @@ impl<T: JsonRpcClient> EthClient<T> {
 		round_info: RoundMetaData,
 	) -> U64 {
 		let block_number = self.get_latest_block_number().await;
+		let prev_block_number = block_number.saturating_sub(BOOTSTRAP_BLOCK_OFFSET.into());
+		let block_diff = block_number.checked_sub(prev_block_number).unwrap().as_u64();
 
 		if let (Some(current_block), Some(prev_block)) = (
 			self.get_block(block_number.into()).await,
-			self.get_block((block_number - BOOTSTRAP_BLOCK_OFFSET).into()).await,
+			self.get_block(prev_block_number.into()).await,
 		) {
 			let timestamp_diff =
 				current_block.timestamp.checked_sub(prev_block.timestamp).unwrap().as_u64() as f64;
-			let block_time = timestamp_diff / BOOTSTRAP_BLOCK_OFFSET as f64;
+			let avg_block_time = timestamp_diff / block_diff as f64;
 
 			let blocks = round_offset.checked_mul(round_info.round_length.as_u32()).unwrap();
 			let blocks_to_native_chain_time = blocks.checked_mul(NATIVE_BLOCK_TIME).unwrap();
-			let bootstrap_offset_height = blocks_to_native_chain_time as f64 / block_time;
+			let bootstrap_offset_height = blocks_to_native_chain_time as f64 / avg_block_time;
 			(bootstrap_offset_height.ceil() as u32).into()
 		} else {
 			panic!(
@@ -271,6 +284,16 @@ impl<T: JsonRpcClient> EthClient<T> {
 				.parse::<f64>()
 				.unwrap(),
 		);
+	}
+
+	/// Verifies whether the current relayer was selected at the current round.
+	pub async fn is_selected_relayer(&self) -> bool {
+		let relayer_manager = self.protocol_contracts.relayer_manager.as_ref().unwrap();
+		self.contract_call(
+			relayer_manager.is_selected_relayer(self.address(), false),
+			"relayer_manager.is_selected_relayer",
+		)
+		.await
 	}
 }
 
@@ -323,23 +346,16 @@ impl<T: JsonRpcClient> LegacyGasMiddleware for EthClient<T> {
 			br_metrics::increase_rpc_calls(&self.get_chain_name());
 
 			if self.debug_mode {
-				log::warn!(
-					target: &self.get_chain_name(),
-					"-[{}] ⚠️  Warning! Error encountered during get gas price, Retries left: {:?}, Error: {}",
+				let log_msg = format!(
+					"-[{}]-[{}] ⚠️  Warning! Error encountered during get gas price, Retries left: {:?}, Error: {}",
 					sub_display_format(SUB_LOG_TARGET),
+					self.address(),
 					retries - 1,
 					last_error
 				);
+				log::warn!(target: &self.get_chain_name(), "{log_msg}");
 				sentry::capture_message(
-					format!(
-						"[{}]-[{}]-[{}] ⚠️  Warning! Error encountered during get gas price, Retries left: {:?}, Error: {}",
-						&self.get_chain_name(),
-						SUB_LOG_TARGET,
-						self.address(),
-						retries - 1,
-						last_error
-					)
-					.as_str(),
+					&format!("[{}]{log_msg}", &self.get_chain_name()),
 					sentry::Level::Warning,
 				);
 			}
@@ -395,23 +411,16 @@ impl<T: JsonRpcClient> Eip1559GasMiddleware for EthClient<T> {
 			br_metrics::increase_rpc_calls(&self.get_chain_name());
 
 			if self.debug_mode {
-				log::warn!(
-					target: &self.get_chain_name(),
-					"-[{}] ⚠️  Warning! Error encountered during get estimated eip1559 fees, Retries left: {:?}, Error: {}",
+				let log_msg = format!(
+					"-[{}]-[{}] ⚠️  Warning! Error encountered during get estimated eip1559 fees, Retries left: {:?}, Error: {}",
 					sub_display_format(SUB_LOG_TARGET),
+					self.address(),
 					retries - 1,
 					last_error
 				);
+				log::warn!(target: &self.get_chain_name(), "{log_msg}");
 				sentry::capture_message(
-					format!(
-						"[{}]-[{}]-[{}] ⚠️  Warning! Error encountered during get estimated eip1559 fees, Retries left: {:?}, Error: {}",
-						&self.get_chain_name(),
-						SUB_LOG_TARGET,
-						self.address(),
-						retries - 1,
-						last_error
-					)
-						.as_str(),
+					&format!("[{}]{log_msg}", &self.get_chain_name()),
 					sentry::Level::Warning,
 				);
 			}

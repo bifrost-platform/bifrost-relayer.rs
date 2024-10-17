@@ -1,6 +1,6 @@
 [package]
 name = "bifrost-relayer"
-version = "1.1.1"
+version = "2.0.0"
 description = "The core rust implementation for Bifrost relayer"
 authors = { workspace = true }
 homepage = { workspace = true }
@@ -23,6 +23,9 @@ tokio = { workspace = true, features = [
 	"rt-multi-thread",
 	"parking_lot",
 ] }
+miniscript = { workspace = true }
+bitcoincore-rpc = { workspace = true }
+subxt = { workspace = true }
 
 # Bifrost Relayer
 br-cli = { path = "../client/cli", default-features = false }

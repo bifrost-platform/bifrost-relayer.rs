@@ -1,5 +1,3 @@
-use std::{str::FromStr, sync::Arc, time::Duration};
-
 use cron::Schedule;
 use ethers::{
 	abi::{encode, Detokenize, Token, Tokenize},
@@ -7,6 +5,7 @@ use ethers::{
 	providers::JsonRpcClient,
 	types::{Address, Filter, Log, TransactionRequest, U256},
 };
+use std::{str::FromStr, sync::Arc, time::Duration};
 use tokio::time::sleep;
 
 use br_client::eth::{traits::BootstrapHandler, EthClient};
@@ -23,8 +22,8 @@ use br_primitives::{
 		socket::{RoundUpSubmit, SerializedRoundUp, Signatures, SocketContractEvents},
 	},
 	eth::{BootstrapState, GasCoefficient, RoundUpEventStatus},
-	sub_display_format,
 	tx::{TxRequest, TxRequestMessage, TxRequestMetadata, TxRequestSender, VSPPhase1Metadata},
+	utils::sub_display_format,
 };
 
 use crate::traits::PeriodicWorker;
@@ -222,6 +221,10 @@ impl<T: JsonRpcClient> RoundupEmitter<T> {
 
 #[async_trait::async_trait]
 impl<T: JsonRpcClient> BootstrapHandler for RoundupEmitter<T> {
+	fn bootstrap_shared_data(&self) -> Arc<BootstrapSharedData> {
+		self.bootstrap_shared_data.clone()
+	}
+
 	async fn bootstrap(&self) {
 		let get_next_poll_round = || async move {
 			let logs = self.get_bootstrap_events().await;
@@ -350,14 +353,5 @@ impl<T: JsonRpcClient> BootstrapHandler for RoundupEmitter<T> {
 		}
 
 		round_up_events
-	}
-
-	async fn is_bootstrap_state_synced_as(&self, state: BootstrapState) -> bool {
-		self.bootstrap_shared_data
-			.bootstrap_states
-			.read()
-			.await
-			.iter()
-			.all(|s| *s == state)
 	}
 }

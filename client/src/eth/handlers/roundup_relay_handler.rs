@@ -24,8 +24,8 @@ use br_primitives::{
 		},
 	},
 	eth::{BootstrapState, ChainID, GasCoefficient, RecoveredSignature, RoundUpEventStatus},
-	sub_display_format,
 	tx::{TxRequest, TxRequestMessage, TxRequestMetadata, TxRequestSender, VSPPhase2Metadata},
+	utils::sub_display_format,
 };
 
 use crate::eth::{
@@ -120,23 +120,15 @@ impl<T: JsonRpcClient> Handler for RoundupRelayHandler<T> {
 					}
 				},
 				Err(e) => {
-					log::error!(
-						target: &self.client.get_chain_name(),
+					let log_msg = format!(
 						"-[{}] Error on decoding RoundUp event ({:?}):{}",
 						sub_display_format(SUB_LOG_TARGET),
 						log.transaction_hash,
 						e.to_string(),
 					);
+					log::error!(target: &self.client.get_chain_name(), "{log_msg}");
 					sentry::capture_message(
-						format!(
-							"[{}]-[{}]-[{}] Error on decoding RoundUp event ({:?}):{}",
-							&self.client.get_chain_name(),
-							SUB_LOG_TARGET,
-							self.client.address(),
-							log.transaction_hash,
-							e
-						)
-						.as_str(),
+						&format!("[{}]{log_msg}", &self.client.get_chain_name()),
 						sentry::Level::Error,
 					);
 				},
@@ -360,8 +352,12 @@ impl<T: JsonRpcClient> RoundupRelayHandler<T> {
 	}
 }
 
-#[async_trait::async_trait]
+#[async_trait]
 impl<T: JsonRpcClient> BootstrapHandler for RoundupRelayHandler<T> {
+	fn bootstrap_shared_data(&self) -> Arc<BootstrapSharedData> {
+		self.bootstrap_shared_data.clone()
+	}
+
 	async fn bootstrap(&self) {
 		log::info!(
 			target: &self.client.get_chain_name(),
@@ -446,15 +442,5 @@ impl<T: JsonRpcClient> BootstrapHandler for RoundupRelayHandler<T> {
 		}
 
 		logs
-	}
-
-	/// Verifies whether the bootstrap state has been synced to the given state.
-	async fn is_bootstrap_state_synced_as(&self, state: BootstrapState) -> bool {
-		self.bootstrap_shared_data
-			.bootstrap_states
-			.read()
-			.await
-			.iter()
-			.all(|s| *s == state)
 	}
 }

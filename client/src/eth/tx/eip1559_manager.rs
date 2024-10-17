@@ -10,8 +10,8 @@ use br_primitives::{
 		errors::{INSUFFICIENT_FUNDS, NETWORK_DOES_NOT_SUPPORT_EIP1559, PROVIDER_INTERNAL_ERROR},
 		tx::{DEFAULT_TX_RETRIES, MAX_FEE_COEFFICIENT, MAX_PRIORITY_FEE_COEFFICIENT},
 	},
-	sub_display_format,
 	tx::{TxRequest, TxRequestMessage},
+	utils::sub_display_format,
 };
 use ethers::{
 	middleware::{MiddlewareBuilder, NonceManagerMiddleware, SignerMiddleware},
@@ -126,13 +126,8 @@ impl<T: 'static + JsonRpcClient> TransactionManager<T> for Eip1559TransactionMan
 			self.min_priority_fee,
 			self.duplicate_confirm_delay,
 		);
-		if msg.is_bootstrap {
-			task.try_send_transaction(msg).await;
-		} else {
-			self.get_spawn_handle().spawn("send_transaction", None, async move {
-				task.try_send_transaction(msg).await
-			});
-		}
+		self.get_spawn_handle()
+			.spawn("send_transaction", None, async move { task.try_send_transaction(msg).await });
 	}
 
 	fn is_txpool_enabled(&self) -> bool {

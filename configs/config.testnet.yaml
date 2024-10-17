@@ -1,18 +1,30 @@
 system:
   private_key: "<YOUR_RELAYER_PRIVATE_KEY>"
+  keystore_path: "<YOUR_KEYSTORE_PATH>"
+  keystore_password: "<YOUR_KEYSTORE_PASSWORD>"
   debug_mode: false
+
+btc_provider:
+  id: 10001
+  chain: "test"
+  provider: "<YOUR_BITCOIN_RPC_ENDPOINT>"
+  call_interval: 10000
 
 evm_providers:
   - name: "bifrost-testnet"
     id: 49088
     provider: "<YOUR_BIFROST_TESTNET_RPC_ENDPOINT>"
     call_interval: 3000
-    block_confirmations: 5
+    block_confirmations: 3
     is_native: true
     is_relay_target: true
     socket_address: "0x0218371b18340aBD460961bdF3Bd5F01858dAB53"
     authority_address: "0x0000000000000000000000000000000000000400"
     relayer_manager_address: "0x0000000000000000000000000000000000002000"
+    bitcoin_socket_address: "0xc292D9d5c31D5246cfAC67ba91202bbCF0AA8108"
+    socket_queue_address: "0x0000000000000000000000000000000000000101"
+    registration_pool_address: "0x0000000000000000000000000000000000000100"
+    relay_executive_address: "0x0000000000000000000000000000000000000803"
   - name: "sepolia"
     id: 11155111
     provider: "<YOUR_SEPOLIA_RPC_ENDPOINT>"
@@ -67,6 +79,7 @@ handler_configs:
 bootstrap_config:
   is_enabled: true
   round_offset: 3
+  btc_block_offset: 3
 
 sentry_config:
   environment: "<YOUR_SENTRY_ENVIRONMENT>"

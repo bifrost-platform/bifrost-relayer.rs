@@ -1,6 +1,5 @@
 use serde::Deserialize;
-use std::borrow::Cow;
-use std::fmt::Display;
+use std::{borrow::Cow, fmt::Display};
 
 use crate::eth::ChainID;
 
@@ -43,6 +42,8 @@ pub struct RelayerConfig {
 	pub system: SystemConfig,
 	/// EVM configs
 	pub evm_providers: Vec<EVMProvider>,
+	/// BTC configs
+	pub btc_provider: BTCProvider,
 	/// Handler configs
 	pub handler_configs: Vec<HandlerConfig>,
 	/// Bootstrapping configs
@@ -57,6 +58,10 @@ pub struct RelayerConfig {
 pub struct SystemConfig {
 	/// The private key of the relayer.
 	pub private_key: String,
+	/// Path of the keystore. (default: `./keys`)
+	pub keystore_path: Option<String>,
+	/// Password of the keystore. (default: `None`)
+	pub keystore_password: Option<String>,
 	/// Debug mode enabled if set to `true`.
 	pub debug_mode: Option<bool>,
 }
@@ -104,6 +109,14 @@ pub struct EVMProvider {
 	pub authority_address: String,
 	/// Relayer manager contract address (Bifrost only)
 	pub relayer_manager_address: Option<String>,
+	/// Bitcoin socket contract address (Bifrost only)
+	pub bitcoin_socket_address: Option<String>,
+	/// Socket Queue contract address (Bifrost only)
+	pub socket_queue_address: Option<String>,
+	/// Registration Pool contract address (Bifrost only)
+	pub registration_pool_address: Option<String>,
+	/// Relay Executive contract address (Bifrost only)
+	pub relay_executive_address: Option<String>,
 	/// Chainlink usdc/usd aggregator
 	pub chainlink_usdc_usd_address: Option<String>,
 	/// Chainlink usdt/usd aggregator
@@ -114,6 +127,26 @@ pub struct EVMProvider {
 	pub chainlink_btc_usd_address: Option<String>,
 	/// Chainlink wbtc/usd aggregator
 	pub chainlink_wbtc_usd_address: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct BTCProvider {
+	/// The bitcoin chain ID used for CCCP.
+	pub id: u32,
+	/// The Bitcoin provider URL.
+	pub provider: String,
+	/// The time interval(ms) used when to request a new block
+	pub call_interval: u64,
+	/// The number of confirmations required for a block to be processed.
+	pub block_confirmations: Option<u64>,
+	/// The chain network. (Allowed values: `main`, `test`, `signet`, `regtest`)
+	pub chain: String,
+	/// Optional. The provider username credential.
+	pub username: Option<String>,
+	/// Optional. The provider password credential.
+	pub password: Option<String>,
+	/// Optional. The wallet name.
+	pub wallet: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize, PartialEq)]
@@ -146,8 +179,10 @@ pub struct HandlerConfig {
 pub struct BootstrapConfig {
 	/// Bootstrapping flag
 	pub is_enabled: bool,
-	/// Round for bootstrap
+	/// Optional. The round offset used for EVM bootstrap.
 	pub round_offset: Option<u32>,
+	/// Optional. The block offset used for Bitcoin bootstrap.
+	pub btc_block_offset: Option<u32>,
 }
 
 #[derive(Default, Debug, Clone, Deserialize)]

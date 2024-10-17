@@ -1,10 +1,11 @@
 use std::{error::Error, str::FromStr, sync::Arc, time::Duration};
 
 use br_primitives::{
+	bootstrap::BootstrapSharedData,
 	contracts::socket::{PollSubmit, Signatures, SocketMessage},
 	eth::{BootstrapState, BuiltRelayTransaction, ChainID, GasCoefficient, RecoveredSignature},
-	sub_display_format,
 	tx::{FlushMetadata, TxRequest, TxRequestMessage, TxRequestMetadata},
+	utils::sub_display_format,
 };
 use ethers::{
 	abi::Token,
@@ -371,29 +372,20 @@ where
 			receipt.transaction_hash
 		);
 		if status.is_zero() && self.debug_mode() {
-			log::warn!(
-				target: &client.get_chain_name(),
-				"-[{}] ⚠️  Warning! Error encountered during contract execution [execution reverted]. A prior transaction might have been already submitted: {}, {:?}-{:?}-{:?}",
+			let log_msg = format!(
+				"-[{}]-[{}] ⚠️  Warning! Error encountered during contract execution [execution reverted]. A prior transaction might have been already submitted: {}, {:?}-{:?}-{:?}",
 				sub_display_format(sub_target),
+				client.address(),
 				metadata,
 				receipt.block_number.unwrap(),
 				status,
 				receipt.transaction_hash
 			);
+			log::warn!(target: &client.get_chain_name(), "{log_msg}");
 			sentry::capture_message(
-                format!(
-                    "[{}]-[{}]-[{}] ⚠️  Warning! Error encountered during contract execution [execution reverted]. A prior transaction might have been already submitted: {}, {:?}-{:?}-{:?}",
-                    &client.get_chain_name(),
-                    sub_target,
-                    client.address(),
-                    metadata,
-                    receipt.block_number.unwrap(),
-                    status,
-                    receipt.transaction_hash
-                )
-                    .as_str(),
-                sentry::Level::Warning,
-            );
+				&format!("[{}]{log_msg}", &client.get_chain_name()),
+				sentry::Level::Warning,
+			);
 		}
 		br_metrics::set_payed_fees(&client.get_chain_name(), &receipt);
 	}
@@ -407,25 +399,20 @@ where
 		escalation: bool,
 	) {
 		let client = self.get_client();
-		log::warn!(
-			target: &client.get_chain_name(),
-			"-[{}] ♻️ The pending transaction has been stalled over 3 blocks. Try gas-escalation: {}-{}",
+
+		let log_msg = format!(
+			"-[{}]-[{}] ♻️ The pending transaction has been stalled over 3 blocks. Try gas-escalation: {}-{}",
 			sub_display_format(sub_target),
+			client.address(),
 			msg.metadata,
-			pending,
+			pending
 		);
+		log::warn!(target: &client.get_chain_name(), "{log_msg}");
 		sentry::capture_message(
-            format!(
-                "[{}]-[{}]-[{}] ♻️  The pending transaction has been stalled over 3 blocks. Try gas-escalation: {}-{}",
-                &client.get_chain_name(),
-                sub_target,
-                client.address(),
-                msg.metadata,
-                pending
-            )
-                .as_str(),
-            sentry::Level::Warning,
-        );
+			&format!("[{}]{log_msg}", &client.get_chain_name()),
+			sentry::Level::Warning,
+		);
+
 		self.retry_transaction(msg, escalation).await;
 	}
 
@@ -433,25 +420,19 @@ where
 	async fn handle_failed_tx_receipt(&self, sub_target: &str, msg: TxRequestMessage) {
 		let client = self.get_client();
 
-		log::error!(
-			target: &client.get_chain_name(),
-			"-[{}] ♻️  The requested transaction failed to generate a receipt: {}, Retries left: {:?}",
+		let log_msg = format!(
+			"-[{}]-[{}] ♻️  The requested transaction failed to generate a receipt: {}, Retries left: {:?}",
 			sub_display_format(sub_target),
+			client.address(),
 			msg.metadata,
-			msg.retries_remaining - 1,
+			msg.retries_remaining - 1
 		);
+		log::error!(target: &client.get_chain_name(), "{log_msg}");
 		sentry::capture_message(
-            format!(
-                "[{}]-[{}]-[{}] ♻️  The requested transaction failed to generate a receipt: {}, Retries left: {:?}",
-                &client.get_chain_name(),
-                sub_target,
-                client.address(),
-                msg.metadata,
-                msg.retries_remaining - 1,
-            )
-                .as_str(),
-            sentry::Level::Error,
-        );
+			&format!("[{}]{log_msg}", &client.get_chain_name()),
+			sentry::Level::Error,
+		);
+
 		self.retry_transaction(msg, false).await;
 	}
 
@@ -464,27 +445,20 @@ where
 	) {
 		let client = self.get_client();
 
-		log::error!(
-			target: &client.get_chain_name(),
-			"-[{}] ♻️  Unknown error while requesting a transaction request: {}, Retries left: {:?}, Error: {}",
+		let log_msg = format!(
+			"-[{}]-[{}] ♻️  Unknown error while requesting a transaction request: {}, Retries left: {:?}, Error: {}",
 			sub_display_format(sub_target),
+			client.address(),
 			msg.metadata,
 			msg.retries_remaining - 1,
 			error.to_string(),
 		);
+		log::error!(target: &client.get_chain_name(), "{log_msg}");
 		sentry::capture_message(
-            format!(
-                "[{}]-[{}]-[{}] ♻️  Unknown error while requesting a transaction request: {}, Retries left: {:?}, Error: {}",
-                &client.get_chain_name(),
-                sub_target,
-                client.address(),
-                msg.metadata,
-                msg.retries_remaining - 1,
-                error
-            )
-                .as_str(),
-            sentry::Level::Error,
-        );
+			&format!("[{}]{log_msg}", &client.get_chain_name()),
+			sentry::Level::Error,
+		);
+
 		self.retry_transaction(msg, false).await;
 	}
 
@@ -498,27 +472,19 @@ where
 		let client = self.get_client();
 
 		if self.debug_mode() {
-			log::warn!(
-				target: &client.get_chain_name(),
-				"-[{}] ⚠️  Warning! Error encountered during gas estimation: {}, Retries left: {:?}, Error: {}",
+			let log_msg = format!(
+				"-[{}]-[{}] ⚠️  Warning! Error encountered during gas estimation: {}, Retries left: {:?}, Error: {}",
 				sub_display_format(sub_target),
+				client.address(),
 				msg.metadata,
 				msg.retries_remaining - 1,
 				error.to_string()
 			);
+			log::warn!(target: &client.get_chain_name(), "{log_msg}");
 			sentry::capture_message(
-                format!(
-                    "[{}]-[{}]-[{}] ⚠️  Warning! Error encountered during gas estimation: {}, Retries left: {:?}, Error: {}",
-                    &client.get_chain_name(),
-                    sub_target,
-                    client.address(),
-                    msg.metadata,
-                    msg.retries_remaining - 1,
-                    error
-                )
-                    .as_str(),
-                sentry::Level::Warning,
-            );
+				&format!("[{}]{log_msg}", &client.get_chain_name()),
+				sentry::Level::Warning,
+			);
 		}
 		self.retry_transaction(msg, false).await;
 	}
@@ -526,6 +492,9 @@ where
 
 #[async_trait::async_trait]
 pub trait BootstrapHandler {
+	/// Fetch the shared bootstrap data.
+	fn bootstrap_shared_data(&self) -> Arc<BootstrapSharedData>;
+
 	/// Starts the bootstrap process.
 	async fn bootstrap(&self);
 
@@ -533,5 +502,12 @@ pub trait BootstrapHandler {
 	async fn get_bootstrap_events(&self) -> Vec<Log>;
 
 	/// Verifies whether the bootstrap state has been synced to the given state.
-	async fn is_bootstrap_state_synced_as(&self, state: BootstrapState) -> bool;
+	async fn is_bootstrap_state_synced_as(&self, state: BootstrapState) -> bool {
+		self.bootstrap_shared_data()
+			.bootstrap_states
+			.read()
+			.await
+			.iter()
+			.all(|s| *s == state)
+	}
 }
