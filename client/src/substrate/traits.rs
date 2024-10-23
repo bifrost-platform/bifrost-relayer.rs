@@ -37,13 +37,26 @@ where
 	where
 		E: Error + Sync + ?Sized,
 	{
+		let error_str = error.to_string();
+
+		// If the transaction is a SubmitSignedPsbt, and the error is RequestDNE, then we don't need to retry
+		if let XtRequestMetadata::SubmitSignedPsbt(_) = msg.metadata {
+			if error_str.contains("BtcSocketQueue::RequestDNE") {
+				log::info!(
+					target: &self.get_bfc_client().get_chain_name(),
+					"M-of-N signature has been collected, so not retrying"
+				);
+				return;
+			}
+		}
+
 		let log_msg = format!(
 			"-[{}]-[{}] ♻️  Unknown error while requesting a transaction request: {}, Retries left: {:?}, Error: {}",
 			sub_display_format(sub_target),
 			self.get_bfc_client().address(),
 			msg.metadata,
 			msg.retries_remaining - 1,
-			error.to_string(),
+			error_str,
 		);
 		log::error!(target: &self.get_bfc_client().get_chain_name(), "{log_msg}");
 		sentry::capture_message(
