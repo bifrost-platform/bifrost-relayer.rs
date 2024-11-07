@@ -1,4 +1,4 @@
-use std::{str::FromStr, sync::Arc};
+use std::{str::FromStr, sync::Arc, time::Duration};
 
 use bitcoincore_rpc::bitcoin::PublicKey;
 use br_client::{btc::storage::keypair::KeypairStorage, eth::EthClient};
@@ -19,7 +19,7 @@ use ethers::{
 	providers::{JsonRpcClient, Provider},
 	types::{Address, Bytes},
 };
-use tokio::sync::RwLock;
+use tokio::{sync::RwLock, time::sleep};
 use tokio_stream::StreamExt;
 
 use crate::traits::PeriodicWorker;
@@ -54,6 +54,8 @@ impl<T: JsonRpcClient + 'static> PeriodicWorker for PubKeySubmitter<T> {
 				{
 					self.get_current_round().await
 				} else {
+					// wait for 9 seconds to ensure the migration sequence is updated. (at least finalization time)
+					sleep(Duration::from_secs(9)).await;
 					self.get_current_round().await.saturating_add(1)
 				};
 
