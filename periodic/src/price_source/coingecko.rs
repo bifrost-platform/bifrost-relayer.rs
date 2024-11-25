@@ -90,6 +90,7 @@ impl<T: JsonRpcClient> CoingeckoPriceFetcher<T> {
 			"bitcoin".into(),
 			"wrapped-bitcoin".into(),
 			"binance-bitcoin".into(),
+			"coinbase-wrapped-btc".into(),
 		];
 
 		let support_coin_list: Vec<SupportedCoin> = Self::get_all_coin_list()

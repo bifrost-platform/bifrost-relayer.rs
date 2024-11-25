@@ -14,19 +14,21 @@ pub struct ChainlinkPriceFetcher<T> {
 
 #[async_trait::async_trait]
 impl<T: JsonRpcClient + 'static> PriceFetcher for ChainlinkPriceFetcher<T> {
-	/// Should use only when requesting USDC/USDT/DAI (stable coins) price.
+	/// Get the price of a symbol from Chainlink aggregator.
+	/// Available symbols: USDC, USDT, DAI, BTC, WBTC, CBBTC
 	async fn get_ticker_with_symbol(&self, symbol: String) -> Result<PriceResponse, Error> {
 		if let Some(client) = &self.client {
 			let symbol_str = symbol.as_str();
 
 			match symbol_str {
-				"USDC" | "USDT" | "DAI" | "BTC" | "WBTC" => {
+				"USDC" | "USDT" | "DAI" | "BTC" | "WBTC" | "CBBTC" => {
 					return if let Some(contract) = match symbol_str {
 						"USDC" => &client.aggregator_contracts.chainlink_usdc_usd,
 						"USDT" => &client.aggregator_contracts.chainlink_usdt_usd,
 						"DAI" => &client.aggregator_contracts.chainlink_dai_usd,
 						"BTC" => &client.aggregator_contracts.chainlink_btc_usd,
 						"WBTC" => &client.aggregator_contracts.chainlink_wbtc_usd,
+						"CBBTC" => &client.aggregator_contracts.chainlink_cbbtc_usd,
 						_ => todo!(),
 					} {
 						let (_, price, _, _, _) = contract.latest_round_data().await.unwrap();
