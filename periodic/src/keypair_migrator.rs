@@ -2,7 +2,10 @@ use crate::traits::PeriodicWorker;
 
 use br_client::{btc::storage::keypair::KeypairStorage, eth::EthClient};
 use br_primitives::{
-	constants::{schedule::MIGRATION_DETECTOR_SCHEDULE, tx::DEFAULT_CALL_RETRY_INTERVAL_MS},
+	constants::{
+		errors::INVALID_PROVIDER_URL, schedule::MIGRATION_DETECTOR_SCHEDULE,
+		tx::DEFAULT_CALL_RETRY_INTERVAL_MS,
+	},
 	substrate::{
 		bifrost_runtime::{
 			self, btc_registration_pool::storage::types::service_state::ServiceState,
@@ -43,12 +46,16 @@ impl<T: JsonRpcClient> KeypairMigrator<T> {
 	async fn initialize(&mut self) {
 		let mut url = self.bfc_client.get_url();
 		if url.scheme() == "https" {
-			url.set_scheme("wss").unwrap();
+			url.set_scheme("wss").expect(INVALID_PROVIDER_URL);
 		} else {
-			url.set_scheme("ws").unwrap();
+			url.set_scheme("ws").expect(INVALID_PROVIDER_URL);
 		}
 
-		self.sub_client = Some(OnlineClient::<CustomConfig>::from_url(url.as_str()).await.unwrap());
+		self.sub_client = Some(
+			OnlineClient::<CustomConfig>::from_insecure_url(url.as_str())
+				.await
+				.expect(INVALID_PROVIDER_URL),
+		);
 
 		match self.get_service_state().await {
 			ServiceState::Normal
