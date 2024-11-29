@@ -102,7 +102,7 @@ impl<T: JsonRpcClient + 'static> PubKeyPreSubmitter<T> {
 		}
 
 		self.sub_client = Some(
-			OnlineClient::<CustomConfig>::from_url(url.as_str())
+			OnlineClient::<CustomConfig>::from_insecure_url(url.as_str())
 				.await
 				.expect(INVALID_PROVIDER_URL),
 		);
