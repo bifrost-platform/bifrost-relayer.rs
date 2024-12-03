@@ -1,4 +1,8 @@
 use crate::traits::PeriodicWorker;
+use alloy::{
+	providers::{fillers::TxFiller, Provider, WalletProvider},
+	transports::Transport,
+};
 use bitcoincore_rpc::bitcoin::PublicKey;
 use br_client::{btc::storage::keypair::KeypairStorage, eth::EthClient};
 use br_primitives::{
@@ -19,15 +23,20 @@ use br_primitives::{
 	utils::{convert_ethers_to_ecdsa_signature, sub_display_format},
 };
 use cron::Schedule;
-use ethers::prelude::JsonRpcClient;
+use eyre::Result;
 use std::{str::FromStr, sync::Arc, time::Duration};
 use subxt::{storage::Storage, OnlineClient};
 use tokio::sync::RwLock;
 
 const SUB_LOG_TARGET: &str = "pubkey-presubmitter";
 
-pub struct PubKeyPreSubmitter<T> {
-	bfc_client: Arc<EthClient<T>>,
+pub struct PubKeyPreSubmitter<F, P, T>
+where
+	F: TxFiller + WalletProvider,
+	P: Provider<T>,
+	T: Transport + Clone,
+{
+	bfc_client: Arc<EthClient<F, P, T>>,
 	/// The Bifrost client.
 	sub_client: Option<OnlineClient<CustomConfig>>,
 	/// The unsigned transaction message sender.
@@ -41,18 +50,23 @@ pub struct PubKeyPreSubmitter<T> {
 }
 
 #[async_trait::async_trait]
-impl<T: JsonRpcClient + 'static> PeriodicWorker for PubKeyPreSubmitter<T> {
+impl<F, P, T> PeriodicWorker for PubKeyPreSubmitter<F, P, T>
+where
+	F: TxFiller + WalletProvider,
+	P: Provider<T>,
+	T: Transport + Clone,
+{
 	fn schedule(&self) -> Schedule {
 		self.schedule.clone()
 	}
 
-	async fn run(&mut self) {
+	async fn run(&mut self) -> Result<()> {
 		self.initialize().await;
 
 		loop {
 			self.wait_until_next_time().await;
 
-			if self.is_relay_executive().await {
+			if self.is_relay_executive().await? {
 				if *self.migration_sequence.read().await != ServiceState::Normal {
 					continue;
 				}
@@ -67,7 +81,7 @@ impl<T: JsonRpcClient + 'static> PeriodicWorker for PubKeyPreSubmitter<T> {
 					);
 
 					let (call, metadata) =
-						self.build_unsigned_tx(self.create_pub_keys(n).await).await;
+						self.build_unsigned_tx(self.create_pub_keys(n).await).await?;
 					self.request_send_transaction(call, metadata);
 				}
 			}
@@ -75,10 +89,15 @@ impl<T: JsonRpcClient + 'static> PeriodicWorker for PubKeyPreSubmitter<T> {
 	}
 }
 
-impl<T: JsonRpcClient + 'static> PubKeyPreSubmitter<T> {
+impl<F, P, T> PubKeyPreSubmitter<F, P, T>
+where
+	F: TxFiller + WalletProvider,
+	P: Provider<T>,
+	T: Transport + Clone,
+{
 	/// Instantiates a new `PubKeyPreSubmitter` instance.
 	pub fn new(
-		bfc_client: Arc<EthClient<T>>,
+		bfc_client: Arc<EthClient<F, P, T>>,
 		xt_request_sender: Arc<XtRequestSender>,
 		keypair_storage: Arc<RwLock<KeypairStorage>>,
 		migration_sequence: Arc<RwLock<MigrationSequence>>,
@@ -111,24 +130,24 @@ impl<T: JsonRpcClient + 'static> PubKeyPreSubmitter<T> {
 	async fn build_unsigned_tx(
 		&self,
 		pub_keys: Vec<PublicKey>,
-	) -> (XtRequest, VaultKeyPresubmissionMetadata) {
-		let (msg, signature) = self.build_payload(&pub_keys).await;
+	) -> Result<(XtRequest, VaultKeyPresubmissionMetadata)> {
+		let (msg, signature) = self.build_payload(&pub_keys).await?;
 		let metadata = VaultKeyPresubmissionMetadata { keys: pub_keys.len() };
 
-		(
+		Ok((
 			XtRequest::from(
 				bifrost_runtime::tx()
 					.btc_registration_pool()
 					.vault_key_presubmission(msg, signature),
 			),
 			metadata,
-		)
+		))
 	}
 
 	async fn build_payload(
 		&self,
 		pub_keys: &Vec<PublicKey>,
-	) -> (VaultKeyPreSubmission<AccountId20>, EthereumSignature) {
+	) -> Result<(VaultKeyPreSubmission<AccountId20>, EthereumSignature)> {
 		let converted_pub_keys = pub_keys
 			.iter()
 			.map(|k| {
@@ -140,26 +159,28 @@ impl<T: JsonRpcClient + 'static> PubKeyPreSubmitter<T> {
 
 		let pool_round = self.get_current_round().await;
 		let msg = VaultKeyPreSubmission {
-			authority_id: AccountId20(self.bfc_client.address().0),
+			authority_id: AccountId20(self.bfc_client.address().0 .0),
 			pub_keys: converted_pub_keys.iter().map(|x| Public(*x)).collect(),
 			pool_round,
 		};
 		let signature = convert_ethers_to_ecdsa_signature(
-			self.bfc_client.wallet.sign_message(
-				&format!(
-					"{}:{}",
-					pool_round,
-					converted_pub_keys
-						.iter()
-						.map(|x| array_bytes::bytes2hex("0x", *x))
-						.collect::<Vec<String>>()
-						.concat()
+			self.bfc_client
+				.sign_message(
+					&format!(
+						"{}:{}",
+						pool_round,
+						converted_pub_keys
+							.iter()
+							.map(|x| array_bytes::bytes2hex("0x", *x))
+							.collect::<Vec<String>>()
+							.concat()
+					)
+					.as_bytes(),
 				)
-				.as_bytes(),
-			),
+				.await?,
 		);
 
-		(msg, signature)
+		Ok((msg, signature))
 	}
 
 	/// Send the transaction request message to the channel.
@@ -203,15 +224,9 @@ impl<T: JsonRpcClient + 'static> PubKeyPreSubmitter<T> {
 	}
 
 	/// Verify whether the current relayer is an executive.
-	async fn is_relay_executive(&self) -> bool {
+	async fn is_relay_executive(&self) -> Result<bool> {
 		let relay_exec = self.bfc_client.protocol_contracts.relay_executive.as_ref().unwrap();
-
-		self.bfc_client
-			.contract_call(
-				relay_exec.is_member(self.bfc_client.address()),
-				"relay_executive.is_member",
-			)
-			.await
+		Ok(relay_exec.is_member(self.bfc_client.address()).call().await?._0)
 	}
 
 	async fn get_latest_storage(&self) -> Storage<CustomConfig, OnlineClient<CustomConfig>> {
@@ -237,7 +252,7 @@ impl<T: JsonRpcClient + 'static> PubKeyPreSubmitter<T> {
 			match storage
 				.fetch(&bifrost_runtime::storage().btc_registration_pool().pre_submitted_pub_keys(
 					self.get_current_round().await,
-					AccountId20(self.bfc_client.address().0),
+					AccountId20(self.bfc_client.address().0 .0),
 				))
 				.await
 			{

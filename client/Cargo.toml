@@ -15,7 +15,6 @@ miniscript = { workspace = true }
 log = { workspace = true }
 rand = { workspace = true }
 sentry = { workspace = true }
-ethers = { workspace = true }
 serde_json = { workspace = true }
 serde_yaml = { workspace = true }
 tokio-stream = { workspace = true }
@@ -32,6 +31,10 @@ sha3 = { workspace = true }
 subxt = { workspace = true }
 url = { workspace = true }
 array-bytes = { workspace = true }
+alloy = { workspace = true }
+tower = { workspace = true }
+eyre = { workspace = true }
+byteorder = { workspace = true }
 
 # subs
 sc-keystore = { workspace = true }

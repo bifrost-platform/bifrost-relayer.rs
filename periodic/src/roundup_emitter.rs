@@ -1,11 +1,13 @@
-use cron::Schedule;
-use ethers::{
-	abi::{encode, Detokenize, Token, Tokenize},
-	contract::EthLogDecode,
-	providers::JsonRpcClient,
-	types::{Address, Filter, Log, TransactionRequest, U256},
+use alloy::{
+	dyn_abi::DynSolValue,
+	primitives::{Address, ChainId, U256},
+	providers::{fillers::TxFiller, Provider, WalletProvider},
+	rpc::types::{Filter, Log, TransactionInput, TransactionRequest},
+	sol_types::SolEvent as _,
+	transports::Transport,
 };
-use std::{str::FromStr, sync::Arc, time::Duration};
+use cron::Schedule;
+use std::{collections::BTreeMap, str::FromStr, sync::Arc, time::Duration};
 use tokio::time::sleep;
 
 use br_client::eth::{traits::BootstrapHandler, EthClient};
@@ -14,29 +16,35 @@ use br_primitives::{
 	constants::{
 		cli::DEFAULT_BOOTSTRAP_ROUND_OFFSET,
 		config::BOOTSTRAP_BLOCK_CHUNK_SIZE,
-		errors::{INVALID_BIFROST_NATIVENESS, INVALID_CONTRACT_ABI, INVALID_PERIODIC_SCHEDULE},
+		errors::{INVALID_BIFROST_NATIVENESS, INVALID_PERIODIC_SCHEDULE},
 		schedule::ROUNDUP_EMITTER_SCHEDULE,
 	},
-	contracts::{
-		authority::RoundMetaData,
-		socket::{RoundUpSubmit, SerializedRoundUp, Signatures, SocketContractEvents},
+	contracts::socket::{
+		SocketContract::RoundUp,
+		Socket_Struct::{Round_Up_Submit, Signatures},
 	},
 	eth::{BootstrapState, GasCoefficient, RoundUpEventStatus},
-	tx::{TxRequest, TxRequestMessage, TxRequestMetadata, TxRequestSender, VSPPhase1Metadata},
+	tx::{TxRequestMessage, TxRequestMetadata, TxRequestSender, VSPPhase1Metadata},
 	utils::sub_display_format,
 };
+use eyre::Result;
 
 use crate::traits::PeriodicWorker;
 
 const SUB_LOG_TARGET: &str = "roundup-emitter";
 
-pub struct RoundupEmitter<T> {
+pub struct RoundupEmitter<F, P, T>
+where
+	F: TxFiller + WalletProvider,
+	P: Provider<T>,
+	T: Transport + Clone,
+{
 	/// Current round number
 	current_round: U256,
 	/// The ethereum client for the Bifrost network.
-	client: Arc<EthClient<T>>,
-	/// The sender that sends messages to the tx request channel.
-	tx_request_sender: Arc<TxRequestSender>,
+	client: Arc<EthClient<F, P, T>>,
+	/// The clients for the external chains.
+	clients: Arc<BTreeMap<ChainId, Arc<EthClient<F, P, T>>>>,
 	/// The time schedule that represents when to check round info.
 	schedule: Schedule,
 	/// The bootstrap shared data.
@@ -44,17 +52,22 @@ pub struct RoundupEmitter<T> {
 }
 
 #[async_trait::async_trait]
-impl<T: JsonRpcClient> PeriodicWorker for RoundupEmitter<T> {
+impl<F, P, T> PeriodicWorker for RoundupEmitter<F, P, T>
+where
+	F: TxFiller + WalletProvider,
+	P: Provider<T>,
+	T: Transport + Clone,
+{
 	fn schedule(&self) -> Schedule {
 		self.schedule.clone()
 	}
 
-	async fn run(&mut self) {
-		self.current_round = self.get_latest_round().await;
+	async fn run(&mut self) -> Result<()> {
+		self.current_round = self.get_latest_round().await?;
 
 		loop {
 			if self.is_bootstrap_state_synced_as(BootstrapState::BootstrapRoundUpPhase1).await {
-				self.bootstrap().await;
+				self.bootstrap().await?;
 				break;
 			} else if self.is_bootstrap_state_synced_as(BootstrapState::NormalStart).await {
 				break;
@@ -66,7 +79,7 @@ impl<T: JsonRpcClient> PeriodicWorker for RoundupEmitter<T> {
 		loop {
 			self.wait_until_next_time().await;
 
-			let latest_round = self.get_latest_round().await;
+			let latest_round = self.get_latest_round().await?;
 
 			if self.current_round < latest_round {
 				log::info!(
@@ -77,13 +90,13 @@ impl<T: JsonRpcClient> PeriodicWorker for RoundupEmitter<T> {
 					latest_round,
 				);
 
-				if !self.is_selected_relayer(latest_round).await {
+				if !self.is_selected_relayer(latest_round).await? {
 					continue;
 				}
 
-				let new_relayers = self.fetch_validator_list(latest_round).await;
+				let new_relayers = self.fetch_validator_list(latest_round).await?;
 				self.request_send_transaction(
-					self.build_transaction(latest_round, new_relayers.clone()),
+					self.build_transaction(latest_round, new_relayers.clone()).await?,
 					VSPPhase1Metadata::new(latest_round, new_relayers),
 				);
 
@@ -93,89 +106,85 @@ impl<T: JsonRpcClient> PeriodicWorker for RoundupEmitter<T> {
 	}
 }
 
-impl<T: JsonRpcClient> RoundupEmitter<T> {
+impl<F, P, T> RoundupEmitter<F, P, T>
+where
+	F: TxFiller + WalletProvider,
+	P: Provider<T>,
+	T: Transport + Clone,
+{
 	/// Instantiates a new `RoundupEmitter` instance.
 	pub fn new(
-		tx_request_senders: Vec<Arc<TxRequestSender>>,
-		clients: Vec<Arc<EthClient<T>>>,
+		clients: Arc<BTreeMap<ChainId, Arc<EthClient<F, P, T>>>>,
 		bootstrap_shared_data: Arc<BootstrapSharedData>,
 	) -> Self {
-		let client = clients
+		let (_, client) = clients
 			.iter()
-			.find(|client| client.metadata.is_native)
+			.find(|(_, client)| client.metadata.is_native)
 			.expect(INVALID_BIFROST_NATIVENESS)
 			.clone();
 
 		Self {
 			current_round: U256::default(),
-			client,
-			tx_request_sender: tx_request_senders
-				.iter()
-				.find(|sender| sender.is_native)
-				.expect(INVALID_BIFROST_NATIVENESS)
-				.clone(),
+			client: client.clone(),
+			clients,
 			schedule: Schedule::from_str(ROUNDUP_EMITTER_SCHEDULE)
 				.expect(INVALID_PERIODIC_SCHEDULE),
 			bootstrap_shared_data,
 		}
 	}
 
-	/// Decode & Serialize log to `SerializedRoundUp` struct.
-	fn decode_log(&self, log: Log) -> Result<SerializedRoundUp, ethers::abi::Error> {
-		match SocketContractEvents::decode_log(&log.into()) {
-			Ok(roundup) => Ok(SerializedRoundUp::from_tokens(roundup.into_tokens()).unwrap()),
-			Err(error) => Err(error),
-		}
+	/// Decode & Serialize log to `RoundUp` struct.
+	fn decode_log(&self, log: Log) -> Result<RoundUp> {
+		Ok(log.log_decode::<RoundUp>()?.inner.data)
 	}
 
 	/// Check relayer has selected in previous round
-	async fn is_selected_relayer(&self, round: U256) -> bool {
+	async fn is_selected_relayer(&self, round: U256) -> Result<bool> {
 		let relayer_manager = self.client.protocol_contracts.relayer_manager.as_ref().unwrap();
-		self.client
-			.contract_call(
-				relayer_manager.is_previous_selected_relayer(
-					round - 1,
-					self.client.address(),
-					true,
-				),
-				"relayer_manager.is_previous_selected_relayer",
-			)
-			.await
+		Ok(relayer_manager
+			.is_previous_selected_relayer(round - U256::from(1), self.client.address(), true)
+			.call()
+			.await?
+			._0)
 	}
 
 	/// Fetch new validator list
-	async fn fetch_validator_list(&self, round: U256) -> Vec<Address> {
+	async fn fetch_validator_list(&self, round: U256) -> Result<Vec<Address>> {
 		let relayer_manager = self.client.protocol_contracts.relayer_manager.as_ref().unwrap();
-		let mut addresses = self
-			.client
-			.contract_call(
-				relayer_manager.previous_selected_relayers(round, true),
-				"relayer_manager.selected_relayers",
-			)
-			.await;
+		let mut addresses =
+			relayer_manager.previous_selected_relayers(round, true).call().await?._0;
 		addresses.sort();
-		addresses
+		Ok(addresses)
 	}
 
 	/// Build `VSP phase 1` transaction.
-	fn build_transaction(&self, round: U256, new_relayers: Vec<Address>) -> TransactionRequest {
-		let encoded_msg = encode(&[
-			Token::Uint(round),
-			Token::Array(new_relayers.iter().map(|address| Token::Address(*address)).collect()),
-		]);
-		let sigs = Signatures::from(self.client.wallet.sign_message(&encoded_msg));
-		let round_up_submit = RoundUpSubmit { round, new_relayers, sigs };
+	async fn build_transaction(
+		&self,
+		round: U256,
+		new_relayers: Vec<Address>,
+	) -> Result<TransactionRequest> {
+		let encoded_msg = DynSolValue::Tuple(vec![
+			DynSolValue::Uint(round, 256),
+			DynSolValue::Array(
+				new_relayers.iter().map(|address| DynSolValue::Address(*address)).collect(),
+			),
+		])
+		.abi_encode();
 
-		TransactionRequest::default()
-			.to(self.client.protocol_contracts.socket.address())
-			.data(
-				self.client
-					.protocol_contracts
-					.socket
-					.round_control_poll(round_up_submit)
-					.calldata()
-					.unwrap(),
-			)
+		let sigs = Signatures::from(self.client.sign_message(&encoded_msg).await?);
+		let round_up_submit = Round_Up_Submit { round, new_relayers, sigs };
+
+		let input = self
+			.client
+			.protocol_contracts
+			.socket
+			.round_control_poll(round_up_submit)
+			.calldata()
+			.clone();
+
+		Ok(TransactionRequest::default()
+			.to(*self.client.protocol_contracts.socket.address())
+			.input(TransactionInput::new(input)))
 	}
 
 	/// Request send transaction to the target tx request channel.
@@ -184,51 +193,56 @@ impl<T: JsonRpcClient> RoundupEmitter<T> {
 		tx_request: TransactionRequest,
 		metadata: VSPPhase1Metadata,
 	) {
-		match self.tx_request_sender.send(TxRequestMessage::new(
-			TxRequest::Legacy(tx_request),
-			TxRequestMetadata::VSPPhase1(metadata.clone()),
-			false,
-			false,
-			GasCoefficient::Mid,
-			false,
-		)) {
-			Ok(()) => log::info!(
-				target: &self.client.get_chain_name(),
-				"-[{}] 👤 Request VSP phase1 transaction: {}",
-				sub_display_format(SUB_LOG_TARGET),
-				metadata
-			),
-			Err(error) => log::error!(
-				target: &self.client.get_chain_name(),
-				"-[{}] ❗️ Failed to request VSP phase1 transaction: {}, Error: {}",
-				sub_display_format(SUB_LOG_TARGET),
-				metadata,
-				error.to_string()
-			),
-		}
+		// match self.tx_request_sender.send(TxRequestMessage::new(
+		// 	tx_request,
+		// 	TxRequestMetadata::VSPPhase1(metadata.clone()),
+		// 	false,
+		// 	false,
+		// 	GasCoefficient::Mid,
+		// 	false,
+		// )) {
+		// 	Ok(()) => log::info!(
+		// 		target: &self.client.get_chain_name(),
+		// 		"-[{}] 👤 Request VSP phase1 transaction: {}",
+		// 		sub_display_format(SUB_LOG_TARGET),
+		// 		metadata
+		// 	),
+		// 	Err(error) => log::error!(
+		// 		target: &self.client.get_chain_name(),
+		// 		"-[{}] ❗️ Failed to request VSP phase1 transaction: {}, Error: {}",
+		// 		sub_display_format(SUB_LOG_TARGET),
+		// 		metadata,
+		// 		error.to_string()
+		// 	),
+		// }
+
+		todo!()
 	}
 
 	/// Get the latest round index.
-	async fn get_latest_round(&self) -> U256 {
-		self.client
-			.contract_call(
-				self.client.protocol_contracts.authority.latest_round(),
-				"authority.latest_round",
-			)
-			.await
+	async fn get_latest_round(&self) -> Result<U256> {
+		Ok(self.client.protocol_contracts.authority.latest_round().call().await?._0)
 	}
 }
 
 #[async_trait::async_trait]
-impl<T: JsonRpcClient> BootstrapHandler for RoundupEmitter<T> {
+impl<F, P, T> BootstrapHandler for RoundupEmitter<F, P, T>
+where
+	F: TxFiller + WalletProvider,
+	P: Provider<T>,
+	T: Transport + Clone,
+{
 	fn bootstrap_shared_data(&self) -> Arc<BootstrapSharedData> {
 		self.bootstrap_shared_data.clone()
 	}
 
-	async fn bootstrap(&self) {
+	async fn bootstrap(&self) -> Result<()> {
 		let get_next_poll_round = || async move {
-			let logs = self.get_bootstrap_events().await;
-			let round_up_events: Vec<SerializedRoundUp> =
+			let logs = self.get_bootstrap_events().await.unwrap();
+			// let round_up_events =
+			// logs.iter().map(|log| self.decode_log(log.clone()).unwrap()).collect();
+
+			let round_up_events: Vec<RoundUp> =
 				logs.iter().map(|log| self.decode_log(log.clone()).unwrap()).collect();
 
 			let max_round = round_up_events
@@ -236,7 +250,7 @@ impl<T: JsonRpcClient> BootstrapHandler for RoundupEmitter<T> {
 				.map(|round_up_event| round_up_event.roundup.round)
 				.max()
 				.unwrap();
-			let max_events: Vec<&SerializedRoundUp> = round_up_events
+			let max_events: Vec<&RoundUp> = round_up_events
 				.iter()
 				.filter(|round_up_event| round_up_event.roundup.round == max_round)
 				.collect();
@@ -247,22 +261,22 @@ impl<T: JsonRpcClient> BootstrapHandler for RoundupEmitter<T> {
 
 			match status {
 				RoundUpEventStatus::NextAuthorityRelayed => max_round,
-				RoundUpEventStatus::NextAuthorityCommitted => max_round + 1,
+				RoundUpEventStatus::NextAuthorityCommitted => max_round + U256::from(1),
 			}
 		};
 
 		let mut next_poll_round = get_next_poll_round().await;
 
 		loop {
-			if next_poll_round == self.current_round + 1 {
+			if next_poll_round == self.current_round + U256::from(1) {
 				// If RoundUp reached to latest round, escape loop
 				break;
 			} else if next_poll_round <= self.current_round {
 				// If RoundUp not reached to latest round, process round_control_poll
-				if self.is_selected_relayer(next_poll_round).await {
-					let new_relayers = self.fetch_validator_list(next_poll_round).await;
+				if self.is_selected_relayer(next_poll_round).await? {
+					let new_relayers = self.fetch_validator_list(next_poll_round).await?;
 					self.request_send_transaction(
-						self.build_transaction(next_poll_round, new_relayers.clone()),
+						self.build_transaction(next_poll_round, new_relayers.clone()).await?,
 						VSPPhase1Metadata::new(next_poll_round, new_relayers),
 					);
 				}
@@ -291,28 +305,24 @@ impl<T: JsonRpcClient> BootstrapHandler for RoundupEmitter<T> {
 				*state = BootstrapState::BootstrapRoundUpPhase2;
 			}
 		}
+
+		Ok(())
 	}
 
-	async fn get_bootstrap_events(&self) -> Vec<Log> {
+	async fn get_bootstrap_events(&self) -> Result<Vec<Log>> {
 		let mut round_up_events = vec![];
 
 		if let Some(bootstrap_config) = &self.bootstrap_shared_data.bootstrap_config {
-			let round_info: RoundMetaData = self
-				.client
-				.contract_call(
-					self.client.protocol_contracts.authority.round_info(),
-					"authority.round_info",
-				)
-				.await;
+			let round_info = self.client.protocol_contracts.authority.round_info().call().await?._0;
 			let bootstrap_offset_height = self
 				.client
 				.get_bootstrap_offset_height_based_on_block_time(
 					bootstrap_config.round_offset.unwrap_or(DEFAULT_BOOTSTRAP_ROUND_OFFSET),
 					round_info,
 				)
-				.await;
+				.await?;
 
-			let latest_block_number = self.client.get_latest_block_number().await;
+			let latest_block_number = self.client.get_block_number().await?;
 			let mut from_block = latest_block_number.saturating_sub(bootstrap_offset_height);
 			let to_block = latest_block_number;
 
@@ -322,20 +332,12 @@ impl<T: JsonRpcClient> BootstrapHandler for RoundupEmitter<T> {
 					std::cmp::min(from_block + BOOTSTRAP_BLOCK_CHUNK_SIZE - 1, to_block);
 
 				let filter = Filter::new()
-					.address(self.client.protocol_contracts.socket.address())
-					.topic0(
-						self.client
-							.protocol_contracts
-							.socket
-							.abi()
-							.event("RoundUp")
-							.expect(INVALID_CONTRACT_ABI)
-							.signature(),
-					)
+					.address(*self.client.protocol_contracts.socket.address())
+					.event_signature(RoundUp::SIGNATURE_HASH)
 					.from_block(from_block)
 					.to_block(chunk_to_block);
 
-				let chunk_logs = self.client.get_logs(&filter).await;
+				let chunk_logs = self.client.get_logs(&filter).await?;
 				round_up_events.extend(chunk_logs);
 
 				from_block = chunk_to_block + 1;
@@ -352,6 +354,6 @@ impl<T: JsonRpcClient> BootstrapHandler for RoundupEmitter<T> {
 			}
 		}
 
-		round_up_events
+		Ok(round_up_events)
 	}
 }

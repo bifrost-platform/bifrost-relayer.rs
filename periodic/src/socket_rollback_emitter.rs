@@ -1,8 +1,13 @@
-use cron::Schedule;
-use ethers::{
-	providers::JsonRpcClient,
-	types::{TransactionRequest, U256},
+use alloy::{
+	consensus::BlockHeader as _,
+	primitives::ChainId,
+	providers::{fillers::TxFiller, Provider, WalletProvider},
+	rpc::types::TransactionRequest,
+	transports::Transport,
 };
+use byteorder::{BigEndian, ByteOrder as _};
+use cron::Schedule;
+use eyre::Result;
 use std::{collections::BTreeMap, str::FromStr, sync::Arc};
 use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
 
@@ -12,10 +17,10 @@ use br_primitives::{
 		errors::{INVALID_BIFROST_NATIVENESS, INVALID_CHAIN_ID, INVALID_PERIODIC_SCHEDULE},
 		schedule::{ROLLBACK_CHECK_MINIMUM_INTERVAL, ROLLBACK_CHECK_SCHEDULE},
 	},
-	contracts::socket::{RequestID, RequestInfo, Signatures, SocketMessage},
-	eth::{ChainID, GasCoefficient, RelayDirection, SocketEventStatus},
+	contracts::socket::Socket_Struct::{RequestID, RequestInfo, Signatures, Socket_Message},
+	eth::{GasCoefficient, RelayDirection, SocketEventStatus},
 	periodic::{RawRequestID, RollbackableMessage},
-	tx::{RollbackMetadata, TxRequest, TxRequestMessage, TxRequestMetadata, TxRequestSender},
+	tx::{RollbackMetadata, TxRequestMessage, TxRequestMetadata, TxRequestSender},
 	utils::sub_display_format,
 };
 
@@ -26,13 +31,18 @@ const SUB_LOG_TARGET: &str = "rollback-emitter";
 /// The essential task that handles `Socket` event rollbacks.
 /// This only handles requests that are relayed to the target client.
 /// (`client` and `tx_request_sender` are connected to the same chain)
-pub struct SocketRollbackEmitter<T> {
+pub struct SocketRollbackEmitter<F, P, T>
+where
+	F: TxFiller + WalletProvider,
+	P: Provider<T>,
+	T: Transport + Clone,
+{
 	/// The `EthClient` to interact with the connected blockchain.
-	pub client: Arc<EthClient<T>>,
+	pub client: Arc<EthClient<F, P, T>>,
 	/// The entire clients instantiated in the system. <chain_id, Arc<EthClient>>
-	system_clients: BTreeMap<ChainID, Arc<EthClient<T>>>,
+	system_clients: Arc<BTreeMap<ChainId, Arc<EthClient<F, P, T>>>>,
 	/// The receiver connected to the socket rollback channel.
-	rollback_receiver: UnboundedReceiver<SocketMessage>,
+	rollback_receiver: UnboundedReceiver<Socket_Message>,
 	/// The local storage saving emitted `Socket` event messages.
 	rollback_msgs: BTreeMap<RawRequestID, RollbackableMessage>,
 	/// The sender that sends messages to the tx request channel.
@@ -41,18 +51,18 @@ pub struct SocketRollbackEmitter<T> {
 	schedule: Schedule,
 }
 
-impl<T: JsonRpcClient> SocketRollbackEmitter<T> {
+impl<F, P, T> SocketRollbackEmitter<F, P, T>
+where
+	F: TxFiller + WalletProvider,
+	P: Provider<T>,
+	T: Transport + Clone,
+{
 	/// Instantiates a new `SocketRollbackEmitter`.
 	pub fn new(
 		tx_request_sender: Arc<TxRequestSender>,
-		system_clients_vec: Vec<Arc<EthClient<T>>>,
-	) -> (Self, UnboundedSender<SocketMessage>) {
-		let (sender, rollback_receiver) = mpsc::unbounded_channel::<SocketMessage>();
-
-		let system_clients: BTreeMap<ChainID, Arc<EthClient<T>>> = system_clients_vec
-			.iter()
-			.map(|client| (client.get_chain_id(), client.clone()))
-			.collect();
+		system_clients: Arc<BTreeMap<ChainId, Arc<EthClient<F, P, T>>>>,
+	) -> (Self, UnboundedSender<Socket_Message>) {
+		let (sender, rollback_receiver) = mpsc::unbounded_channel::<Socket_Message>();
 
 		(
 			Self {
@@ -69,45 +79,50 @@ impl<T: JsonRpcClient> SocketRollbackEmitter<T> {
 	}
 
 	/// Verifies whether the given socket message has been executed.
-	async fn is_request_executed(&self, socket_msg: &SocketMessage) -> bool {
+	async fn is_request_executed(&self, socket_msg: &Socket_Message) -> Result<bool> {
 		let src_request = self
-			.get_socket_request(&socket_msg.req_id, ChainID::from_be_bytes(socket_msg.req_id.chain))
-			.await;
+			.get_socket_request(
+				&socket_msg.req_id,
+				BigEndian::read_u32(&socket_msg.req_id.ChainIndex.0) as ChainId,
+			)
+			.await?;
 		let dst_request = self
 			.get_socket_request(
 				&socket_msg.req_id,
-				ChainID::from_be_bytes(socket_msg.ins_code.chain),
+				BigEndian::read_u32(&socket_msg.ins_code.ChainIndex.0) as ChainId,
 			)
-			.await;
+			.await?;
 
 		if let (Some(src_request), Some(dst_request)) = (src_request, dst_request) {
 			let src_status = SocketEventStatus::from(&src_request.field[0]);
 			let dst_status = SocketEventStatus::from(&dst_request.field[0]);
 
 			match src_status {
-				SocketEventStatus::Committed | SocketEventStatus::Rollbacked => return true,
+				SocketEventStatus::Committed | SocketEventStatus::Rollbacked => return Ok(true),
 				_ => (),
 			}
-			if self.is_inbound_sequence(ChainID::from_be_bytes(socket_msg.ins_code.chain)) {
+			if self.is_inbound_sequence(
+				BigEndian::read_u32(&socket_msg.ins_code.ChainIndex.0) as ChainId
+			) {
 				match dst_status {
 					SocketEventStatus::Executed
 					| SocketEventStatus::Reverted
 					| SocketEventStatus::Accepted
-					| SocketEventStatus::Rejected => return true,
+					| SocketEventStatus::Rejected => return Ok(true),
 					_ => (),
 				}
 			} else {
 				match dst_status {
-					SocketEventStatus::Executed | SocketEventStatus::Reverted => return true,
+					SocketEventStatus::Executed | SocketEventStatus::Reverted => return Ok(true),
 					_ => (),
 				}
 			}
 		}
-		false
+		Ok(false)
 	}
 
 	/// Verifies whether the socket event is an inbound sequence.
-	fn is_inbound_sequence(&self, dst_chain_id: ChainID) -> bool {
+	fn is_inbound_sequence(&self, dst_chain_id: ChainId) -> bool {
 		if let Some(client) = self.system_clients.get(&dst_chain_id) {
 			return matches!(client.metadata.if_destination_chain, RelayDirection::Inbound);
 		}
@@ -115,10 +130,8 @@ impl<T: JsonRpcClient> SocketRollbackEmitter<T> {
 	}
 
 	/// Verifies whether a certain socket message has been waited for at least the required minimum time.
-	fn is_request_timeout(&self, timeout_started_at: U256, current_timestamp: U256) -> bool {
-		if current_timestamp.saturating_sub(timeout_started_at)
-			>= ROLLBACK_CHECK_MINIMUM_INTERVAL.into()
-		{
+	fn is_request_timeout(&self, timeout_started_at: u64, current_timestamp: u64) -> bool {
+		if current_timestamp.saturating_sub(timeout_started_at) >= ROLLBACK_CHECK_MINIMUM_INTERVAL {
 			return true;
 		}
 		false
@@ -128,23 +141,18 @@ impl<T: JsonRpcClient> SocketRollbackEmitter<T> {
 	async fn get_socket_request(
 		&self,
 		req_id: &RequestID,
-		chain_id: ChainID,
-	) -> Option<RequestInfo> {
+		chain_id: ChainId,
+	) -> Result<Option<RequestInfo>> {
 		if let Some(client) = self.system_clients.get(&chain_id) {
-			return Some(
-				client
-					.contract_call(
-						client.protocol_contracts.socket.get_request(req_id.clone()),
-						"socket.get_request",
-					)
-					.await,
-			);
+			return Ok(Some(
+				client.protocol_contracts.socket.get_request(req_id.clone()).call().await?._0,
+			));
 		}
-		None
+		Ok(None)
 	}
 
 	/// Tries to rollback the given socket message.
-	async fn try_rollback(&self, socket_msg: &SocketMessage) {
+	async fn try_rollback(&self, socket_msg: &Socket_Message) {
 		let status = SocketEventStatus::from(socket_msg.status);
 		match status {
 			SocketEventStatus::Requested => self.try_rollback_inbound(socket_msg).await,
@@ -154,19 +162,19 @@ impl<T: JsonRpcClient> SocketRollbackEmitter<T> {
 	}
 
 	/// Tries to rollback the given inbound socket message.
-	async fn try_rollback_inbound(&self, socket_msg: &SocketMessage) {
+	async fn try_rollback_inbound(&self, socket_msg: &Socket_Message) {
 		let mut submit_sig = socket_msg.clone();
 		submit_sig.status = SocketEventStatus::Failed.into();
 		let tx_request = TransactionRequest::default()
-			.data(self.build_poll_call_data(submit_sig.clone(), Signatures::default()))
-			.to(self.client.protocol_contracts.socket.address());
+			.input(self.build_poll_call_data(submit_sig.clone(), Signatures::default()))
+			.to(*self.client.protocol_contracts.socket.address());
 
 		let metadata = RollbackMetadata::new(
 			true,
 			SocketEventStatus::Failed,
 			socket_msg.req_id.sequence,
-			ChainID::from_be_bytes(socket_msg.req_id.chain),
-			ChainID::from_be_bytes(socket_msg.ins_code.chain),
+			BigEndian::read_u32(&socket_msg.req_id.ChainIndex.0) as ChainId,
+			BigEndian::read_u32(&socket_msg.ins_code.ChainIndex.0) as ChainId,
 		);
 
 		// transaction executed on Bifrost so no random delay required.
@@ -175,24 +183,24 @@ impl<T: JsonRpcClient> SocketRollbackEmitter<T> {
 	}
 
 	/// Tries to rollback the given outbound socket message.
-	async fn try_rollback_outbound(&self, socket_msg: &SocketMessage) {
+	async fn try_rollback_outbound(&self, socket_msg: &Socket_Message) {
 		// `submit_sig` is the state changed socket message that will be passed.
 		// `socket_msg` is the origin message that will be used for signature builds.
 		let mut submit_sig = socket_msg.clone();
 		submit_sig.status = SocketEventStatus::Rejected.into();
 		let tx_request = TransactionRequest::default()
-			.data(self.build_poll_call_data(
+			.input(self.build_poll_call_data(
 				submit_sig.clone(),
 				self.get_sorted_signatures(socket_msg.clone()).await,
 			))
-			.to(self.client.protocol_contracts.socket.address());
+			.to(*self.client.protocol_contracts.socket.address());
 
 		let metadata = RollbackMetadata::new(
 			false,
 			SocketEventStatus::Rejected,
 			socket_msg.req_id.sequence,
-			ChainID::from_be_bytes(socket_msg.req_id.chain),
-			ChainID::from_be_bytes(socket_msg.ins_code.chain),
+			BigEndian::read_u32(&socket_msg.req_id.ChainIndex.0) as ChainId,
+			BigEndian::read_u32(&socket_msg.ins_code.ChainIndex.0) as ChainId,
 		);
 
 		// transaction executed on External chain's so random delay required.
@@ -202,12 +210,12 @@ impl<T: JsonRpcClient> SocketRollbackEmitter<T> {
 
 	/// Tries to receive any new rollbackable messages and store's it locally.
 	/// The timestamp will be set to the current highest block's timestamp.
-	fn receive(&mut self, current_timestamp: U256) {
+	fn receive(&mut self, current_timestamp: u64) {
 		while let Ok(msg) = self.rollback_receiver.try_recv() {
 			// prevent rollback for bitcoin bridges
 			if let Some(bitcoin_chain_id) = self.client.get_bitcoin_chain_id() {
-				if msg.req_id.chain.as_slice() == bitcoin_chain_id.to_be_bytes()
-					|| msg.ins_code.chain.as_slice() == bitcoin_chain_id.to_be_bytes()
+				if BigEndian::read_u32(&msg.req_id.ChainIndex.0) as u64 == bitcoin_chain_id
+					|| BigEndian::read_u32(&msg.ins_code.ChainIndex.0) as u64 == bitcoin_chain_id
 				{
 					continue;
 				}
@@ -241,7 +249,7 @@ impl<T: JsonRpcClient> SocketRollbackEmitter<T> {
 		// asynchronous transaction tasks will work fine for rollback transactions,
 		// so `is_bootstrap` parameter is set to `false`.
 		match self.tx_request_sender.send(TxRequestMessage::new(
-			TxRequest::Legacy(tx_request),
+			tx_request,
 			TxRequestMetadata::Rollback(metadata.clone()),
 			true,
 			give_random_delay,
@@ -275,8 +283,13 @@ impl<T: JsonRpcClient> SocketRollbackEmitter<T> {
 }
 
 #[async_trait::async_trait]
-impl<T: JsonRpcClient> SocketRelayBuilder<T> for SocketRollbackEmitter<T> {
-	fn get_client(&self) -> Arc<EthClient<T>> {
+impl<F, P, T> SocketRelayBuilder<F, P, T> for SocketRollbackEmitter<F, P, T>
+where
+	F: TxFiller + WalletProvider,
+	P: Provider<T>,
+	T: Transport + Clone,
+{
+	fn get_client(&self) -> Arc<EthClient<F, P, T>> {
 		// This will always return the Bifrost client.
 		// Used only for `get_sorted_signatures()` on `Outbound::Accepted` rollbacks.
 		self.system_clients
@@ -289,34 +302,42 @@ impl<T: JsonRpcClient> SocketRelayBuilder<T> for SocketRollbackEmitter<T> {
 }
 
 #[async_trait::async_trait]
-impl<T: JsonRpcClient> PeriodicWorker for SocketRollbackEmitter<T> {
+impl<F, P, T> PeriodicWorker for SocketRollbackEmitter<F, P, T>
+where
+	F: TxFiller + WalletProvider,
+	P: Provider<T>,
+	T: Transport + Clone,
+{
 	fn schedule(&self) -> Schedule {
 		self.schedule.clone()
 	}
 
-	async fn run(&mut self) {
+	async fn run(&mut self) -> Result<()> {
 		loop {
 			self.wait_until_next_time().await;
 
 			// executed or rollback handled request ID's.
 			let mut handled_req_ids = vec![];
 
-			if let Some(latest_block) =
-				self.client.get_block(self.client.get_latest_block_number().await.into()).await
+			if let Some(latest_block) = self
+				.client
+				.get_block(self.client.get_block_number().await?.into(), true.into())
+				.await?
 			{
-				self.receive(latest_block.timestamp);
+				self.receive(latest_block.header.timestamp());
 
 				for (req_id, rollback_msg) in self.rollback_msgs.clone() {
 					// ignore if the request has already been processed.
 					// it should be removed from the local storage.
-					if self.is_request_executed(&rollback_msg.socket_msg).await {
+					if self.is_request_executed(&rollback_msg.socket_msg).await? {
 						handled_req_ids.push(req_id);
 						continue;
 					}
 					// ignore if the required interval didn't pass.
-					if !self
-						.is_request_timeout(rollback_msg.timeout_started_at, latest_block.timestamp)
-					{
+					if !self.is_request_timeout(
+						rollback_msg.timeout_started_at,
+						latest_block.header.timestamp(),
+					) {
 						continue;
 					}
 					// the pending request has not been processed in the waiting period. rollback should be handled.

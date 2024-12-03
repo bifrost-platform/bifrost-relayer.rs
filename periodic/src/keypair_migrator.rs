@@ -1,5 +1,9 @@
 use crate::traits::PeriodicWorker;
 
+use alloy::{
+	providers::{fillers::TxFiller, Provider, WalletProvider},
+	transports::Transport,
+};
 use br_client::{btc::storage::keypair::KeypairStorage, eth::EthClient};
 use br_primitives::{
 	constants::{schedule::MIGRATION_DETECTOR_SCHEDULE, tx::DEFAULT_CALL_RETRY_INTERVAL_MS},
@@ -11,23 +15,33 @@ use br_primitives::{
 	},
 };
 use cron::Schedule;
-use ethers::prelude::JsonRpcClient;
+use eyre::Result;
 use std::{str::FromStr, sync::Arc, time::Duration};
 use subxt::OnlineClient;
 use tokio::sync::RwLock;
 
-pub struct KeypairMigrator<T> {
+pub struct KeypairMigrator<F, P, T>
+where
+	F: TxFiller + WalletProvider,
+	P: Provider<T>,
+	T: Transport + Clone,
+{
 	sub_client: Option<OnlineClient<CustomConfig>>,
-	bfc_client: Arc<EthClient<T>>,
+	bfc_client: Arc<EthClient<F, P, T>>,
 	migration_sequence: Arc<RwLock<MigrationSequence>>,
 	keypair_storage: Arc<RwLock<KeypairStorage>>,
 	schedule: Schedule,
 }
 
-impl<T: JsonRpcClient> KeypairMigrator<T> {
+impl<F, P, T> KeypairMigrator<F, P, T>
+where
+	F: TxFiller + WalletProvider,
+	P: Provider<T>,
+	T: Transport + Clone,
+{
 	/// Instantiates a new `KeypairMigrator` instance.
 	pub fn new(
-		bfc_client: Arc<EthClient<T>>,
+		bfc_client: Arc<EthClient<F, P, T>>,
 		migration_sequence: Arc<RwLock<MigrationSequence>>,
 		keypair_storage: Arc<RwLock<KeypairStorage>>,
 	) -> Self {
@@ -128,12 +142,17 @@ impl<T: JsonRpcClient> KeypairMigrator<T> {
 }
 
 #[async_trait::async_trait]
-impl<T: JsonRpcClient> PeriodicWorker for KeypairMigrator<T> {
+impl<F, P, T> PeriodicWorker for KeypairMigrator<F, P, T>
+where
+	F: TxFiller + WalletProvider,
+	P: Provider<T>,
+	T: Transport + Clone,
+{
 	fn schedule(&self) -> Schedule {
 		self.schedule.clone()
 	}
 
-	async fn run(&mut self) {
+	async fn run(&mut self) -> Result<()> {
 		self.initialize().await;
 
 		loop {

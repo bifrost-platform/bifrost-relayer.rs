@@ -47,13 +47,23 @@ rand = "0.8.5"
 lazy_static = "1.4.0"
 url = "2.5.0"
 array-bytes = "6.1"
+eyre = "0.6"
+tower = "0.5.0"
+byteorder = "1.5.0"
 
 serde_yaml = "0.9.25"
 serde = "1.0.188"
 serde_json = "1.0.107"
 
 hex = "0.4.3"
-ethers = { git = "https://github.com/bifrost-platform/ethers-rs", tag = "ethers-v2.0.10-arbitrum-support" }
+alloy = { version = "0.6", features = [
+	"full",
+	"reqwest-rustls-tls",
+	"provider-txpool-api",
+	"json-rpc",
+	"transports",
+	"k256",
+] }
 k256 = "0.13.1"
 sha3 = "0.10.8"
 

@@ -1,7 +1,9 @@
-use ethers::prelude::abigen;
+use alloy::sol;
 
-abigen!(
+sol!(
+	#[allow(missing_docs)]
+	#[derive(Debug)]
+	#[sol(rpc)]
 	AuthorityContract,
-	"../abi/abi.authority.merged.json",
-	event_derives(serde::Deserialize, serde::Serialize)
+	"../abi/abi.authority.merged.json"
 );

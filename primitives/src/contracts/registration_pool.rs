@@ -1,7 +1,9 @@
-use ethers::prelude::abigen;
+use alloy::sol;
 
-abigen!(
+sol!(
+	#[allow(missing_docs)]
+	#[derive(Debug)]
+	#[sol(rpc)]
 	RegistrationPoolContract,
-	"../abi/abi.registration_pool.bifrost.json",
-	event_derives(serde::Deserialize, serde::Serialize)
+	"../abi/abi.registration_pool.bifrost.json"
 );

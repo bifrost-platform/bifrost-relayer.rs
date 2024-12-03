@@ -1,5 +1,6 @@
 mod cli;
 mod service;
+mod service_deps;
 mod verification;
 
 use std::io::Write;

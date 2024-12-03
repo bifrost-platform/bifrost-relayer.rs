@@ -12,25 +12,35 @@ use crate::{
 	eth::EthClient,
 };
 
+use alloy::{
+	providers::{fillers::TxFiller, Provider, WalletProvider},
+	rpc::types::TransactionRequest,
+	transports::Transport,
+};
 use br_primitives::{
 	bootstrap::BootstrapSharedData,
 	eth::{BootstrapState, GasCoefficient},
 	tx::{
-		TxRequest, TxRequestMessage, TxRequestMetadata, TxRequestSender, XtRequest,
-		XtRequestMessage, XtRequestMetadata, XtRequestSender,
+		TxRequestMessage, TxRequestMetadata, TxRequestSender, XtRequest, XtRequestMessage,
+		XtRequestMetadata, XtRequestSender,
 	},
 	utils::sub_display_format,
 };
-use ethers::{prelude::TransactionRequest, providers::JsonRpcClient};
+use eyre::Result;
 use std::sync::Arc;
 
 use super::block::EventMessage;
 
 #[async_trait::async_trait]
-pub trait XtRequester<T: JsonRpcClient> {
+pub trait XtRequester<F, P, T>
+where
+	F: TxFiller + WalletProvider,
+	P: Provider<T>,
+	T: Transport + Clone,
+{
 	fn xt_request_sender(&self) -> Arc<XtRequestSender>;
 
-	fn bfc_client(&self) -> Arc<EthClient<T>>;
+	fn bfc_client(&self) -> Arc<EthClient<F, P, T>>;
 
 	fn request_send_transaction(
 		&self,
@@ -88,10 +98,15 @@ pub trait XtRequester<T: JsonRpcClient> {
 }
 
 #[async_trait::async_trait]
-pub trait TxRequester<T: JsonRpcClient> {
+pub trait TxRequester<F, P, T>
+where
+	F: TxFiller + WalletProvider,
+	P: Provider<T>,
+	T: Transport + Clone,
+{
 	fn tx_request_sender(&self) -> Arc<TxRequestSender>;
 
-	fn bfc_client(&self) -> Arc<EthClient<T>>;
+	fn bfc_client(&self) -> Arc<EthClient<F, P, T>>;
 
 	async fn request_send_transaction(
 		&self,
@@ -100,7 +115,7 @@ pub trait TxRequester<T: JsonRpcClient> {
 		sub_log_target: &str,
 	) {
 		match self.tx_request_sender().send(TxRequestMessage::new(
-			TxRequest::Legacy(tx_request),
+			tx_request,
 			metadata.clone(),
 			true,
 			false,
@@ -133,9 +148,9 @@ pub trait TxRequester<T: JsonRpcClient> {
 
 #[async_trait::async_trait]
 pub trait Handler {
-	async fn run(&mut self);
+	async fn run(&mut self) -> Result<()>;
 
-	async fn process_event(&self, event_tx: Event);
+	async fn process_event(&self, event_tx: Event) -> Result<()>;
 
 	fn is_target_event(&self, event_type: EventType) -> bool;
 }
@@ -146,10 +161,10 @@ pub trait BootstrapHandler {
 	fn bootstrap_shared_data(&self) -> Arc<BootstrapSharedData>;
 
 	/// Starts the bootstrap process.
-	async fn bootstrap(&self);
+	async fn bootstrap(&self) -> Result<()>;
 
 	/// Fetch the historical events to bootstrap.
-	async fn get_bootstrap_events(&self) -> (EventMessage, EventMessage);
+	async fn get_bootstrap_events(&self) -> Result<(EventMessage, EventMessage)>;
 
 	/// Verifies whether the bootstrap state has been synced to the given state.
 	async fn is_bootstrap_state_synced_as(&self, state: BootstrapState) -> bool {

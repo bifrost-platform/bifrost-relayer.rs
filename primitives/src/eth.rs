@@ -1,24 +1,33 @@
 use std::{str::FromStr, sync::Arc};
 
-use ethers::{
-	providers::{JsonRpcClient, Provider},
-	types::{Address, Signature, TransactionRequest, Uint8, H160, U64},
+use alloy::{
+	network::Ethereum,
+	primitives::{Address, ChainId},
+	providers::{
+		fillers::{FillProvider, TxFiller},
+		Provider, WalletProvider,
+	},
+	rpc::types::TransactionRequest,
+	signers::Signature,
+	transports::Transport,
 };
 use url::Url;
 
 use crate::{
-	constants::errors::{INVALID_CONTRACT_ADDRESS, INVALID_PROVIDER_URL, MISSING_CONTRACT_ADDRESS},
+	constants::errors::{INVALID_CONTRACT_ADDRESS, MISSING_CONTRACT_ADDRESS},
 	contracts::{
-		authority::AuthorityContract, bitcoin_socket::BitcoinSocketContract,
-		chainlink_aggregator::ChainlinkContract, registration_pool::RegistrationPoolContract,
-		relay_executive::RelayExecutiveContract, relayer_manager::RelayerManagerContract,
-		socket::SocketContract, socket_queue::SocketQueueContract,
+		authority::AuthorityContract::{self, AuthorityContractInstance},
+		bitcoin_socket::BitcoinSocketContract::{self, BitcoinSocketContractInstance},
+		chainlink_aggregator::ChainlinkContract::{self, ChainlinkContractInstance},
+		registration_pool::RegistrationPoolContract::{self, RegistrationPoolContractInstance},
+		relay_executive::RelayExecutiveContract::{self, RelayExecutiveContractInstance},
+		relayer_manager::RelayerManagerContract::{self, RelayerManagerContractInstance},
+		socket::SocketContract::{self, SocketContractInstance},
+		socket_queue::SocketQueueContract::{self, SocketQueueContractInstance},
 	},
 };
 
-/// The type of EVM chain ID's.
-pub type ChainID = u32;
-
+#[derive(Clone)]
 /// The metadata of the EVM provider.
 pub struct ProviderMetadata {
 	/// The name of this provider.
@@ -26,14 +35,14 @@ pub struct ProviderMetadata {
 	/// The provider URL. (Allowed values: `http`, `https`)
 	pub url: Url,
 	/// Id of chain which this client interact with.
-	pub id: ChainID,
+	pub id: ChainId,
 	/// The bitcoin chain ID used for CCCP.
-	pub bitcoin_chain_id: Option<ChainID>,
+	pub bitcoin_chain_id: Option<ChainId>,
 	/// The total number of confirmations required for a block to be processed. (block
 	/// confirmations + eth_getLogs batch size)
-	pub block_confirmations: U64,
+	pub block_confirmations: u64,
 	/// The batch size used on `eth_getLogs()` requests.
-	pub get_logs_batch_size: U64,
+	pub get_logs_batch_size: u64,
 	/// The `get_block` request interval in milliseconds.
 	pub call_interval: u64,
 	/// Relay direction when CCCP event points this chain as destination.
@@ -45,9 +54,9 @@ pub struct ProviderMetadata {
 impl ProviderMetadata {
 	pub fn new(
 		name: String,
-		url: String,
-		id: ChainID,
-		bitcoin_chain_id: Option<ChainID>,
+		url: Url,
+		id: ChainId,
+		bitcoin_chain_id: Option<ChainId>,
 		block_confirmations: u64,
 		call_interval: u64,
 		get_logs_batch_size: u64,
@@ -55,11 +64,11 @@ impl ProviderMetadata {
 	) -> Self {
 		Self {
 			name,
-			url: Url::parse(&url).expect(INVALID_PROVIDER_URL),
+			url,
 			id,
 			bitcoin_chain_id,
-			block_confirmations: U64::from(block_confirmations.saturating_add(get_logs_batch_size)),
-			get_logs_batch_size: U64::from(get_logs_batch_size),
+			block_confirmations: block_confirmations.saturating_add(get_logs_batch_size),
+			get_logs_batch_size,
 			call_interval,
 			is_native,
 			if_destination_chain: match is_native {
@@ -70,24 +79,41 @@ impl ProviderMetadata {
 	}
 }
 
-pub struct AggregatorContracts<T> {
+#[derive(Clone)]
+pub struct AggregatorContracts<F, P, T>
+where
+	F: TxFiller + WalletProvider,
+	P: Provider<T>,
+	T: Transport + Clone,
+{
 	/// Chainlink usdc/usd aggregator
-	pub chainlink_usdc_usd: Option<ChainlinkContract<Provider<T>>>,
+	pub chainlink_usdc_usd:
+		Option<ChainlinkContractInstance<T, Arc<FillProvider<F, P, T, Ethereum>>>>,
 	/// Chainlink usdt/usd aggregator
-	pub chainlink_usdt_usd: Option<ChainlinkContract<Provider<T>>>,
+	pub chainlink_usdt_usd:
+		Option<ChainlinkContractInstance<T, Arc<FillProvider<F, P, T, Ethereum>>>>,
 	/// Chainlink dai/usd aggregator
-	pub chainlink_dai_usd: Option<ChainlinkContract<Provider<T>>>,
+	pub chainlink_dai_usd:
+		Option<ChainlinkContractInstance<T, Arc<FillProvider<F, P, T, Ethereum>>>>,
 	/// Chainlink btc/usd aggregator
-	pub chainlink_btc_usd: Option<ChainlinkContract<Provider<T>>>,
+	pub chainlink_btc_usd:
+		Option<ChainlinkContractInstance<T, Arc<FillProvider<F, P, T, Ethereum>>>>,
 	/// Chainlink wbtc/usd aggregator
-	pub chainlink_wbtc_usd: Option<ChainlinkContract<Provider<T>>>,
+	pub chainlink_wbtc_usd:
+		Option<ChainlinkContractInstance<T, Arc<FillProvider<F, P, T, Ethereum>>>>,
 	/// Chainlink cbbtc/usd aggregator
-	pub chainlink_cbbtc_usd: Option<ChainlinkContract<Provider<T>>>,
+	pub chainlink_cbbtc_usd:
+		Option<ChainlinkContractInstance<T, Arc<FillProvider<F, P, T, Ethereum>>>>,
 }
 
-impl<T: JsonRpcClient> AggregatorContracts<T> {
+impl<F, P, T> AggregatorContracts<F, P, T>
+where
+	F: TxFiller + WalletProvider,
+	P: Provider<T>,
+	T: Transport + Clone,
+{
 	pub fn new(
-		provider: Arc<Provider<T>>,
+		provider: Arc<FillProvider<F, P, T, Ethereum>>,
 		chainlink_usdc_usd_address: Option<String>,
 		chainlink_usdt_usd_address: Option<String>,
 		chainlink_dai_usd_address: Option<String>,
@@ -97,7 +123,7 @@ impl<T: JsonRpcClient> AggregatorContracts<T> {
 	) -> Self {
 		let create_contract_instance = |address: String| {
 			ChainlinkContract::new(
-				H160::from_str(&address).expect(INVALID_CONTRACT_ADDRESS),
+				Address::from_str(&address).expect(INVALID_CONTRACT_ADDRESS),
 				provider.clone(),
 			)
 		};
@@ -113,7 +139,12 @@ impl<T: JsonRpcClient> AggregatorContracts<T> {
 	}
 }
 
-impl<T: JsonRpcClient> Default for AggregatorContracts<T> {
+impl<F, P, T> Default for AggregatorContracts<F, P, T>
+where
+	F: TxFiller + WalletProvider,
+	P: Provider<T>,
+	T: Transport + Clone,
+{
 	fn default() -> Self {
 		Self {
 			chainlink_usdc_usd: None,
@@ -126,28 +157,43 @@ impl<T: JsonRpcClient> Default for AggregatorContracts<T> {
 	}
 }
 
+#[derive(Clone)]
 /// The protocol contract instances of the EVM provider.
-pub struct ProtocolContracts<T> {
+pub struct ProtocolContracts<F, P, T>
+where
+	F: TxFiller + WalletProvider,
+	P: Provider<T>,
+	T: Transport + Clone,
+{
 	/// SocketContract
-	pub socket: SocketContract<Provider<T>>,
+	pub socket: SocketContractInstance<T, Arc<FillProvider<F, P, T, Ethereum>>>,
 	/// AuthorityContract
-	pub authority: AuthorityContract<Provider<T>>,
+	pub authority: AuthorityContractInstance<T, Arc<FillProvider<F, P, T, Ethereum>>>,
 	/// RelayerManagerContract (Bifrost only)
-	pub relayer_manager: Option<RelayerManagerContract<Provider<T>>>,
+	pub relayer_manager:
+		Option<RelayerManagerContractInstance<T, Arc<FillProvider<F, P, T, Ethereum>>>>,
 	/// BitcoinSocketContract (Bifrost only)
-	pub bitcoin_socket: Option<BitcoinSocketContract<Provider<T>>>,
+	pub bitcoin_socket:
+		Option<BitcoinSocketContractInstance<T, Arc<FillProvider<F, P, T, Ethereum>>>>,
 	/// SocketQueueContract (Bifrost only)
-	pub socket_queue: Option<SocketQueueContract<Provider<T>>>,
+	pub socket_queue: Option<SocketQueueContractInstance<T, Arc<FillProvider<F, P, T, Ethereum>>>>,
 	/// RegistrationPoolContract (Bifrost only)
-	pub registration_pool: Option<RegistrationPoolContract<Provider<T>>>,
+	pub registration_pool:
+		Option<RegistrationPoolContractInstance<T, Arc<FillProvider<F, P, T, Ethereum>>>>,
 	/// RelayExecutiveContract (Bifrost only)
-	pub relay_executive: Option<RelayExecutiveContract<Provider<T>>>,
+	pub relay_executive:
+		Option<RelayExecutiveContractInstance<T, Arc<FillProvider<F, P, T, Ethereum>>>>,
 }
 
-impl<T: JsonRpcClient> ProtocolContracts<T> {
+impl<F, P, T> ProtocolContracts<F, P, T>
+where
+	F: TxFiller + WalletProvider,
+	P: Provider<T>,
+	T: Transport + Clone,
+{
 	pub fn new(
 		is_native: bool,
-		provider: Arc<Provider<T>>,
+		provider: Arc<FillProvider<F, P, T, Ethereum>>,
 		socket_address: String,
 		authority_address: String,
 		relayer_manager_address: Option<String>,
@@ -158,11 +204,11 @@ impl<T: JsonRpcClient> ProtocolContracts<T> {
 	) -> Self {
 		let mut contracts = Self {
 			socket: SocketContract::new(
-				H160::from_str(&socket_address).expect(INVALID_CONTRACT_ADDRESS),
+				Address::from_str(&socket_address).expect(INVALID_CONTRACT_ADDRESS),
 				provider.clone(),
 			),
 			authority: AuthorityContract::new(
-				H160::from_str(&authority_address).expect(INVALID_CONTRACT_ADDRESS),
+				Address::from_str(&authority_address).expect(INVALID_CONTRACT_ADDRESS),
 				provider.clone(),
 			),
 			relayer_manager: None,
@@ -173,27 +219,27 @@ impl<T: JsonRpcClient> ProtocolContracts<T> {
 		};
 		if is_native {
 			contracts.relayer_manager = Some(RelayerManagerContract::new(
-				H160::from_str(&relayer_manager_address.expect(MISSING_CONTRACT_ADDRESS))
+				Address::from_str(&relayer_manager_address.expect(MISSING_CONTRACT_ADDRESS))
 					.expect(INVALID_CONTRACT_ADDRESS),
 				provider.clone(),
 			));
 			contracts.bitcoin_socket = Some(BitcoinSocketContract::new(
-				H160::from_str(&bitcoin_socket_address.expect(MISSING_CONTRACT_ADDRESS))
+				Address::from_str(&bitcoin_socket_address.expect(MISSING_CONTRACT_ADDRESS))
 					.expect(INVALID_CONTRACT_ADDRESS),
 				provider.clone(),
 			));
 			contracts.socket_queue = Some(SocketQueueContract::new(
-				H160::from_str(&socket_queue_address.expect(MISSING_CONTRACT_ADDRESS))
+				Address::from_str(&socket_queue_address.expect(MISSING_CONTRACT_ADDRESS))
 					.expect(INVALID_CONTRACT_ADDRESS),
 				provider.clone(),
 			));
 			contracts.registration_pool = Some(RegistrationPoolContract::new(
-				H160::from_str(&registration_pool_address.expect(MISSING_CONTRACT_ADDRESS))
+				Address::from_str(&registration_pool_address.expect(MISSING_CONTRACT_ADDRESS))
 					.expect(INVALID_CONTRACT_ADDRESS),
 				provider.clone(),
 			));
 			contracts.relay_executive = Some(RelayExecutiveContract::new(
-				H160::from_str(&relay_executive_address.expect(MISSING_CONTRACT_ADDRESS))
+				Address::from_str(&relay_executive_address.expect(MISSING_CONTRACT_ADDRESS))
 					.expect(INVALID_CONTRACT_ADDRESS),
 				provider.clone(),
 			));
@@ -290,9 +336,9 @@ impl From<u8> for SocketEventStatus {
 	}
 }
 
-impl From<&Uint8> for SocketEventStatus {
-	fn from(value: &Uint8) -> Self {
-		Self::from(u8::from(value.clone()))
+impl From<&u8> for SocketEventStatus {
+	fn from(value: &u8) -> Self {
+		Self::from(*value)
 	}
 }
 
@@ -365,5 +411,178 @@ pub struct BuiltRelayTransaction {
 impl BuiltRelayTransaction {
 	pub fn new(tx_request: TransactionRequest, is_external: bool) -> Self {
 		Self { tx_request, is_external }
+	}
+}
+
+pub mod retry {
+	use alloy::{
+		rpc::json_rpc::{RequestPacket, ResponsePacket},
+		transports::{
+			layers::RetryPolicy as RetryPolicyT, RpcError, TransportError, TransportErrorKind,
+			TransportFut,
+		},
+	};
+	use std::{
+		sync::{
+			atomic::{AtomicU32, Ordering},
+			Arc,
+		},
+		task::{Context, Poll},
+		time::Duration,
+	};
+	use tokio::time::sleep;
+	use tower::{Layer, Service};
+
+	/// A Transport Layer that is responsible for retrying requests based on the
+	/// error type. See [`TransportError`].
+	#[derive(Debug, Clone)]
+	pub struct RetryBackoffLayer {
+		/// The maximum number of retries for errors
+		max_retries: u32,
+		/// The initial backoff in milliseconds
+		initial_backoff: u64,
+	}
+
+	impl RetryBackoffLayer {
+		/// Creates a new retry layer with the given parameters.
+		pub const fn new(max_retries: u32, initial_backoff: u64) -> Self {
+			Self { max_retries, initial_backoff }
+		}
+	}
+
+	/// [RetryPolicy] implements [RetryPolicyT] to determine whether to retry depending on the
+	/// err.
+	#[derive(Debug, Copy, Clone, Default)]
+	#[non_exhaustive]
+	pub struct RetryPolicy;
+
+	impl RetryPolicyT for RetryPolicy {
+		fn should_retry(&self, _error: &TransportError) -> bool {
+			// TODO: Filter out errors that are not retryable. now we retry all errors.
+			true
+		}
+
+		/// Provides a backoff hint if the error response contains it
+		fn backoff_hint(&self, error: &TransportError) -> Option<std::time::Duration> {
+			if let RpcError::ErrorResp(resp) = error {
+				let data = resp.try_data_as::<serde_json::Value>();
+				if let Some(Ok(data)) = data {
+					// if daily rate limit exceeded, infura returns the requested backoff in the error
+					// response
+					let backoff_seconds = &data["rate"]["backoff_seconds"];
+					// infura rate limit error
+					if let Some(seconds) = backoff_seconds.as_u64() {
+						return Some(std::time::Duration::from_secs(seconds));
+					}
+					if let Some(seconds) = backoff_seconds.as_f64() {
+						return Some(std::time::Duration::from_secs(seconds as u64 + 1));
+					}
+				}
+			}
+
+			None
+		}
+	}
+
+	impl<S> Layer<S> for RetryBackoffLayer {
+		type Service = RetryBackoffService<S>;
+
+		fn layer(&self, inner: S) -> Self::Service {
+			RetryBackoffService {
+				inner,
+				policy: RetryPolicy,
+				max_retries: self.max_retries,
+				initial_backoff: self.initial_backoff,
+				requests_enqueued: Arc::new(AtomicU32::new(0)),
+			}
+		}
+	}
+
+	/// A Tower Service used by the [RetryBackoffLayer] that is responsible for retrying all requests on error.
+	/// See [TransportError] and [RetryPolicy].
+	#[derive(Debug, Clone)]
+	pub struct RetryBackoffService<S> {
+		/// The inner service
+		inner: S,
+		/// The retry policy
+		policy: RetryPolicy,
+		/// The maximum number of retries for errors
+		max_retries: u32,
+		/// The initial backoff in milliseconds
+		initial_backoff: u64,
+		/// The number of requests currently enqueued
+		requests_enqueued: Arc<AtomicU32>,
+	}
+
+	impl<S> RetryBackoffService<S> {
+		const fn initial_backoff(&self) -> Duration {
+			Duration::from_millis(self.initial_backoff)
+		}
+	}
+
+	impl<S> Service<RequestPacket> for RetryBackoffService<S>
+	where
+		S: Service<RequestPacket, Response = ResponsePacket, Error = TransportError>
+			+ Send
+			+ 'static
+			+ Clone,
+		S::Future: Send + 'static,
+	{
+		type Response = ResponsePacket;
+		type Error = TransportError;
+		type Future = TransportFut<'static>;
+
+		fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+			self.inner.poll_ready(cx)
+		}
+
+		fn call(&mut self, request: RequestPacket) -> Self::Future {
+			let inner = self.inner.clone();
+			let this = self.clone();
+			let mut inner = std::mem::replace(&mut self.inner, inner);
+			Box::pin(async move {
+				let _ = this.requests_enqueued.fetch_add(1, Ordering::SeqCst) as u64;
+				let mut retry_count: u32 = 0;
+				loop {
+					let err;
+					let res = inner.call(request.clone()).await;
+
+					match res {
+						Ok(res) => {
+							if let Some(e) = res.as_error() {
+								err = TransportError::ErrorResp(e.clone())
+							} else {
+								this.requests_enqueued.fetch_sub(1, Ordering::SeqCst);
+								return Ok(res);
+							}
+						},
+						Err(e) => err = e,
+					}
+
+					let should_retry = this.policy.should_retry(&err);
+					if should_retry {
+						retry_count += 1;
+						if retry_count > this.max_retries {
+							return Err(TransportErrorKind::custom_str(&format!(
+								"Max retries exceeded {}",
+								err
+							)));
+						}
+
+						let _ = this.requests_enqueued.load(Ordering::SeqCst) as u64;
+
+						// try to extract the requested backoff from the error or compute the next
+						// backoff based on retry count
+						let backoff_hint = this.policy.backoff_hint(&err);
+						let next_backoff = backoff_hint.unwrap_or_else(|| this.initial_backoff());
+
+						sleep(next_backoff).await;
+					} else {
+						this.requests_enqueued.fetch_sub(1, Ordering::SeqCst);
+						return Err(err);
+					}
+				}
+			})
+		}
 	}
 }

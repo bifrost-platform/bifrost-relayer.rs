@@ -1,16 +1,9 @@
-use ethers::prelude::abigen;
+use alloy::sol;
 
-abigen!(
+sol!(
+	#[allow(missing_docs)]
+	#[derive(Debug)]
+	#[sol(rpc)]
 	BitcoinSocketContract,
-	"../abi/abi.socket.bitcoin.json",
-	event_derives(serde::Deserialize, serde::Serialize)
+	"../abi/abi.socket.bitcoin.json"
 );
-
-#[derive(Debug, Clone, PartialEq, ethers::contract::EthEvent, ethers::contract::EthDisplay)]
-#[ethevent(
-	name = "Socket",
-	abi = "Socket(((bytes4,uint64,uint128),uint8,(bytes4,bytes16),(bytes32,bytes32,address,address,uint256,bytes)))"
-)]
-pub struct Socket {
-	pub msg: SocketMessage,
-}

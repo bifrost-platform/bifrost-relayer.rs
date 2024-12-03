@@ -1,18 +1,18 @@
-use std::sync::Arc;
-
-use ethers::{
-	providers::JsonRpcClient,
-	types::{BlockNumber, Filter, Log, SyncingStatus, U64},
+use alloy::{
+	primitives::{BlockNumber, ChainId},
+	providers::{fillers::TxFiller, Provider, WalletProvider},
+	rpc::types::{Filter, Log, SyncStatus},
+	transports::Transport,
 };
+use eyre::Result;
+use std::sync::Arc;
 use tokio::{
 	sync::broadcast::{self, Receiver, Sender},
 	time::{sleep, Duration},
 };
 
 use br_primitives::{
-	bootstrap::BootstrapSharedData,
-	eth::{BootstrapState, ChainID},
-	utils::sub_display_format,
+	bootstrap::BootstrapSharedData, eth::BootstrapState, utils::sub_display_format,
 };
 
 use super::{traits::BootstrapHandler, EthClient};
@@ -21,13 +21,13 @@ use super::{traits::BootstrapHandler, EthClient};
 /// The message format passed through the block channel.
 pub struct EventMessage {
 	/// The processed block number.
-	pub block_number: U64,
+	pub block_number: u64,
 	/// The detected transaction logs from the target contracts.
 	pub event_logs: Vec<Log>,
 }
 
 impl EventMessage {
-	pub fn new(block_number: U64, event_logs: Vec<Log>) -> Self {
+	pub fn new(block_number: u64, event_logs: Vec<Log>) -> Self {
 		Self { block_number, event_logs }
 	}
 }
@@ -35,13 +35,13 @@ impl EventMessage {
 /// The message receiver connected to the block channel.
 pub struct EventReceiver {
 	/// The chain ID of the block channel.
-	pub id: ChainID,
+	pub id: ChainId,
 	/// The message receiver.
 	pub receiver: Receiver<EventMessage>,
 }
 
 impl EventReceiver {
-	pub fn new(id: ChainID, receiver: Receiver<EventMessage>) -> Self {
+	pub fn new(id: ChainId, receiver: Receiver<EventMessage>) -> Self {
 		Self { id, receiver }
 	}
 }
@@ -49,13 +49,18 @@ impl EventReceiver {
 const SUB_LOG_TARGET: &str = "event-manager";
 
 /// The essential task that listens and handle new events.
-pub struct EventManager<T> {
+pub struct EventManager<F, P, T>
+where
+	F: TxFiller + WalletProvider,
+	P: Provider<T>,
+	T: Transport + Clone,
+{
 	/// The ethereum client for the connected chain.
-	pub client: Arc<EthClient<T>>,
+	pub client: Arc<EthClient<F, P, T>>,
 	/// The channel sending event messages.
 	pub sender: Sender<EventMessage>,
 	/// The block waiting for enough confirmations.
-	waiting_block: U64,
+	waiting_block: u64,
 	/// The bootstrap shared data.
 	bootstrap_shared_data: Arc<BootstrapSharedData>,
 	/// The flag whether the relayer has enabled self balance synchronization. This field will be
@@ -63,32 +68,30 @@ pub struct EventManager<T> {
 	is_balance_sync_enabled: bool,
 }
 
-impl<T: JsonRpcClient> EventManager<T> {
+impl<F, P, T> EventManager<F, P, T>
+where
+	F: TxFiller + WalletProvider,
+	P: Provider<T>,
+	T: Transport + Clone,
+{
 	/// Instantiates a new `EventManager` instance.
 	pub fn new(
-		client: Arc<EthClient<T>>,
+		client: Arc<EthClient<F, P, T>>,
 		bootstrap_shared_data: Arc<BootstrapSharedData>,
 		is_balance_sync_enabled: bool,
 	) -> Self {
 		let (sender, _receiver) = broadcast::channel(512);
-
-		Self {
-			client,
-			sender,
-			waiting_block: U64::default(),
-			bootstrap_shared_data,
-			is_balance_sync_enabled,
-		}
+		Self { client, sender, waiting_block: 0u64, bootstrap_shared_data, is_balance_sync_enabled }
 	}
 
 	/// Initialize event manager.
-	async fn initialize(&mut self) {
-		self.client.verify_chain_id().await;
-		self.client.verify_minimum_balance().await;
+	async fn initialize(&mut self) -> Result<()> {
+		self.client.verify_chain_id().await?;
+		self.client.verify_minimum_balance().await?;
 
 		// initialize waiting block to the latest block + 1
-		let latest_block = self.client.get_latest_block_number().await;
-		self.waiting_block = latest_block.saturating_add(U64::from(1u64));
+		let latest_block = self.client.get_block_number().await?;
+		self.waiting_block = latest_block.saturating_add(1u64);
 		log::info!(
 			target: &self.client.get_chain_name(),
 			"-[{}] 💤 Idle, best: #{:?}",
@@ -97,23 +100,24 @@ impl<T: JsonRpcClient> EventManager<T> {
 		);
 
 		if self.is_balance_sync_enabled {
-			self.client.sync_balance().await;
+			self.client.sync_balance().await?;
 		}
+		Ok(())
 	}
 
 	/// Starts the event manager. Reads every new mined block of the connected chain and starts to
 	/// publish to the event channel.
-	pub async fn run(&mut self) {
-		self.initialize().await;
+	pub async fn run(&mut self) -> Result<()> {
+		self.initialize().await?;
 
 		loop {
 			if self.is_bootstrap_state_synced_as(BootstrapState::NormalStart).await {
-				let latest_block = self.client.get_latest_block_number().await;
+				let latest_block = self.client.get_block_number().await?;
 				while self.is_block_confirmed(latest_block) {
-					self.process_confirmed_block().await;
+					self.process_confirmed_block().await?;
 
 					if self.is_balance_sync_enabled {
-						self.client.sync_balance().await;
+						self.client.sync_balance().await?;
 					}
 				}
 			}
@@ -124,28 +128,26 @@ impl<T: JsonRpcClient> EventManager<T> {
 
 	/// Process the confirmed block and verifies if any events emitted from the target
 	/// contracts.
-	async fn process_confirmed_block(&mut self) {
+	async fn process_confirmed_block(&mut self) -> Result<()> {
 		let from = self.waiting_block;
-		let to = from.saturating_add(
-			self.client.metadata.get_logs_batch_size.saturating_sub(U64::from(1u64)),
-		);
+		let to = from.saturating_add(self.client.metadata.get_logs_batch_size.saturating_sub(1u64));
 
 		let filter = if let Some(bitcoin_socket) = &self.client.protocol_contracts.bitcoin_socket {
 			Filter::new()
 				.from_block(BlockNumber::from(from))
 				.to_block(BlockNumber::from(to))
 				.address(vec![
-					self.client.protocol_contracts.socket.address(),
-					bitcoin_socket.address(),
+					self.client.protocol_contracts.socket.address().clone(),
+					bitcoin_socket.address().clone(),
 				])
 		} else {
 			Filter::new()
 				.from_block(BlockNumber::from(from))
 				.to_block(BlockNumber::from(to))
-				.address(self.client.protocol_contracts.socket.address())
+				.address(self.client.protocol_contracts.socket.address().clone())
 		};
 
-		let target_logs = self.client.get_logs(&filter).await;
+		let target_logs = self.client.get_logs(&filter).await?;
 		if !target_logs.is_empty() {
 			self.sender.send(EventMessage::new(self.waiting_block, target_logs)).unwrap();
 		}
@@ -168,17 +170,19 @@ impl<T: JsonRpcClient> EventManager<T> {
 		}
 
 		self.increment_waiting_block(to);
+
+		Ok(())
 	}
 
 	/// Increment the waiting block.
-	fn increment_waiting_block(&mut self, to: U64) {
-		self.waiting_block = to.saturating_add(U64::from(1u64));
-		br_metrics::set_block_height(&self.client.get_chain_name(), self.waiting_block.as_u64());
+	fn increment_waiting_block(&mut self, to: u64) {
+		self.waiting_block = to.saturating_add(1u64);
+		br_metrics::set_block_height(&self.client.get_chain_name(), self.waiting_block);
 	}
 
 	/// Verifies if the stored waiting block has waited enough.
 	#[inline]
-	fn is_block_confirmed(&self, latest_block: U64) -> bool {
+	fn is_block_confirmed(&self, latest_block: u64) -> bool {
 		if self.waiting_block > latest_block {
 			return false;
 		}
@@ -186,10 +190,10 @@ impl<T: JsonRpcClient> EventManager<T> {
 	}
 
 	/// Verifies if the connected provider is in block sync mode.
-	pub async fn wait_provider_sync(&self) {
+	pub async fn wait_provider_sync(&self) -> Result<()> {
 		loop {
-			match self.client.is_syncing().await {
-				SyncingStatus::IsFalse => {
+			match self.client.syncing().await? {
+				SyncStatus::None => {
 					for state in
 						self.bootstrap_shared_data.bootstrap_states.write().await.iter_mut()
 					{
@@ -197,9 +201,9 @@ impl<T: JsonRpcClient> EventManager<T> {
 							*state = BootstrapState::BootstrapRoundUpPhase1;
 						}
 					}
-					return;
+					return Ok(());
 				},
-				SyncingStatus::IsSyncing(status) => {
+				SyncStatus::Info(status) => {
 					log::info!(
 						target: &self.client.get_chain_name(),
 						"-[{}] ⚙️  Syncing: #{:?}, Highest: #{:?}",
@@ -207,15 +211,6 @@ impl<T: JsonRpcClient> EventManager<T> {
 						status.current_block,
 						status.highest_block,
 					);
-				},
-				SyncingStatus::IsArbitrumSyncing(status) => {
-					log::info!(
-						target: &self.client.get_chain_name(),
-						"-[{}] ⚙️  Processed batch: #{:?}, Last batch: #{:?}",
-						sub_display_format(SUB_LOG_TARGET),
-						status.batch_processed,
-						status.batch_seen
-					)
 				},
 			}
 
@@ -225,14 +220,21 @@ impl<T: JsonRpcClient> EventManager<T> {
 }
 
 #[async_trait::async_trait]
-impl<T: JsonRpcClient> BootstrapHandler for EventManager<T> {
+impl<F, P, T> BootstrapHandler for EventManager<F, P, T>
+where
+	F: TxFiller + WalletProvider,
+	P: Provider<T>,
+	T: Transport + Clone,
+{
 	fn bootstrap_shared_data(&self) -> Arc<BootstrapSharedData> {
 		self.bootstrap_shared_data.clone()
 	}
 
-	async fn bootstrap(&self) {}
+	async fn bootstrap(&self) -> Result<()> {
+		Ok(())
+	}
 
-	async fn get_bootstrap_events(&self) -> Vec<Log> {
-		vec![]
+	async fn get_bootstrap_events(&self) -> Result<Vec<Log>> {
+		Ok(vec![])
 	}
 }

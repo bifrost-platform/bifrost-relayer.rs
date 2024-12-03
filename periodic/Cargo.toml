@@ -15,7 +15,7 @@ sentry = { workspace = true }
 async-trait = { workspace = true }
 chrono = { workspace = true }
 cron = { workspace = true }
-ethers = { workspace = true }
+alloy = { workspace = true }
 serde_json = { workspace = true }
 serde_yaml = { workspace = true }
 rand = { workspace = true }
@@ -27,6 +27,8 @@ bitcoincore-rpc = { workspace = true }
 subxt = { workspace = true }
 array-bytes = { workspace = true }
 miniscript = { workspace = true }
+eyre = { workspace = true }
+byteorder = { workspace = true }
 
 # Bifrost Relayer
 br-cli = { path = "../client/cli", default-features = false }

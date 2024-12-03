@@ -1,7 +1,9 @@
-use ethers::prelude::abigen;
+use alloy::sol;
 
-abigen!(
+sol!(
+	#[allow(missing_docs)]
+	#[derive(Debug)]
+	#[sol(rpc)]
 	ChainlinkContract,
-	"../abi/abi.aggregatorv3.chainlink.json",
-	event_derives(serde::Deserialize, serde::Serialize)
+	"../abi/abi.aggregatorv3.chainlink.json"
 );
