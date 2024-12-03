@@ -382,16 +382,11 @@ where
 	P: Provider<T>,
 	T: Transport + Clone,
 {
-	let bfc_client = manager_deps
-		.clients
-		.get(&manager_deps.bifrost_chain_id)
-		.expect(INVALID_BIFROST_NATIVENESS)
-		.clone();
 	log::info!(
 		target: LOG_TARGET,
 		"-[{}] 👤 Relayer: {:?}",
 		sub_display_format(SUB_LOG_TARGET),
-		bfc_client.address()
+		manager_deps.bifrost_client.address()
 	);
 	log::info!(
 		target: LOG_TARGET,
@@ -418,8 +413,6 @@ where
 {
 	let task_manager = TaskManager::new(config.clone().tokio_handle, None)?;
 
-	let clients = Arc::new(clients);
-
 	let bootstrap_shared_data = BootstrapSharedData::new(&config);
 
 	let pending_outbounds = PendingOutboundPool::new();
@@ -437,16 +430,20 @@ where
 
 	let migration_sequence = Arc::new(RwLock::new(MigrationSequence::Normal));
 
-	let manager_deps = ManagerDeps::new(&config, clients, bootstrap_shared_data.clone());
-	let substrate_deps = SubstrateDeps::new(&manager_deps, &task_manager);
+	let manager_deps = ManagerDeps::new(&config, Arc::new(clients), bootstrap_shared_data.clone());
+	let bfc_client = manager_deps.bifrost_client.clone();
+
+	let substrate_deps = SubstrateDeps::new(bfc_client.clone(), &task_manager);
 	let periodic_deps = PeriodicDeps::new(
 		bootstrap_shared_data.clone(),
 		migration_sequence.clone(),
 		keypair_storage.clone(),
-		&manager_deps,
 		&substrate_deps,
+		manager_deps.clients.clone(),
+		bfc_client.clone(),
 	);
-	let handler_deps = HandlerDeps::new(&config, &manager_deps, bootstrap_shared_data.clone());
+	let handler_deps =
+		HandlerDeps::new(&config, &manager_deps, bootstrap_shared_data.clone(), bfc_client.clone());
 	let btc_deps = BtcDeps::new(
 		&config,
 		pending_outbounds.clone(),
@@ -455,6 +452,7 @@ where
 		&manager_deps,
 		&substrate_deps,
 		migration_sequence.clone(),
+		bfc_client.clone(),
 	);
 
 	print_relay_targets(&manager_deps);

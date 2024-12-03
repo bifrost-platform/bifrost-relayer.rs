@@ -172,13 +172,11 @@ where
 {
 	/// Instantiates a new `RoundupRelayHandler` instance.
 	pub fn new(
-		bifrost_chain_id: &ChainId,
+		client: Arc<EthClient<F, P, T>>,
 		event_receiver: Receiver<EventMessage>,
 		clients: Arc<BTreeMap<ChainId, Arc<EthClient<F, P, T>>>>,
 		bootstrap_shared_data: Arc<BootstrapSharedData>,
 	) -> Self {
-		let client = clients.get(&bifrost_chain_id).expect(INVALID_BIFROST_NATIVENESS).clone();
-
 		Self {
 			event_receiver,
 			client,

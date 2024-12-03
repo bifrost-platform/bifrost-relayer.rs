@@ -80,15 +80,13 @@ where
 	T: Transport + Clone,
 {
 	/// Instantiates a new `HeartbeatSender` instance.
-	pub fn new(clients: Arc<BTreeMap<ChainId, Arc<EthClient<F, P, T>>>>) -> Self {
-		let (_, client) = clients
-			.iter()
-			.find(|(_, client)| client.metadata.is_native)
-			.expect(INVALID_BIFROST_NATIVENESS);
-
+	pub fn new(
+		client: Arc<EthClient<F, P, T>>,
+		clients: Arc<BTreeMap<ChainId, Arc<EthClient<F, P, T>>>>,
+	) -> Self {
 		Self {
 			schedule: Schedule::from_str(HEARTBEAT_SCHEDULE).expect(INVALID_PERIODIC_SCHEDULE),
-			client: client.clone(),
+			client,
 			clients,
 		}
 	}

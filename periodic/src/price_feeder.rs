@@ -97,11 +97,10 @@ where
 	T: Transport + Clone,
 {
 	pub fn new(
-		bifrost_chain_id: &ChainId,
+		client: Arc<EthClient<F, P, T>>,
 		clients: Arc<BTreeMap<ChainId, Arc<EthClient<F, P, T>>>>,
 	) -> Self {
 		let asset_oid = get_asset_oids();
-		let client = clients.get(bifrost_chain_id).expect(INVALID_BIFROST_NATIVENESS).clone();
 
 		Self {
 			schedule: Schedule::from_str(PRICE_FEEDER_SCHEDULE).expect(INVALID_PERIODIC_SCHEDULE),

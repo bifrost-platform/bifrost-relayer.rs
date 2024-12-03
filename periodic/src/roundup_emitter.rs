@@ -114,18 +114,14 @@ where
 {
 	/// Instantiates a new `RoundupEmitter` instance.
 	pub fn new(
+		client: Arc<EthClient<F, P, T>>,
 		clients: Arc<BTreeMap<ChainId, Arc<EthClient<F, P, T>>>>,
 		bootstrap_shared_data: Arc<BootstrapSharedData>,
 	) -> Self {
-		let (_, client) = clients
-			.iter()
-			.find(|(_, client)| client.metadata.is_native)
-			.expect(INVALID_BIFROST_NATIVENESS)
-			.clone();
 
 		Self {
 			current_round: U256::default(),
-			client: client.clone(),
+			client,
 			clients,
 			schedule: Schedule::from_str(ROUNDUP_EMITTER_SCHEDULE)
 				.expect(INVALID_PERIODIC_SCHEDULE),
