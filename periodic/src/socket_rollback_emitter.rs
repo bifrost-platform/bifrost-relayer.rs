@@ -152,13 +152,15 @@ where
 	}
 
 	/// Tries to rollback the given socket message.
-	async fn try_rollback(&self, socket_msg: &Socket_Message) {
+	async fn try_rollback(&self, socket_msg: &Socket_Message) -> Result<()> {
 		let status = SocketEventStatus::from(socket_msg.status);
 		match status {
 			SocketEventStatus::Requested => self.try_rollback_inbound(socket_msg).await,
-			SocketEventStatus::Accepted => self.try_rollback_outbound(socket_msg).await,
+			SocketEventStatus::Accepted => self.try_rollback_outbound(socket_msg).await?,
 			_ => panic!("Trying rollback on an invalid socket event status"),
 		}
+
+		Ok(())
 	}
 
 	/// Tries to rollback the given inbound socket message.
@@ -183,7 +185,7 @@ where
 	}
 
 	/// Tries to rollback the given outbound socket message.
-	async fn try_rollback_outbound(&self, socket_msg: &Socket_Message) {
+	async fn try_rollback_outbound(&self, socket_msg: &Socket_Message) -> Result<()> {
 		// `submit_sig` is the state changed socket message that will be passed.
 		// `socket_msg` is the origin message that will be used for signature builds.
 		let mut submit_sig = socket_msg.clone();
@@ -191,7 +193,7 @@ where
 		let tx_request = TransactionRequest::default()
 			.input(self.build_poll_call_data(
 				submit_sig.clone(),
-				self.get_sorted_signatures(socket_msg.clone()).await,
+				self.get_sorted_signatures(socket_msg.clone()).await?,
 			))
 			.to(*self.client.protocol_contracts.socket.address());
 
@@ -206,6 +208,8 @@ where
 		// transaction executed on External chain's so random delay required.
 		// aggregated relay typed transactions are good with low gas coefficient.
 		self.request_send_transaction(tx_request, metadata, true, GasCoefficient::Low);
+
+		Ok(())
 	}
 
 	/// Tries to receive any new rollbackable messages and store's it locally.

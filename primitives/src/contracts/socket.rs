@@ -1,5 +1,5 @@
 use alloy::{
-	primitives::{b256, Bytes, B256},
+	primitives::{b256, Bytes, Parity, B256},
 	signers::Signature,
 	sol,
 };
@@ -39,6 +39,36 @@ impl From<Signature> for Signatures {
 		let s = signature.s().into();
 		let v = signature.v().to_u64() as u8;
 
-		Signatures { r: vec![r], s: vec![s], v: Bytes::from(vec![v]) }
+		Signatures { r: vec![r], s: vec![s], v: Bytes::from([v]) }
+	}
+}
+
+impl From<Vec<Signature>> for Signatures {
+	fn from(signatures: Vec<Signature>) -> Self {
+		let mut r = Vec::with_capacity(signatures.len());
+		let mut s = Vec::with_capacity(signatures.len());
+		let mut v = Vec::with_capacity(signatures.len());
+
+		for sig in signatures.iter() {
+			r.push(sig.r().into());
+			s.push(sig.s().into());
+			v.push(sig.v().to_u64() as u8);
+		}
+
+		Signatures { r, s, v: Bytes::from(v) }
+	}
+}
+
+impl From<Signatures> for Vec<Signature> {
+	fn from(signatures: Signatures) -> Self {
+		let mut res = Vec::with_capacity(signatures.r.len());
+		for idx in 0..signatures.r.len() {
+			let r = signatures.r[idx].into();
+			let s = signatures.s[idx].into();
+			let v = Parity::try_from(signatures.v[idx] as u64).unwrap();
+			res.push(Signature::from_rs_and_parity(r, s, v).unwrap());
+		}
+
+		res
 	}
 }

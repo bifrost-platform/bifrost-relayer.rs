@@ -27,7 +27,7 @@ use br_primitives::{
 		SocketContract::{RoundUp, SocketContractInstance},
 		Socket_Struct::{Round_Up_Submit, Signatures},
 	},
-	eth::{BootstrapState, GasCoefficient, RecoveredSignature, RoundUpEventStatus},
+	eth::{BootstrapState, GasCoefficient, RoundUpEventStatus},
 	tx::{TxRequestMessage, TxRequestMetadata, TxRequestSender, VSPPhase2Metadata},
 	utils::{recover_message, sub_display_format},
 };
@@ -208,7 +208,7 @@ where
 		round: U256,
 		new_relayers: &[Address],
 	) -> Result<Signatures> {
-		let raw_sigs = self
+		let signatures = self
 			.client
 			.protocol_contracts
 			.socket
@@ -217,36 +217,11 @@ where
 			.await?
 			._0;
 
-		let raw_concated_v = &raw_sigs.v.to_string()[2..];
+		let mut signature_vec = Vec::<Signature>::from(signatures);
+		signature_vec
+			.sort_by_key(|k| recover_message(*k, &self.encode_relayer_array(round, new_relayers)));
 
-		let mut recovered_sigs = vec![];
-		let encoded_msg = self.encode_relayer_array(round, new_relayers);
-		for idx in 0..raw_sigs.r.len() {
-			let sig = Signature::from_rs_and_parity(
-				raw_sigs.r[idx].into(),
-				raw_sigs.s[idx].into(),
-				u64::from_str_radix(&raw_concated_v[idx * 2..idx * 2 + 2], 16).unwrap(),
-			)?;
-
-			recovered_sigs.push(RecoveredSignature::new(
-				idx,
-				sig,
-				recover_message(sig, &encoded_msg),
-			));
-		}
-		recovered_sigs.sort_by_key(|k| k.signer);
-
-		let mut sorted_sigs = Signatures::default();
-		let mut sorted_concated_v = String::from("0x");
-		recovered_sigs.into_iter().for_each(|sig| {
-			let idx = sig.idx;
-			sorted_sigs.r.push(raw_sigs.r[idx]);
-			sorted_sigs.s.push(raw_sigs.s[idx]);
-			sorted_concated_v.push_str(&format!("{:x}", sig.signature.v().recid().to_byte()));
-		});
-		sorted_sigs.v = Bytes::from_str(&sorted_concated_v)?;
-
-		Ok(sorted_sigs)
+		Ok(Signatures::from(signature_vec))
 	}
 
 	/// Verifies whether the current relayer was selected at the given round.

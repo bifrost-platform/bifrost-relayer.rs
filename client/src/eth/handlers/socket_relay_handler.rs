@@ -206,7 +206,7 @@ where
 			},
 			SocketEventStatus::Accepted | SocketEventStatus::Rejected => {
 				is_external = true;
-				self.get_sorted_signatures(msg).await
+				self.get_sorted_signatures(msg).await?
 			},
 			_ => panic!(
 				"[{}]-[{}]-[{}] Unknown socket event status received: {:?}",
@@ -232,7 +232,7 @@ where
 			},
 			SocketEventStatus::Accepted | SocketEventStatus::Rejected => {
 				is_external = true;
-				self.get_sorted_signatures(msg).await
+				self.get_sorted_signatures(msg).await?
 			},
 			SocketEventStatus::Executed | SocketEventStatus::Reverted => Signatures::default(),
 			_ => panic!(

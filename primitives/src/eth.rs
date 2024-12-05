@@ -8,7 +8,6 @@ use alloy::{
 		Provider, WalletProvider,
 	},
 	rpc::types::TransactionRequest,
-	signers::Signature,
 	transports::Transport,
 };
 use url::Url;
@@ -380,23 +379,6 @@ pub enum BootstrapState {
 	BootstrapSocketRelay,
 	/// phase 3. process for latest block as normal
 	NormalStart,
-}
-
-#[derive(Clone, Debug)]
-/// The information of a recovered signature.
-pub struct RecoveredSignature {
-	/// The original index that represents the order from the result of `get_signatures()`.
-	pub idx: usize,
-	/// The signature of the message.
-	pub signature: Signature,
-	/// The account who signed the message.
-	pub signer: Address,
-}
-
-impl RecoveredSignature {
-	pub fn new(idx: usize, signature: Signature, signer: Address) -> Self {
-		Self { idx, signature, signer }
-	}
 }
 
 #[derive(Clone, Debug)]

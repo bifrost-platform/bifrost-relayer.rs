@@ -14,7 +14,7 @@ use br_primitives::{
 	contracts::socket::Socket_Struct::{Poll_Submit, Signatures, Socket_Message},
 	eth::{BootstrapState, BuiltRelayTransaction, GasCoefficient},
 	tx::{FlushMetadata, TxRequestMessage, TxRequestMetadata},
-	utils::sub_display_format,
+	utils::{recover_message, sub_display_format},
 };
 use eyre::Result;
 use sc_service::SpawnTaskHandle;
@@ -81,62 +81,26 @@ where
 		Ok((Signatures::default(), false))
 	}
 
-	/// Encodes the given socket message to bytes.
-	fn encode_socket_message(&self, msg: Socket_Message) -> Vec<u8> {
-		msg.abi_encode()
-	}
-
 	/// Signs the given socket message.
 	async fn sign_socket_message(&self, msg: Socket_Message) -> Result<Signature> {
-		let encoded_msg = self.encode_socket_message(msg);
-		Ok(self.get_client().sign_message(&encoded_msg).await?)
+		Ok(self.get_client().sign_message(&msg.abi_encode()).await?)
 	}
 
 	/// Get the signatures of the given message.
-	async fn get_sorted_signatures(&self, _msg: Socket_Message) -> Signatures {
-		// let raw_sigs = self
-		// 	.get_client()
-		// 	.contract_call(
-		// 		self.get_client()
-		// 			.protocol_contracts
-		// 			.socket
-		// 			.get_signatures(msg.clone().req_id, msg.clone().status),
-		// 		"socket.get_signatures",
-		// 	)
-		// 	.await;
+	async fn get_sorted_signatures(&self, msg: Socket_Message) -> Result<Signatures> {
+		let client = self.get_client();
+		let signatures = client
+			.protocol_contracts
+			.socket
+			.get_signatures(msg.req_id.clone(), msg.status.clone())
+			.call()
+			.await?
+			._0;
 
-		// let raw_concated_v = &raw_sigs.v.to_string()[2..];
+		let mut signature_vec = Vec::<Signature>::from(signatures);
+		signature_vec.sort_by_key(|k| recover_message(*k, &msg.abi_encode()));
 
-		// let mut recovered_sigs = vec![];
-		// let encoded_msg = self.encode_socket_message(msg);
-		// for idx in 0..raw_sigs.r.len() {
-		// 	let sig = Signature {
-		// 		r: raw_sigs.r[idx].into(),
-		// 		s: raw_sigs.s[idx].into(),
-		// 		v: u64::from_str_radix(&raw_concated_v[idx * 2..idx * 2 + 2], 16).unwrap(),
-		// 	};
-		// 	recovered_sigs.push(RecoveredSignature::new(
-		// 		idx,
-		// 		sig,
-		// 		self.get_client().wallet.recover_message(sig, &encoded_msg),
-		// 	));
-		// }
-		// recovered_sigs.sort_by_key(|k| k.signer);
-
-		// let mut sorted_sigs = Signatures::default();
-		// let mut sorted_concated_v = String::from("0x");
-		// recovered_sigs.into_iter().for_each(|sig| {
-		// 	let idx = sig.idx;
-		// 	sorted_sigs.r.push(raw_sigs.r[idx]);
-		// 	sorted_sigs.s.push(raw_sigs.s[idx]);
-		// 	let v = Bytes::from([sig.signature.v as u8]);
-		// 	sorted_concated_v.push_str(&v.to_string()[2..]);
-		// });
-		// sorted_sigs.v = Bytes::from_str(&sorted_concated_v).unwrap();
-
-		// sorted_sigs
-
-		todo!("Implement this")
+		Ok(Signatures::from(signature_vec))
 	}
 }
 
