@@ -79,10 +79,20 @@ evm_providers:
     eip1559: true
     socket_address: "0xac1552e30857A814a225BAa81145bcB071B46DDd"
     authority_address: "0xA069a57426Cd4c53925c1847Bec01aAB832A5118"
+  - name: "core"
+    id: 1116
+    provider: "<YOUR_CORE_RPC_ENDPOINT>"
+    call_interval: 3000
+    block_confirmations: 3
+    is_relay_target: false
+    eip1559: false
+    min_gas_price: 30000000000
+    socket_address: "0x4C7a44F3FB37A53F33D3fe3cCdE97A444F105239"
+    authority_address: "0xA069a57426Cd4c53925c1847Bec01aAB832A5118"
 
 handler_configs:
   - handler_type: Socket
-    watch_list: [3068, 1, 56, 137, 8453, 42161]
+    watch_list: [3068, 1, 56, 137, 8453, 42161, 1116]
   - handler_type: Roundup
     watch_list: [3068]
 
