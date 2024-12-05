@@ -1,447 +1,182 @@
-use std::{cmp::max, fmt::Debug, sync::Arc};
-
 use br_primitives::{
 	constants::{
 		config::{BOOTSTRAP_BLOCK_OFFSET, NATIVE_BLOCK_TIME},
 		errors::{INSUFFICIENT_FUNDS, INVALID_CHAIN_ID, PROVIDER_INTERNAL_ERROR},
-		tx::{DEFAULT_CALL_RETRIES, DEFAULT_CALL_RETRY_INTERVAL_MS},
 	},
-	contracts::authority::RoundMetaData,
-	eth::{AggregatorContracts, ChainID, ProtocolContracts, ProviderMetadata},
-	utils::sub_display_format,
+	contracts::authority::BfcStaking::round_meta_data,
+	eth::{AggregatorContracts, ProtocolContracts, ProviderMetadata},
 };
 
-use ethers::{
-	abi::Detokenize,
-	prelude::ContractCall,
-	providers::{JsonRpcClient, Middleware, Provider},
-	types::{
-		Address, Block, BlockId, Filter, Log, SyncingStatus, Transaction, TransactionReceipt,
-		TxpoolContent, H256, U256, U64,
+use alloy::{
+	network::Ethereum,
+	primitives::{
+		utils::{format_units, parse_ether},
+		Address, ChainId,
 	},
-	utils::{format_units, WEI_IN_ETHER},
+	providers::{
+		fillers::{FillProvider, TxFiller},
+		PendingTransactionBuilder, Provider, RootProvider, SendableTx, WalletProvider,
+	},
+	signers::{local::LocalSigner, Signature, Signer as _},
+	transports::{Transport, TransportResult},
 };
-use serde::{de::DeserializeOwned, Serialize};
-use tokio::time::{sleep, Duration};
+use eyre::{eyre, Result};
+use k256::ecdsa::SigningKey;
+use std::sync::Arc;
 use url::Url;
-
-use self::{
-	traits::{Eip1559GasMiddleware, LegacyGasMiddleware},
-	wallet::WalletManager,
-};
 
 pub mod events;
 pub mod handlers;
 pub mod traits;
-pub mod tx;
-pub mod wallet;
 
-const SUB_LOG_TARGET: &str = "eth-client";
-
-/// The core client for EVM-based chain interactions.
-pub struct EthClient<T> {
-	/// The wallet manager for the connected relayer.
-	pub wallet: WalletManager,
-	/// The metadata of the provider.
+#[derive(Clone)]
+pub struct EthClient<F, P, T>
+where
+	F: TxFiller + WalletProvider,
+	P: Provider<T>,
+	T: Transport + Clone,
+{
+	/// The inner provider.
+	inner: Arc<FillProvider<F, P, T, Ethereum>>,
+	/// The signer.
+	pub signer: LocalSigner<SigningKey>,
+	/// The provider metadata.
 	pub metadata: ProviderMetadata,
-	/// the protocol contract instances of the provider.
-	pub protocol_contracts: ProtocolContracts<T>,
-	/// the aggregator contract instances of the provider.
-	pub aggregator_contracts: AggregatorContracts<T>,
-	/// The ethers.rs wrapper for the connected chain.
-	provider: Arc<Provider<T>>,
-	/// The flag whether debug mode is enabled. If enabled, certain errors will be logged such as
-	/// gas estimation failures.
-	debug_mode: bool,
+	/// The protocol contracts.
+	pub protocol_contracts: ProtocolContracts<F, P, T>,
+	/// The aggregator contracts.
+	pub aggregator_contracts: AggregatorContracts<F, P, T>,
 }
 
-impl<T: JsonRpcClient> EthClient<T> {
-	/// Instantiates a new `EthClient` instance for the given chain.
+impl<F, P, T> EthClient<F, P, T>
+where
+	F: TxFiller + WalletProvider,
+	P: Provider<T>,
+	T: Transport + Clone,
+{
+	/// Create a new EthClient
 	pub fn new(
-		wallet: WalletManager,
-		provider: Arc<Provider<T>>,
+		inner: Arc<FillProvider<F, P, T, Ethereum>>,
+		signer: LocalSigner<SigningKey>,
 		metadata: ProviderMetadata,
-		protocol_contracts: ProtocolContracts<T>,
-		aggregator_contracts: AggregatorContracts<T>,
-		debug_mode: bool,
+		protocol_contracts: ProtocolContracts<F, P, T>,
+		aggregator_contracts: AggregatorContracts<F, P, T>,
 	) -> Self {
-		Self { wallet, provider, metadata, protocol_contracts, aggregator_contracts, debug_mode }
+		Self { inner, signer, metadata, protocol_contracts, aggregator_contracts }
 	}
 
-	/// Returns the relayer address.
+	/// Verifies whether the configured chain id and the provider's chain id match.
+	pub async fn verify_chain_id(&self) -> Result<()> {
+		let chain_id = self.get_chain_id().await?;
+		if chain_id != self.metadata.id {
+			Err(eyre!(INVALID_CHAIN_ID))
+		} else {
+			Ok(())
+		}
+	}
+
+	/// Verifies whether the relayer has enough balance to pay for the transaction fees.
+	pub async fn verify_minimum_balance(&self) -> Result<()> {
+		if self.metadata.is_native {
+			let balance = self.get_balance(self.address()).await?;
+			if balance < parse_ether("1")? {
+				eyre::bail!(INSUFFICIENT_FUNDS)
+			}
+		}
+		Ok(())
+	}
+
+	/// Get the signer address.
 	pub fn address(&self) -> Address {
-		self.wallet.address()
+		self.inner.default_signer_address()
 	}
 
-	/// Returns name which chain this client interacts with.
+	/// Get the chain name.
 	pub fn get_chain_name(&self) -> String {
 		self.metadata.name.clone()
 	}
 
-	/// Returns id which chain this client interacts with.
-	pub fn get_chain_id(&self) -> ChainID {
-		self.metadata.id
-	}
-
-	pub fn get_bitcoin_chain_id(&self) -> Option<ChainID> {
-		self.metadata.bitcoin_chain_id
-	}
-
-	/// Returns the provider URL.
+	/// Returns the URL of the provider.
 	pub fn get_url(&self) -> Url {
 		self.metadata.url.clone()
 	}
-
-	/// Returns `Arc<Provider>`.
-	pub fn get_provider(&self) -> Arc<Provider<T>> {
-		self.provider.clone()
-	}
-
-	/// Make a JSON RPC request to the chain provider via the internal connection, and return the
-	/// result. This method wraps the original JSON RPC call and retries whenever the request fails
-	/// until it exceeds the maximum retries.
-	async fn rpc_call<P, R>(&self, method: &str, params: P) -> R
-	where
-		P: Debug + Serialize + Send + Sync + Clone,
-		R: Serialize + DeserializeOwned + Debug + Send,
-	{
-		let mut retries_remaining: u8 = DEFAULT_CALL_RETRIES;
-		let mut error_msg = String::default();
-
-		while retries_remaining > 0 {
-			br_metrics::increase_rpc_calls(&self.get_chain_name());
-			match self.provider.request(method, params.clone()).await {
-				Ok(result) => return result,
-				Err(error) => {
-					// retry on error
-					retries_remaining = retries_remaining.saturating_sub(1);
-					error_msg = error.to_string();
-				},
-			}
-			sleep(Duration::from_millis(DEFAULT_CALL_RETRY_INTERVAL_MS)).await;
-		}
-		panic!(
-			"[{}]-[{}]-[{}] {} [method: {}]: {}",
+	/// Sync the native token balance to the metrics.
+	pub async fn sync_balance(&self) -> Result<()> {
+		br_metrics::set_native_balance(
 			&self.get_chain_name(),
-			SUB_LOG_TARGET,
-			self.address(),
-			PROVIDER_INTERNAL_ERROR,
-			method,
-			error_msg
+			format_units(self.get_balance(self.address()).await?, "ether")?.parse::<f64>()?,
 		);
+		Ok(())
 	}
 
-	/// Make a contract call to the chain provider via the internal connection, and return the
-	/// result. This method wraps the original contract call and retries whenever the request fails
-	/// until it exceeds the maximum retries.
-	pub async fn contract_call<M, D>(&self, raw_call: ContractCall<M, D>, method: &str) -> D
-	where
-		M: Middleware,
-		D: Serialize + DeserializeOwned + Debug + Send + Detokenize,
-	{
-		let mut retries_remaining: u8 = DEFAULT_CALL_RETRIES;
-		let mut error_msg = String::default();
-
-		while retries_remaining > 0 {
-			br_metrics::increase_rpc_calls(&self.get_chain_name());
-			match raw_call.call().await {
-				Ok(result) => return result,
-				Err(error) => {
-					// retry on error
-					retries_remaining = retries_remaining.saturating_sub(1);
-					error_msg = error.to_string();
-				},
-			}
-			sleep(Duration::from_millis(DEFAULT_CALL_RETRY_INTERVAL_MS)).await;
-		}
-		panic!(
-			"[{}]-[{}]-[{}] {} [method: {}]: {}",
-			&self.get_chain_name(),
-			SUB_LOG_TARGET,
-			self.address(),
-			PROVIDER_INTERNAL_ERROR,
-			method,
-			error_msg
-		);
+	/// Get the chain id.
+	pub fn chain_id(&self) -> ChainId {
+		self.metadata.id
 	}
 
-	/// Verifies whether the configured chain ID and the provider's actual chain ID matches.
-	pub async fn verify_chain_id(&self) {
-		let chain_id: U256 = self.rpc_call("eth_chainId", ()).await;
-		if self.get_chain_id() != chain_id.as_u32() {
-			panic!(
-				"[{}]-[{}]-[{}] {}",
-				&self.get_chain_name(),
-				SUB_LOG_TARGET,
-				self.address(),
-				INVALID_CHAIN_ID
-			);
-		}
+	/// Get the bitcoin chain id.
+	pub fn get_bitcoin_chain_id(&self) -> Option<ChainId> {
+		self.metadata.bitcoin_chain_id
 	}
 
-	/// Verifies whether the relayer has at least the minimum balance required.
-	pub async fn verify_minimum_balance(&self) {
-		if self.metadata.is_native {
-			let balance = self.get_balance(self.address()).await;
-			if balance < WEI_IN_ETHER {
-				panic!(
-					"[{}]-[{}]-[{}] {}",
-					&self.get_chain_name(),
-					SUB_LOG_TARGET,
-					self.address(),
-					INSUFFICIENT_FUNDS
-				);
-			}
-		}
+	/// Signs the given message.
+	pub async fn sign_message(&self, message: &[u8]) -> Result<Signature> {
+		let a: Vec<u8> = self.signer.sign_message(message).await?.into();
+		Ok(Signature::try_from(a.as_slice())?)
 	}
 
-	/// Retrieves the balance of the given address.
-	pub async fn get_balance(&self, who: Address) -> U256 {
-		self.rpc_call("eth_getBalance", (who, "latest")).await
-	}
-
-	/// Retrieves the latest mined block number of the connected chain.
-	pub async fn get_latest_block_number(&self) -> U64 {
-		self.rpc_call("eth_blockNumber", ()).await
-	}
-
-	/// Retrieves the block information of the given block hash.
-	pub async fn get_block_with_txs(&self, id: BlockId) -> Option<Block<Transaction>> {
-		self.rpc_call("eth_getBlockByNumber", (id, true)).await
-	}
-
-	/// Retrieves the block information of the given block hash.
-	pub async fn get_block(&self, id: BlockId) -> Option<Block<H256>> {
-		self.rpc_call("eth_getBlockByNumber", (id, false)).await
-	}
-
-	/// Retrieves the transaction of the given transaction hash.
-	pub async fn get_transaction(&self, hash: H256) -> Option<Transaction> {
-		self.rpc_call("eth_getTransactionByHash", vec![hash]).await
-	}
-
-	/// Retrieves the transaction receipt of the given transaction hash.
-	pub async fn get_transaction_receipt(&self, hash: H256) -> Option<TransactionReceipt> {
-		self.rpc_call("eth_getTransactionReceipt", vec![hash]).await
-	}
-
-	/// Returns the details of all transactions currently pending for inclusion in the next
-	/// block(s).
-	pub async fn get_txpool_content(&self) -> TxpoolContent {
-		self.rpc_call("txpool_content", ()).await
-	}
-
-	/// Returns an array of all logs matching the given filter.
-	pub async fn get_logs(&self, filter: &Filter) -> Vec<Log> {
-		self.rpc_call("eth_getLogs", vec![filter]).await
-	}
-
-	/// Returns an object with data about the sync status or false.
-	pub async fn is_syncing(&self) -> SyncingStatus {
-		self.rpc_call("eth_syncing", ()).await
-	}
-
-	/// Get factor between the block time of native-chain and block time of this chain
+	/// Get the bootstrap offset height based on the block time.
 	/// Approximately Bifrost: 3s, Polygon: 2s, BSC: 3s, Ethereum: 12s
 	pub async fn get_bootstrap_offset_height_based_on_block_time(
 		&self,
-		round_offset: u32,
-		round_info: RoundMetaData,
-	) -> U64 {
-		let block_number = self.get_latest_block_number().await;
-		let prev_block_number = block_number.saturating_sub(BOOTSTRAP_BLOCK_OFFSET.into());
-		let block_diff = block_number.checked_sub(prev_block_number).unwrap().as_u64();
+		round_offset: u64,
+		round_info: round_meta_data,
+	) -> Result<u64> {
+		let block_number = self.get_block_number().await?;
+		let prev_block_number = block_number.saturating_sub(BOOTSTRAP_BLOCK_OFFSET);
+		let block_diff = block_number.checked_sub(prev_block_number).unwrap();
 
-		if let (Some(current_block), Some(prev_block)) = (
-			self.get_block(block_number.into()).await,
-			self.get_block(prev_block_number.into()).await,
-		) {
-			let timestamp_diff =
-				current_block.timestamp.checked_sub(prev_block.timestamp).unwrap().as_u64() as f64;
+		let current_block = self.get_block(block_number.into(), true.into()).await?;
+		let prev_block = self.get_block(prev_block_number.into(), true.into()).await?;
+		if let (Some(current_block), Some(prev_block)) = (current_block, prev_block) {
+			let current_timestamp = current_block.header.timestamp;
+			let prev_timestamp = prev_block.header.timestamp;
+			let timestamp_diff = current_timestamp.checked_sub(prev_timestamp).unwrap() as f64;
 			let avg_block_time = timestamp_diff / block_diff as f64;
 
-			let blocks = round_offset.checked_mul(round_info.round_length.as_u32()).unwrap();
+			let blocks = round_offset
+				.checked_mul(round_info.round_length.saturating_to::<u64>())
+				.unwrap();
 			let blocks_to_native_chain_time = blocks.checked_mul(NATIVE_BLOCK_TIME).unwrap();
 			let bootstrap_offset_height = blocks_to_native_chain_time as f64 / avg_block_time;
-			(bootstrap_offset_height.ceil() as u32).into()
+			Ok(bootstrap_offset_height.ceil() as u64)
 		} else {
-			panic!(
-				"[{}]-[{}]-[{}] {} [method: bootstrap]",
-				&self.get_chain_name(),
-				SUB_LOG_TARGET,
-				PROVIDER_INTERNAL_ERROR,
-				self.address()
-			);
+			Err(eyre!(PROVIDER_INTERNAL_ERROR))
 		}
 	}
 
-	/// Send prometheus metric of the current balance.
-	pub async fn sync_balance(&self) {
-		br_metrics::set_native_balance(
-			&self.get_chain_name(),
-			format_units(self.get_balance(self.address()).await, "ether")
-				.unwrap()
-				.parse::<f64>()
-				.unwrap(),
-		);
-	}
-
-	/// Verifies whether the current relayer was selected at the current round.
-	pub async fn is_selected_relayer(&self) -> bool {
+	/// Verifies whether the current relayer was selected at the current round
+	pub async fn is_selected_relayer(&self) -> Result<bool> {
 		let relayer_manager = self.protocol_contracts.relayer_manager.as_ref().unwrap();
-		self.contract_call(
-			relayer_manager.is_selected_relayer(self.address(), false),
-			"relayer_manager.is_selected_relayer",
-		)
-		.await
+		Ok(relayer_manager.is_selected_relayer(self.address(), false).call().await?._0)
 	}
 }
 
 #[async_trait::async_trait]
-impl<T: JsonRpcClient> LegacyGasMiddleware for EthClient<T> {
-	async fn get_gas_price(&self) -> U256 {
-		match self.provider.get_gas_price().await {
-			Ok(gas_price) => {
-				br_metrics::increase_rpc_calls(&self.get_chain_name());
-				gas_price
-			},
-			Err(error) => {
-				self.handle_failed_get_gas_price(DEFAULT_CALL_RETRIES, error.to_string()).await
-			},
-		}
+impl<F, P, T> Provider<T, Ethereum> for EthClient<F, P, T>
+where
+	F: TxFiller + WalletProvider,
+	P: Provider<T>,
+	T: Transport + Clone,
+{
+	fn root(&self) -> &RootProvider<T, Ethereum> {
+		self.inner.root()
 	}
 
-	async fn get_gas_price_for_retry(
+	async fn send_transaction_internal(
 		&self,
-		previous_gas_price: U256,
-		gas_price_coefficient: f64,
-		min_gas_price: U256,
-	) -> U256 {
-		let previous_gas_price = previous_gas_price.as_u64() as f64;
-
-		let current_gas_price = self.get_gas_price().await;
-		let escalated_gas_price =
-			U256::from((previous_gas_price * gas_price_coefficient).ceil() as u64);
-
-		max(max(current_gas_price, escalated_gas_price), min_gas_price)
-	}
-
-	async fn get_gas_price_for_escalation(
-		&self,
-		gas_price: U256,
-		gas_price_coefficient: f64,
-		min_gas_price: U256,
-	) -> U256 {
-		max(
-			U256::from((gas_price.as_u64() as f64 * gas_price_coefficient).ceil() as u64),
-			min_gas_price,
-		)
-	}
-
-	async fn handle_failed_get_gas_price(&self, retries_remaining: u8, error: String) -> U256 {
-		let mut retries = retries_remaining;
-		let mut last_error = error;
-
-		while retries > 0 {
-			br_metrics::increase_rpc_calls(&self.get_chain_name());
-
-			if self.debug_mode {
-				let log_msg = format!(
-					"-[{}]-[{}] ⚠️  Warning! Error encountered during get gas price, Retries left: {:?}, Error: {}",
-					sub_display_format(SUB_LOG_TARGET),
-					self.address(),
-					retries - 1,
-					last_error
-				);
-				log::warn!(target: &self.get_chain_name(), "{log_msg}");
-				sentry::capture_message(
-					&format!("[{}]{log_msg}", &self.get_chain_name()),
-					sentry::Level::Warning,
-				);
-			}
-
-			match self.provider.get_gas_price().await {
-				Ok(gas_price) => return gas_price,
-				Err(error) => {
-					sleep(Duration::from_millis(DEFAULT_CALL_RETRY_INTERVAL_MS)).await;
-					retries -= 1;
-					last_error = error.to_string();
-				},
-			}
-		}
-
-		panic!(
-			"[{}]-[{}]-[{}] {} [method: get_gas_price]: {}",
-			&self.get_chain_name(),
-			SUB_LOG_TARGET,
-			self.address(),
-			PROVIDER_INTERNAL_ERROR,
-			last_error
-		);
-	}
-}
-
-#[async_trait::async_trait]
-impl<T: JsonRpcClient> Eip1559GasMiddleware for EthClient<T> {
-	async fn get_estimated_eip1559_fees(&self) -> (U256, U256) {
-		match self.provider.estimate_eip1559_fees(None).await {
-			Ok(fees) => {
-				br_metrics::increase_rpc_calls(&self.get_chain_name());
-				fees
-			},
-			Err(error) => {
-				self.handle_failed_get_estimated_eip1559_fees(
-					DEFAULT_CALL_RETRIES,
-					error.to_string(),
-				)
-				.await
-			},
-		}
-	}
-
-	async fn handle_failed_get_estimated_eip1559_fees(
-		&self,
-		retries_remaining: u8,
-		error: String,
-	) -> (U256, U256) {
-		let mut retries = retries_remaining;
-		let mut last_error = error;
-
-		while retries > 0 {
-			br_metrics::increase_rpc_calls(&self.get_chain_name());
-
-			if self.debug_mode {
-				let log_msg = format!(
-					"-[{}]-[{}] ⚠️  Warning! Error encountered during get estimated eip1559 fees, Retries left: {:?}, Error: {}",
-					sub_display_format(SUB_LOG_TARGET),
-					self.address(),
-					retries - 1,
-					last_error
-				);
-				log::warn!(target: &self.get_chain_name(), "{log_msg}");
-				sentry::capture_message(
-					&format!("[{}]{log_msg}", &self.get_chain_name()),
-					sentry::Level::Warning,
-				);
-			}
-
-			match self.provider.estimate_eip1559_fees(None).await {
-				Ok(fees) => return fees,
-				Err(error) => {
-					sleep(Duration::from_millis(DEFAULT_CALL_RETRY_INTERVAL_MS)).await;
-					retries -= 1;
-					last_error = error.to_string();
-				},
-			}
-		}
-
-		panic!(
-			"[{}]-[{}]-[{}] {} [method: get_estimated_eip1559_fees]: {}",
-			&self.get_chain_name(),
-			SUB_LOG_TARGET,
-			self.address(),
-			PROVIDER_INTERNAL_ERROR,
-			last_error
-		);
+		tx: SendableTx<Ethereum>,
+	) -> TransportResult<PendingTransactionBuilder<T, Ethereum>> {
+		self.inner.send_transaction_internal(tx).await
 	}
 }

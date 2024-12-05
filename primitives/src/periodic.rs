@@ -1,8 +1,8 @@
-use ethers::types::U256;
+use alloy::primitives::{ChainId, U256};
 use serde::Deserialize;
 use tokio::sync::mpsc::{error::SendError, UnboundedSender};
 
-use crate::{contracts::socket::SocketMessage, eth::ChainID};
+use crate::contracts::socket::Socket_Struct::Socket_Message;
 
 #[derive(Clone, Debug, Deserialize)]
 pub struct PriceResponse {
@@ -27,13 +27,13 @@ pub enum PriceSource {
 pub struct RollbackableMessage {
 	/// The timestamp that this relayer has tried to process the socket event.
 	/// If time passed as long as `ROLLBACK_CHECK_MINIMUM_INTERVAL`, this request will be rollbacked.
-	pub timeout_started_at: U256,
+	pub timeout_started_at: u64,
 	/// The rollbackable socket message. This will be either `Inbound::Requested` or `Outbound::Accepted`.
-	pub socket_msg: SocketMessage,
+	pub socket_msg: Socket_Message,
 }
 
 impl RollbackableMessage {
-	pub fn new(timestamp: U256, socket_msg: SocketMessage) -> Self {
+	pub fn new(timestamp: u64, socket_msg: Socket_Message) -> Self {
 		Self { timeout_started_at: timestamp, socket_msg }
 	}
 }
@@ -44,17 +44,17 @@ pub type RawRequestID = u128;
 /// The channel message sender for rollbackable socket messages.
 pub struct RollbackSender {
 	/// The unique chain ID for this sender.
-	pub id: ChainID,
+	pub id: ChainId,
 	/// The channel message sender.
-	pub sender: UnboundedSender<SocketMessage>,
+	pub sender: UnboundedSender<Socket_Message>,
 }
 
 impl RollbackSender {
-	pub fn new(id: ChainID, sender: UnboundedSender<SocketMessage>) -> Self {
+	pub fn new(id: ChainId, sender: UnboundedSender<Socket_Message>) -> Self {
 		Self { id, sender }
 	}
 
-	pub fn send(&self, message: SocketMessage) -> Result<(), SendError<SocketMessage>> {
+	pub fn send(&self, message: Socket_Message) -> Result<(), SendError<Socket_Message>> {
 		self.sender.send(message)
 	}
 }

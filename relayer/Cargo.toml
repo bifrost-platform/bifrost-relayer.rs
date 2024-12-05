@@ -15,7 +15,7 @@ log = { workspace = true }
 env_logger = { workspace = true }
 chrono = { workspace = true }
 serde_yaml = { workspace = true }
-ethers = { workspace = true }
+alloy = { workspace = true }
 futures = { workspace = true }
 clap = { workspace = true, features = ["derive"] }
 tokio = { workspace = true, features = [
@@ -26,6 +26,7 @@ tokio = { workspace = true, features = [
 miniscript = { workspace = true }
 bitcoincore-rpc = { workspace = true }
 subxt = { workspace = true }
+eyre = { workspace = true }
 
 # Bifrost Relayer
 br-cli = { path = "../client/cli", default-features = false }

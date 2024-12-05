@@ -13,7 +13,8 @@ repository = { workspace = true }
 hex = { workspace = true }
 chrono = { workspace = true }
 cron = { workspace = true }
-ethers = { workspace = true }
+alloy = { workspace = true }
+tower = { workspace = true }
 thiserror = { workspace = true }
 async-trait = { workspace = true }
 reqwest = { workspace = true }
@@ -29,3 +30,5 @@ miniscript = { workspace = true }
 subxt = { workspace = true }
 bitcoincore-rpc = { workspace = true }
 url = { workspace = true }
+sha3 = { workspace = true }
+k256 = { workspace = true }

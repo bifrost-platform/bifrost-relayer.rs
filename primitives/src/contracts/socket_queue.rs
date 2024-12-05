@@ -1,7 +1,9 @@
-use ethers::prelude::abigen;
+use alloy::sol;
 
-abigen!(
+sol!(
+	#[allow(missing_docs)]
+	#[derive(Debug)]
+	#[sol(rpc)]
 	SocketQueueContract,
-	"../abi/abi.socket_queue.bifrost.json",
-	event_derives(serde::Deserialize, serde::Serialize)
+	"../abi/abi.socket_queue.bifrost.json"
 );

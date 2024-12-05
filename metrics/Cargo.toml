@@ -12,7 +12,7 @@ repository = { workspace = true }
 # General
 lazy_static = { workspace = true }
 sentry = { workspace = true }
-ethers = { workspace = true }
+alloy = { workspace = true }
 
 # Substrate
 prometheus-endpoint = { workspace = true }

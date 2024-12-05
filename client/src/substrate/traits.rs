@@ -1,10 +1,13 @@
+use alloy::{
+	providers::{fillers::TxFiller, Provider, WalletProvider},
+	transports::Transport,
+};
 use br_primitives::{
 	substrate::CustomConfig,
 	tx::{XtRequestMessage, XtRequestMetadata},
 	utils::sub_display_format,
 };
 
-use ethers::providers::JsonRpcClient;
 use std::{error::Error, sync::Arc, time::Duration};
 use subxt::{blocks::ExtrinsicEvents, Config, OnlineClient};
 use tokio::time::sleep;
@@ -12,15 +15,17 @@ use tokio::time::sleep;
 use crate::eth::EthClient;
 
 #[async_trait::async_trait]
-pub trait ExtrinsicTask<T>
+pub trait ExtrinsicTask<F, P, T>
 where
-	T: JsonRpcClient,
+	F: TxFiller + WalletProvider,
+	P: Provider<T>,
+	T: Transport + Clone,
 {
 	/// Get the substrate client.
 	fn get_sub_client(&self) -> Arc<OnlineClient<CustomConfig>>;
 
 	/// Get the Bifrost client.
-	fn get_bfc_client(&self) -> Arc<EthClient<T>>;
+	fn get_bfc_client(&self) -> Arc<EthClient<F, P, T>>;
 
 	/// Sends the consumed unsigned transaction request to the Bifrost network.
 	async fn try_send_unsigned_transaction(&self, msg: XtRequestMessage);
