@@ -33,7 +33,7 @@ where
 	T: Transport + Clone,
 {
 	/// The Bifrost client.
-	client: Arc<EthClient<F, P, T>>,
+	pub client: Arc<EthClient<F, P, T>>,
 	/// The unsigned transaction message sender.
 	xt_request_sender: Arc<XtRequestSender>,
 	/// The public and private keypair local storage.

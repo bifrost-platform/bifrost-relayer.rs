@@ -44,7 +44,7 @@ where
 	P: Provider<T>,
 	T: Transport + Clone,
 {
-	bfc_client: Arc<EthClient<F, P, T>>,
+	pub bfc_client: Arc<EthClient<F, P, T>>,
 	event_receiver: Receiver<BTCEventMessage>,
 	target_event: EventType,
 	/// The bootstrap shared data.

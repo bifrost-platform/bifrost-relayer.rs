@@ -27,6 +27,7 @@ miniscript = { workspace = true }
 bitcoincore-rpc = { workspace = true }
 subxt = { workspace = true }
 eyre = { workspace = true }
+sentry = { workspace = true }
 
 # Bifrost Relayer
 br-cli = { path = "../client/cli", default-features = false }

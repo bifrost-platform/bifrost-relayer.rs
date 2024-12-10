@@ -27,7 +27,7 @@ where
 	/// The time schedule that represents when to check heartbeat pulsed.
 	schedule: Schedule,
 	/// The `EthClient` to interact with the bifrost network.
-	client: Arc<EthClient<F, P, T>>,
+	pub client: Arc<EthClient<F, P, T>>,
 	/// The handle to spawn tasks.
 	handle: SpawnTaskHandle,
 }

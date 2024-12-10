@@ -233,8 +233,10 @@ where
 		"migration-detector",
 		Some("migration-detector"),
 		async move {
-			keypair_migrator.run().await;
-			()
+			let reason = keypair_migrator.run().await;
+			let log_msg = format!("migration detector stopped: {:?}", reason);
+			log::error!("{log_msg}");
+			sentry::capture_message(&log_msg, sentry::Level::Error);
 		},
 	);
 
@@ -243,8 +245,16 @@ where
 		"pub-key-presubmitter",
 		Some("pub-key-presubmitter"),
 		async move {
-			presubmitter.run().await;
-			()
+			loop {
+				let report = presubmitter.run().await;
+				let log_msg = format!(
+					"public key presubmitter({}) stopped: {:?}\nRestarting in 12 seconds...",
+					presubmitter.bfc_client.address(),
+					report
+				);
+				log::error!("{log_msg}");
+				sentry::capture_message(&log_msg, sentry::Level::Error);
+			}
 		},
 	);
 
@@ -259,8 +269,19 @@ where
 	task_manager
 		.spawn_essential_handle()
 		.spawn("heartbeat", Some("heartbeat"), async move {
-			heartbeat_sender.run().await;
-			()
+			loop {
+				let report = heartbeat_sender.run().await;
+				let log_msg = format!(
+					"heartbeat sender({}:{}) stopped: {:?}\nRestarting in 12 seconds...",
+					heartbeat_sender.client.get_chain_name(),
+					heartbeat_sender.client.address(),
+					report
+				);
+				log::error!("{log_msg}");
+				sentry::capture_message(&log_msg, sentry::Level::Error);
+
+				tokio::time::sleep(Duration::from_secs(12)).await;
+			}
 		});
 
 	// spawn oracle price feeder
@@ -271,8 +292,19 @@ where
 		),
 		Some("oracle"),
 		async move {
-			oracle_price_feeder.run().await;
-			()
+			loop {
+				let report = oracle_price_feeder.run().await;
+				let log_msg = format!(
+					"oracle price feeder({}:{}) stopped: {:?}\nRestarting in 12 seconds...",
+					oracle_price_feeder.client.get_chain_name(),
+					oracle_price_feeder.client.address(),
+					report
+				);
+				log::error!("{log_msg}");
+				sentry::capture_message(&log_msg, sentry::Level::Error);
+
+				tokio::time::sleep(Duration::from_secs(12)).await;
+			}
 		},
 	);
 
@@ -285,8 +317,19 @@ where
 			),
 			Some("rollback"),
 			async move {
-				emitter.run().await;
-				()
+				loop {
+					let report = emitter.run().await;
+					let log_msg = format!(
+						"rollback emitter({}:{}) stopped: {:?}\nRestarting in 12 seconds...",
+						emitter.client.get_chain_name(),
+						emitter.client.address(),
+						report
+					);
+					log::error!("{log_msg}");
+					sentry::capture_message(&log_msg, sentry::Level::Error);
+
+					tokio::time::sleep(Duration::from_secs(12)).await;
+				}
 			},
 		)
 	});
@@ -314,9 +357,16 @@ where
 				}
 				drop(guard);
 
-				handler.run().await;
-
-				()
+				loop {
+					let report = handler.run().await;
+					let log_msg = format!(
+						"socket relay handler({}) stopped: {:?}\nRestarting immediately...",
+						handler.client.get_chain_name(),
+						report
+					);
+					log::error!("{log_msg}");
+					sentry::capture_message(&log_msg, sentry::Level::Error);
+				}
 			},
 		);
 	});
@@ -330,8 +380,16 @@ where
 			),
 			Some("handlers"),
 			async move {
-				handler.run().await;
-				()
+				loop {
+					let report = handler.run().await;
+					let log_msg = format!(
+						"roundup relay handler({}) stopped: {:?}\nRestarting immediately...",
+						handler.client.get_chain_name(),
+						report
+					);
+					log::error!("{log_msg}");
+					sentry::capture_message(&log_msg, sentry::Level::Error);
+				}
 			},
 		);
 	});
@@ -341,8 +399,16 @@ where
 		"roundup-emitter",
 		Some("roundup-emitter"),
 		async move {
-			roundup_emitter.run().await;
-			()
+			loop {
+				let report = roundup_emitter.run().await;
+				let log_msg = format!(
+					"roundup emitter({}) stopped: {:?}\nRestarting immediately...",
+					roundup_emitter.client.address(),
+					report
+				);
+				log::error!("{log_msg}");
+				sentry::capture_message(&log_msg, sentry::Level::Error);
+			}
 		},
 	);
 
@@ -354,9 +420,17 @@ where
 			),
 			Some("event-managers"),
 			async move {
-				event_manager.wait_provider_sync().await;
-				event_manager.run().await;
-				()
+				let _ = event_manager.wait_provider_sync().await;
+				loop {
+					let report = event_manager.run().await;
+					let log_msg = format!(
+						"event manager({}) stopped: {:?}\nRestarting immediately...",
+						event_manager.client.get_chain_name(),
+						report
+					);
+					log::error!("{log_msg}");
+					sentry::capture_message(&log_msg, sentry::Level::Error);
+				}
 			},
 		)
 	});
@@ -366,40 +440,80 @@ where
 		"bitcoin-inbound-handler",
 		Some("handlers"),
 		async move {
-			inbound.run().await;
-			()
+			loop {
+				let report = inbound.run().await;
+				let log_msg = format!(
+					"bitcoin inbound handler({}) stopped: {:?}\nRestarting immediately...",
+					inbound.bfc_client.address(),
+					report
+				);
+				log::error!("{log_msg}");
+				sentry::capture_message(&log_msg, sentry::Level::Error);
+			}
 		},
 	);
 	task_manager.spawn_essential_handle().spawn(
 		"bitcoin-outbound-handler",
 		Some("handlers"),
 		async move {
-			outbound.run().await;
-			()
+			loop {
+				let report = outbound.run().await;
+				let log_msg = format!(
+					"bitcoin outbound handler({}) stopped: {:?}\nRestarting immediately...",
+					outbound.bfc_client.address(),
+					report
+				);
+				log::error!("{log_msg}");
+				sentry::capture_message(&log_msg, sentry::Level::Error);
+			}
 		},
 	);
 	task_manager.spawn_essential_handle().spawn(
 		"bitcoin-psbt-signer",
 		Some("handlers"),
 		async move {
-			psbt_signer.run().await;
-			()
+			loop {
+				let report = psbt_signer.run().await;
+				let log_msg = format!(
+					"bitcoin psbt signer({}) stopped: {:?}\nRestarting immediately...",
+					psbt_signer.client.address(),
+					report
+				);
+				log::error!("{log_msg}");
+				sentry::capture_message(&log_msg, sentry::Level::Error);
+			}
 		},
 	);
 	task_manager.spawn_essential_handle().spawn(
 		"bitcoin-public-key-submitter",
 		Some("pub-key-submitter"),
 		async move {
-			pub_key_submitter.run().await;
-			()
+			loop {
+				let report = pub_key_submitter.run().await;
+				let log_msg = format!(
+					"bitcoin public key submitter({}) stopped: {:?}\nRestarting immediately...",
+					pub_key_submitter.client.address(),
+					report
+				);
+				log::error!("{log_msg}");
+				sentry::capture_message(&log_msg, sentry::Level::Error);
+			}
 		},
 	);
 	task_manager.spawn_essential_handle().spawn(
 		"bitcoin-rollback-verifier",
 		Some("rollback-verifier"),
 		async move {
-			rollback_verifier.run().await;
-			()
+			loop {
+				let report = rollback_verifier.run().await;
+				let log_msg = format!(
+					"bitcoin rollback verifier({}) stopped: {:?}\nRestarting immediately...",
+					rollback_verifier.bfc_client.address(),
+					report
+				);
+				log::error!("{log_msg}");
+				sentry::capture_message(&log_msg, sentry::Level::Error);
+			}
 		},
 	);
 	task_manager.spawn_essential_handle().spawn(
@@ -417,9 +531,16 @@ where
 			}
 			drop(guard);
 
-			block_manager.run().await;
-
-			()
+			loop {
+				let report = block_manager.run().await;
+				let log_msg = format!(
+					"bitcoin block manager({}) stopped: {:?}\nRestarting immediately...",
+					block_manager.bfc_client.address(),
+					report
+				);
+				log::error!("{log_msg}");
+				sentry::capture_message(&log_msg, sentry::Level::Error);
+			}
 		},
 	);
 

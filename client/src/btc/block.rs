@@ -99,7 +99,7 @@ where
 	/// The Bitcoin client.
 	btc_client: BtcClient,
 	/// The Bifrost client.
-	bfc_client: Arc<EthClient<F, P, T>>,
+	pub bfc_client: Arc<EthClient<F, P, T>>,
 	/// The event message sender.
 	sender: Sender<EventMessage>,
 	/// The configured minimum block confirmations required to process a block.

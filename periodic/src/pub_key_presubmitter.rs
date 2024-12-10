@@ -36,7 +36,7 @@ where
 	P: Provider<T>,
 	T: Transport + Clone,
 {
-	bfc_client: Arc<EthClient<F, P, T>>,
+	pub bfc_client: Arc<EthClient<F, P, T>>,
 	/// The Bifrost client.
 	sub_client: Option<OnlineClient<CustomConfig>>,
 	/// The unsigned transaction message sender.

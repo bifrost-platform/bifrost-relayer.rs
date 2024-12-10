@@ -41,7 +41,7 @@ where
 	/// Current round number
 	current_round: U256,
 	/// The ethereum client for the Bifrost network.
-	client: Arc<EthClient<F, P, T>>,
+	pub client: Arc<EthClient<F, P, T>>,
 	/// The time schedule that represents when to check round info.
 	schedule: Schedule,
 	/// The bootstrap shared data.

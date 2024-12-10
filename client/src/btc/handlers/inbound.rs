@@ -43,7 +43,7 @@ where
 	T: Transport + Clone,
 {
 	/// `EthClient` for interact with Bifrost network.
-	bfc_client: Arc<EthClient<F, P, T>>,
+	pub bfc_client: Arc<EthClient<F, P, T>>,
 	/// The receiver that consumes new events from the block channel.
 	event_receiver: Receiver<BTCEventMessage>,
 	/// Event type which this handler should handle.
