@@ -1,9 +1,9 @@
-use std::{collections::BTreeMap, str::FromStr, sync::Arc, time::Duration};
+use std::{collections::BTreeMap, sync::Arc, time::Duration};
 
 use alloy::{
 	dyn_abi::DynSolValue,
 	network::Ethereum,
-	primitives::{Address, Bytes, ChainId, Signature, B256, U256},
+	primitives::{Address, ChainId, Signature, B256, U256},
 	providers::{
 		fillers::{FillProvider, TxFiller},
 		Provider, WalletProvider,
@@ -14,26 +14,25 @@ use alloy::{
 };
 use async_trait::async_trait;
 use eyre::Result;
+use sc_service::SpawnTaskHandle;
 use tokio::{sync::broadcast::Receiver, time::sleep};
 use tokio_stream::StreamExt;
 
 use br_primitives::{
 	bootstrap::BootstrapSharedData,
-	constants::{
-		cli::DEFAULT_BOOTSTRAP_ROUND_OFFSET, config::BOOTSTRAP_BLOCK_CHUNK_SIZE,
-		errors::INVALID_BIFROST_NATIVENESS,
-	},
+	constants::{cli::DEFAULT_BOOTSTRAP_ROUND_OFFSET, config::BOOTSTRAP_BLOCK_CHUNK_SIZE},
 	contracts::socket::{
 		SocketContract::{RoundUp, SocketContractInstance},
 		Socket_Struct::{Round_Up_Submit, Signatures},
 	},
-	eth::{BootstrapState, GasCoefficient, RoundUpEventStatus},
-	tx::{TxRequestMessage, TxRequestMetadata, TxRequestSender, VSPPhase2Metadata},
+	eth::{BootstrapState, RoundUpEventStatus},
+	tx::{TxRequestMetadata, VSPPhase2Metadata},
 	utils::{recover_message, sub_display_format},
 };
 
 use crate::eth::{
 	events::EventMessage,
+	send_transaction,
 	traits::{BootstrapHandler, Handler},
 	EthClient,
 };
@@ -57,13 +56,15 @@ where
 	roundup_signature: B256,
 	/// The bootstrap shared data.
 	bootstrap_shared_data: Arc<BootstrapSharedData>,
+	/// The handle to spawn tasks.
+	handle: SpawnTaskHandle,
 }
 
 #[async_trait]
 impl<F, P, T> Handler for RoundupRelayHandler<F, P, T>
 where
-	F: TxFiller + WalletProvider,
-	P: Provider<T>,
+	F: TxFiller + WalletProvider + 'static,
+	P: Provider<T> + 'static,
 	T: Transport + Clone,
 {
 	async fn run(&mut self) -> Result<()> {
@@ -102,6 +103,14 @@ where
 			}
 			match self.decode_log(log.clone()).await {
 				Ok(serialized_log) => {
+					if !self
+						.is_selected_relayer(serialized_log.roundup.round - U256::from(1))
+						.await?
+					{
+						// do nothing if not selected
+						return Ok(());
+					}
+
 					if !is_bootstrap {
 						log::info!(
 							target: &self.client.get_chain_name(),
@@ -111,15 +120,9 @@ where
 							log.transaction_hash,
 						);
 					}
+
 					match RoundUpEventStatus::from_u8(serialized_log.status) {
 						RoundUpEventStatus::NextAuthorityCommitted => {
-							if !self
-								.is_selected_relayer(serialized_log.roundup.round - U256::from(1))
-								.await?
-							{
-								// do nothing if not selected
-								return Ok(());
-							}
 							self.broadcast_roundup(
 								&self
 									.build_roundup_submit(
@@ -127,7 +130,6 @@ where
 										serialized_log.roundup.new_relayers,
 									)
 									.await?,
-								is_bootstrap,
 							)
 							.await?;
 						},
@@ -166,8 +168,8 @@ where
 
 impl<F, P, T> RoundupRelayHandler<F, P, T>
 where
-	F: TxFiller + WalletProvider,
-	P: Provider<T>,
+	F: TxFiller + WalletProvider + 'static,
+	P: Provider<T> + 'static,
 	T: Transport + Clone,
 {
 	/// Instantiates a new `RoundupRelayHandler` instance.
@@ -176,6 +178,7 @@ where
 		event_receiver: Receiver<EventMessage>,
 		clients: Arc<BTreeMap<ChainId, Arc<EthClient<F, P, T>>>>,
 		bootstrap_shared_data: Arc<BootstrapSharedData>,
+		handle: SpawnTaskHandle,
 	) -> Self {
 		Self {
 			event_receiver,
@@ -183,6 +186,7 @@ where
 			external_clients: clients,
 			roundup_signature: RoundUp::SIGNATURE_HASH,
 			bootstrap_shared_data,
+			handle,
 		}
 	}
 
@@ -259,17 +263,13 @@ where
 	}
 
 	/// Check roundup submitted before. If not, call `round_control_relay`.
-	async fn broadcast_roundup(
-		&self,
-		roundup_submit: &Round_Up_Submit,
-		is_bootstrap: bool,
-	) -> Result<()> {
+	async fn broadcast_roundup(&self, roundup_submit: &Round_Up_Submit) -> Result<()> {
 		if self.external_clients.is_empty() {
 			return Ok(());
 		}
 
 		let mut stream = tokio_stream::iter(self.external_clients.iter());
-		while let Some((_, target_client)) = stream.next().await {
+		while let Some((dst_chain_id, target_client)) = stream.next().await {
 			// Check roundup submitted to target chain before.
 			let latest_round =
 				target_client.protocol_contracts.authority.latest_round().call().await?._0;
@@ -278,24 +278,17 @@ where
 					&target_client.protocol_contracts.socket,
 					roundup_submit,
 				);
-				let target_chain_id = target_client.get_chain_id().await?;
 
-				// if let Some(sender) = self.tx_request_senders.get(&target_chain_id) {
-				// 	sender
-				// 		.send(TxRequestMessage::new(
-				// 			transaction_request,
-				// 			TxRequestMetadata::VSPPhase2(VSPPhase2Metadata::new(
-				// 				roundup_submit.round,
-				// 				target_chain_id,
-				// 			)),
-				// 			true,
-				// 			true,
-				// 			GasCoefficient::Low,
-				// 			is_bootstrap,
-				// 		))
-				// 		.unwrap()
-				// }
-				todo!()
+				send_transaction(
+					target_client.clone(),
+					transaction_request,
+					SUB_LOG_TARGET.to_string(),
+					TxRequestMetadata::VSPPhase2(VSPPhase2Metadata::new(
+						roundup_submit.round,
+						*dst_chain_id,
+					)),
+					self.handle.clone(),
+				);
 			}
 		}
 
@@ -331,8 +324,8 @@ where
 #[async_trait]
 impl<F, P, T> BootstrapHandler for RoundupRelayHandler<F, P, T>
 where
-	F: TxFiller + WalletProvider,
-	P: Provider<T>,
+	F: TxFiller + WalletProvider + 'static,
+	P: Provider<T> + 'static,
 	T: Transport + Clone,
 {
 	fn bootstrap_shared_data(&self) -> Arc<BootstrapSharedData> {

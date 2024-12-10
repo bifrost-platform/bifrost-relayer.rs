@@ -1,30 +1,29 @@
 use alloy::{
 	dyn_abi::DynSolValue,
-	primitives::{Address, ChainId, U256},
+	primitives::{Address, U256},
 	providers::{fillers::TxFiller, Provider, WalletProvider},
 	rpc::types::{Filter, Log, TransactionInput, TransactionRequest},
 	sol_types::SolEvent as _,
 	transports::Transport,
 };
 use cron::Schedule;
-use std::{collections::BTreeMap, str::FromStr, sync::Arc, time::Duration};
+use sc_service::SpawnTaskHandle;
+use std::{str::FromStr, sync::Arc, time::Duration};
 use tokio::time::sleep;
 
-use br_client::eth::{traits::BootstrapHandler, EthClient};
+use br_client::eth::{send_transaction, traits::BootstrapHandler, EthClient};
 use br_primitives::{
 	bootstrap::BootstrapSharedData,
 	constants::{
-		cli::DEFAULT_BOOTSTRAP_ROUND_OFFSET,
-		config::BOOTSTRAP_BLOCK_CHUNK_SIZE,
-		errors::{INVALID_BIFROST_NATIVENESS, INVALID_PERIODIC_SCHEDULE},
-		schedule::ROUNDUP_EMITTER_SCHEDULE,
+		cli::DEFAULT_BOOTSTRAP_ROUND_OFFSET, config::BOOTSTRAP_BLOCK_CHUNK_SIZE,
+		errors::INVALID_PERIODIC_SCHEDULE, schedule::ROUNDUP_EMITTER_SCHEDULE,
 	},
 	contracts::socket::{
 		SocketContract::RoundUp,
 		Socket_Struct::{Round_Up_Submit, Signatures},
 	},
-	eth::{BootstrapState, GasCoefficient, RoundUpEventStatus},
-	tx::{TxRequestMessage, TxRequestMetadata, TxRequestSender, VSPPhase1Metadata},
+	eth::{BootstrapState, RoundUpEventStatus},
+	tx::{TxRequestMetadata, VSPPhase1Metadata},
 	utils::sub_display_format,
 };
 use eyre::Result;
@@ -43,19 +42,19 @@ where
 	current_round: U256,
 	/// The ethereum client for the Bifrost network.
 	client: Arc<EthClient<F, P, T>>,
-	/// The clients for the external chains.
-	clients: Arc<BTreeMap<ChainId, Arc<EthClient<F, P, T>>>>,
 	/// The time schedule that represents when to check round info.
 	schedule: Schedule,
 	/// The bootstrap shared data.
 	bootstrap_shared_data: Arc<BootstrapSharedData>,
+	/// The handle to spawn tasks.
+	handle: SpawnTaskHandle,
 }
 
 #[async_trait::async_trait]
 impl<F, P, T> PeriodicWorker for RoundupEmitter<F, P, T>
 where
-	F: TxFiller + WalletProvider,
-	P: Provider<T>,
+	F: TxFiller + WalletProvider + 'static,
+	P: Provider<T> + 'static,
 	T: Transport + Clone,
 {
 	fn schedule(&self) -> Schedule {
@@ -108,30 +107,24 @@ where
 
 impl<F, P, T> RoundupEmitter<F, P, T>
 where
-	F: TxFiller + WalletProvider,
-	P: Provider<T>,
+	F: TxFiller + WalletProvider + 'static,
+	P: Provider<T> + 'static,
 	T: Transport + Clone,
 {
 	/// Instantiates a new `RoundupEmitter` instance.
 	pub fn new(
 		client: Arc<EthClient<F, P, T>>,
-		clients: Arc<BTreeMap<ChainId, Arc<EthClient<F, P, T>>>>,
 		bootstrap_shared_data: Arc<BootstrapSharedData>,
+		handle: SpawnTaskHandle,
 	) -> Self {
-
 		Self {
 			current_round: U256::default(),
 			client,
-			clients,
 			schedule: Schedule::from_str(ROUNDUP_EMITTER_SCHEDULE)
 				.expect(INVALID_PERIODIC_SCHEDULE),
 			bootstrap_shared_data,
+			handle,
 		}
-	}
-
-	/// Decode & Serialize log to `RoundUp` struct.
-	fn decode_log(&self, log: Log) -> Result<RoundUp> {
-		Ok(log.log_decode::<RoundUp>()?.inner.data)
 	}
 
 	/// Check relayer has selected in previous round
@@ -189,30 +182,13 @@ where
 		tx_request: TransactionRequest,
 		metadata: VSPPhase1Metadata,
 	) {
-		// match self.tx_request_sender.send(TxRequestMessage::new(
-		// 	tx_request,
-		// 	TxRequestMetadata::VSPPhase1(metadata.clone()),
-		// 	false,
-		// 	false,
-		// 	GasCoefficient::Mid,
-		// 	false,
-		// )) {
-		// 	Ok(()) => log::info!(
-		// 		target: &self.client.get_chain_name(),
-		// 		"-[{}] 👤 Request VSP phase1 transaction: {}",
-		// 		sub_display_format(SUB_LOG_TARGET),
-		// 		metadata
-		// 	),
-		// 	Err(error) => log::error!(
-		// 		target: &self.client.get_chain_name(),
-		// 		"-[{}] ❗️ Failed to request VSP phase1 transaction: {}, Error: {}",
-		// 		sub_display_format(SUB_LOG_TARGET),
-		// 		metadata,
-		// 		error.to_string()
-		// 	),
-		// }
-
-		todo!()
+		send_transaction(
+			self.client.clone(),
+			tx_request,
+			SUB_LOG_TARGET.to_string(),
+			TxRequestMetadata::VSPPhase1(metadata),
+			self.handle.clone(),
+		);
 	}
 
 	/// Get the latest round index.
@@ -224,8 +200,8 @@ where
 #[async_trait::async_trait]
 impl<F, P, T> BootstrapHandler for RoundupEmitter<F, P, T>
 where
-	F: TxFiller + WalletProvider,
-	P: Provider<T>,
+	F: TxFiller + WalletProvider + 'static,
+	P: Provider<T> + 'static,
 	T: Transport + Clone,
 {
 	fn bootstrap_shared_data(&self) -> Arc<BootstrapSharedData> {
@@ -235,11 +211,9 @@ where
 	async fn bootstrap(&self) -> Result<()> {
 		let get_next_poll_round = || async move {
 			let logs = self.get_bootstrap_events().await.unwrap();
-			// let round_up_events =
-			// logs.iter().map(|log| self.decode_log(log.clone()).unwrap()).collect();
 
 			let round_up_events: Vec<RoundUp> =
-				logs.iter().map(|log| self.decode_log(log.clone()).unwrap()).collect();
+				logs.iter().map(|log| log.log_decode::<RoundUp>().unwrap().inner.data).collect();
 
 			let max_round = round_up_events
 				.iter()

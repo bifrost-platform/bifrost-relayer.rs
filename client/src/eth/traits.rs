@@ -105,48 +105,6 @@ where
 }
 
 #[async_trait::async_trait]
-pub trait LegacyGasMiddleware {
-	/// Get the current gas price of the network.
-	async fn get_gas_price(&self) -> U256;
-
-	/// Get gas_price for legacy retry transaction request.
-	///
-	/// Returns `max(current_network_gas_price,escalated_gas_price)`
-	async fn get_gas_price_for_retry(
-		&self,
-		previous_gas_price: U256,
-		gas_price_coefficient: f64,
-		min_gas_price: U256,
-	) -> U256;
-
-	/// Get gas_price for escalated legacy transaction request. This will be only used when
-	/// `is_initially_escalated` is enabled.
-	async fn get_gas_price_for_escalation(
-		&self,
-		gas_price: U256,
-		gas_price_coefficient: f64,
-		min_gas_price: U256,
-	) -> U256;
-
-	/// Handles the failed gas price rpc request.
-	async fn handle_failed_get_gas_price(&self, retries_remaining: u8, error: String) -> U256;
-}
-
-#[async_trait::async_trait]
-pub trait Eip1559GasMiddleware {
-	/// Gets a heuristic recommendation of max fee per gas and max priority fee per gas for EIP-1559
-	/// compatible transactions.
-	async fn get_estimated_eip1559_fees(&self) -> (U256, U256);
-
-	/// Handles the failed eip1559 fees rpc request.
-	async fn handle_failed_get_estimated_eip1559_fees(
-		&self,
-		retries_remaining: u8,
-		error: String,
-	) -> (U256, U256);
-}
-
-#[async_trait::async_trait]
 /// The manager trait for Legacy and Eip1559 transactions.
 pub trait TransactionManager<F, P, T>
 where
@@ -154,9 +112,6 @@ where
 	P: Provider<T>,
 	T: Transport + Clone,
 {
-	/// Starts the transaction manager. Listens to every new consumed tx request message.
-	async fn run(&mut self);
-
 	/// Initialize transaction manager.
 	async fn initialize(&mut self);
 

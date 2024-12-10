@@ -31,10 +31,10 @@ where
 		pending_outbounds: PendingOutboundPool,
 		keypair_storage: Arc<RwLock<KeypairStorage>>,
 		bootstrap_shared_data: BootstrapSharedData,
-		manager_deps: &ManagerDeps<F, P, T>,
 		substrate_deps: &SubstrateDeps<F, P, T>,
 		migration_sequence: Arc<RwLock<MigrationSequence>>,
 		bfc_client: Arc<EthClient<F, P, T>>,
+		task_manager: &TaskManager,
 	) -> Self {
 		let bootstrap_shared_data = Arc::new(bootstrap_shared_data.clone());
 		let network = Network::from_core_arg(&config.relayer_config.btc_provider.chain)
@@ -69,15 +69,15 @@ where
 		);
 		let inbound = InboundHandler::new(
 			bfc_client.clone(),
-			manager_deps.clients.clone(),
 			block_manager.subscribe(),
 			bootstrap_shared_data.clone(),
+			task_manager.spawn_handle(),
 		);
 		let outbound = OutboundHandler::new(
 			bfc_client.clone(),
-			manager_deps.clients.clone(),
 			block_manager.subscribe(),
 			bootstrap_shared_data.clone(),
+			task_manager.spawn_handle(),
 		);
 
 		let psbt_signer = PsbtSigner::new(

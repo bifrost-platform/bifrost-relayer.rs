@@ -14,16 +14,12 @@ use crate::{
 
 use alloy::{
 	providers::{fillers::TxFiller, Provider, WalletProvider},
-	rpc::types::TransactionRequest,
 	transports::Transport,
 };
 use br_primitives::{
 	bootstrap::BootstrapSharedData,
-	eth::{BootstrapState, GasCoefficient},
-	tx::{
-		TxRequestMessage, TxRequestMetadata, TxRequestSender, XtRequest, XtRequestMessage,
-		XtRequestMetadata, XtRequestSender,
-	},
+	eth::BootstrapState,
+	tx::{XtRequest, XtRequestMessage, XtRequestMetadata, XtRequestSender},
 	utils::sub_display_format,
 };
 use eyre::Result;
@@ -90,55 +86,6 @@ where
 				log::error!(target: &self.bfc_client().get_chain_name(), "{log_msg}");
 				sentry::capture_message(
 					&format!("[{}]{log_msg}", &self.bfc_client().get_chain_name()),
-					sentry::Level::Error,
-				);
-			},
-		}
-	}
-}
-
-#[async_trait::async_trait]
-pub trait TxRequester<F, P, T>
-where
-	F: TxFiller + WalletProvider,
-	P: Provider<T>,
-	T: Transport + Clone,
-{
-	fn tx_request_sender(&self) -> Arc<TxRequestSender>;
-
-	fn bfc_client(&self) -> Arc<EthClient<F, P, T>>;
-
-	async fn request_send_transaction(
-		&self,
-		tx_request: TransactionRequest,
-		metadata: TxRequestMetadata,
-		sub_log_target: &str,
-	) {
-		match self.tx_request_sender().send(TxRequestMessage::new(
-			tx_request,
-			metadata.clone(),
-			true,
-			false,
-			GasCoefficient::Mid,
-			false,
-		)) {
-			Ok(_) => log::info!(
-				target: LOG_TARGET,
-				"-[{}] 🔖 Request relay transaction: {}",
-				sub_display_format(sub_log_target),
-				metadata
-			),
-			Err(error) => {
-				let log_msg = format!(
-					"-[{}]-[{}] ❗️ Failed to send relay transaction: {}, Error: {}",
-					sub_display_format(sub_log_target),
-					self.bfc_client().address(),
-					metadata,
-					error
-				);
-				log::error!(target: LOG_TARGET, "{log_msg}");
-				sentry::capture_message(
-					&format!("[{}]{log_msg}", LOG_TARGET),
 					sentry::Level::Error,
 				);
 			},

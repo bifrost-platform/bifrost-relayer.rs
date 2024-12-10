@@ -3,12 +3,12 @@ use crate::{
 		block::{Event, EventMessage as BTCEventMessage, EventType},
 		handlers::{Handler, LOG_TARGET},
 	},
-	eth::EthClient,
+	eth::{send_transaction, EthClient},
 };
 
 use alloy::{
 	network::Ethereum,
-	primitives::{Address as EthAddress, ChainId, B256, U256},
+	primitives::{Address as EthAddress, B256, U256},
 	providers::{
 		fillers::{FillProvider, TxFiller},
 		Provider, WalletProvider,
@@ -21,17 +21,18 @@ use br_primitives::{
 	bootstrap::BootstrapSharedData,
 	contracts::bitcoin_socket::BitcoinSocketContract::BitcoinSocketContractInstance,
 	eth::BootstrapState,
-	tx::{BitcoinRelayMetadata, TxRequestMetadata, TxRequestSender},
+	tx::{BitcoinRelayMetadata, TxRequestMetadata},
 	utils::sub_display_format,
 };
 use eyre::Result;
 
 use miniscript::bitcoin::{address::NetworkUnchecked, hashes::Hash, Address as BtcAddress};
-use std::{collections::BTreeMap, sync::Arc};
+use sc_service::SpawnTaskHandle;
+use std::sync::Arc;
 use tokio::sync::broadcast::Receiver;
 use tokio_stream::StreamExt;
 
-use super::{BootstrapHandler, EventMessage, TxRequester};
+use super::{BootstrapHandler, EventMessage};
 
 const SUB_LOG_TARGET: &str = "inbound-handler";
 
@@ -43,14 +44,14 @@ where
 {
 	/// `EthClient` for interact with Bifrost network.
 	bfc_client: Arc<EthClient<F, P, T>>,
-	/// All clients.
-	clients: Arc<BTreeMap<ChainId, Arc<EthClient<F, P, T>>>>,
 	/// The receiver that consumes new events from the block channel.
 	event_receiver: Receiver<BTCEventMessage>,
 	/// Event type which this handler should handle.
 	target_event: EventType,
 	/// The bootstrap shared data.
 	bootstrap_shared_data: Arc<BootstrapSharedData>,
+	/// The handle to spawn tasks.
+	handle: SpawnTaskHandle,
 }
 
 impl<F, P, T> InboundHandler<F, P, T>
@@ -61,16 +62,16 @@ where
 {
 	pub fn new(
 		bfc_client: Arc<EthClient<F, P, T>>,
-		clients: Arc<BTreeMap<ChainId, Arc<EthClient<F, P, T>>>>,
 		event_receiver: Receiver<BTCEventMessage>,
 		bootstrap_shared_data: Arc<BootstrapSharedData>,
+		handle: SpawnTaskHandle,
 	) -> Self {
 		Self {
 			bfc_client,
-			clients,
 			event_receiver,
 			target_event: EventType::Inbound,
 			bootstrap_shared_data,
+			handle,
 		}
 	}
 
@@ -155,27 +156,11 @@ where
 	}
 }
 
-// #[async_trait::async_trait]
-// impl<F, P, T> TxRequester<F, P, T> for InboundHandler<F, P, T>
-// where
-// 	F: TxFiller<Ethereum> + WalletProvider<Ethereum>,
-// 	P: Provider<T, Ethereum>,
-// 	T: Transport + Clone,
-// {
-// 	fn tx_request_sender(&self) -> Arc<TxRequestSender> {
-// 		self.tx_request_sender.clone()
-// 	}
-
-// 	fn bfc_client(&self) -> Arc<EthClient<F, P, T>> {
-// 		self.bfc_client.clone()
-// 	}
-// }
-
 #[async_trait::async_trait]
 impl<F, P, T> Handler for InboundHandler<F, P, T>
 where
-	F: TxFiller + WalletProvider,
-	P: Provider<T>,
+	F: TxFiller + WalletProvider + 'static,
+	P: Provider<T> + 'static,
 	T: Transport + Clone,
 {
 	async fn run(&mut self) -> Result<()> {
@@ -226,13 +211,13 @@ where
 			let metadata =
 				BitcoinRelayMetadata::new(event.address, user_bfc_address, event.txid, event.index);
 
-			// self.request_send_transaction(
-			// 	tx_request,
-			// 	TxRequestMetadata::BitcoinSocketRelay(metadata),
-			// 	SUB_LOG_TARGET,
-			// )
-			// .await;
-			todo!()
+			send_transaction(
+				self.bfc_client.clone(),
+				tx_request,
+				format!("{} ({})", SUB_LOG_TARGET, self.bfc_client.get_chain_name()),
+				TxRequestMetadata::BitcoinSocketRelay(metadata),
+				self.handle.clone(),
+			);
 		}
 
 		Ok(())

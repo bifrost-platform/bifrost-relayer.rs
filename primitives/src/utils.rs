@@ -1,11 +1,16 @@
 use alloy::primitives::{keccak256, Address, Signature as EthersSignature, B256};
 use k256::{ecdsa::VerifyingKey, elliptic_curve::sec1::ToEncodedPoint};
+use rand::Rng as _;
 use sha3::{Digest, Keccak256};
 
 use crate::substrate::{EthereumSignature, Signature};
 
 pub fn sub_display_format(log_target: &str) -> String {
 	format!("{:<019}", log_target)
+}
+
+pub fn generate_delay() -> u64 {
+	rand::thread_rng().gen_range(0..=12000)
 }
 
 /// Converts the ethers::Signature to a bifrost_runtime::Signature.

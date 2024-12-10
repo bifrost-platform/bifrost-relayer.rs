@@ -25,6 +25,7 @@ use br_client::{
 		storage::{keypair::KeypairStorage, pending_outbound::PendingOutboundPool},
 	},
 	eth::{
+		events::EventManager,
 		handlers::{RoundupRelayHandler, SocketRelayHandler},
 		EthClient,
 	},
@@ -32,7 +33,7 @@ use br_client::{
 };
 use br_periodic::{
 	BitcoinRollbackVerifier, HeartbeatSender, KeypairMigrator, OraclePriceFeeder, PsbtSigner,
-	PubKeyPreSubmitter, PubKeySubmitter, RoundupEmitter,
+	PubKeyPreSubmitter, PubKeySubmitter, RoundupEmitter, SocketRollbackEmitter,
 };
 use br_primitives::{
 	bootstrap::BootstrapSharedData,
@@ -44,10 +45,11 @@ use br_primitives::{
 			INVALID_PROVIDER_URL,
 		},
 	},
+	contracts::socket::Socket_Struct::Socket_Message,
 	substrate::MigrationSequence,
 	tx::XtRequestSender,
 };
 use miniscript::bitcoin::Network;
 use sc_service::TaskManager;
 use std::{collections::BTreeMap, sync::Arc};
-use tokio::sync::RwLock;
+use tokio::sync::{mpsc::UnboundedSender, RwLock};

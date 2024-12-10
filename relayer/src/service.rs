@@ -32,10 +32,7 @@ use br_primitives::{
 	cli::{Configuration, HandlerType},
 	constants::{
 		cli::{DEFAULT_GET_LOGS_BATCH_SIZE, DEFAULT_KEYSTORE_PATH, DEFAULT_PROMETHEUS_PORT},
-		errors::{
-			INVALID_BIFROST_NATIVENESS, INVALID_BITCOIN_NETWORK, INVALID_PRIVATE_KEY,
-			INVALID_PROVIDER_URL,
-		},
+		errors::{INVALID_BITCOIN_NETWORK, INVALID_PRIVATE_KEY, INVALID_PROVIDER_URL},
 		tx::DEFAULT_CALL_RETRIES,
 	},
 	eth::{
@@ -55,6 +52,8 @@ use crate::{
 /// Starts the relayer service.
 pub fn relay(config: Configuration) -> Result<TaskManager, ServiceError> {
 	assert_configuration_validity(&config);
+
+	let task_manager = TaskManager::new(config.clone().tokio_handle, None)?;
 
 	let evm_providers = &config.relayer_config.evm_providers;
 	let btc_provider = &config.relayer_config.btc_provider;
@@ -91,6 +90,7 @@ pub fn relay(config: Configuration) -> Result<TaskManager, ServiceError> {
 					if is_native { Some(btc_provider.id) } else { None },
 					evm_provider.block_confirmations,
 					evm_provider.call_interval,
+					evm_provider.eip1559.unwrap_or(false),
 					evm_provider.get_logs_batch_size.unwrap_or(DEFAULT_GET_LOGS_BATCH_SIZE),
 					is_native,
 				),
@@ -119,7 +119,69 @@ pub fn relay(config: Configuration) -> Result<TaskManager, ServiceError> {
 		})
 		.collect::<BTreeMap<ChainId, _>>();
 
-	new_relay_base(config, clients).map(|RelayBase { task_manager, .. }| task_manager)
+	let bootstrap_shared_data = BootstrapSharedData::new(&config);
+
+	let pending_outbounds = PendingOutboundPool::new();
+	let keypair_storage = Arc::new(RwLock::new(KeypairStorage::new(
+		config
+			.clone()
+			.relayer_config
+			.system
+			.keystore_path
+			.unwrap_or(DEFAULT_KEYSTORE_PATH.to_string()),
+		config.relayer_config.system.keystore_password.clone(),
+		Network::from_core_arg(&config.relayer_config.btc_provider.chain)
+			.expect(INVALID_BITCOIN_NETWORK),
+	)));
+
+	let migration_sequence = Arc::new(RwLock::new(MigrationSequence::Normal));
+
+	let manager_deps = ManagerDeps::new(&config, Arc::new(clients), bootstrap_shared_data.clone());
+	let bfc_client = manager_deps.bifrost_client.clone();
+
+	let substrate_deps = SubstrateDeps::new(bfc_client.clone(), &task_manager);
+	let periodic_deps = PeriodicDeps::new(
+		bootstrap_shared_data.clone(),
+		migration_sequence.clone(),
+		keypair_storage.clone(),
+		&substrate_deps,
+		manager_deps.clients.clone(),
+		bfc_client.clone(),
+		&task_manager,
+	);
+	let handler_deps = HandlerDeps::new(
+		&config,
+		&manager_deps,
+		bootstrap_shared_data.clone(),
+		bfc_client.clone(),
+		periodic_deps.rollback_senders.clone(),
+		&task_manager,
+	);
+	let btc_deps = BtcDeps::new(
+		&config,
+		pending_outbounds.clone(),
+		keypair_storage.clone(),
+		bootstrap_shared_data.clone(),
+		&substrate_deps,
+		migration_sequence.clone(),
+		bfc_client.clone(),
+		&task_manager,
+	);
+
+	print_relay_targets(&manager_deps);
+
+	Ok(spawn_relayer_tasks(
+		task_manager,
+		FullDeps {
+			bootstrap_shared_data,
+			manager_deps,
+			periodic_deps,
+			handler_deps,
+			substrate_deps,
+			btc_deps,
+		},
+		&config,
+	))
 }
 
 /// Spawn relayer service tasks by the `TaskManager`.
@@ -150,6 +212,7 @@ where
 		mut heartbeat_sender,
 		mut oracle_price_feeder,
 		mut roundup_emitter,
+		rollback_emitters,
 		mut keypair_migrator,
 		mut presubmitter,
 		..
@@ -212,6 +275,21 @@ where
 			()
 		},
 	);
+
+	// spawn socket rollback emitters
+	rollback_emitters.into_iter().for_each(|mut emitter| {
+		task_manager.spawn_essential_handle().spawn(
+			Box::leak(
+				format!("{}-socket-rollback-emitter", emitter.client.get_chain_name())
+					.into_boxed_str(),
+			),
+			Some("rollback"),
+			async move {
+				emitter.run().await;
+				()
+			},
+		)
+	});
 
 	// spawn socket relay handlers
 	socket_relay_handlers.into_iter().for_each(|mut handler| {
@@ -399,81 +477,4 @@ where
 			.collect::<Vec<String>>()
 			.join(", ")
 	);
-}
-
-/// Builds the internal components for the relayer service and spawns asynchronous tasks.
-fn new_relay_base<F, P, T>(
-	config: Configuration,
-	clients: BTreeMap<ChainId, Arc<EthClient<F, P, T>>>,
-) -> Result<RelayBase, ServiceError>
-where
-	F: TxFiller + WalletProvider + 'static,
-	P: Provider<T> + 'static,
-	T: Transport + Clone,
-{
-	let task_manager = TaskManager::new(config.clone().tokio_handle, None)?;
-
-	let bootstrap_shared_data = BootstrapSharedData::new(&config);
-
-	let pending_outbounds = PendingOutboundPool::new();
-	let keypair_storage = Arc::new(RwLock::new(KeypairStorage::new(
-		config
-			.clone()
-			.relayer_config
-			.system
-			.keystore_path
-			.unwrap_or(DEFAULT_KEYSTORE_PATH.to_string()),
-		config.relayer_config.system.keystore_password.clone(),
-		Network::from_core_arg(&config.relayer_config.btc_provider.chain)
-			.expect(INVALID_BITCOIN_NETWORK),
-	)));
-
-	let migration_sequence = Arc::new(RwLock::new(MigrationSequence::Normal));
-
-	let manager_deps = ManagerDeps::new(&config, Arc::new(clients), bootstrap_shared_data.clone());
-	let bfc_client = manager_deps.bifrost_client.clone();
-
-	let substrate_deps = SubstrateDeps::new(bfc_client.clone(), &task_manager);
-	let periodic_deps = PeriodicDeps::new(
-		bootstrap_shared_data.clone(),
-		migration_sequence.clone(),
-		keypair_storage.clone(),
-		&substrate_deps,
-		manager_deps.clients.clone(),
-		bfc_client.clone(),
-	);
-	let handler_deps =
-		HandlerDeps::new(&config, &manager_deps, bootstrap_shared_data.clone(), bfc_client.clone());
-	let btc_deps = BtcDeps::new(
-		&config,
-		pending_outbounds.clone(),
-		keypair_storage.clone(),
-		bootstrap_shared_data.clone(),
-		&manager_deps,
-		&substrate_deps,
-		migration_sequence.clone(),
-		bfc_client.clone(),
-	);
-
-	print_relay_targets(&manager_deps);
-
-	Ok(RelayBase {
-		task_manager: spawn_relayer_tasks(
-			task_manager,
-			FullDeps {
-				bootstrap_shared_data,
-				manager_deps,
-				periodic_deps,
-				handler_deps,
-				substrate_deps,
-				btc_deps,
-			},
-			&config,
-		),
-	})
-}
-
-struct RelayBase {
-	/// The task manager of the relayer.
-	task_manager: TaskManager,
 }

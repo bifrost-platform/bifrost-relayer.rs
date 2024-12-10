@@ -5,22 +5,22 @@ use alloy::{
 	rpc::types::TransactionRequest,
 	transports::Transport,
 };
-use byteorder::{BigEndian, ByteOrder as _};
 use cron::Schedule;
 use eyre::Result;
+use sc_service::SpawnTaskHandle;
 use std::{collections::BTreeMap, str::FromStr, sync::Arc};
 use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
 
-use br_client::eth::{traits::SocketRelayBuilder, EthClient};
+use br_client::eth::{send_transaction, traits::SocketRelayBuilder, EthClient};
 use br_primitives::{
 	constants::{
-		errors::{INVALID_BIFROST_NATIVENESS, INVALID_CHAIN_ID, INVALID_PERIODIC_SCHEDULE},
+		errors::{INVALID_BIFROST_NATIVENESS, INVALID_PERIODIC_SCHEDULE},
 		schedule::{ROLLBACK_CHECK_MINIMUM_INTERVAL, ROLLBACK_CHECK_SCHEDULE},
 	},
 	contracts::socket::Socket_Struct::{RequestID, RequestInfo, Signatures, Socket_Message},
-	eth::{GasCoefficient, RelayDirection, SocketEventStatus},
+	eth::{RelayDirection, SocketEventStatus},
 	periodic::{RawRequestID, RollbackableMessage},
-	tx::{RollbackMetadata, TxRequestMessage, TxRequestMetadata, TxRequestSender},
+	tx::{RollbackMetadata, TxRequestMetadata},
 	utils::sub_display_format,
 };
 
@@ -45,36 +45,37 @@ where
 	rollback_receiver: UnboundedReceiver<Socket_Message>,
 	/// The local storage saving emitted `Socket` event messages.
 	rollback_msgs: BTreeMap<RawRequestID, RollbackableMessage>,
-	/// The sender that sends messages to the tx request channel.
-	tx_request_sender: Arc<TxRequestSender>,
 	/// The time schedule that represents when to check heartbeat pulsed.
 	schedule: Schedule,
+	/// The handle to spawn tasks.
+	handle: SpawnTaskHandle,
 }
 
 impl<F, P, T> SocketRollbackEmitter<F, P, T>
 where
-	F: TxFiller + WalletProvider,
-	P: Provider<T>,
+	F: TxFiller + WalletProvider + 'static,
+	P: Provider<T> + 'static,
 	T: Transport + Clone,
 {
 	/// Instantiates a new `SocketRollbackEmitter`.
 	pub fn new(
-		tx_request_sender: Arc<TxRequestSender>,
+		client: Arc<EthClient<F, P, T>>,
 		system_clients: Arc<BTreeMap<ChainId, Arc<EthClient<F, P, T>>>>,
-	) -> (Self, UnboundedSender<Socket_Message>) {
+		handle: SpawnTaskHandle,
+	) -> (Self, Arc<UnboundedSender<Socket_Message>>) {
 		let (sender, rollback_receiver) = mpsc::unbounded_channel::<Socket_Message>();
 
 		(
 			Self {
-				client: system_clients.get(&tx_request_sender.id).expect(INVALID_CHAIN_ID).clone(),
+				client,
 				system_clients,
 				rollback_receiver,
 				rollback_msgs: BTreeMap::new(),
-				tx_request_sender,
 				schedule: Schedule::from_str(ROLLBACK_CHECK_SCHEDULE)
 					.expect(INVALID_PERIODIC_SCHEDULE),
+				handle,
 			},
-			sender,
+			Arc::new(sender),
 		)
 	}
 
@@ -83,13 +84,13 @@ where
 		let src_request = self
 			.get_socket_request(
 				&socket_msg.req_id,
-				BigEndian::read_u32(&socket_msg.req_id.ChainIndex.0) as ChainId,
+				Into::<u32>::into(socket_msg.req_id.ChainIndex) as ChainId,
 			)
 			.await?;
 		let dst_request = self
 			.get_socket_request(
 				&socket_msg.req_id,
-				BigEndian::read_u32(&socket_msg.ins_code.ChainIndex.0) as ChainId,
+				Into::<u32>::into(socket_msg.ins_code.ChainIndex) as ChainId,
 			)
 			.await?;
 
@@ -101,9 +102,9 @@ where
 				SocketEventStatus::Committed | SocketEventStatus::Rollbacked => return Ok(true),
 				_ => (),
 			}
-			if self.is_inbound_sequence(
-				BigEndian::read_u32(&socket_msg.ins_code.ChainIndex.0) as ChainId
-			) {
+			if self
+				.is_inbound_sequence(Into::<u32>::into(socket_msg.ins_code.ChainIndex) as ChainId)
+			{
 				match dst_status {
 					SocketEventStatus::Executed
 					| SocketEventStatus::Reverted
@@ -175,13 +176,13 @@ where
 			true,
 			SocketEventStatus::Failed,
 			socket_msg.req_id.sequence,
-			BigEndian::read_u32(&socket_msg.req_id.ChainIndex.0) as ChainId,
-			BigEndian::read_u32(&socket_msg.ins_code.ChainIndex.0) as ChainId,
+			Into::<u32>::into(socket_msg.req_id.ChainIndex) as ChainId,
+			Into::<u32>::into(socket_msg.ins_code.ChainIndex) as ChainId,
 		);
 
 		// transaction executed on Bifrost so no random delay required.
 		// due to majority checks, higher gas coefficient required.
-		self.request_send_transaction(tx_request, metadata, false, GasCoefficient::Mid);
+		self.request_send_transaction(tx_request, metadata);
 	}
 
 	/// Tries to rollback the given outbound socket message.
@@ -201,13 +202,13 @@ where
 			false,
 			SocketEventStatus::Rejected,
 			socket_msg.req_id.sequence,
-			BigEndian::read_u32(&socket_msg.req_id.ChainIndex.0) as ChainId,
-			BigEndian::read_u32(&socket_msg.ins_code.ChainIndex.0) as ChainId,
+			Into::<u32>::into(socket_msg.req_id.ChainIndex) as ChainId,
+			Into::<u32>::into(socket_msg.ins_code.ChainIndex) as ChainId,
 		);
 
 		// transaction executed on External chain's so random delay required.
 		// aggregated relay typed transactions are good with low gas coefficient.
-		self.request_send_transaction(tx_request, metadata, true, GasCoefficient::Low);
+		self.request_send_transaction(tx_request, metadata);
 
 		Ok(())
 	}
@@ -218,8 +219,8 @@ where
 		while let Ok(msg) = self.rollback_receiver.try_recv() {
 			// prevent rollback for bitcoin bridges
 			if let Some(bitcoin_chain_id) = self.client.get_bitcoin_chain_id() {
-				if BigEndian::read_u32(&msg.req_id.ChainIndex.0) as u64 == bitcoin_chain_id
-					|| BigEndian::read_u32(&msg.ins_code.ChainIndex.0) as u64 == bitcoin_chain_id
+				if Into::<u32>::into(msg.req_id.ChainIndex) as ChainId == bitcoin_chain_id
+					|| Into::<u32>::into(msg.ins_code.ChainIndex) as ChainId == bitcoin_chain_id
 				{
 					continue;
 				}
@@ -243,46 +244,14 @@ where
 	}
 
 	/// Request a socket rollback transaction to the target tx request channel.
-	fn request_send_transaction(
-		&self,
-		tx_request: TransactionRequest,
-		metadata: RollbackMetadata,
-		give_random_delay: bool,
-		gas_coefficient: GasCoefficient,
-	) {
-		// asynchronous transaction tasks will work fine for rollback transactions,
-		// so `is_bootstrap` parameter is set to `false`.
-		match self.tx_request_sender.send(TxRequestMessage::new(
+	fn request_send_transaction(&self, tx_request: TransactionRequest, metadata: RollbackMetadata) {
+		send_transaction(
+			self.client.clone(),
 			tx_request,
-			TxRequestMetadata::Rollback(metadata.clone()),
-			true,
-			give_random_delay,
-			gas_coefficient,
-			false,
-		)) {
-			Ok(()) => {
-				log::info!(
-					target: &self.client.get_chain_name(),
-					"-[{}] 🔃 Try Rollback::Socket: {}",
-					sub_display_format(SUB_LOG_TARGET),
-					metadata
-				);
-			},
-			Err(error) => {
-				let log_msg = format!(
-					"-[{}]-[{}] ❗️ Failed to try Rollback::Socket: {}, Error: {}",
-					sub_display_format(SUB_LOG_TARGET),
-					self.client.address(),
-					metadata,
-					error
-				);
-				log::error!(target: &self.client.get_chain_name(), "{log_msg}");
-				sentry::capture_message(
-					&format!("[{}]{log_msg}", &self.client.get_chain_name()),
-					sentry::Level::Error,
-				);
-			},
-		}
+			SUB_LOG_TARGET.to_string(),
+			TxRequestMetadata::Rollback(metadata),
+			self.handle.clone(),
+		);
 	}
 }
 
@@ -308,8 +277,8 @@ where
 #[async_trait::async_trait]
 impl<F, P, T> PeriodicWorker for SocketRollbackEmitter<F, P, T>
 where
-	F: TxFiller + WalletProvider,
-	P: Provider<T>,
+	F: TxFiller + WalletProvider + 'static,
+	P: Provider<T> + 'static,
 	T: Transport + Clone,
 {
 	fn schedule(&self) -> Schedule {
@@ -345,7 +314,7 @@ where
 						continue;
 					}
 					// the pending request has not been processed in the waiting period. rollback should be handled.
-					self.try_rollback(&rollback_msg.socket_msg).await;
+					self.try_rollback(&rollback_msg.socket_msg).await?;
 					handled_req_ids.push(req_id);
 				}
 			}

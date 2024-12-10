@@ -1,6 +1,5 @@
-use alloy::primitives::{ChainId, U256};
+use alloy::primitives::U256;
 use serde::Deserialize;
-use tokio::sync::mpsc::{error::SendError, UnboundedSender};
 
 use crate::contracts::socket::Socket_Struct::Socket_Message;
 
@@ -40,21 +39,3 @@ impl RollbackableMessage {
 
 /// The primitive sequence ID of a single socket request.
 pub type RawRequestID = u128;
-
-/// The channel message sender for rollbackable socket messages.
-pub struct RollbackSender {
-	/// The unique chain ID for this sender.
-	pub id: ChainId,
-	/// The channel message sender.
-	pub sender: UnboundedSender<Socket_Message>,
-}
-
-impl RollbackSender {
-	pub fn new(id: ChainId, sender: UnboundedSender<Socket_Message>) -> Self {
-		Self { id, sender }
-	}
-
-	pub fn send(&self, message: Socket_Message) -> Result<(), SendError<Socket_Message>> {
-		self.sender.send(message)
-	}
-}

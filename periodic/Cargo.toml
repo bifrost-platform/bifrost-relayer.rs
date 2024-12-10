@@ -28,7 +28,7 @@ subxt = { workspace = true }
 array-bytes = { workspace = true }
 miniscript = { workspace = true }
 eyre = { workspace = true }
-byteorder = { workspace = true }
+sc-service = { workspace = true }
 
 # Bifrost Relayer
 br-cli = { path = "../client/cli", default-features = false }

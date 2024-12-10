@@ -691,28 +691,6 @@ impl TxRequestMessage {
 	}
 }
 
-/// The message sender connected to the event channel.
-pub struct TxRequestSender {
-	/// The chain ID of the event channel.
-	pub id: ChainId,
-	/// The message sender.
-	pub sender: UnboundedSender<TxRequestMessage>,
-	/// Is Bifrost network?
-	pub is_native: bool,
-}
-
-impl TxRequestSender {
-	/// Instantiates a new `TxRequestSender` instance.
-	pub fn new(id: ChainId, sender: UnboundedSender<TxRequestMessage>, is_native: bool) -> Self {
-		Self { id, sender, is_native }
-	}
-
-	/// Sends a new event message.
-	pub fn send(&self, message: TxRequestMessage) -> Result<(), SendError<TxRequestMessage>> {
-		self.sender.send(message)
-	}
-}
-
 pub struct XtRequestMessage {
 	/// The remaining retries of the transaction request.
 	pub retries_remaining: u8,

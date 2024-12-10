@@ -1,6 +1,4 @@
 use super::*;
-use br_client::eth::{events::EventManager, EthClient};
-use br_primitives::cli::Configuration;
 
 pub struct ManagerDeps<F, P, T>
 where
@@ -8,7 +6,7 @@ where
 	P: Provider<T>,
 	T: Transport + Clone,
 {
-	/// Bifrost chain id.
+	/// Bifrost client
 	pub bifrost_client: Arc<EthClient<F, P, T>>,
 	/// The `EthClient`'s for each specified chain.
 	pub clients: Arc<BTreeMap<ChainId, Arc<EthClient<F, P, T>>>>,

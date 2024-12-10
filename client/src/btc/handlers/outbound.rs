@@ -3,7 +3,7 @@ use crate::{
 		block::{Event, EventMessage as BTCEventMessage, EventType},
 		handlers::{Handler, LOG_TARGET},
 	},
-	eth::{traits::SocketRelayBuilder, EthClient},
+	eth::{send_transaction, traits::SocketRelayBuilder, EthClient},
 };
 
 use alloy::{
@@ -24,20 +24,17 @@ use br_primitives::{
 		socket_queue::SocketQueueContract::SocketQueueContractInstance,
 	},
 	eth::{BootstrapState, BuiltRelayTransaction, SocketEventStatus},
-	tx::{SocketRelayMetadata, TxRequestMetadata, TxRequestSender},
+	tx::{SocketRelayMetadata, TxRequestMetadata},
 	utils::sub_display_format,
 };
-use byteorder::{BigEndian, ByteOrder};
 use eyre::Result;
-use miniscript::bitcoin::hashes::Hash;
-use miniscript::bitcoin::Txid;
-use std::{
-	collections::{BTreeMap, BTreeSet},
-	sync::Arc,
-};
+use miniscript::bitcoin::{hashes::Hash, Txid};
+use sc_service::SpawnTaskHandle;
+use std::sync::Arc;
 use tokio::sync::broadcast::Receiver;
+use tokio_stream::StreamExt;
 
-use super::{BootstrapHandler, EventMessage, TxRequester};
+use super::{BootstrapHandler, EventMessage};
 
 const SUB_LOG_TARGET: &str = "outbound-handler";
 
@@ -48,11 +45,12 @@ where
 	T: Transport + Clone,
 {
 	bfc_client: Arc<EthClient<F, P, T>>,
-	clients: Arc<BTreeMap<ChainId, Arc<EthClient<F, P, T>>>>,
 	event_receiver: Receiver<BTCEventMessage>,
 	target_event: EventType,
 	/// The bootstrap shared data.
 	bootstrap_shared_data: Arc<BootstrapSharedData>,
+	/// The handle to spawn tasks.
+	handle: SpawnTaskHandle,
 }
 
 impl<F, P, T> OutboundHandler<F, P, T>
@@ -63,16 +61,16 @@ where
 {
 	pub fn new(
 		bfc_client: Arc<EthClient<F, P, T>>,
-		clients: Arc<BTreeMap<ChainId, Arc<EthClient<F, P, T>>>>,
 		event_receiver: Receiver<BTCEventMessage>,
 		bootstrap_shared_data: Arc<BootstrapSharedData>,
+		handle: SpawnTaskHandle,
 	) -> Self {
 		Self {
 			bfc_client,
-			clients,
 			event_receiver,
 			target_event: EventType::Outbound,
 			bootstrap_shared_data,
+			handle,
 		}
 	}
 
@@ -98,27 +96,11 @@ where
 	}
 }
 
-// #[async_trait::async_trait]
-// impl<F, P, T> TxRequester<F, P, T> for OutboundHandler<F, P, T>
-// where
-// 	F: TxFiller<Ethereum> + WalletProvider<Ethereum>,
-// 	P: Provider<T, Ethereum>,
-// 	T: Transport + Clone,
-// {
-// 	fn tx_request_sender(&self) -> Arc<TxRequestSender> {
-// 		self.tx_request_sender.clone()
-// 	}
-
-// 	fn bfc_client(&self) -> Arc<EthClient<F, P, T>> {
-// 		self.bfc_client.clone()
-// 	}
-// }
-
 #[async_trait::async_trait]
 impl<F, P, T> Handler for OutboundHandler<F, P, T>
 where
-	F: TxFiller + WalletProvider,
-	P: Provider<T>,
+	F: TxFiller + WalletProvider + 'static,
+	P: Provider<T> + 'static,
 	T: Transport + Clone,
 {
 	async fn run(&mut self) -> Result<()> {
@@ -140,39 +122,41 @@ where
 					msg.events.len()
 				);
 
-				let txids: BTreeSet<Txid> = msg.events.iter().map(|event| event.txid).collect();
-				for txid in txids {
-					let socket_messages = self.check_socket_queue(txid).await?;
-					for mut msg in socket_messages {
-						msg.status = SocketEventStatus::Executed.into();
-
-						if let Some(built_transaction) =
-							self.build_transaction(msg.clone(), false, Default::default()).await?
-						{
-							// self.request_send_transaction(
-							// 	built_transaction.tx_request,
-							// 	TxRequestMetadata::SocketRelay(SocketRelayMetadata::new(
-							// 		false,
-							// 		SocketEventStatus::from(msg.status),
-							// 		msg.req_id.sequence,
-							// 		BigEndian::read_u32(&msg.req_id.ChainIndex.0) as ChainId,
-							// 		BigEndian::read_u32(&msg.ins_code.ChainIndex.0) as ChainId,
-							// 		msg.params.to,
-							// 		false,
-							// 	)),
-							// 	SUB_LOG_TARGET,
-							// )
-							// .await;
-							todo!()
-						}
-					}
+				let mut stream = tokio_stream::iter(msg.events.into_iter());
+				while let Some(event) = stream.next().await {
+					self.process_event(event).await?;
 				}
 			}
 		}
 	}
 
-	async fn process_event(&self, _event_tx: Event) -> Result<()> {
-		unreachable!("unimplemented")
+	async fn process_event(&self, event: Event) -> Result<()> {
+		let mut stream = tokio_stream::iter(self.check_socket_queue(event.txid).await?.into_iter());
+		while let Some(mut msg) = stream.next().await {
+			msg.status = SocketEventStatus::Executed.into();
+
+			if let Some(built_transaction) =
+				self.build_transaction(msg.clone(), false, Default::default()).await?
+			{
+				send_transaction(
+					self.bfc_client.clone(),
+					built_transaction.tx_request,
+					format!("{} ({})", SUB_LOG_TARGET, self.bfc_client.get_chain_name()),
+					TxRequestMetadata::SocketRelay(SocketRelayMetadata::new(
+						false,
+						SocketEventStatus::from(msg.status),
+						msg.req_id.sequence,
+						Into::<u32>::into(msg.req_id.ChainIndex) as ChainId,
+						Into::<u32>::into(msg.ins_code.ChainIndex) as ChainId,
+						msg.params.to,
+						false,
+					)),
+					self.handle.clone(),
+				);
+			}
+		}
+
+		Ok(())
 	}
 
 	#[inline]

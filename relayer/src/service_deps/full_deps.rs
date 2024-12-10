@@ -3,8 +3,8 @@ use super::*;
 /// The relayer client dependencies.
 pub struct FullDeps<F, P, T>
 where
-	F: TxFiller + WalletProvider,
-	P: Provider<T>,
+	F: TxFiller + WalletProvider + 'static,
+	P: Provider<T> + 'static,
 	T: Transport + Clone,
 {
 	pub bootstrap_shared_data: BootstrapSharedData,

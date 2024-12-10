@@ -5,24 +5,28 @@ use br_primitives::{
 	},
 	contracts::authority::BfcStaking::round_meta_data,
 	eth::{AggregatorContracts, ProtocolContracts, ProviderMetadata},
+	tx::TxRequestMetadata,
+	utils::generate_delay,
 };
 
 use alloy::{
 	network::Ethereum,
 	primitives::{
-		utils::{format_units, parse_ether},
+		utils::{format_units, parse_ether, Unit},
 		Address, ChainId,
 	},
 	providers::{
 		fillers::{FillProvider, TxFiller},
 		PendingTransactionBuilder, Provider, RootProvider, SendableTx, WalletProvider,
 	},
+	rpc::types::TransactionRequest,
 	signers::{local::LocalSigner, Signature, Signer as _},
 	transports::{Transport, TransportResult},
 };
 use eyre::{eyre, Result};
 use k256::ecdsa::SigningKey;
-use std::sync::Arc;
+use sc_service::SpawnTaskHandle;
+use std::{sync::Arc, time::Duration};
 use url::Url;
 
 pub mod events;
@@ -179,4 +183,55 @@ where
 	) -> TransportResult<PendingTransactionBuilder<T, Ethereum>> {
 		self.inner.send_transaction_internal(tx).await
 	}
+}
+
+pub fn send_transaction<F, P, T>(
+	client: Arc<EthClient<F, P, T>>,
+	mut request: TransactionRequest,
+	requester: String,
+	metadata: TxRequestMetadata,
+	handle: SpawnTaskHandle,
+) where
+	F: TxFiller + WalletProvider + 'static,
+	P: Provider<T> + 'static,
+	T: Transport + Clone,
+{
+	handle.spawn("send_transaction", None, async move {
+		if client.metadata.is_native {
+			// gas price is fixed to 1000 Gwei on bifrost network
+			request.max_fee_per_gas = Some(0);
+			request.max_priority_fee_per_gas = Some(1000 * Unit::GWEI.wei().to::<u128>());
+		} else {
+			// to avoid duplicate(will revert) external networks transactions
+			tokio::time::sleep(Duration::from_millis(generate_delay())).await;
+
+			if !client.metadata.eip1559 {
+				// TODO: if transaction failed by gas price issue, should bring back `GasCoefficient` here.
+				request.gas_price = Some(client.get_gas_price().await.unwrap());
+			}
+		}
+
+		match client.send_transaction(request).await {
+			Ok(pending) => {
+				log::info!(
+					target: &requester,
+					" 🔖 Send transaction ({} tx:{}): {}",
+					client.get_chain_name(),
+					pending.tx_hash(),
+					metadata
+				);
+			},
+			Err(err) => {
+				let msg = format!(
+					" ❗️ Failed to send transaction ({} address:{}): {}, Error: {}",
+					client.get_chain_name(),
+					client.address(),
+					metadata,
+					err
+				);
+				log::error!(target: &requester, "{msg}");
+				sentry::capture_message(&msg, sentry::Level::Error);
+			},
+		}
+	});
 }

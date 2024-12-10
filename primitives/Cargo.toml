@@ -32,3 +32,4 @@ bitcoincore-rpc = { workspace = true }
 url = { workspace = true }
 sha3 = { workspace = true }
 k256 = { workspace = true }
+rand = { workspace = true }

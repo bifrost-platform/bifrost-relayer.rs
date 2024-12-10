@@ -2,8 +2,8 @@ use super::*;
 
 pub struct HandlerDeps<F, P, T>
 where
-	F: TxFiller + WalletProvider,
-	P: Provider<T>,
+	F: TxFiller + WalletProvider + 'static,
+	P: Provider<T> + 'static,
 	T: Transport + Clone,
 {
 	/// The `SocketRelayHandler`'s for each specified chain.
@@ -23,9 +23,11 @@ where
 		manager_deps: &ManagerDeps<F, P, T>,
 		bootstrap_shared_data: BootstrapSharedData,
 		bfc_client: Arc<EthClient<F, P, T>>,
+		rollback_senders: Arc<BTreeMap<ChainId, Arc<UnboundedSender<Socket_Message>>>>,
+		task_manager: &TaskManager,
 	) -> Self {
 		let mut handlers = (vec![], vec![]);
-		let ManagerDeps { clients, event_managers, .. } = manager_deps;
+		let ManagerDeps { bifrost_client, clients, event_managers } = manager_deps;
 
 		config.relayer_config.handler_configs.iter().for_each(
 			|handler_config| match handler_config.handler_type {
@@ -34,6 +36,9 @@ where
 						*target,
 						event_managers.get(target).expect(INVALID_CHAIN_ID).sender.subscribe(),
 						clients.clone(),
+						bifrost_client.clone(),
+						rollback_senders.clone(),
+						task_manager.spawn_handle(),
 						Arc::new(bootstrap_shared_data.clone()),
 					));
 				}),
@@ -47,6 +52,7 @@ where
 							.subscribe(),
 						clients.clone(),
 						Arc::new(bootstrap_shared_data.clone()),
+						task_manager.spawn_handle(),
 					));
 				},
 			},

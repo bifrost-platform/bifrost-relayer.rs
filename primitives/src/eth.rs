@@ -44,6 +44,8 @@ pub struct ProviderMetadata {
 	pub get_logs_batch_size: u64,
 	/// The `get_block` request interval in milliseconds.
 	pub call_interval: u64,
+	/// The flag whether EIP-1559 is enabled.
+	pub eip1559: bool,
 	/// Relay direction when CCCP event points this chain as destination.
 	pub if_destination_chain: RelayDirection,
 	/// The flag whether the chain is Bifrost(native) or an external chain.
@@ -58,6 +60,7 @@ impl ProviderMetadata {
 		bitcoin_chain_id: Option<ChainId>,
 		block_confirmations: u64,
 		call_interval: u64,
+		eip1559: bool,
 		get_logs_batch_size: u64,
 		is_native: bool,
 	) -> Self {
@@ -69,6 +72,7 @@ impl ProviderMetadata {
 			block_confirmations: block_confirmations.saturating_add(get_logs_batch_size),
 			get_logs_batch_size,
 			call_interval,
+			eip1559,
 			is_native,
 			if_destination_chain: match is_native {
 				true => RelayDirection::Inbound,

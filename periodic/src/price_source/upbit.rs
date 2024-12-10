@@ -112,7 +112,7 @@ impl UpbitPriceFetcher {
 				Err(_) => Err(Error),
 			}
 		} else {
-			todo!()
+			unimplemented!()
 		}
 	}
 

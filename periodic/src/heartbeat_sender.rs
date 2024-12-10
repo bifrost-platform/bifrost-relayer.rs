@@ -1,22 +1,17 @@
 use alloy::{
-	primitives::ChainId,
 	providers::{fillers::TxFiller, Provider, WalletProvider},
 	rpc::types::TransactionRequest,
 	transports::Transport,
 };
-use br_client::eth::EthClient;
+use br_client::eth::{send_transaction, EthClient};
 use br_primitives::{
-	constants::{
-		errors::{INVALID_BIFROST_NATIVENESS, INVALID_PERIODIC_SCHEDULE},
-		schedule::HEARTBEAT_SCHEDULE,
-	},
-	eth::GasCoefficient,
-	tx::{HeartbeatMetadata, TxRequestMessage, TxRequestMetadata},
-	utils::sub_display_format,
+	constants::{errors::INVALID_PERIODIC_SCHEDULE, schedule::HEARTBEAT_SCHEDULE},
+	tx::{HeartbeatMetadata, TxRequestMetadata},
 };
 use cron::Schedule;
 use eyre::Result;
-use std::{collections::BTreeMap, str::FromStr, sync::Arc};
+use sc_service::SpawnTaskHandle;
+use std::{str::FromStr, sync::Arc};
 
 use crate::traits::PeriodicWorker;
 
@@ -33,15 +28,15 @@ where
 	schedule: Schedule,
 	/// The `EthClient` to interact with the bifrost network.
 	client: Arc<EthClient<F, P, T>>,
-	/// The clients to interact with external chains.
-	clients: Arc<BTreeMap<ChainId, Arc<EthClient<F, P, T>>>>,
+	/// The handle to spawn tasks.
+	handle: SpawnTaskHandle,
 }
 
 #[async_trait::async_trait]
 impl<F, P, T> PeriodicWorker for HeartbeatSender<F, P, T>
 where
-	F: TxFiller + WalletProvider,
-	P: Provider<T>,
+	F: TxFiller + WalletProvider + 'static,
+	P: Provider<T> + 'static,
 	T: Transport + Clone,
 {
 	fn schedule(&self) -> Schedule {
@@ -75,19 +70,16 @@ where
 
 impl<F, P, T> HeartbeatSender<F, P, T>
 where
-	F: TxFiller + WalletProvider,
-	P: Provider<T>,
+	F: TxFiller + WalletProvider + 'static,
+	P: Provider<T> + 'static,
 	T: Transport + Clone,
 {
 	/// Instantiates a new `HeartbeatSender` instance.
-	pub fn new(
-		client: Arc<EthClient<F, P, T>>,
-		clients: Arc<BTreeMap<ChainId, Arc<EthClient<F, P, T>>>>,
-	) -> Self {
+	pub fn new(client: Arc<EthClient<F, P, T>>, handle: SpawnTaskHandle) -> Self {
 		Self {
 			schedule: Schedule::from_str(HEARTBEAT_SCHEDULE).expect(INVALID_PERIODIC_SCHEDULE),
 			client,
-			clients,
+			handle,
 		}
 	}
 
@@ -105,28 +97,12 @@ where
 		tx_request: TransactionRequest,
 		metadata: HeartbeatMetadata,
 	) {
-		// match self.tx_request_sender.send(TxRequestMessage::new(
-		// 	tx_request,
-		// 	TxRequestMetadata::Heartbeat(metadata.clone()),
-		// 	false,
-		// 	false,
-		// 	GasCoefficient::Low,
-		// 	false,
-		// )) {
-		// 	Ok(()) => log::info!(
-		// 		target: &self.client.get_chain_name(),
-		// 		"-[{}] 💓 Request Heartbeat transaction: {}",
-		// 		sub_display_format(SUB_LOG_TARGET),
-		// 		metadata
-		// 	),
-		// 	Err(error) => log::error!(
-		// 		target: &self.client.get_chain_name(),
-		// 		"-[{}] ❗️ Failed to request Heartbeat transaction: {}, Error: {}",
-		// 		sub_display_format(SUB_LOG_TARGET),
-		// 		metadata,
-		// 		error.to_string()
-		// 	),
-		// }
-		todo!()
+		send_transaction(
+			self.client.clone(),
+			tx_request,
+			SUB_LOG_TARGET.to_string(),
+			TxRequestMetadata::Heartbeat(metadata),
+			self.handle.clone(),
+		);
 	}
 }

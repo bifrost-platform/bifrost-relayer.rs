@@ -11,18 +11,15 @@ use chrono::{DateTime, Utc};
 use cron::Schedule;
 use eyre::Result;
 use rand::Rng;
+use sc_service::SpawnTaskHandle;
 use tokio::time::sleep;
 
-use br_client::eth::EthClient;
+use br_client::eth::{send_transaction, EthClient};
 use br_primitives::{
-	constants::{
-		errors::{INVALID_BIFROST_NATIVENESS, INVALID_PERIODIC_SCHEDULE},
-		schedule::PRICE_FEEDER_SCHEDULE,
-	},
+	constants::{errors::INVALID_PERIODIC_SCHEDULE, schedule::PRICE_FEEDER_SCHEDULE},
 	contracts::socket::get_asset_oids,
-	eth::GasCoefficient,
 	periodic::{PriceResponse, PriceSource},
-	tx::{PriceFeedMetadata, TxRequestMessage, TxRequestMetadata, TxRequestSender},
+	tx::{PriceFeedMetadata, TxRequestMetadata},
 	utils::sub_display_format,
 };
 
@@ -52,13 +49,15 @@ where
 	asset_oid: BTreeMap<&'static str, B256>,
 	/// The vector that contains each `EthClient`.
 	clients: Arc<BTreeMap<ChainId, Arc<EthClient<F, P, T>>>>,
+	/// The handle to spawn tasks.
+	handle: SpawnTaskHandle,
 }
 
 #[async_trait]
 impl<F, P, T> PeriodicWorker for OraclePriceFeeder<F, P, T>
 where
-	F: TxFiller + WalletProvider,
-	P: Provider<T>,
+	F: TxFiller + WalletProvider + 'static,
+	P: Provider<T> + 'static,
 	T: Transport + Clone,
 {
 	fn schedule(&self) -> Schedule {
@@ -92,13 +91,14 @@ where
 
 impl<F, P, T> OraclePriceFeeder<F, P, T>
 where
-	F: TxFiller + WalletProvider,
-	P: Provider<T>,
+	F: TxFiller + WalletProvider + 'static,
+	P: Provider<T> + 'static,
 	T: Transport + Clone,
 {
 	pub fn new(
 		client: Arc<EthClient<F, P, T>>,
 		clients: Arc<BTreeMap<ChainId, Arc<EthClient<F, P, T>>>>,
+		handle: SpawnTaskHandle,
 	) -> Self {
 		let asset_oid = get_asset_oids();
 
@@ -109,6 +109,7 @@ where
 			asset_oid,
 			client,
 			clients,
+			handle,
 		}
 	}
 
@@ -296,37 +297,12 @@ where
 		tx_request: TransactionRequest,
 		metadata: PriceFeedMetadata,
 	) {
-		// match self.tx_request_sender.send(TxRequestMessage::new(
-		// 	tx_request,
-		// 	TxRequestMetadata::PriceFeed(metadata.clone()),
-		// 	false,
-		// 	false,
-		// 	GasCoefficient::Mid,
-		// 	false,
-		// )) {
-		// 	Ok(()) => log::info!(
-		// 		target: &self.client.get_chain_name(),
-		// 		"-[{}] 💵 Request price feed transaction to chain({:?}): {}",
-		// 		sub_display_format(SUB_LOG_TARGET),
-		// 		self.client.chain_id(),
-		// 		metadata
-		// 	),
-		// 	Err(error) => {
-		// 		let log_msg = format!(
-		// 			"-[{}]-[{}] ❗️ Failed to request price feed transaction to chain({:?}): {}, Error: {}",
-		// 			sub_display_format(SUB_LOG_TARGET),
-		// 			self.client.address(),
-		// 			self.client.chain_id(),
-		// 			metadata,
-		// 			error.to_string()
-		// 		);
-		// 		log::error!(target: &self.client.get_chain_name(), "{log_msg}");
-		// 		sentry::capture_message(
-		// 			&format!("[{}]{log_msg}", &self.client.get_chain_name()),
-		// 			sentry::Level::Error,
-		// 		);
-		// 	},
-		// }
-		todo!()
+		send_transaction(
+			self.client.clone(),
+			tx_request,
+			SUB_LOG_TARGET.to_string(),
+			TxRequestMetadata::PriceFeed(metadata),
+			self.handle.clone(),
+		);
 	}
 }
