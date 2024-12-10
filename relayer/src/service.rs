@@ -24,7 +24,7 @@ use br_client::{
 		handlers::Handler as _,
 		storage::{keypair::KeypairStorage, pending_outbound::PendingOutboundPool},
 	},
-	eth::{traits::Handler as _, EthClient},
+	eth::{retry::RetryBackoffLayer, traits::Handler as _, EthClient},
 };
 use br_periodic::traits::PeriodicWorker;
 use br_primitives::{
@@ -35,10 +35,7 @@ use br_primitives::{
 		errors::{INVALID_BITCOIN_NETWORK, INVALID_PRIVATE_KEY, INVALID_PROVIDER_URL},
 		tx::DEFAULT_CALL_RETRIES,
 	},
-	eth::{
-		retry::RetryBackoffLayer, AggregatorContracts, BootstrapState, ProtocolContracts,
-		ProviderMetadata,
-	},
+	eth::{AggregatorContracts, BootstrapState, ProtocolContracts, ProviderMetadata},
 	substrate::MigrationSequence,
 	utils::sub_display_format,
 };
@@ -71,7 +68,11 @@ pub fn relay(config: Configuration) -> Result<TaskManager, ServiceError> {
 			let wallet = EthereumWallet::from(signer.clone());
 
 			let client = RpcClient::builder()
-				.layer(RetryBackoffLayer::new(DEFAULT_CALL_RETRIES, evm_provider.call_interval))
+				.layer(RetryBackoffLayer::new(
+					DEFAULT_CALL_RETRIES,
+					evm_provider.call_interval,
+					evm_provider.name.clone(),
+				))
 				.http(url.clone())
 				.with_poll_interval(Duration::from_millis(evm_provider.call_interval));
 			let provider = Arc::new(
