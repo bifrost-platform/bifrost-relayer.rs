@@ -60,7 +60,7 @@ wget "https://github.com/bifrost-platform/bifrost-relayer.rs/releases/latest/dow
 
 Next, the configuration YAML file contains certain parameters that the operator has to set. For instance, variables such
 as the relayer private key and each EVM provider's RPC endpoints depend on the operator, thus these values should be
-manuall input.
+manually set.
 
 You should prepare RPC endpoints for the following blockchain networks. There are two options for this: 1) operating your own blockchains nodes, or 2) utilizing services that offers RPC endpoints. You can find node providers on the links below. **It’s crucial that each node must be archive-mode enabled**.
 
@@ -70,6 +70,7 @@ You should prepare RPC endpoints for the following blockchain networks. There ar
 - [Polygon](https://wiki.polygon.technology/docs/pos/reference/rpc-endpoints/)
 - [Base](https://docs.base.org/tools/node-providers/)
 - [Arbitrum](https://docs.arbitrum.io/node-running/node-providers)
+- [Bitcoin](https://bitcoin.org/en/full-node)
 
 You should also prepare an EVM account that will act as your relayer account. This account should have enough balance
 for transaction fees used in operations.
