@@ -53,7 +53,7 @@ where
 	pub protocol_contracts: ProtocolContracts<F, P, T>,
 	/// The aggregator contracts.
 	pub aggregator_contracts: AggregatorContracts<F, P, T>,
-	/// send_transaction not allowed while flushing.
+	/// flushing not allowed to work concurrently.
 	pub martial_law: Arc<Mutex<()>>,
 }
 
@@ -276,9 +276,6 @@ pub fn send_transaction<F, P, T>(
 {
 	let this_handle = handle.clone();
 	this_handle.spawn("send_transaction", None, async move {
-		let lock = client.martial_law.lock().await;
-		drop(lock);
-
 		if client.metadata.is_native {
 			// gas price is fixed to 1000 Gwei on bifrost network
 			request.max_fee_per_gas = Some(0);
