@@ -55,7 +55,7 @@ serde = "1.0.188"
 serde_json = "1.0.107"
 
 hex = "0.4.3"
-alloy = { version = "0.6", features = [
+alloy = { version = "0.8", features = [
 	"full",
 	"reqwest-rustls-tls",
 	"provider-txpool-api",

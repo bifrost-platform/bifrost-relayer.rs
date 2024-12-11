@@ -3,7 +3,7 @@ use std::{collections::BTreeMap, sync::Arc, time::Duration};
 use alloy::{
 	dyn_abi::DynSolValue,
 	network::Ethereum,
-	primitives::{Address, ChainId, Signature, B256, U256},
+	primitives::{Address, ChainId, PrimitiveSignature, B256, U256},
 	providers::{
 		fillers::{FillProvider, TxFiller},
 		Provider, WalletProvider,
@@ -221,7 +221,7 @@ where
 			.await?
 			._0;
 
-		let mut signature_vec = Vec::<Signature>::from(signatures);
+		let mut signature_vec = Vec::<PrimitiveSignature>::from(signatures);
 		signature_vec
 			.sort_by_key(|k| recover_message(*k, &self.encode_relayer_array(round, new_relayers)));
 

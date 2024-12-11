@@ -1,4 +1,4 @@
-use alloy::primitives::{keccak256, Address, Signature as EthersSignature, B256};
+use alloy::primitives::{keccak256, Address, PrimitiveSignature as EthersSignature, B256};
 use k256::{ecdsa::VerifyingKey, elliptic_curve::sec1::ToEncodedPoint};
 use rand::Rng as _;
 use sha3::{Digest, Keccak256};
@@ -28,7 +28,7 @@ pub fn hash_bytes(bytes: &Vec<u8>) -> B256 {
 pub fn recover_message(sig: EthersSignature, msg: &[u8]) -> Address {
 	let r = sig.r().to_be_bytes::<32>();
 	let s = sig.s().to_be_bytes::<32>();
-	let v = sig.v().recid();
+	let v = sig.recid();
 	let rs = k256::ecdsa::Signature::from_slice([r, s].concat().as_slice()).unwrap();
 
 	let verify_key =
