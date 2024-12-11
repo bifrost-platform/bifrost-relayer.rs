@@ -10,12 +10,14 @@ use br_primitives::{
 };
 
 use alloy::{
-	network::Ethereum,
+	consensus::Transaction,
+	network::{Ethereum, TransactionResponse as _},
 	primitives::{
 		utils::{format_units, parse_ether, Unit},
 		Address, ChainId,
 	},
 	providers::{
+		ext::TxPoolApi as _,
 		fillers::{FillProvider, TxFiller},
 		PendingTransactionBuilder, Provider, RootProvider, SendableTx, WalletProvider,
 	},
@@ -26,7 +28,8 @@ use alloy::{
 use eyre::{eyre, Result};
 use k256::ecdsa::SigningKey;
 use sc_service::SpawnTaskHandle;
-use std::{sync::Arc, time::Duration};
+use std::{collections::VecDeque, sync::Arc, time::Duration};
+use tokio::sync::Mutex;
 use url::Url;
 
 pub mod events;
@@ -50,6 +53,8 @@ where
 	pub protocol_contracts: ProtocolContracts<F, P, T>,
 	/// The aggregator contracts.
 	pub aggregator_contracts: AggregatorContracts<F, P, T>,
+	/// send_transaction not allowed while flushing.
+	pub martial_law: Arc<Mutex<()>>,
 }
 
 impl<F, P, T> EthClient<F, P, T>
@@ -66,7 +71,14 @@ where
 		protocol_contracts: ProtocolContracts<F, P, T>,
 		aggregator_contracts: AggregatorContracts<F, P, T>,
 	) -> Self {
-		Self { inner, signer, metadata, protocol_contracts, aggregator_contracts }
+		Self {
+			inner,
+			signer,
+			metadata,
+			protocol_contracts,
+			aggregator_contracts,
+			martial_law: Arc::new(Mutex::new(())),
+		}
 	}
 
 	/// Verifies whether the configured chain id and the provider's chain id match.
@@ -164,6 +176,72 @@ where
 		let relayer_manager = self.protocol_contracts.relayer_manager.as_ref().unwrap();
 		Ok(relayer_manager.is_selected_relayer(self.address(), false).call().await?._0)
 	}
+
+	/// Flush stalled transactions from the txpool.
+	pub async fn flush_stalled_transactions(&self) -> Result<()> {
+		let _lock = self.martial_law.lock().await;
+
+		// if the chain is native or txpool is not enabled, do nothing
+		if self.metadata.is_native || self.txpool_status().await.is_err() {
+			return Ok(());
+		}
+
+		// possibility of txpool being flushed automatically. wait for 2 blocks.
+		tokio::time::sleep(Duration::from_millis(self.metadata.call_interval * 2)).await;
+
+		let pending = self.txpool_content().await?.remove_from(&self.address()).pending;
+		let mut transactions = pending.into_iter().map(|(_, tx)| tx).collect::<VecDeque<_>>();
+		transactions.make_contiguous().sort_by(|a, b| a.nonce().cmp(&b.nonce()));
+
+		while let Some(tx) = transactions.pop_front() {
+			if self.get_transaction_receipt(tx.tx_hash()).await.unwrap().is_some() {
+				continue;
+			}
+
+			let mut tx_request = tx.clone().into_request();
+
+			// RBF
+			if tx.is_legacy_gas() {
+				let new_gas_price = ((tx_request.gas_price.unwrap() as f64) * 1.1).ceil() as u128;
+				let current_gas_price = self.get_gas_price().await.unwrap();
+
+				if new_gas_price >= current_gas_price {
+					tx_request.gas_price = Some(new_gas_price);
+				} else {
+					tx_request.gas_price = Some(current_gas_price);
+				}
+			} else {
+				let current_gas_price = self.estimate_eip1559_fees(None).await.unwrap();
+
+				let new_max_fee_per_gas =
+					(tx_request.max_fee_per_gas.unwrap() as f64 * 1.1).ceil() as u128;
+				let new_max_priority_fee_per_gas =
+					(tx_request.max_priority_fee_per_gas.unwrap() as f64 * 1.1).ceil() as u128;
+
+				if new_max_fee_per_gas >= current_gas_price.max_fee_per_gas {
+					tx_request.max_fee_per_gas = Some(new_max_fee_per_gas);
+				} else {
+					tx_request.max_fee_per_gas = Some(current_gas_price.max_fee_per_gas);
+				}
+				if new_max_priority_fee_per_gas >= current_gas_price.max_priority_fee_per_gas {
+					tx_request.max_priority_fee_per_gas = Some(new_max_priority_fee_per_gas);
+				} else {
+					tx_request.max_priority_fee_per_gas =
+						Some(current_gas_price.max_priority_fee_per_gas);
+				}
+			}
+
+			let pending = self
+				.send_transaction(tx_request)
+				.await?
+				.with_timeout(Some(Duration::from_millis(self.metadata.call_interval)));
+			if pending.watch().await.is_err() {
+				transactions.push_front(tx);
+			}
+		}
+
+		Ok(())
+	}
 }
 
 #[async_trait::async_trait]
@@ -196,7 +274,11 @@ pub fn send_transaction<F, P, T>(
 	P: Provider<T> + 'static,
 	T: Transport + Clone,
 {
-	handle.spawn("send_transaction", None, async move {
+	let this_handle = handle.clone();
+	this_handle.spawn("send_transaction", None, async move {
+		let lock = client.martial_law.lock().await;
+		drop(lock);
+
 		if client.metadata.is_native {
 			// gas price is fixed to 1000 Gwei on bifrost network
 			request.max_fee_per_gas = Some(0);
@@ -211,7 +293,7 @@ pub fn send_transaction<F, P, T>(
 			}
 		}
 
-		match client.send_transaction(request).await {
+		match client.send_transaction(request.clone()).await {
 			Ok(pending) => {
 				log::info!(
 					target: &requester,
@@ -231,6 +313,11 @@ pub fn send_transaction<F, P, T>(
 				);
 				log::error!(target: &requester, "{msg}");
 				sentry::capture_message(&msg, sentry::Level::Error);
+
+				if err.to_string().to_lowercase().contains("nonce too low") {
+					client.flush_stalled_transactions().await.unwrap();
+					send_transaction(client, request, requester, metadata, handle);
+				}
 			},
 		}
 	});
