@@ -3,100 +3,112 @@ use crate::{
 		block::{Event, EventMessage as BTCEventMessage, EventType},
 		handlers::{Handler, LOG_TARGET},
 	},
-	eth::{traits::SocketRelayBuilder, EthClient},
+	eth::{send_transaction, traits::SocketRelayBuilder, EthClient},
 };
 
+use alloy::{
+	network::Ethereum,
+	primitives::ChainId,
+	providers::{
+		fillers::{FillProvider, TxFiller},
+		Provider, WalletProvider,
+	},
+	rpc::types::TransactionRequest,
+	sol_types::SolEvent,
+	transports::Transport,
+};
 use br_primitives::{
 	bootstrap::BootstrapSharedData,
 	contracts::{
-		socket::{Socket, SocketMessage},
-		socket_queue::SocketQueueContract,
+		socket::{SocketContract::Socket, Socket_Struct::Socket_Message},
+		socket_queue::SocketQueueContract::SocketQueueContractInstance,
 	},
-	eth::{BootstrapState, BuiltRelayTransaction, ChainID, SocketEventStatus},
-	tx::{SocketRelayMetadata, TxRequestMetadata, TxRequestSender},
+	eth::{BootstrapState, BuiltRelayTransaction, SocketEventStatus},
+	tx::{SocketRelayMetadata, TxRequestMetadata},
 	utils::sub_display_format,
 };
-use ethers::{
-	abi::AbiDecode,
-	prelude::TransactionRequest,
-	providers::{JsonRpcClient, Provider},
-	types::Bytes,
-};
-use miniscript::bitcoin::hashes::Hash;
-use miniscript::bitcoin::Txid;
-use std::{collections::BTreeSet, sync::Arc};
+use eyre::Result;
+use miniscript::bitcoin::{hashes::Hash, Txid};
+use sc_service::SpawnTaskHandle;
+use std::sync::Arc;
 use tokio::sync::broadcast::Receiver;
+use tokio_stream::StreamExt;
 
-use super::{BootstrapHandler, EventMessage, TxRequester};
+use super::{BootstrapHandler, EventMessage};
 
 const SUB_LOG_TARGET: &str = "outbound-handler";
 
-pub struct OutboundHandler<T> {
-	bfc_client: Arc<EthClient<T>>,
-	tx_request_sender: Arc<TxRequestSender>,
+pub struct OutboundHandler<F, P, T>
+where
+	F: TxFiller + WalletProvider,
+	P: Provider<T>,
+	T: Transport + Clone,
+{
+	pub bfc_client: Arc<EthClient<F, P, T>>,
 	event_receiver: Receiver<BTCEventMessage>,
 	target_event: EventType,
 	/// The bootstrap shared data.
 	bootstrap_shared_data: Arc<BootstrapSharedData>,
+	/// The handle to spawn tasks.
+	handle: SpawnTaskHandle,
 }
 
-impl<T: JsonRpcClient> OutboundHandler<T> {
+impl<F, P, T> OutboundHandler<F, P, T>
+where
+	F: TxFiller + WalletProvider,
+	P: Provider<T>,
+	T: Transport + Clone,
+{
 	pub fn new(
-		bfc_client: Arc<EthClient<T>>,
-		tx_request_sender: Arc<TxRequestSender>,
+		bfc_client: Arc<EthClient<F, P, T>>,
 		event_receiver: Receiver<BTCEventMessage>,
 		bootstrap_shared_data: Arc<BootstrapSharedData>,
+		handle: SpawnTaskHandle,
 	) -> Self {
 		Self {
 			bfc_client,
-			tx_request_sender,
 			event_receiver,
 			target_event: EventType::Outbound,
 			bootstrap_shared_data,
+			handle,
 		}
 	}
 
 	#[inline]
-	fn socket_queue(&self) -> &SocketQueueContract<Provider<T>> {
+	fn socket_queue(
+		&self,
+	) -> &SocketQueueContractInstance<T, Arc<FillProvider<F, P, T, Ethereum>>> {
 		self.bfc_client.protocol_contracts.socket_queue.as_ref().unwrap()
 	}
 
 	/// Check if the transaction was originated by CCCP. If true, returns the composed socket messages.
-	async fn check_socket_queue(&self, txid: Txid) -> Vec<SocketMessage> {
+	async fn check_socket_queue(&self, txid: Txid) -> Result<Vec<Socket_Message>> {
 		let mut slice: [u8; 32] = txid.to_byte_array();
 		slice.reverse();
 
-		let socket_messages: Vec<Bytes> = self
-			.bfc_client
-			.contract_call(self.socket_queue().outbound_tx(slice), "socket_queue.outbound_tx")
-			.await;
+		let socket_messages = self.socket_queue().outbound_tx(slice.into()).call().await?._0;
 
 		socket_messages
 			.iter()
-			.map(|bytes| Socket::decode(&bytes).unwrap().msg)
-			.collect()
+			.map(|bytes| Socket::abi_decode_data(bytes, true).map(|decoded| decoded.0))
+			.collect::<Result<Vec<_>, _>>()
+			.map_err(|e| e.into())
 	}
 }
 
 #[async_trait::async_trait]
-impl<T: JsonRpcClient> TxRequester<T> for OutboundHandler<T> {
-	fn tx_request_sender(&self) -> Arc<TxRequestSender> {
-		self.tx_request_sender.clone()
-	}
-
-	fn bfc_client(&self) -> Arc<EthClient<T>> {
-		self.bfc_client.clone()
-	}
-}
-
-#[async_trait::async_trait]
-impl<T: JsonRpcClient + 'static> Handler for OutboundHandler<T> {
-	async fn run(&mut self) {
+impl<F, P, T> Handler for OutboundHandler<F, P, T>
+where
+	F: TxFiller + WalletProvider + 'static,
+	P: Provider<T> + 'static,
+	T: Transport + Clone,
+{
+	async fn run(&mut self) -> Result<()> {
 		loop {
 			if self.is_bootstrap_state_synced_as(BootstrapState::NormalStart).await {
 				let msg = self.event_receiver.recv().await.unwrap();
 
-				if !self.bfc_client.is_selected_relayer().await
+				if !self.bfc_client.is_selected_relayer().await?
 					|| !self.is_target_event(msg.event_type)
 				{
 					continue;
@@ -110,38 +122,41 @@ impl<T: JsonRpcClient + 'static> Handler for OutboundHandler<T> {
 					msg.events.len()
 				);
 
-				let txids: BTreeSet<Txid> = msg.events.iter().map(|event| event.txid).collect();
-				for txid in txids {
-					let socket_messages = self.check_socket_queue(txid).await;
-					for mut msg in socket_messages {
-						msg.status = SocketEventStatus::Executed.into();
-
-						if let Some(built_transaction) =
-							self.build_transaction(msg.clone(), false, Default::default()).await
-						{
-							self.request_send_transaction(
-								built_transaction.tx_request,
-								TxRequestMetadata::SocketRelay(SocketRelayMetadata::new(
-									false,
-									SocketEventStatus::from(msg.status),
-									msg.req_id.sequence,
-									ChainID::from_be_bytes(msg.req_id.chain),
-									ChainID::from_be_bytes(msg.ins_code.chain),
-									msg.params.to,
-									false,
-								)),
-								SUB_LOG_TARGET,
-							)
-							.await;
-						}
-					}
+				let mut stream = tokio_stream::iter(msg.events.into_iter());
+				while let Some(event) = stream.next().await {
+					self.process_event(event).await?;
 				}
 			}
 		}
 	}
 
-	async fn process_event(&self, _event_tx: Event) {
-		unreachable!("unimplemented")
+	async fn process_event(&self, event: Event) -> Result<()> {
+		let mut stream = tokio_stream::iter(self.check_socket_queue(event.txid).await?.into_iter());
+		while let Some(mut msg) = stream.next().await {
+			msg.status = SocketEventStatus::Executed.into();
+
+			if let Some(built_transaction) =
+				self.build_transaction(msg.clone(), false, Default::default()).await?
+			{
+				send_transaction(
+					self.bfc_client.clone(),
+					built_transaction.tx_request,
+					format!("{} ({})", SUB_LOG_TARGET, self.bfc_client.get_chain_name()),
+					TxRequestMetadata::SocketRelay(SocketRelayMetadata::new(
+						false,
+						SocketEventStatus::from(msg.status),
+						msg.req_id.sequence,
+						Into::<u32>::into(msg.req_id.ChainIndex) as ChainId,
+						Into::<u32>::into(msg.ins_code.ChainIndex) as ChainId,
+						msg.params.to,
+						false,
+					)),
+					self.handle.clone(),
+				);
+			}
+		}
+
+		Ok(())
 	}
 
 	#[inline]
@@ -151,39 +166,49 @@ impl<T: JsonRpcClient + 'static> Handler for OutboundHandler<T> {
 }
 
 #[async_trait::async_trait]
-impl<T: JsonRpcClient + 'static> SocketRelayBuilder<T> for OutboundHandler<T> {
-	fn get_client(&self) -> Arc<EthClient<T>> {
+impl<F, P, T> SocketRelayBuilder<F, P, T> for OutboundHandler<F, P, T>
+where
+	F: TxFiller + WalletProvider,
+	P: Provider<T>,
+	T: Transport + Clone,
+{
+	fn get_client(&self) -> Arc<EthClient<F, P, T>> {
 		self.bfc_client.clone()
 	}
 
 	async fn build_transaction(
 		&self,
-		msg: SocketMessage,
+		msg: Socket_Message,
 		_: bool,
-		_: ChainID,
-	) -> Option<BuiltRelayTransaction> {
+		_: ChainId,
+	) -> Result<Option<BuiltRelayTransaction>> {
 		// the original msg must be used for building calldata
-		let (signatures, is_external) = self.build_outbound_signatures(msg.clone()).await;
-		return Some(BuiltRelayTransaction::new(
+		let (signatures, is_external) = self.build_outbound_signatures(msg.clone()).await?;
+		return Ok(Some(BuiltRelayTransaction::new(
 			TransactionRequest::default()
-				.data(self.build_poll_call_data(msg, signatures))
-				.to(self.bfc_client.protocol_contracts.socket.address()),
+				.input(self.build_poll_call_data(msg, signatures))
+				.to(self.bfc_client.protocol_contracts.socket.address().clone()),
 			is_external,
-		));
+		)));
 	}
 }
 
 #[async_trait::async_trait]
-impl<T: JsonRpcClient> BootstrapHandler for OutboundHandler<T> {
+impl<F, P, T> BootstrapHandler for OutboundHandler<F, P, T>
+where
+	F: TxFiller + WalletProvider,
+	P: Provider<T>,
+	T: Transport + Clone,
+{
 	fn bootstrap_shared_data(&self) -> Arc<BootstrapSharedData> {
 		self.bootstrap_shared_data.clone()
 	}
 
-	async fn bootstrap(&self) {
+	async fn bootstrap(&self) -> Result<()> {
 		unreachable!("unimplemented")
 	}
 
-	async fn get_bootstrap_events(&self) -> (EventMessage, EventMessage) {
+	async fn get_bootstrap_events(&self) -> Result<(EventMessage, EventMessage)> {
 		unreachable!("unimplemented")
 	}
 }

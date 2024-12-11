@@ -3,172 +3,172 @@ use crate::{
 		block::{Event, EventMessage as BTCEventMessage, EventType},
 		handlers::{Handler, LOG_TARGET},
 	},
-	eth::EthClient,
+	eth::{send_transaction, EthClient},
 };
 
+use alloy::{
+	network::Ethereum,
+	primitives::{Address as EthAddress, B256, U256},
+	providers::{
+		fillers::{FillProvider, TxFiller},
+		Provider, WalletProvider,
+	},
+	rpc::types::{TransactionInput, TransactionRequest},
+	transports::Transport,
+};
 use bitcoincore_rpc::bitcoin::Txid;
 use br_primitives::{
 	bootstrap::BootstrapSharedData,
-	contracts::bitcoin_socket::BitcoinSocketContract,
+	contracts::bitcoin_socket::BitcoinSocketContract::BitcoinSocketContractInstance,
 	eth::BootstrapState,
-	tx::{BitcoinRelayMetadata, TxRequestMetadata, TxRequestSender},
+	tx::{BitcoinRelayMetadata, TxRequestMetadata},
 	utils::sub_display_format,
 };
+use eyre::Result;
 
-use ethers::{
-	providers::{JsonRpcClient, Provider},
-	types::{Address as EthAddress, Address, TransactionRequest},
-};
 use miniscript::bitcoin::{address::NetworkUnchecked, hashes::Hash, Address as BtcAddress};
-use sp_core::H256;
+use sc_service::SpawnTaskHandle;
 use std::sync::Arc;
 use tokio::sync::broadcast::Receiver;
 use tokio_stream::StreamExt;
 
-use super::{BootstrapHandler, EventMessage, TxRequester};
+use super::{BootstrapHandler, EventMessage};
 
 const SUB_LOG_TARGET: &str = "inbound-handler";
 
-pub struct InboundHandler<T> {
+pub struct InboundHandler<F, P, T>
+where
+	F: TxFiller + WalletProvider,
+	P: Provider<T>,
+	T: Transport + Clone,
+{
 	/// `EthClient` for interact with Bifrost network.
-	bfc_client: Arc<EthClient<T>>,
-	/// Sender that sends messages to tx request channel (Bifrost network)
-	tx_request_sender: Arc<TxRequestSender>,
+	pub bfc_client: Arc<EthClient<F, P, T>>,
 	/// The receiver that consumes new events from the block channel.
 	event_receiver: Receiver<BTCEventMessage>,
 	/// Event type which this handler should handle.
 	target_event: EventType,
 	/// The bootstrap shared data.
 	bootstrap_shared_data: Arc<BootstrapSharedData>,
+	/// The handle to spawn tasks.
+	handle: SpawnTaskHandle,
 }
 
-impl<T: JsonRpcClient + 'static> InboundHandler<T> {
+impl<F, P, T> InboundHandler<F, P, T>
+where
+	F: TxFiller + WalletProvider,
+	P: Provider<T>,
+	T: Transport + Clone,
+{
 	pub fn new(
-		bfc_client: Arc<EthClient<T>>,
-		tx_request_sender: Arc<TxRequestSender>,
+		bfc_client: Arc<EthClient<F, P, T>>,
 		event_receiver: Receiver<BTCEventMessage>,
 		bootstrap_shared_data: Arc<BootstrapSharedData>,
+		handle: SpawnTaskHandle,
 	) -> Self {
 		Self {
 			bfc_client,
-			tx_request_sender,
 			event_receiver,
 			target_event: EventType::Inbound,
 			bootstrap_shared_data,
+			handle,
 		}
 	}
 
 	async fn get_user_bfc_address(
 		&self,
 		vault_address: &BtcAddress<NetworkUnchecked>,
-	) -> Option<EthAddress> {
+	) -> Result<Option<EthAddress>> {
 		let registration_pool =
 			self.bfc_client.protocol_contracts.registration_pool.as_ref().unwrap();
-		let user_address: EthAddress = self
-			.bfc_client
-			.contract_call(
-				registration_pool.user_address(
-					vault_address.clone().assume_checked().to_string(),
-					self.get_current_round().await,
-				),
-				"registration_pool.user_address",
-			)
-			.await;
 
-		if user_address == EthAddress::zero() {
-			None
+		let vault_address = vault_address.clone().assume_checked().to_string();
+		let round = self.get_current_round().await?;
+		let user_address = registration_pool.user_address(vault_address, round).call().await?._0;
+
+		if user_address == EthAddress::ZERO {
+			Ok(None)
 		} else {
-			user_address.into()
+			Ok(Some(user_address))
 		}
 	}
 
-	async fn is_rollback_output(&self, txid: Txid, index: u32) -> bool {
+	async fn is_rollback_output(&self, txid: Txid, index: u32) -> Result<bool> {
 		let socket_queue = self.bfc_client.protocol_contracts.socket_queue.as_ref().unwrap();
 
 		let slice: [u8; 32] = txid.to_byte_array();
+		let psbt_txid =
+			socket_queue.rollback_output(slice.into(), U256::from(index)).call().await?._0;
 
-		let psbt_txid = self
-			.bfc_client
-			.contract_call(
-				socket_queue.rollback_output(slice, index.into()),
-				"socket_queue.rollback_output",
-			)
-			.await;
-
-		!H256::from(psbt_txid).is_zero()
+		Ok(!B256::from(psbt_txid).is_zero())
 	}
 
-	fn build_transaction(&self, event: &Event, user_bfc_address: Address) -> TransactionRequest {
+	fn build_transaction(&self, event: &Event, user_bfc_address: EthAddress) -> TransactionRequest {
 		let calldata = self
 			.bitcoin_socket()
 			.poll(
-				event.txid.to_byte_array(),
-				event.index.into(),
+				event.txid.to_byte_array().into(),
+				U256::from(event.index),
 				user_bfc_address,
-				event.amount.to_sat().into(),
+				U256::from(event.amount.to_sat()),
 			)
 			.calldata()
-			.unwrap();
+			.clone();
 
-		TransactionRequest::default().data(calldata).to(self.bitcoin_socket().address())
+		TransactionRequest::default()
+			.input(TransactionInput::new(calldata))
+			.to(self.bitcoin_socket().address().clone())
 	}
 
 	/// Checks if the relayer has already voted on the event.
-	async fn is_relayer_voted(&self, event: &Event, user_bfc_address: Address) -> bool {
+	async fn is_relayer_voted(&self, event: &Event, user_bfc_address: EthAddress) -> Result<bool> {
 		let hash_key = self
-			.bfc_client
-			.contract_call(
-				self.bitcoin_socket().get_hash_key(
-					event.txid.to_byte_array(),
-					event.index.into(),
-					user_bfc_address,
-					event.amount.to_sat().into(),
-				),
-				"bitcoin_socket.get_hash_key",
+			.bitcoin_socket()
+			.getHashKey(
+				event.txid.to_byte_array().into(),
+				U256::from(event.index),
+				user_bfc_address,
+				U256::from(event.amount.to_sat()),
 			)
-			.await;
+			.call()
+			.await?
+			._0;
 
-		self.bfc_client
-			.contract_call(
-				self.bitcoin_socket().is_relayer_voted(hash_key, self.bfc_client.address()),
-				"bitcoin_socket.is_relayer_voted",
-			)
-			.await
+		Ok(self
+			.bitcoin_socket()
+			.isRelayerVoted(hash_key, self.bfc_client.address())
+			.call()
+			.await?
+			._0)
 	}
 
-	async fn get_current_round(&self) -> u32 {
+	async fn get_current_round(&self) -> Result<u32> {
 		let registration_pool =
 			self.bfc_client.protocol_contracts.registration_pool.as_ref().unwrap();
-		self.bfc_client
-			.contract_call(registration_pool.current_round(), "registration_pool.current_round")
-			.await
+		Ok(registration_pool.current_round().call().await?._0)
 	}
 
 	#[inline]
-	fn bitcoin_socket(&self) -> &BitcoinSocketContract<Provider<T>> {
+	fn bitcoin_socket(
+		&self,
+	) -> &BitcoinSocketContractInstance<T, Arc<FillProvider<F, P, T, Ethereum>>> {
 		self.bfc_client.protocol_contracts.bitcoin_socket.as_ref().unwrap()
 	}
 }
 
 #[async_trait::async_trait]
-impl<T: JsonRpcClient> TxRequester<T> for InboundHandler<T> {
-	fn tx_request_sender(&self) -> Arc<TxRequestSender> {
-		self.tx_request_sender.clone()
-	}
-
-	fn bfc_client(&self) -> Arc<EthClient<T>> {
-		self.bfc_client.clone()
-	}
-}
-
-#[async_trait::async_trait]
-impl<T: JsonRpcClient + 'static> Handler for InboundHandler<T> {
-	async fn run(&mut self) {
+impl<F, P, T> Handler for InboundHandler<F, P, T>
+where
+	F: TxFiller + WalletProvider + 'static,
+	P: Provider<T> + 'static,
+	T: Transport + Clone,
+{
+	async fn run(&mut self) -> Result<()> {
 		loop {
 			if self.is_bootstrap_state_synced_as(BootstrapState::NormalStart).await {
 				let msg = self.event_receiver.recv().await.unwrap();
 
-				if !self.bfc_client.is_selected_relayer().await
+				if !self.bfc_client.is_selected_relayer().await?
 					|| !self.is_target_event(msg.event_type)
 				{
 					continue;
@@ -184,14 +184,14 @@ impl<T: JsonRpcClient + 'static> Handler for InboundHandler<T> {
 
 				let mut stream = tokio_stream::iter(msg.events);
 				while let Some(event) = stream.next().await {
-					self.process_event(event).await;
+					self.process_event(event).await?;
 				}
 			}
 		}
 	}
 
-	async fn process_event(&self, mut event: Event) {
-		if let Some(user_bfc_address) = self.get_user_bfc_address(&event.address).await {
+	async fn process_event(&self, mut event: Event) -> Result<()> {
+		if let Some(user_bfc_address) = self.get_user_bfc_address(&event.address).await? {
 			// txid from event is in little endian, convert it to big endian
 			event.txid = {
 				let mut slice: [u8; 32] = event.txid.to_byte_array();
@@ -200,23 +200,27 @@ impl<T: JsonRpcClient + 'static> Handler for InboundHandler<T> {
 			};
 
 			// check if transaction has been submitted to be rollbacked
-			if self.is_rollback_output(event.txid, event.index).await {
-				return;
+			if self.is_rollback_output(event.txid, event.index).await? {
+				return Ok(());
 			}
-			if self.is_relayer_voted(&event, user_bfc_address).await {
-				return;
+			if self.is_relayer_voted(&event, user_bfc_address).await? {
+				return Ok(());
 			}
 
 			let tx_request = self.build_transaction(&event, user_bfc_address);
 			let metadata =
 				BitcoinRelayMetadata::new(event.address, user_bfc_address, event.txid, event.index);
-			self.request_send_transaction(
+
+			send_transaction(
+				self.bfc_client.clone(),
 				tx_request,
+				format!("{} ({})", SUB_LOG_TARGET, self.bfc_client.get_chain_name()),
 				TxRequestMetadata::BitcoinSocketRelay(metadata),
-				SUB_LOG_TARGET,
-			)
-			.await;
+				self.handle.clone(),
+			);
 		}
+
+		Ok(())
 	}
 
 	#[inline]
@@ -226,16 +230,21 @@ impl<T: JsonRpcClient + 'static> Handler for InboundHandler<T> {
 }
 
 #[async_trait::async_trait]
-impl<T: JsonRpcClient> BootstrapHandler for InboundHandler<T> {
+impl<F, P, T> BootstrapHandler for InboundHandler<F, P, T>
+where
+	F: TxFiller + WalletProvider,
+	P: Provider<T>,
+	T: Transport + Clone,
+{
 	fn bootstrap_shared_data(&self) -> Arc<BootstrapSharedData> {
 		self.bootstrap_shared_data.clone()
 	}
 
-	async fn bootstrap(&self) {
+	async fn bootstrap(&self) -> Result<()> {
 		unreachable!("unimplemented")
 	}
 
-	async fn get_bootstrap_events(&self) -> (EventMessage, EventMessage) {
+	async fn get_bootstrap_events(&self) -> Result<(EventMessage, EventMessage)> {
 		unreachable!("unimplemented")
 	}
 }

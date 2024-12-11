@@ -12,7 +12,7 @@ use br_primitives::{
 };
 
 /// Verifies whether the certain numeric parameters specified in the configuration YAML file are valid.
-/// If any single paramater has been provided, the system will panic on-start.
+/// If any single parameter has been provided, the system will panic on-start.
 pub(super) fn assert_configuration_validity(config: &Configuration) {
 	let bootstrap_config = &config.relayer_config.bootstrap_config;
 	let evm_providers = &config.relayer_config.evm_providers;

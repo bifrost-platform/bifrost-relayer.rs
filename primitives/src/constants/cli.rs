@@ -2,7 +2,7 @@
 pub const DEFAULT_KEYSTORE_PATH: &str = "./keys";
 
 /// The default round offset used on bootstrap. (=3 rounds)
-pub const DEFAULT_BOOTSTRAP_ROUND_OFFSET: u32 = 3;
+pub const DEFAULT_BOOTSTRAP_ROUND_OFFSET: u64 = 3;
 
 /// The default bootstrap offset for Bitcoin (in blocks)
 pub const DEFAULT_BITCOIN_BOOTSTRAP_BLOCK_OFFSET: u32 = 3;
@@ -50,4 +50,4 @@ pub const MAX_DUPLICATE_CONFIRM_DELAY_MS: u64 = 60_000;
 pub const MIN_GET_LOGS_BATCH_SIZE: u64 = 1;
 
 /// The maximum round offset allowed for bootstrap. (=14 rounds)
-pub const MAX_BOOTSTRAP_ROUND_OFFSET: u32 = 14;
+pub const MAX_BOOTSTRAP_ROUND_OFFSET: u64 = 14;
