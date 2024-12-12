@@ -235,10 +235,7 @@ where
 		"migration-detector",
 		Some("migration-detector"),
 		async move {
-			let reason = keypair_migrator.run().await;
-			let log_msg = format!("migration detector stopped: {:?}", reason);
-			log::error!("{log_msg}");
-			sentry::capture_message(&log_msg, sentry::Level::Error);
+			let _ = keypair_migrator.run().await;
 		},
 	);
 
