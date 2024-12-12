@@ -71,6 +71,7 @@ You should prepare RPC endpoints for the following blockchain networks. There ar
 - [Base](https://docs.base.org/tools/node-providers/)
 - [Arbitrum](https://docs.arbitrum.io/node-running/node-providers)
 - [Bitcoin](https://bitcoin.org/en/full-node)
+- [Core](https://docs.coredao.org/docs/Dev-Guide/rpc-list)
 
 You should also prepare an EVM account that will act as your relayer account. This account should have enough balance
 for transaction fees used in operations.
