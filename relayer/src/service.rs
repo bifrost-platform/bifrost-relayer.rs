@@ -253,6 +253,8 @@ where
 				);
 				log::error!("{log_msg}");
 				sentry::capture_message(&log_msg, sentry::Level::Error);
+
+				tokio::time::sleep(Duration::from_secs(12)).await;
 			}
 		},
 	);
