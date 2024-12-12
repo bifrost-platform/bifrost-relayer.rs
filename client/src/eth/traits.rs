@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use alloy::{
+	network::AnyNetwork,
 	primitives::{ChainId, B256, U256},
 	providers::{fillers::TxFiller, Provider, WalletProvider},
 	rpc::types::{Log, TransactionInput},
@@ -37,8 +38,8 @@ pub trait Handler {
 /// The client to interact with the `Socket` contract instance.
 pub trait SocketRelayBuilder<F, P, T>
 where
-	F: TxFiller + WalletProvider,
-	P: Provider<T>,
+	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
+	P: Provider<T, AnyNetwork>,
 	T: Transport + Clone,
 {
 	/// Get the `EthClient` of the implemented handler.

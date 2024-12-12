@@ -1,4 +1,5 @@
 use alloy::{
+	network::AnyNetwork,
 	providers::{fillers::TxFiller, Provider, WalletProvider},
 	transports::Transport,
 };
@@ -21,8 +22,8 @@ const SUB_LOG_TARGET: &str = "unsigned-tx-manager";
 /// The essential task that sends unsigned transactions asynchronously.
 pub struct UnsignedTransactionManager<F, P, T>
 where
-	F: TxFiller + WalletProvider,
-	P: Provider<T>,
+	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
+	P: Provider<T, AnyNetwork>,
 	T: Transport + Clone,
 {
 	/// The substrate client.
@@ -37,8 +38,8 @@ where
 
 impl<F, P, T> UnsignedTransactionManager<F, P, T>
 where
-	F: TxFiller + WalletProvider + 'static,
-	P: Provider<T> + 'static,
+	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork> + 'static,
+	P: Provider<T, AnyNetwork> + 'static,
 	T: Transport + Clone,
 {
 	/// Instantiates a new `UnsignedTransactionManager`.
@@ -97,8 +98,8 @@ where
 /// The transaction task for unsigned transactions.
 pub struct UnsignedTransactionTask<F, P, T>
 where
-	F: TxFiller + WalletProvider,
-	P: Provider<T>,
+	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
+	P: Provider<T, AnyNetwork>,
 	T: Transport + Clone,
 {
 	/// The substrate client.
@@ -109,8 +110,8 @@ where
 
 impl<F, P, T> UnsignedTransactionTask<F, P, T>
 where
-	F: TxFiller + WalletProvider,
-	P: Provider<T>,
+	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
+	P: Provider<T, AnyNetwork>,
 	T: Transport + Clone,
 {
 	/// Build an unsigned transaction task instance.
@@ -125,8 +126,8 @@ where
 #[async_trait::async_trait]
 impl<F, P, T> ExtrinsicTask<F, P, T> for UnsignedTransactionTask<F, P, T>
 where
-	F: TxFiller + WalletProvider,
-	P: Provider<T>,
+	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
+	P: Provider<T, AnyNetwork>,
 	T: Transport + Clone,
 {
 	fn get_sub_client(&self) -> Arc<OnlineClient<CustomConfig>> {

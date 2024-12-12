@@ -1,7 +1,7 @@
 use std::{str::FromStr, sync::Arc, time::Duration};
 
 use alloy::{
-	network::Ethereum,
+	network::AnyNetwork,
 	primitives::{Address, Bytes},
 	providers::{
 		fillers::{FillProvider, TxFiller},
@@ -34,8 +34,8 @@ const SUB_LOG_TARGET: &str = "pubkey-submitter";
 
 pub struct PubKeySubmitter<F, P, T>
 where
-	F: TxFiller + WalletProvider,
-	P: Provider<T>,
+	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
+	P: Provider<T, AnyNetwork>,
 	T: Transport + Clone,
 {
 	/// The Bifrost client.
@@ -53,8 +53,8 @@ where
 #[async_trait::async_trait]
 impl<F, P, T> PeriodicWorker for PubKeySubmitter<F, P, T>
 where
-	F: TxFiller + WalletProvider,
-	P: Provider<T>,
+	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
+	P: Provider<T, AnyNetwork>,
 	T: Transport + Clone,
 {
 	fn schedule(&self) -> Schedule {
@@ -119,8 +119,8 @@ where
 
 impl<F, P, T> PubKeySubmitter<F, P, T>
 where
-	F: TxFiller + WalletProvider,
-	P: Provider<T>,
+	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
+	P: Provider<T, AnyNetwork>,
 	T: Transport + Clone,
 {
 	/// Instantiates a new `PubKeySubmitter` instance.
@@ -247,7 +247,7 @@ where
 
 	fn registration_pool(
 		&self,
-	) -> &RegistrationPoolContractInstance<T, Arc<FillProvider<F, P, T, Ethereum>>> {
+	) -> &RegistrationPoolContractInstance<T, Arc<FillProvider<F, P, T, AnyNetwork>>, AnyNetwork> {
 		self.client.protocol_contracts.registration_pool.as_ref().unwrap()
 	}
 

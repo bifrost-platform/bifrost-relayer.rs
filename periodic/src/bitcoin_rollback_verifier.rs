@@ -1,7 +1,7 @@
 use std::{collections::BTreeMap, str::FromStr, sync::Arc, time::Duration};
 
 use alloy::{
-	network::Ethereum,
+	network::AnyNetwork,
 	primitives::{keccak256, Address as EvmAddress, Bytes, B256},
 	providers::{
 		fillers::{FillProvider, TxFiller},
@@ -85,8 +85,8 @@ impl From<rollback_requestReturn> for RollbackRequest {
 
 pub struct BitcoinRollbackVerifier<F, P, T>
 where
-	F: TxFiller + WalletProvider,
-	P: Provider<T>,
+	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
+	P: Provider<T, AnyNetwork>,
 	T: Transport + Clone,
 {
 	/// The Bitcoin client.
@@ -102,8 +102,8 @@ where
 #[async_trait::async_trait]
 impl<F, P, TR> RpcApi for BitcoinRollbackVerifier<F, P, TR>
 where
-	F: TxFiller + WalletProvider,
-	P: Provider<TR>,
+	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
+	P: Provider<TR, AnyNetwork>,
 	TR: Transport + Clone,
 {
 	async fn call<T: for<'a> Deserialize<'a> + Send>(
@@ -128,8 +128,8 @@ where
 #[async_trait::async_trait]
 impl<F, P, T> XtRequester<F, P, T> for BitcoinRollbackVerifier<F, P, T>
 where
-	F: TxFiller + WalletProvider,
-	P: Provider<T>,
+	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
+	P: Provider<T, AnyNetwork>,
 	T: Transport + Clone,
 {
 	fn xt_request_sender(&self) -> Arc<XtRequestSender> {
@@ -144,8 +144,8 @@ where
 #[async_trait::async_trait]
 impl<F, P, T> PeriodicWorker for BitcoinRollbackVerifier<F, P, T>
 where
-	F: TxFiller + WalletProvider,
-	P: Provider<T>,
+	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
+	P: Provider<T, AnyNetwork>,
 	T: Transport + Clone,
 {
 	fn schedule(&self) -> Schedule {
@@ -222,8 +222,8 @@ where
 
 impl<F, P, T> BitcoinRollbackVerifier<F, P, T>
 where
-	F: TxFiller + WalletProvider,
-	P: Provider<T>,
+	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
+	P: Provider<T, AnyNetwork>,
 	T: Transport + Clone,
 {
 	/// Instantiates a new `BitcoinRollbackVerifier` instance.
@@ -322,7 +322,7 @@ where
 	/// Get the `BtcSocketQueue` precompile contract instance.
 	fn socket_queue(
 		&self,
-	) -> &SocketQueueContractInstance<T, Arc<FillProvider<F, P, T, Ethereum>>> {
+	) -> &SocketQueueContractInstance<T, Arc<FillProvider<F, P, T, AnyNetwork>>, AnyNetwork> {
 		self.bfc_client.protocol_contracts.socket_queue.as_ref().unwrap()
 	}
 }

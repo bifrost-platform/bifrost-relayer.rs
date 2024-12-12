@@ -1,4 +1,5 @@
 use alloy::{
+	network::AnyNetwork,
 	providers::{fillers::TxFiller, Provider, WalletProvider},
 	transports::Transport,
 };
@@ -17,8 +18,8 @@ use crate::eth::EthClient;
 #[async_trait::async_trait]
 pub trait ExtrinsicTask<F, P, T>
 where
-	F: TxFiller + WalletProvider,
-	P: Provider<T>,
+	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
+	P: Provider<T, AnyNetwork>,
 	T: Transport + Clone,
 {
 	/// Get the substrate client.

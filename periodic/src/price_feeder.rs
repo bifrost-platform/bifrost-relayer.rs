@@ -1,6 +1,7 @@
 use std::{collections::BTreeMap, fmt::Error, str::FromStr, sync::Arc};
 
 use alloy::{
+	network::AnyNetwork,
 	primitives::{utils::parse_ether, ChainId, FixedBytes, B256, U256},
 	providers::{fillers::TxFiller, Provider, WalletProvider},
 	rpc::types::{TransactionInput, TransactionRequest},
@@ -33,8 +34,8 @@ const SUB_LOG_TARGET: &str = "price-feeder";
 /// The essential task that handles oracle price feedings.
 pub struct OraclePriceFeeder<F, P, T>
 where
-	F: TxFiller + WalletProvider,
-	P: Provider<T>,
+	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
+	P: Provider<T, AnyNetwork>,
 	T: Transport + Clone,
 {
 	/// The `EthClient` to interact with the bifrost network.
@@ -56,8 +57,8 @@ where
 #[async_trait]
 impl<F, P, T> PeriodicWorker for OraclePriceFeeder<F, P, T>
 where
-	F: TxFiller + WalletProvider + 'static,
-	P: Provider<T> + 'static,
+	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork> + 'static,
+	P: Provider<T, AnyNetwork> + 'static,
 	T: Transport + Clone,
 {
 	fn schedule(&self) -> Schedule {
@@ -91,8 +92,8 @@ where
 
 impl<F, P, T> OraclePriceFeeder<F, P, T>
 where
-	F: TxFiller + WalletProvider + 'static,
-	P: Provider<T> + 'static,
+	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork> + 'static,
+	P: Provider<T, AnyNetwork> + 'static,
 	T: Transport + Clone,
 {
 	pub fn new(

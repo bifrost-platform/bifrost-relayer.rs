@@ -2,6 +2,7 @@ use std::{collections::BTreeMap, sync::Arc};
 
 use crate::traits::PriceFetcher;
 use alloy::{
+	network::AnyNetwork,
 	primitives::U256,
 	providers::{fillers::TxFiller, Provider, WalletProvider},
 	transports::Transport,
@@ -13,8 +14,8 @@ use eyre::{eyre, Result};
 #[derive(Clone)]
 pub struct ChainlinkPriceFetcher<F, P, T>
 where
-	F: TxFiller + WalletProvider,
-	P: Provider<T>,
+	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
+	P: Provider<T, AnyNetwork>,
 	T: Transport + Clone,
 {
 	client: Option<Arc<EthClient<F, P, T>>>,
@@ -23,8 +24,8 @@ where
 #[async_trait::async_trait]
 impl<F, P, T> PriceFetcher for ChainlinkPriceFetcher<F, P, T>
 where
-	F: TxFiller + WalletProvider,
-	P: Provider<T>,
+	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
+	P: Provider<T, AnyNetwork>,
 	T: Transport + Clone,
 {
 	/// Get the price of a symbol from Chainlink aggregator.
@@ -82,8 +83,8 @@ where
 
 impl<F, P, T> ChainlinkPriceFetcher<F, P, T>
 where
-	F: TxFiller + WalletProvider,
-	P: Provider<T>,
+	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
+	P: Provider<T, AnyNetwork>,
 	T: Transport + Clone,
 {
 	pub async fn new(client: Option<Arc<EthClient<F, P, T>>>) -> Self {

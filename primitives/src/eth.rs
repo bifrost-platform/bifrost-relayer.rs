@@ -1,7 +1,7 @@
 use std::{str::FromStr, sync::Arc};
 
 use alloy::{
-	network::Ethereum,
+	network::AnyNetwork,
 	primitives::{Address, ChainId},
 	providers::{
 		fillers::{FillProvider, TxFiller},
@@ -85,38 +85,38 @@ impl ProviderMetadata {
 #[derive(Clone)]
 pub struct AggregatorContracts<F, P, T>
 where
-	F: TxFiller + WalletProvider,
-	P: Provider<T>,
+	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
+	P: Provider<T, AnyNetwork>,
 	T: Transport + Clone,
 {
 	/// Chainlink usdc/usd aggregator
 	pub chainlink_usdc_usd:
-		Option<ChainlinkContractInstance<T, Arc<FillProvider<F, P, T, Ethereum>>>>,
+		Option<ChainlinkContractInstance<T, Arc<FillProvider<F, P, T, AnyNetwork>>, AnyNetwork>>,
 	/// Chainlink usdt/usd aggregator
 	pub chainlink_usdt_usd:
-		Option<ChainlinkContractInstance<T, Arc<FillProvider<F, P, T, Ethereum>>>>,
+		Option<ChainlinkContractInstance<T, Arc<FillProvider<F, P, T, AnyNetwork>>, AnyNetwork>>,
 	/// Chainlink dai/usd aggregator
 	pub chainlink_dai_usd:
-		Option<ChainlinkContractInstance<T, Arc<FillProvider<F, P, T, Ethereum>>>>,
+		Option<ChainlinkContractInstance<T, Arc<FillProvider<F, P, T, AnyNetwork>>, AnyNetwork>>,
 	/// Chainlink btc/usd aggregator
 	pub chainlink_btc_usd:
-		Option<ChainlinkContractInstance<T, Arc<FillProvider<F, P, T, Ethereum>>>>,
+		Option<ChainlinkContractInstance<T, Arc<FillProvider<F, P, T, AnyNetwork>>, AnyNetwork>>,
 	/// Chainlink wbtc/usd aggregator
 	pub chainlink_wbtc_usd:
-		Option<ChainlinkContractInstance<T, Arc<FillProvider<F, P, T, Ethereum>>>>,
+		Option<ChainlinkContractInstance<T, Arc<FillProvider<F, P, T, AnyNetwork>>, AnyNetwork>>,
 	/// Chainlink cbbtc/usd aggregator
 	pub chainlink_cbbtc_usd:
-		Option<ChainlinkContractInstance<T, Arc<FillProvider<F, P, T, Ethereum>>>>,
+		Option<ChainlinkContractInstance<T, Arc<FillProvider<F, P, T, AnyNetwork>>, AnyNetwork>>,
 }
 
 impl<F, P, T> AggregatorContracts<F, P, T>
 where
-	F: TxFiller + WalletProvider,
-	P: Provider<T>,
+	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
+	P: Provider<T, AnyNetwork>,
 	T: Transport + Clone,
 {
 	pub fn new(
-		provider: Arc<FillProvider<F, P, T, Ethereum>>,
+		provider: Arc<FillProvider<F, P, T, AnyNetwork>>,
 		chainlink_usdc_usd_address: Option<String>,
 		chainlink_usdt_usd_address: Option<String>,
 		chainlink_dai_usd_address: Option<String>,
@@ -144,8 +144,8 @@ where
 
 impl<F, P, T> Default for AggregatorContracts<F, P, T>
 where
-	F: TxFiller + WalletProvider,
-	P: Provider<T>,
+	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
+	P: Provider<T, AnyNetwork>,
 	T: Transport + Clone,
 {
 	fn default() -> Self {
@@ -164,39 +164,44 @@ where
 /// The protocol contract instances of the EVM provider.
 pub struct ProtocolContracts<F, P, T>
 where
-	F: TxFiller + WalletProvider,
-	P: Provider<T>,
+	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
+	P: Provider<T, AnyNetwork>,
 	T: Transport + Clone,
 {
 	/// SocketContract
-	pub socket: SocketContractInstance<T, Arc<FillProvider<F, P, T, Ethereum>>>,
+	pub socket: SocketContractInstance<T, Arc<FillProvider<F, P, T, AnyNetwork>>, AnyNetwork>,
 	/// AuthorityContract
-	pub authority: AuthorityContractInstance<T, Arc<FillProvider<F, P, T, Ethereum>>>,
+	pub authority: AuthorityContractInstance<T, Arc<FillProvider<F, P, T, AnyNetwork>>, AnyNetwork>,
 	/// RelayerManagerContract (Bifrost only)
-	pub relayer_manager:
-		Option<RelayerManagerContractInstance<T, Arc<FillProvider<F, P, T, Ethereum>>>>,
+	pub relayer_manager: Option<
+		RelayerManagerContractInstance<T, Arc<FillProvider<F, P, T, AnyNetwork>>, AnyNetwork>,
+	>,
 	/// BitcoinSocketContract (Bifrost only)
-	pub bitcoin_socket:
-		Option<BitcoinSocketContractInstance<T, Arc<FillProvider<F, P, T, Ethereum>>>>,
+	pub bitcoin_socket: Option<
+		BitcoinSocketContractInstance<T, Arc<FillProvider<F, P, T, AnyNetwork>>, AnyNetwork>,
+	>,
 	/// SocketQueueContract (Bifrost only)
-	pub socket_queue: Option<SocketQueueContractInstance<T, Arc<FillProvider<F, P, T, Ethereum>>>>,
+	pub socket_queue:
+		Option<SocketQueueContractInstance<T, Arc<FillProvider<F, P, T, AnyNetwork>>, AnyNetwork>>,
 	/// RegistrationPoolContract (Bifrost only)
-	pub registration_pool:
-		Option<RegistrationPoolContractInstance<T, Arc<FillProvider<F, P, T, Ethereum>>>>,
+	pub registration_pool: Option<
+		RegistrationPoolContractInstance<T, Arc<FillProvider<F, P, T, AnyNetwork>>, AnyNetwork>,
+	>,
 	/// RelayExecutiveContract (Bifrost only)
-	pub relay_executive:
-		Option<RelayExecutiveContractInstance<T, Arc<FillProvider<F, P, T, Ethereum>>>>,
+	pub relay_executive: Option<
+		RelayExecutiveContractInstance<T, Arc<FillProvider<F, P, T, AnyNetwork>>, AnyNetwork>,
+	>,
 }
 
 impl<F, P, T> ProtocolContracts<F, P, T>
 where
-	F: TxFiller + WalletProvider,
-	P: Provider<T>,
+	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
+	P: Provider<T, AnyNetwork>,
 	T: Transport + Clone,
 {
 	pub fn new(
 		is_native: bool,
-		provider: Arc<FillProvider<F, P, T, Ethereum>>,
+		provider: Arc<FillProvider<F, P, T, AnyNetwork>>,
 		socket_address: String,
 		authority_address: String,
 		relayer_manager_address: Option<String>,

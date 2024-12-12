@@ -1,5 +1,6 @@
 use crate::traits::PeriodicWorker;
 use alloy::{
+	network::AnyNetwork,
 	primitives::{keccak256, Bytes, B256},
 	providers::{fillers::TxFiller, Provider, WalletProvider},
 	transports::Transport,
@@ -28,8 +29,8 @@ const SUB_LOG_TARGET: &str = "psbt-signer";
 /// The essential task that submits signed PSBT's.
 pub struct PsbtSigner<F, P, T>
 where
-	F: TxFiller + WalletProvider,
-	P: Provider<T>,
+	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
+	P: Provider<T, AnyNetwork>,
 	T: Transport + Clone,
 {
 	/// The Bifrost client.
@@ -48,8 +49,8 @@ where
 
 impl<F, P, T> PsbtSigner<F, P, T>
 where
-	F: TxFiller + WalletProvider,
-	P: Provider<T>,
+	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
+	P: Provider<T, AnyNetwork>,
 	T: Transport + Clone,
 {
 	/// Instantiates a new `PsbtSigner` instance.
@@ -203,8 +204,8 @@ where
 #[async_trait::async_trait]
 impl<F, P, T> XtRequester<F, P, T> for PsbtSigner<F, P, T>
 where
-	F: TxFiller + WalletProvider,
-	P: Provider<T>,
+	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
+	P: Provider<T, AnyNetwork>,
 	T: Transport + Clone,
 {
 	fn xt_request_sender(&self) -> Arc<XtRequestSender> {
@@ -219,8 +220,8 @@ where
 #[async_trait::async_trait]
 impl<F, P, T> PeriodicWorker for PsbtSigner<F, P, T>
 where
-	F: TxFiller + WalletProvider,
-	P: Provider<T>,
+	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
+	P: Provider<T, AnyNetwork>,
 	T: Transport + Clone,
 {
 	fn schedule(&self) -> Schedule {

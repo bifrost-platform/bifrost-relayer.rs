@@ -13,6 +13,7 @@ use crate::{
 };
 
 use alloy::{
+	network::AnyNetwork,
 	providers::{fillers::TxFiller, Provider, WalletProvider},
 	transports::Transport,
 };
@@ -30,8 +31,8 @@ use super::block::EventMessage;
 #[async_trait::async_trait]
 pub trait XtRequester<F, P, T>
 where
-	F: TxFiller + WalletProvider,
-	P: Provider<T>,
+	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
+	P: Provider<T, AnyNetwork>,
 	T: Transport + Clone,
 {
 	fn xt_request_sender(&self) -> Arc<XtRequestSender>;

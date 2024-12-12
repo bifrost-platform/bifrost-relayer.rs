@@ -1,5 +1,6 @@
 use alloy::{
 	dyn_abi::DynSolValue,
+	network::AnyNetwork,
 	primitives::{Address, U256},
 	providers::{fillers::TxFiller, Provider, WalletProvider},
 	rpc::types::{Filter, Log, TransactionInput, TransactionRequest},
@@ -34,8 +35,8 @@ const SUB_LOG_TARGET: &str = "roundup-emitter";
 
 pub struct RoundupEmitter<F, P, T>
 where
-	F: TxFiller + WalletProvider,
-	P: Provider<T>,
+	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
+	P: Provider<T, AnyNetwork>,
 	T: Transport + Clone,
 {
 	/// Current round number
@@ -53,8 +54,8 @@ where
 #[async_trait::async_trait]
 impl<F, P, T> PeriodicWorker for RoundupEmitter<F, P, T>
 where
-	F: TxFiller + WalletProvider + 'static,
-	P: Provider<T> + 'static,
+	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork> + 'static,
+	P: Provider<T, AnyNetwork> + 'static,
 	T: Transport + Clone,
 {
 	fn schedule(&self) -> Schedule {
@@ -107,8 +108,8 @@ where
 
 impl<F, P, T> RoundupEmitter<F, P, T>
 where
-	F: TxFiller + WalletProvider + 'static,
-	P: Provider<T> + 'static,
+	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork> + 'static,
+	P: Provider<T, AnyNetwork> + 'static,
 	T: Transport + Clone,
 {
 	/// Instantiates a new `RoundupEmitter` instance.
@@ -200,8 +201,8 @@ where
 #[async_trait::async_trait]
 impl<F, P, T> BootstrapHandler for RoundupEmitter<F, P, T>
 where
-	F: TxFiller + WalletProvider + 'static,
-	P: Provider<T> + 'static,
+	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork> + 'static,
+	P: Provider<T, AnyNetwork> + 'static,
 	T: Transport + Clone,
 {
 	fn bootstrap_shared_data(&self) -> Arc<BootstrapSharedData> {

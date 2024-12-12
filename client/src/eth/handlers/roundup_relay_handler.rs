@@ -2,7 +2,7 @@ use std::{collections::BTreeMap, sync::Arc, time::Duration};
 
 use alloy::{
 	dyn_abi::DynSolValue,
-	network::Ethereum,
+	network::{primitives::ReceiptResponse as _, AnyNetwork},
 	primitives::{Address, ChainId, PrimitiveSignature, B256, U256},
 	providers::{
 		fillers::{FillProvider, TxFiller},
@@ -42,8 +42,8 @@ const SUB_LOG_TARGET: &str = "roundup-handler";
 /// The essential task that handles `roundup relay` related events.
 pub struct RoundupRelayHandler<F, P, T>
 where
-	F: TxFiller + WalletProvider,
-	P: Provider<T>,
+	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
+	P: Provider<T, AnyNetwork>,
 	T: Transport + Clone,
 {
 	/// The `EthClient` to interact with the bifrost network.
@@ -63,8 +63,8 @@ where
 #[async_trait]
 impl<F, P, T> Handler for RoundupRelayHandler<F, P, T>
 where
-	F: TxFiller + WalletProvider + 'static,
-	P: Provider<T> + 'static,
+	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork> + 'static,
+	P: Provider<T, AnyNetwork> + 'static,
 	T: Transport + Clone,
 {
 	async fn run(&mut self) -> Result<()> {
@@ -98,7 +98,7 @@ where
 		if let Some(receipt) =
 			self.client.get_transaction_receipt(log.transaction_hash.unwrap()).await?
 		{
-			if !receipt.status() {
+			if !receipt.inner.status() {
 				return Ok(());
 			}
 			match self.decode_log(log.clone()).await {
@@ -168,8 +168,8 @@ where
 
 impl<F, P, T> RoundupRelayHandler<F, P, T>
 where
-	F: TxFiller + WalletProvider + 'static,
-	P: Provider<T> + 'static,
+	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork> + 'static,
+	P: Provider<T, AnyNetwork> + 'static,
 	T: Transport + Clone,
 {
 	/// Instantiates a new `RoundupRelayHandler` instance.
@@ -252,7 +252,11 @@ where
 	/// Build `round_control_relay` method call transaction.
 	fn build_transaction_request(
 		&self,
-		target_socket: &SocketContractInstance<T, Arc<FillProvider<F, P, T, Ethereum>>>,
+		target_socket: &SocketContractInstance<
+			T,
+			Arc<FillProvider<F, P, T, AnyNetwork>>,
+			AnyNetwork,
+		>,
 		roundup_submit: &Round_Up_Submit,
 	) -> TransactionRequest {
 		TransactionRequest::default()
@@ -324,8 +328,8 @@ where
 #[async_trait]
 impl<F, P, T> BootstrapHandler for RoundupRelayHandler<F, P, T>
 where
-	F: TxFiller + WalletProvider + 'static,
-	P: Provider<T> + 'static,
+	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork> + 'static,
+	P: Provider<T, AnyNetwork> + 'static,
 	T: Transport + Clone,
 {
 	fn bootstrap_shared_data(&self) -> Arc<BootstrapSharedData> {

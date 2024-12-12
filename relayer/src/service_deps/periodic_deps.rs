@@ -2,8 +2,8 @@ use super::*;
 
 pub struct PeriodicDeps<F, P, T>
 where
-	F: TxFiller + WalletProvider,
-	P: Provider<T>,
+	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
+	P: Provider<T, AnyNetwork>,
 	T: Transport + Clone,
 {
 	/// The `HeartbeatSender` used for system health checks.
@@ -24,8 +24,8 @@ where
 
 impl<F, P, T> PeriodicDeps<F, P, T>
 where
-	F: TxFiller + WalletProvider + 'static,
-	P: Provider<T> + 'static,
+	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork> + 'static,
+	P: Provider<T, AnyNetwork> + 'static,
 	T: Transport + Clone,
 {
 	pub fn new(

@@ -1,4 +1,5 @@
 use alloy::{
+	network::AnyNetwork,
 	providers::{fillers::TxFiller, Provider, WalletProvider},
 	rpc::types::TransactionRequest,
 	transports::Transport,
@@ -20,8 +21,8 @@ const SUB_LOG_TARGET: &str = "heartbeat-sender";
 /// The essential task that sending heartbeat transaction.
 pub struct HeartbeatSender<F, P, T>
 where
-	F: TxFiller + WalletProvider,
-	P: Provider<T>,
+	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
+	P: Provider<T, AnyNetwork>,
 	T: Transport + Clone,
 {
 	/// The time schedule that represents when to check heartbeat pulsed.
@@ -35,8 +36,8 @@ where
 #[async_trait::async_trait]
 impl<F, P, T> PeriodicWorker for HeartbeatSender<F, P, T>
 where
-	F: TxFiller + WalletProvider + 'static,
-	P: Provider<T> + 'static,
+	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork> + 'static,
+	P: Provider<T, AnyNetwork> + 'static,
 	T: Transport + Clone,
 {
 	fn schedule(&self) -> Schedule {
@@ -70,8 +71,8 @@ where
 
 impl<F, P, T> HeartbeatSender<F, P, T>
 where
-	F: TxFiller + WalletProvider + 'static,
-	P: Provider<T> + 'static,
+	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork> + 'static,
+	P: Provider<T, AnyNetwork> + 'static,
 	T: Transport + Clone,
 {
 	/// Instantiates a new `HeartbeatSender` instance.

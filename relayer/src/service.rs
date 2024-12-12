@@ -7,7 +7,7 @@ use std::{
 };
 
 use alloy::{
-	network::EthereumWallet,
+	network::{AnyNetwork, EthereumWallet},
 	primitives::ChainId,
 	providers::{fillers::TxFiller, Provider, ProviderBuilder, WalletProvider},
 	rpc::client::RpcClient,
@@ -78,6 +78,7 @@ pub fn relay(config: Configuration) -> Result<TaskManager, ServiceError> {
 			let provider = Arc::new(
 				ProviderBuilder::new()
 					.with_recommended_fillers()
+					.network::<AnyNetwork>()
 					.wallet(wallet)
 					.on_client(client),
 			);
@@ -192,8 +193,8 @@ fn spawn_relayer_tasks<F, P, T>(
 	config: &Configuration,
 ) -> TaskManager
 where
-	F: TxFiller + WalletProvider + 'static,
-	P: Provider<T> + 'static,
+	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork> + 'static,
+	P: Provider<T, AnyNetwork> + 'static,
 	T: Transport + Clone,
 {
 	let prometheus_config = &config.relayer_config.prometheus_config;
@@ -578,8 +579,8 @@ where
 /// Log the configured relay targets.
 fn print_relay_targets<F, P, T>(manager_deps: &ManagerDeps<F, P, T>)
 where
-	F: TxFiller + WalletProvider,
-	P: Provider<T>,
+	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
+	P: Provider<T, AnyNetwork>,
 	T: Transport + Clone,
 {
 	log::info!(

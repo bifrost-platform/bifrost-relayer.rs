@@ -11,7 +11,7 @@ use br_primitives::{
 
 use alloy::{
 	consensus::Transaction,
-	network::{Ethereum, TransactionResponse as _},
+	network::{AnyNetwork, AnyRpcTransaction, AnyTypedTransaction, TransactionResponse as _},
 	primitives::{
 		utils::{format_units, parse_ether, Unit},
 		Address, ChainId,
@@ -21,7 +21,7 @@ use alloy::{
 		fillers::{FillProvider, TxFiller},
 		PendingTransactionBuilder, Provider, RootProvider, SendableTx, WalletProvider,
 	},
-	rpc::types::TransactionRequest,
+	rpc::types::{serde_helpers::WithOtherFields, txpool::TxpoolContent, TransactionRequest},
 	signers::{local::LocalSigner, Signature, Signer as _},
 	transports::{Transport, TransportResult},
 };
@@ -39,12 +39,12 @@ pub mod traits;
 #[derive(Clone)]
 pub struct EthClient<F, P, T>
 where
-	F: TxFiller + WalletProvider,
-	P: Provider<T>,
+	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
+	P: Provider<T, AnyNetwork>,
 	T: Transport + Clone,
 {
 	/// The inner provider.
-	inner: Arc<FillProvider<F, P, T, Ethereum>>,
+	inner: Arc<FillProvider<F, P, T, AnyNetwork>>,
 	/// The signer.
 	pub signer: LocalSigner<SigningKey>,
 	/// The provider metadata.
@@ -59,13 +59,13 @@ where
 
 impl<F, P, T> EthClient<F, P, T>
 where
-	F: TxFiller + WalletProvider,
-	P: Provider<T>,
+	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
+	P: Provider<T, AnyNetwork>,
 	T: Transport + Clone,
 {
 	/// Create a new EthClient
 	pub fn new(
-		inner: Arc<FillProvider<F, P, T, Ethereum>>,
+		inner: Arc<FillProvider<F, P, T, AnyNetwork>>,
 		signer: LocalSigner<SigningKey>,
 		metadata: ProviderMetadata,
 		protocol_contracts: ProtocolContracts<F, P, T>,
@@ -189,7 +189,8 @@ where
 		// possibility of txpool being flushed automatically. wait for 2 blocks.
 		tokio::time::sleep(Duration::from_millis(self.metadata.call_interval * 2)).await;
 
-		let pending = self.txpool_content().await?.remove_from(&self.address()).pending;
+		let mut content: TxpoolContent<AnyRpcTransaction> = self.txpool_content().await?;
+		let pending = content.remove_from(&self.address()).pending;
 		let mut transactions = pending.into_iter().map(|(_, tx)| tx).collect::<VecDeque<_>>();
 		transactions.make_contiguous().sort_by(|a, b| a.nonce().cmp(&b.nonce()));
 
@@ -198,7 +199,9 @@ where
 				continue;
 			}
 
-			let mut tx_request = tx.clone().into_request();
+			let mut tx_request = WithOtherFields::<TransactionRequest>::from(
+				AnyTypedTransaction::from(tx.inner.inner.clone()),
+			);
 
 			// RBF
 			if tx.is_legacy_gas() {
@@ -245,20 +248,20 @@ where
 }
 
 #[async_trait::async_trait]
-impl<F, P, T> Provider<T, Ethereum> for EthClient<F, P, T>
+impl<F, P, T> Provider<T, AnyNetwork> for EthClient<F, P, T>
 where
-	F: TxFiller + WalletProvider,
-	P: Provider<T>,
+	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
+	P: Provider<T, AnyNetwork>,
 	T: Transport + Clone,
 {
-	fn root(&self) -> &RootProvider<T, Ethereum> {
+	fn root(&self) -> &RootProvider<T, AnyNetwork> {
 		self.inner.root()
 	}
 
 	async fn send_transaction_internal(
 		&self,
-		tx: SendableTx<Ethereum>,
-	) -> TransportResult<PendingTransactionBuilder<T, Ethereum>> {
+		tx: SendableTx<AnyNetwork>,
+	) -> TransportResult<PendingTransactionBuilder<T, AnyNetwork>> {
 		self.inner.send_transaction_internal(tx).await
 	}
 }
@@ -270,8 +273,8 @@ pub fn send_transaction<F, P, T>(
 	metadata: TxRequestMetadata,
 	handle: SpawnTaskHandle,
 ) where
-	F: TxFiller + WalletProvider + 'static,
-	P: Provider<T> + 'static,
+	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork> + 'static,
+	P: Provider<T, AnyNetwork> + 'static,
 	T: Transport + Clone,
 {
 	let this_handle = handle.clone();
@@ -290,7 +293,7 @@ pub fn send_transaction<F, P, T>(
 			}
 		}
 
-		match client.send_transaction(request.clone()).await {
+		match client.send_transaction(WithOtherFields::new(request.clone())).await {
 			Ok(pending) => {
 				log::info!(
 					target: &requester,

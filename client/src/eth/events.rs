@@ -1,4 +1,5 @@
 use alloy::{
+	network::AnyNetwork,
 	primitives::{BlockNumber, ChainId},
 	providers::{fillers::TxFiller, Provider, WalletProvider},
 	rpc::types::{Filter, Log, SyncStatus},
@@ -51,8 +52,8 @@ const SUB_LOG_TARGET: &str = "event-manager";
 /// The essential task that listens and handle new events.
 pub struct EventManager<F, P, T>
 where
-	F: TxFiller + WalletProvider,
-	P: Provider<T>,
+	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
+	P: Provider<T, AnyNetwork>,
 	T: Transport + Clone,
 {
 	/// The ethereum client for the connected chain.
@@ -70,8 +71,8 @@ where
 
 impl<F, P, T> EventManager<F, P, T>
 where
-	F: TxFiller + WalletProvider,
-	P: Provider<T>,
+	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
+	P: Provider<T, AnyNetwork>,
 	T: Transport + Clone,
 {
 	/// Instantiates a new `EventManager` instance.
@@ -222,8 +223,8 @@ where
 #[async_trait::async_trait]
 impl<F, P, T> BootstrapHandler for EventManager<F, P, T>
 where
-	F: TxFiller + WalletProvider,
-	P: Provider<T>,
+	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
+	P: Provider<T, AnyNetwork>,
 	T: Transport + Clone,
 {
 	fn bootstrap_shared_data(&self) -> Arc<BootstrapSharedData> {

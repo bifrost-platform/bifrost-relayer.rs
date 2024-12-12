@@ -1,6 +1,7 @@
 use crate::traits::PeriodicWorker;
 
 use alloy::{
+	network::AnyNetwork,
 	providers::{fillers::TxFiller, Provider, WalletProvider},
 	transports::Transport,
 };
@@ -25,8 +26,8 @@ use tokio::sync::RwLock;
 
 pub struct KeypairMigrator<F, P, T>
 where
-	F: TxFiller + WalletProvider,
-	P: Provider<T>,
+	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
+	P: Provider<T, AnyNetwork>,
 	T: Transport + Clone,
 {
 	sub_client: Option<OnlineClient<CustomConfig>>,
@@ -38,8 +39,8 @@ where
 
 impl<F, P, T> KeypairMigrator<F, P, T>
 where
-	F: TxFiller + WalletProvider,
-	P: Provider<T>,
+	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
+	P: Provider<T, AnyNetwork>,
 	T: Transport + Clone,
 {
 	/// Instantiates a new `KeypairMigrator` instance.
@@ -151,8 +152,8 @@ where
 #[async_trait::async_trait]
 impl<F, P, T> PeriodicWorker for KeypairMigrator<F, P, T>
 where
-	F: TxFiller + WalletProvider,
-	P: Provider<T>,
+	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
+	P: Provider<T, AnyNetwork>,
 	T: Transport + Clone,
 {
 	fn schedule(&self) -> Schedule {

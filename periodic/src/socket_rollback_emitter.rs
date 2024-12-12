@@ -1,5 +1,6 @@
 use alloy::{
 	consensus::BlockHeader as _,
+	network::AnyNetwork,
 	primitives::ChainId,
 	providers::{fillers::TxFiller, Provider, WalletProvider},
 	rpc::types::TransactionRequest,
@@ -33,8 +34,8 @@ const SUB_LOG_TARGET: &str = "rollback-emitter";
 /// (`client` and `tx_request_sender` are connected to the same chain)
 pub struct SocketRollbackEmitter<F, P, T>
 where
-	F: TxFiller + WalletProvider,
-	P: Provider<T>,
+	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
+	P: Provider<T, AnyNetwork>,
 	T: Transport + Clone,
 {
 	/// The `EthClient` to interact with the connected blockchain.
@@ -53,8 +54,8 @@ where
 
 impl<F, P, T> SocketRollbackEmitter<F, P, T>
 where
-	F: TxFiller + WalletProvider + 'static,
-	P: Provider<T> + 'static,
+	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork> + 'static,
+	P: Provider<T, AnyNetwork> + 'static,
 	T: Transport + Clone,
 {
 	/// Instantiates a new `SocketRollbackEmitter`.
@@ -258,8 +259,8 @@ where
 #[async_trait::async_trait]
 impl<F, P, T> SocketRelayBuilder<F, P, T> for SocketRollbackEmitter<F, P, T>
 where
-	F: TxFiller + WalletProvider,
-	P: Provider<T>,
+	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
+	P: Provider<T, AnyNetwork>,
 	T: Transport + Clone,
 {
 	fn get_client(&self) -> Arc<EthClient<F, P, T>> {
@@ -277,8 +278,8 @@ where
 #[async_trait::async_trait]
 impl<F, P, T> PeriodicWorker for SocketRollbackEmitter<F, P, T>
 where
-	F: TxFiller + WalletProvider + 'static,
-	P: Provider<T> + 'static,
+	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork> + 'static,
+	P: Provider<T, AnyNetwork> + 'static,
 	T: Transport + Clone,
 {
 	fn schedule(&self) -> Schedule {

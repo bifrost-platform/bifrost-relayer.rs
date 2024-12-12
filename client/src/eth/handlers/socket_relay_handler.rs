@@ -1,6 +1,7 @@
 use std::{collections::BTreeMap, sync::Arc, time::Duration};
 
 use alloy::{
+	network::AnyNetwork,
 	primitives::{ChainId, B256, U256},
 	providers::{fillers::TxFiller, Provider, WalletProvider},
 	rpc::types::{Filter, Log, TransactionRequest},
@@ -43,8 +44,8 @@ const SUB_LOG_TARGET: &str = "socket-handler";
 /// The essential task that handles `socket relay` related events.
 pub struct SocketRelayHandler<F, P, T>
 where
-	F: TxFiller + WalletProvider + 'static,
-	P: Provider<T> + 'static,
+	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork> + 'static,
+	P: Provider<T, AnyNetwork> + 'static,
 	T: Transport + Clone,
 {
 	/// The `EthClient` to interact with the connected blockchain.
@@ -68,8 +69,8 @@ where
 #[async_trait::async_trait]
 impl<F, P, T> Handler for SocketRelayHandler<F, P, T>
 where
-	F: TxFiller + WalletProvider,
-	P: Provider<T>,
+	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
+	P: Provider<T, AnyNetwork>,
 	T: Transport + Clone,
 {
 	async fn run(&mut self) -> Result<()> {
@@ -161,8 +162,8 @@ where
 #[async_trait::async_trait]
 impl<F, P, T> SocketRelayBuilder<F, P, T> for SocketRelayHandler<F, P, T>
 where
-	F: TxFiller + WalletProvider,
-	P: Provider<T>,
+	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
+	P: Provider<T, AnyNetwork>,
 	T: Transport + Clone,
 {
 	fn get_client(&self) -> Arc<EthClient<F, P, T>> {
@@ -254,8 +255,8 @@ where
 
 impl<F, P, T> SocketRelayHandler<F, P, T>
 where
-	F: TxFiller + WalletProvider + 'static,
-	P: Provider<T> + 'static,
+	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork> + 'static,
+	P: Provider<T, AnyNetwork> + 'static,
 	T: Transport + Clone,
 {
 	/// Instantiates a new `SocketRelayHandler` instance.
@@ -486,8 +487,8 @@ where
 #[async_trait::async_trait]
 impl<F, P, T> BootstrapHandler for SocketRelayHandler<F, P, T>
 where
-	F: TxFiller + WalletProvider,
-	P: Provider<T>,
+	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
+	P: Provider<T, AnyNetwork>,
 	T: Transport + Clone,
 {
 	fn bootstrap_shared_data(&self) -> Arc<BootstrapSharedData> {

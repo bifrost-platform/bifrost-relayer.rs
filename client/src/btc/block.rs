@@ -4,6 +4,7 @@ use crate::{
 };
 
 use alloy::{
+	network::AnyNetwork,
 	providers::{fillers::TxFiller, Provider, WalletProvider},
 	transports::Transport,
 };
@@ -92,8 +93,8 @@ impl EventMessage {
 /// A module that reads every new Bitcoin block and filters `Inbound`, `Outbound` events.
 pub struct BlockManager<F, P, T>
 where
-	F: TxFiller + WalletProvider,
-	P: Provider<T>,
+	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
+	P: Provider<T, AnyNetwork>,
 	T: Transport + Clone,
 {
 	/// The Bitcoin client.
@@ -119,8 +120,8 @@ where
 #[async_trait::async_trait]
 impl<F, P, TR> RpcApi for BlockManager<F, P, TR>
 where
-	F: TxFiller + WalletProvider,
-	P: Provider<TR>,
+	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
+	P: Provider<TR, AnyNetwork>,
 	TR: Transport + Clone,
 {
 	async fn call<T: for<'a> Deserialize<'a> + Send>(
@@ -151,8 +152,8 @@ where
 
 impl<F, P, T> BlockManager<F, P, T>
 where
-	F: TxFiller + WalletProvider,
-	P: Provider<T>,
+	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
+	P: Provider<T, AnyNetwork>,
 	T: Transport + Clone,
 {
 	/// Instantiates a new `BlockManager` instance.
@@ -374,8 +375,8 @@ where
 #[async_trait::async_trait]
 impl<F, P, T> BootstrapHandler for BlockManager<F, P, T>
 where
-	F: TxFiller + WalletProvider,
-	P: Provider<T>,
+	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
+	P: Provider<T, AnyNetwork>,
 	T: Transport + Clone,
 {
 	fn bootstrap_shared_data(&self) -> Arc<BootstrapSharedData> {

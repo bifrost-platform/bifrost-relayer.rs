@@ -1,6 +1,7 @@
 use std::{collections::BTreeMap, fmt::Error, ops::Mul, sync::Arc};
 
 use alloy::{
+	network::AnyNetwork,
 	primitives::U256,
 	providers::{fillers::TxFiller, Provider, WalletProvider},
 	transports::Transport,
@@ -33,8 +34,8 @@ const LOG_TARGET: &str = "price-fetcher";
 #[derive(Clone)]
 pub enum PriceFetchers<F, P, T>
 where
-	F: TxFiller + WalletProvider,
-	P: Provider<T>,
+	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
+	P: Provider<T, AnyNetwork>,
 	T: Transport + Clone,
 {
 	Binance(BinancePriceFetcher),
@@ -85,8 +86,8 @@ pub async fn krw_to_usd(krw_amount: U256) -> Result<U256, Error> {
 
 impl<F, P, T> PriceFetchers<F, P, T>
 where
-	F: TxFiller + WalletProvider,
-	P: Provider<T>,
+	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
+	P: Provider<T, AnyNetwork>,
 	T: Transport + Clone,
 {
 	pub async fn new(
@@ -111,8 +112,8 @@ where
 #[async_trait]
 impl<F, P, T> PriceFetcher for PriceFetchers<F, P, T>
 where
-	F: TxFiller + WalletProvider,
-	P: Provider<T>,
+	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
+	P: Provider<T, AnyNetwork>,
 	T: Transport + Clone,
 {
 	async fn get_ticker_with_symbol(&self, symbol: String) -> Result<PriceResponse> {

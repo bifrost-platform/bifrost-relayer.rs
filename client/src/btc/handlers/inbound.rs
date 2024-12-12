@@ -7,7 +7,7 @@ use crate::{
 };
 
 use alloy::{
-	network::Ethereum,
+	network::AnyNetwork,
 	primitives::{Address as EthAddress, B256, U256},
 	providers::{
 		fillers::{FillProvider, TxFiller},
@@ -38,8 +38,8 @@ const SUB_LOG_TARGET: &str = "inbound-handler";
 
 pub struct InboundHandler<F, P, T>
 where
-	F: TxFiller + WalletProvider,
-	P: Provider<T>,
+	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
+	P: Provider<T, AnyNetwork>,
 	T: Transport + Clone,
 {
 	/// `EthClient` for interact with Bifrost network.
@@ -56,8 +56,8 @@ where
 
 impl<F, P, T> InboundHandler<F, P, T>
 where
-	F: TxFiller + WalletProvider,
-	P: Provider<T>,
+	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
+	P: Provider<T, AnyNetwork>,
 	T: Transport + Clone,
 {
 	pub fn new(
@@ -151,7 +151,7 @@ where
 	#[inline]
 	fn bitcoin_socket(
 		&self,
-	) -> &BitcoinSocketContractInstance<T, Arc<FillProvider<F, P, T, Ethereum>>> {
+	) -> &BitcoinSocketContractInstance<T, Arc<FillProvider<F, P, T, AnyNetwork>>, AnyNetwork> {
 		self.bfc_client.protocol_contracts.bitcoin_socket.as_ref().unwrap()
 	}
 }
@@ -159,8 +159,8 @@ where
 #[async_trait::async_trait]
 impl<F, P, T> Handler for InboundHandler<F, P, T>
 where
-	F: TxFiller + WalletProvider + 'static,
-	P: Provider<T> + 'static,
+	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork> + 'static,
+	P: Provider<T, AnyNetwork> + 'static,
 	T: Transport + Clone,
 {
 	async fn run(&mut self) -> Result<()> {
@@ -232,8 +232,8 @@ where
 #[async_trait::async_trait]
 impl<F, P, T> BootstrapHandler for InboundHandler<F, P, T>
 where
-	F: TxFiller + WalletProvider,
-	P: Provider<T>,
+	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
+	P: Provider<T, AnyNetwork>,
 	T: Transport + Clone,
 {
 	fn bootstrap_shared_data(&self) -> Arc<BootstrapSharedData> {

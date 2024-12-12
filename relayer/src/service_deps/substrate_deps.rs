@@ -2,8 +2,8 @@ use super::*;
 
 pub struct SubstrateDeps<F, P, T>
 where
-	F: TxFiller + WalletProvider,
-	P: Provider<T>,
+	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
+	P: Provider<T, AnyNetwork>,
 	T: Transport + Clone,
 {
 	/// The `UnsignedTransactionManager` for Bifrost.
@@ -14,8 +14,8 @@ where
 
 impl<F, P, T> SubstrateDeps<F, P, T>
 where
-	F: TxFiller + WalletProvider + 'static,
-	P: Provider<T> + 'static,
+	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork> + 'static,
+	P: Provider<T, AnyNetwork> + 'static,
 	T: Transport + Clone,
 {
 	pub fn new(bfc_client: Arc<EthClient<F, P, T>>, task_manager: &TaskManager) -> Self {

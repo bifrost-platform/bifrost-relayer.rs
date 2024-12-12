@@ -7,7 +7,7 @@ use crate::{
 };
 
 use alloy::{
-	network::Ethereum,
+	network::AnyNetwork,
 	primitives::ChainId,
 	providers::{
 		fillers::{FillProvider, TxFiller},
@@ -40,8 +40,8 @@ const SUB_LOG_TARGET: &str = "outbound-handler";
 
 pub struct OutboundHandler<F, P, T>
 where
-	F: TxFiller + WalletProvider,
-	P: Provider<T>,
+	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
+	P: Provider<T, AnyNetwork>,
 	T: Transport + Clone,
 {
 	pub bfc_client: Arc<EthClient<F, P, T>>,
@@ -55,8 +55,8 @@ where
 
 impl<F, P, T> OutboundHandler<F, P, T>
 where
-	F: TxFiller + WalletProvider,
-	P: Provider<T>,
+	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
+	P: Provider<T, AnyNetwork>,
 	T: Transport + Clone,
 {
 	pub fn new(
@@ -77,7 +77,7 @@ where
 	#[inline]
 	fn socket_queue(
 		&self,
-	) -> &SocketQueueContractInstance<T, Arc<FillProvider<F, P, T, Ethereum>>> {
+	) -> &SocketQueueContractInstance<T, Arc<FillProvider<F, P, T, AnyNetwork>>, AnyNetwork> {
 		self.bfc_client.protocol_contracts.socket_queue.as_ref().unwrap()
 	}
 
@@ -99,8 +99,8 @@ where
 #[async_trait::async_trait]
 impl<F, P, T> Handler for OutboundHandler<F, P, T>
 where
-	F: TxFiller + WalletProvider + 'static,
-	P: Provider<T> + 'static,
+	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork> + 'static,
+	P: Provider<T, AnyNetwork> + 'static,
 	T: Transport + Clone,
 {
 	async fn run(&mut self) -> Result<()> {
@@ -168,8 +168,8 @@ where
 #[async_trait::async_trait]
 impl<F, P, T> SocketRelayBuilder<F, P, T> for OutboundHandler<F, P, T>
 where
-	F: TxFiller + WalletProvider,
-	P: Provider<T>,
+	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
+	P: Provider<T, AnyNetwork>,
 	T: Transport + Clone,
 {
 	fn get_client(&self) -> Arc<EthClient<F, P, T>> {
@@ -196,8 +196,8 @@ where
 #[async_trait::async_trait]
 impl<F, P, T> BootstrapHandler for OutboundHandler<F, P, T>
 where
-	F: TxFiller + WalletProvider,
-	P: Provider<T>,
+	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
+	P: Provider<T, AnyNetwork>,
 	T: Transport + Clone,
 {
 	fn bootstrap_shared_data(&self) -> Arc<BootstrapSharedData> {

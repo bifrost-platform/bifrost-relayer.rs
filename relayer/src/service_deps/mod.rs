@@ -13,6 +13,7 @@ pub use periodic_deps::PeriodicDeps;
 pub use substrate_deps::SubstrateDeps;
 
 use alloy::{
+	network::AnyNetwork,
 	primitives::ChainId,
 	providers::{fillers::TxFiller, Provider, WalletProvider},
 	transports::Transport,

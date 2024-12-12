@@ -2,8 +2,8 @@ use super::*;
 
 pub struct ManagerDeps<F, P, T>
 where
-	F: TxFiller + WalletProvider,
-	P: Provider<T>,
+	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
+	P: Provider<T, AnyNetwork>,
 	T: Transport + Clone,
 {
 	/// Bifrost client
@@ -16,8 +16,8 @@ where
 
 impl<F, P, T> ManagerDeps<F, P, T>
 where
-	F: TxFiller + WalletProvider,
-	P: Provider<T>,
+	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
+	P: Provider<T, AnyNetwork>,
 	T: Transport + Clone,
 {
 	/// Initializes the `EthClient`, `TransactionManager`, `EventManager`, `TxRequestSender` for each chain.

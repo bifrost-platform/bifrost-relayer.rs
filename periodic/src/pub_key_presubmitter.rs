@@ -1,5 +1,6 @@
 use crate::traits::PeriodicWorker;
 use alloy::{
+	network::AnyNetwork,
 	providers::{fillers::TxFiller, Provider, WalletProvider},
 	transports::Transport,
 };
@@ -32,8 +33,8 @@ const SUB_LOG_TARGET: &str = "pubkey-presubmitter";
 
 pub struct PubKeyPreSubmitter<F, P, T>
 where
-	F: TxFiller + WalletProvider,
-	P: Provider<T>,
+	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
+	P: Provider<T, AnyNetwork>,
 	T: Transport + Clone,
 {
 	pub bfc_client: Arc<EthClient<F, P, T>>,
@@ -52,8 +53,8 @@ where
 #[async_trait::async_trait]
 impl<F, P, T> PeriodicWorker for PubKeyPreSubmitter<F, P, T>
 where
-	F: TxFiller + WalletProvider,
-	P: Provider<T>,
+	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
+	P: Provider<T, AnyNetwork>,
 	T: Transport + Clone,
 {
 	fn schedule(&self) -> Schedule {
@@ -91,8 +92,8 @@ where
 
 impl<F, P, T> PubKeyPreSubmitter<F, P, T>
 where
-	F: TxFiller + WalletProvider,
-	P: Provider<T>,
+	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
+	P: Provider<T, AnyNetwork>,
 	T: Transport + Clone,
 {
 	/// Instantiates a new `PubKeyPreSubmitter` instance.
