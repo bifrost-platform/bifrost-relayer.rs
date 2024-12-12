@@ -20,7 +20,7 @@ where
 	P: Provider<T, AnyNetwork>,
 	T: Transport + Clone,
 {
-	/// Initializes the `EthClient`, `TransactionManager`, `EventManager`, `TxRequestSender` for each chain.
+	/// Initializes the `EthClient`'s and `EventManager`'s for each chain.
 	pub fn new(
 		config: &Configuration,
 		clients: Arc<BTreeMap<ChainId, Arc<EthClient<F, P, T>>>>,
