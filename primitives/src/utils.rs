@@ -26,10 +26,8 @@ pub fn hash_bytes(bytes: &Vec<u8>) -> B256 {
 
 /// Recovers the address from the given signature and message.
 pub fn recover_message(sig: EthersSignature, msg: &[u8]) -> Address {
-	let r = sig.r().to_be_bytes::<32>();
-	let s = sig.s().to_be_bytes::<32>();
 	let v = sig.recid();
-	let rs = k256::ecdsa::Signature::from_slice([r, s].concat().as_slice()).unwrap();
+	let rs = sig.to_k256().unwrap();
 
 	let verify_key =
 		VerifyingKey::recover_from_digest(Keccak256::new_with_prefix(msg), &rs, v).unwrap();
