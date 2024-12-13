@@ -281,8 +281,8 @@ pub fn send_transaction<F, P, T>(
 	this_handle.spawn("send_transaction", None, async move {
 		if client.metadata.is_native {
 			// gas price is fixed to 1000 Gwei on bifrost network
-			request.max_fee_per_gas = Some(0);
-			request.max_priority_fee_per_gas = Some(1000 * Unit::GWEI.wei().to::<u128>());
+			request.max_fee_per_gas = Some(1000 * Unit::GWEI.wei().to::<u128>());
+			request.max_priority_fee_per_gas = Some(0);
 		} else {
 			// to avoid duplicate(will revert) external networks transactions
 			tokio::time::sleep(Duration::from_millis(generate_delay())).await;
