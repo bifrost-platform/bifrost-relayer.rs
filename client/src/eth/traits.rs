@@ -1,8 +1,9 @@
 use std::sync::Arc;
 
 use alloy::{
+	dyn_abi::DynSolValue,
 	network::AnyNetwork,
-	primitives::{ChainId, B256, U256},
+	primitives::{ChainId, FixedBytes, B256, U256},
 	providers::{fillers::TxFiller, Provider, WalletProvider},
 	rpc::types::{Log, TransactionInput},
 	signers::Signature,
@@ -66,6 +67,38 @@ where
 		Ok(None)
 	}
 
+	fn encode_socket_message(&self, msg: Socket_Message) -> Vec<u8> {
+		let req_id = DynSolValue::Tuple(vec![
+			DynSolValue::FixedBytes(
+				FixedBytes::<32>::from_slice(msg.req_id.ChainIndex.as_slice()),
+				4,
+			),
+			DynSolValue::Uint(U256::from(msg.req_id.round_id), 64),
+			DynSolValue::Uint(U256::from(msg.req_id.sequence), 128),
+		]);
+		let status = DynSolValue::Uint(U256::from(msg.status), 8);
+		let ins_code = DynSolValue::Tuple(vec![
+			DynSolValue::FixedBytes(
+				FixedBytes::<32>::from_slice(msg.ins_code.ChainIndex.as_slice()),
+				4,
+			),
+			DynSolValue::FixedBytes(
+				FixedBytes::<32>::from_slice(msg.ins_code.RBCmethod.as_slice()),
+				16,
+			),
+		]);
+		let params = DynSolValue::Tuple(vec![
+			DynSolValue::FixedBytes(msg.params.tokenIDX0, 32),
+			DynSolValue::FixedBytes(msg.params.tokenIDX1, 32),
+			DynSolValue::Address(msg.params.refund),
+			DynSolValue::Address(msg.params.to),
+			DynSolValue::Uint(msg.params.amount, 256),
+			DynSolValue::Bytes(msg.params.variants.to_vec()),
+		]);
+
+		DynSolValue::Tuple(vec![req_id, status, ins_code, params]).abi_encode()
+	}
+
 	/// Build the signatures required to request an inbound `poll()` and returns a flag which represents
 	/// whether the relay transaction should be processed to an external chain.
 	async fn build_inbound_signatures(&self, _msg: Socket_Message) -> Result<(Signatures, bool)> {
@@ -80,7 +113,7 @@ where
 
 	/// Signs the given socket message.
 	async fn sign_socket_message(&self, msg: Socket_Message) -> Result<Signature> {
-		Ok(self.get_client().sign_message(&msg.abi_encode()).await?)
+		Ok(self.get_client().sign_message(&self.encode_socket_message(msg)).await?)
 	}
 
 	/// Get the signatures of the given message.

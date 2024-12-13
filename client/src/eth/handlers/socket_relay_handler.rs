@@ -184,10 +184,12 @@ where
 			} else {
 				self.build_outbound_signatures(msg.clone()).await?
 			};
+
+			let input = self.build_poll_call_data(msg, signatures);
+			println!("input: {:?}", input);
+
 			return Ok(Some(BuiltRelayTransaction::new(
-				TransactionRequest::default()
-					.input(self.build_poll_call_data(msg, signatures))
-					.to(*to_socket),
+				TransactionRequest::default().input(input).to(*to_socket),
 				is_external,
 			)));
 		}

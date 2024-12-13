@@ -22,12 +22,13 @@ use alloy::{
 		PendingTransactionBuilder, Provider, RootProvider, SendableTx, WalletProvider,
 	},
 	rpc::types::{serde_helpers::WithOtherFields, txpool::TxpoolContent, TransactionRequest},
-	signers::{local::LocalSigner, Signature, Signer as _},
+	signers::{local::LocalSigner, Signature},
 	transports::{Transport, TransportResult},
 };
 use eyre::{eyre, Result};
 use k256::ecdsa::SigningKey;
 use sc_service::SpawnTaskHandle;
+use sha3::{Digest, Keccak256};
 use std::{collections::VecDeque, sync::Arc, time::Duration};
 use tokio::sync::Mutex;
 use url::Url;
@@ -137,8 +138,8 @@ where
 
 	/// Signs the given message.
 	pub async fn sign_message(&self, message: &[u8]) -> Result<Signature> {
-		let a: Vec<u8> = self.signer.sign_message(message).await?.into();
-		Ok(Signature::try_from(a.as_slice())?)
+		let cred = self.signer.credential();
+		Ok(Signature::from(cred.sign_digest_recoverable(Keccak256::new_with_prefix(message))?))
 	}
 
 	/// Get the bootstrap offset height based on the block time.
