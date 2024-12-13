@@ -29,7 +29,7 @@ use eyre::{eyre, Result};
 use k256::ecdsa::SigningKey;
 use sc_service::SpawnTaskHandle;
 use sha3::{Digest, Keccak256};
-use std::{collections::VecDeque, sync::Arc, time::Duration};
+use std::{cmp::max, collections::VecDeque, sync::Arc, time::Duration};
 use tokio::sync::Mutex;
 use url::Url;
 
@@ -209,11 +209,7 @@ where
 				let new_gas_price = ((tx_request.gas_price.unwrap() as f64) * 1.1).ceil() as u128;
 				let current_gas_price = self.get_gas_price().await.unwrap();
 
-				if new_gas_price >= current_gas_price {
-					tx_request.gas_price = Some(new_gas_price);
-				} else {
-					tx_request.gas_price = Some(current_gas_price);
-				}
+				tx_request.gas_price = Some(max(new_gas_price, current_gas_price));
 			} else {
 				let current_gas_price = self.estimate_eip1559_fees(None).await.unwrap();
 
@@ -222,17 +218,12 @@ where
 				let new_max_priority_fee_per_gas =
 					(tx_request.max_priority_fee_per_gas.unwrap() as f64 * 1.1).ceil() as u128;
 
-				if new_max_fee_per_gas >= current_gas_price.max_fee_per_gas {
-					tx_request.max_fee_per_gas = Some(new_max_fee_per_gas);
-				} else {
-					tx_request.max_fee_per_gas = Some(current_gas_price.max_fee_per_gas);
-				}
-				if new_max_priority_fee_per_gas >= current_gas_price.max_priority_fee_per_gas {
-					tx_request.max_priority_fee_per_gas = Some(new_max_priority_fee_per_gas);
-				} else {
-					tx_request.max_priority_fee_per_gas =
-						Some(current_gas_price.max_priority_fee_per_gas);
-				}
+				tx_request.max_fee_per_gas =
+					Some(max(new_max_fee_per_gas, current_gas_price.max_fee_per_gas));
+				tx_request.max_priority_fee_per_gas = Some(max(
+					new_max_priority_fee_per_gas,
+					current_gas_price.max_priority_fee_per_gas,
+				));
 			}
 
 			let pending = self
