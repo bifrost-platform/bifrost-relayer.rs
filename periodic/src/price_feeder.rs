@@ -19,6 +19,7 @@ use br_client::eth::{send_transaction, EthClient};
 use br_primitives::{
 	constants::{errors::INVALID_PERIODIC_SCHEDULE, schedule::PRICE_FEEDER_SCHEDULE},
 	contracts::socket::get_asset_oids,
+	eth::AggregatorContracts,
 	periodic::{PriceResponse, PriceSource},
 	tx::{PriceFeedMetadata, TxRequestMetadata},
 	utils::sub_display_format,
@@ -244,9 +245,7 @@ where
 		}
 
 		for (_, client) in self.clients.iter() {
-			if client.aggregator_contracts.chainlink_usdc_usd.is_some()
-				|| client.aggregator_contracts.chainlink_usdt_usd.is_some()
-			{
+			if Self::has_any_chainlink_feeds(&client.aggregator_contracts) {
 				if let Ok(fetcher) =
 					PriceFetchers::new(PriceSource::Chainlink, client.clone().into()).await
 				{
@@ -254,6 +253,19 @@ where
 				}
 			}
 		}
+	}
+
+	fn has_any_chainlink_feeds(contracts: &AggregatorContracts<F, P, T>) -> bool {
+		[
+			&contracts.chainlink_usdc_usd,
+			&contracts.chainlink_usdt_usd,
+			&contracts.chainlink_dai_usd,
+			&contracts.chainlink_btc_usd,
+			&contracts.chainlink_wbtc_usd,
+			&contracts.chainlink_cbbtc_usd,
+		]
+		.iter()
+		.any(|contract| contract.is_some())
 	}
 
 	/// Build and send transaction.
