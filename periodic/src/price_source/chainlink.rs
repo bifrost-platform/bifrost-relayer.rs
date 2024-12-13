@@ -69,8 +69,14 @@ where
 	async fn get_tickers(&self) -> Result<BTreeMap<String, PriceResponse>> {
 		let mut ret = BTreeMap::new();
 
-		for symbol in ["USDC".to_string(), "USDT".to_string(), "DAI".to_string(), "BTC".to_string()]
-		{
+		for symbol in [
+			"USDC".to_string(),
+			"USDT".to_string(),
+			"DAI".to_string(),
+			"BTC".to_string(),
+			"WBTC".to_string(),
+			"CBBTC".to_string(),
+		] {
 			match self.get_ticker_with_symbol(symbol.clone()).await {
 				Ok(ticker) => ret.insert(symbol, ticker),
 				Err(_) => continue,
