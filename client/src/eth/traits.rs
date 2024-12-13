@@ -70,7 +70,7 @@ where
 	fn encode_socket_message(&self, msg: Socket_Message) -> Vec<u8> {
 		let req_id = DynSolValue::Tuple(vec![
 			DynSolValue::FixedBytes(
-				FixedBytes::<32>::from_slice(msg.req_id.ChainIndex.as_slice()),
+				FixedBytes::<32>::right_padding_from(msg.req_id.ChainIndex.as_slice()),
 				4,
 			),
 			DynSolValue::Uint(U256::from(msg.req_id.round_id), 64),
@@ -79,11 +79,11 @@ where
 		let status = DynSolValue::Uint(U256::from(msg.status), 8);
 		let ins_code = DynSolValue::Tuple(vec![
 			DynSolValue::FixedBytes(
-				FixedBytes::<32>::from_slice(msg.ins_code.ChainIndex.as_slice()),
+				FixedBytes::<32>::right_padding_from(msg.ins_code.ChainIndex.as_slice()),
 				4,
 			),
 			DynSolValue::FixedBytes(
-				FixedBytes::<32>::from_slice(msg.ins_code.RBCmethod.as_slice()),
+				FixedBytes::<32>::right_padding_from(msg.ins_code.RBCmethod.as_slice()),
 				16,
 			),
 		]);
