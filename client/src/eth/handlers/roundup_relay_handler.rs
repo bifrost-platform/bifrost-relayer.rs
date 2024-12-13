@@ -1,13 +1,10 @@
-use std::{collections::BTreeMap, sync::Arc, time::Duration};
+use std::{sync::Arc, time::Duration};
 
 use alloy::{
 	dyn_abi::DynSolValue,
 	network::{primitives::ReceiptResponse as _, AnyNetwork},
-	primitives::{Address, ChainId, PrimitiveSignature, B256, U256},
-	providers::{
-		fillers::{FillProvider, TxFiller},
-		Provider, WalletProvider,
-	},
+	primitives::{Address, PrimitiveSignature, B256, U256},
+	providers::{fillers::TxFiller, Provider, WalletProvider},
 	rpc::types::{Filter, Log, TransactionInput, TransactionRequest},
 	sol_types::SolEvent as _,
 	transports::Transport,
@@ -22,7 +19,8 @@ use br_primitives::{
 	bootstrap::BootstrapSharedData,
 	constants::{cli::DEFAULT_BOOTSTRAP_ROUND_OFFSET, config::BOOTSTRAP_BLOCK_CHUNK_SIZE},
 	contracts::socket::{
-		SocketContract::{RoundUp, SocketContractInstance},
+		SocketContract::RoundUp,
+		SocketInstance,
 		Socket_Struct::{Round_Up_Submit, Signatures},
 	},
 	eth::{BootstrapState, RoundUpEventStatus},
@@ -34,7 +32,7 @@ use crate::eth::{
 	events::EventMessage,
 	send_transaction,
 	traits::{BootstrapHandler, Handler},
-	EthClient,
+	ClientMap, EthClient,
 };
 
 const SUB_LOG_TARGET: &str = "roundup-handler";
@@ -51,7 +49,7 @@ where
 	/// The receiver that consumes new events from the block channel.
 	event_receiver: Receiver<EventMessage>,
 	/// `EthClient`s to interact with provided networks except bifrost network.
-	external_clients: Arc<BTreeMap<ChainId, Arc<EthClient<F, P, T>>>>,
+	external_clients: Arc<ClientMap<F, P, T>>,
 	/// Signature of RoundUp Event.
 	roundup_signature: B256,
 	/// The bootstrap shared data.
@@ -141,7 +139,7 @@ where
 						"-[{}] Error on decoding RoundUp event ({:?}):{}",
 						sub_display_format(SUB_LOG_TARGET),
 						log.transaction_hash,
-						e.to_string(),
+						e,
 					);
 					log::error!(target: &self.client.get_chain_name(), "{log_msg}");
 					sentry::capture_message(
@@ -176,7 +174,7 @@ where
 	pub fn new(
 		client: Arc<EthClient<F, P, T>>,
 		event_receiver: Receiver<EventMessage>,
-		clients: Arc<BTreeMap<ChainId, Arc<EthClient<F, P, T>>>>,
+		clients: Arc<ClientMap<F, P, T>>,
 		bootstrap_shared_data: Arc<BootstrapSharedData>,
 		handle: SpawnTaskHandle,
 	) -> Self {
@@ -252,11 +250,7 @@ where
 	/// Build `round_control_relay` method call transaction.
 	fn build_transaction_request(
 		&self,
-		target_socket: &SocketContractInstance<
-			T,
-			Arc<FillProvider<F, P, T, AnyNetwork>>,
-			AnyNetwork,
-		>,
+		target_socket: &SocketInstance<F, P, T>,
 		roundup_submit: &Round_Up_Submit,
 	) -> TransactionRequest {
 		TransactionRequest::default()

@@ -1,3 +1,5 @@
+use br_client::eth::ClientMap;
+
 use super::*;
 
 pub struct ManagerDeps<F, P, T>
@@ -9,7 +11,7 @@ where
 	/// Bifrost client
 	pub bifrost_client: Arc<EthClient<F, P, T>>,
 	/// The `EthClient`'s for each specified chain.
-	pub clients: Arc<BTreeMap<ChainId, Arc<EthClient<F, P, T>>>>,
+	pub clients: Arc<ClientMap<F, P, T>>,
 	/// The `EventManager`'s for each specified chain.
 	pub event_managers: BTreeMap<ChainId, EventManager<F, P, T>>,
 }
@@ -23,7 +25,7 @@ where
 	/// Initializes the `EthClient`'s and `EventManager`'s for each chain.
 	pub fn new(
 		config: &Configuration,
-		clients: Arc<BTreeMap<ChainId, Arc<EthClient<F, P, T>>>>,
+		clients: Arc<ClientMap<F, P, T>>,
 		bootstrap_shared_data: BootstrapSharedData,
 	) -> Self {
 		let prometheus_config = &config.relayer_config.prometheus_config;

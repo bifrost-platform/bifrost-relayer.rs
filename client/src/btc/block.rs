@@ -1,7 +1,4 @@
-use crate::{
-	btc::{storage::pending_outbound::PendingOutboundPool, LOG_TARGET},
-	eth::EthClient,
-};
+use crate::{btc::LOG_TARGET, eth::EthClient};
 
 use alloy::{
 	network::AnyNetwork,
@@ -113,8 +110,6 @@ where
 	bootstrap_shared_data: Arc<BootstrapSharedData>,
 	/// The bootstrap offset in blocks.
 	bootstrap_offset: u32,
-	/// NOTE: currently not used.
-	_pending_outbounds: PendingOutboundPool,
 }
 
 #[async_trait::async_trait]
@@ -160,7 +155,6 @@ where
 	pub fn new(
 		btc_client: BtcClient,
 		bfc_client: Arc<EthClient<F, P, T>>,
-		_pending_outbounds: PendingOutboundPool,
 		bootstrap_shared_data: Arc<BootstrapSharedData>,
 		call_interval: u64,
 		block_confirmations: u64,
@@ -185,7 +179,6 @@ where
 			call_interval,
 			bootstrap_shared_data,
 			bootstrap_offset,
-			_pending_outbounds,
 		}
 	}
 

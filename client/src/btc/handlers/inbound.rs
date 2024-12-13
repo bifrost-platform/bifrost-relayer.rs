@@ -9,17 +9,14 @@ use crate::{
 use alloy::{
 	network::AnyNetwork,
 	primitives::{Address as EthAddress, B256, U256},
-	providers::{
-		fillers::{FillProvider, TxFiller},
-		Provider, WalletProvider,
-	},
+	providers::{fillers::TxFiller, Provider, WalletProvider},
 	rpc::types::{TransactionInput, TransactionRequest},
 	transports::Transport,
 };
 use bitcoincore_rpc::bitcoin::Txid;
 use br_primitives::{
 	bootstrap::BootstrapSharedData,
-	contracts::bitcoin_socket::BitcoinSocketContract::BitcoinSocketContractInstance,
+	contracts::bitcoin_socket::BitcoinSocketInstance,
 	eth::BootstrapState,
 	tx::{BitcoinRelayMetadata, TxRequestMetadata},
 	utils::sub_display_format,
@@ -117,7 +114,7 @@ where
 
 		TransactionRequest::default()
 			.input(TransactionInput::new(calldata))
-			.to(self.bitcoin_socket().address().clone())
+			.to(*self.bitcoin_socket().address())
 	}
 
 	/// Checks if the relayer has already voted on the event.
@@ -149,9 +146,7 @@ where
 	}
 
 	#[inline]
-	fn bitcoin_socket(
-		&self,
-	) -> &BitcoinSocketContractInstance<T, Arc<FillProvider<F, P, T, AnyNetwork>>, AnyNetwork> {
+	fn bitcoin_socket(&self) -> &BitcoinSocketInstance<F, P, T> {
 		self.bfc_client.protocol_contracts.bitcoin_socket.as_ref().unwrap()
 	}
 }

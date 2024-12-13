@@ -1,4 +1,4 @@
-use alloy::sol;
+use super::*;
 
 sol!(
 	#[allow(missing_docs)]
@@ -7,3 +7,8 @@ sol!(
 	ChainlinkContract,
 	"../abi/abi.aggregatorv3.chainlink.json"
 );
+
+use ChainlinkContract::ChainlinkContractInstance;
+
+pub type ChainlinkInstance<F, P, T> =
+	ChainlinkContractInstance<T, Arc<FillProvider<F, P, T, AnyNetwork>>, AnyNetwork>;

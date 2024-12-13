@@ -1,4 +1,4 @@
-use alloy::sol;
+use super::*;
 
 sol!(
 	#[allow(missing_docs)]
@@ -7,3 +7,8 @@ sol!(
 	RelayExecutiveContract,
 	"../abi/abi.relay_executive.bifrost.json"
 );
+
+use RelayExecutiveContract::RelayExecutiveContractInstance;
+
+pub type RelayExecutiveInstance<F, P, T> =
+	RelayExecutiveContractInstance<T, Arc<FillProvider<F, P, T, AnyNetwork>>, AnyNetwork>;

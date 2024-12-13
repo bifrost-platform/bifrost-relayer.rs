@@ -84,7 +84,7 @@ where
 			self.get_bfc_client().address(),
 			msg.metadata,
 			msg.retries_remaining - 1,
-			error.to_string(),
+			error,
 		);
 		log::error!(target: &self.get_bfc_client().get_chain_name(), "{log_msg}");
 		sentry::capture_message(

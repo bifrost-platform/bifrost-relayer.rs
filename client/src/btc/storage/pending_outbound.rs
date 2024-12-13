@@ -13,16 +13,12 @@ pub struct PendingOutboundValue {
 	pub amount: Amount,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct PendingOutboundPool(
 	Arc<RwLock<BTreeMap<Address<NetworkUnchecked>, PendingOutboundValue>>>,
 );
 
 impl PendingOutboundPool {
-	pub fn new() -> Self {
-		Self(Default::default())
-	}
-
 	pub async fn insert(
 		&self,
 		key: Address<NetworkUnchecked>,

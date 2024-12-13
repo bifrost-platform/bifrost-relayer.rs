@@ -28,7 +28,6 @@ where
 {
 	pub fn new(
 		config: &Configuration,
-		pending_outbounds: PendingOutboundPool,
 		keypair_storage: Arc<RwLock<KeypairStorage>>,
 		bootstrap_shared_data: BootstrapSharedData,
 		substrate_deps: &SubstrateDeps<F, P, T>,
@@ -58,9 +57,8 @@ where
 		let block_manager = BlockManager::new(
 			btc_client.clone(),
 			bfc_client.clone(),
-			pending_outbounds.clone(),
 			bootstrap_shared_data.clone(),
-			config.relayer_config.btc_provider.call_interval.clone(),
+			config.relayer_config.btc_provider.call_interval,
 			config
 				.relayer_config
 				.btc_provider

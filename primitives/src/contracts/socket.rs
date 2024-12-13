@@ -1,8 +1,4 @@
-use alloy::{
-	primitives::{b256, Bytes, PrimitiveSignature, B256},
-	sol,
-};
-use std::collections::BTreeMap;
+use super::*;
 use Socket_Struct::*;
 
 pub fn get_asset_oids() -> BTreeMap<&'static str, B256> {
@@ -71,3 +67,8 @@ impl From<Signatures> for Vec<PrimitiveSignature> {
 		res
 	}
 }
+
+use SocketContract::SocketContractInstance;
+
+pub type SocketInstance<F, P, T> =
+	SocketContractInstance<T, Arc<FillProvider<F, P, T, AnyNetwork>>, AnyNetwork>;

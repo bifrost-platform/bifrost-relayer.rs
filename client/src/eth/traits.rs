@@ -122,7 +122,7 @@ where
 		let signatures = client
 			.protocol_contracts
 			.socket
-			.get_signatures(msg.req_id.clone(), msg.status.clone())
+			.get_signatures(msg.req_id.clone(), msg.status)
 			.call()
 			.await?
 			._0;

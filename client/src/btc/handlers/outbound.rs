@@ -9,10 +9,7 @@ use crate::{
 use alloy::{
 	network::AnyNetwork,
 	primitives::ChainId,
-	providers::{
-		fillers::{FillProvider, TxFiller},
-		Provider, WalletProvider,
-	},
+	providers::{fillers::TxFiller, Provider, WalletProvider},
 	rpc::types::TransactionRequest,
 	sol_types::SolEvent,
 	transports::Transport,
@@ -21,7 +18,7 @@ use br_primitives::{
 	bootstrap::BootstrapSharedData,
 	contracts::{
 		socket::{SocketContract::Socket, Socket_Struct::Socket_Message},
-		socket_queue::SocketQueueContract::SocketQueueContractInstance,
+		socket_queue::SocketQueueInstance,
 	},
 	eth::{BootstrapState, BuiltRelayTransaction, SocketEventStatus},
 	tx::{SocketRelayMetadata, TxRequestMetadata},
@@ -75,9 +72,7 @@ where
 	}
 
 	#[inline]
-	fn socket_queue(
-		&self,
-	) -> &SocketQueueContractInstance<T, Arc<FillProvider<F, P, T, AnyNetwork>>, AnyNetwork> {
+	fn socket_queue(&self) -> &SocketQueueInstance<F, P, T> {
 		self.bfc_client.protocol_contracts.socket_queue.as_ref().unwrap()
 	}
 
@@ -187,7 +182,7 @@ where
 		return Ok(Some(BuiltRelayTransaction::new(
 			TransactionRequest::default()
 				.input(self.build_poll_call_data(msg, signatures))
-				.to(self.bfc_client.protocol_contracts.socket.address().clone()),
+				.to(*self.bfc_client.protocol_contracts.socket.address()),
 			is_external,
 		)));
 	}

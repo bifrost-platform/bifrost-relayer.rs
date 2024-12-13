@@ -1,3 +1,5 @@
+use br_client::eth::ClientMap;
+
 use super::*;
 
 pub struct PeriodicDeps<F, P, T>
@@ -33,7 +35,7 @@ where
 		migration_sequence: Arc<RwLock<MigrationSequence>>,
 		keypair_storage: Arc<RwLock<KeypairStorage>>,
 		substrate_deps: &SubstrateDeps<F, P, T>,
-		clients: Arc<BTreeMap<ChainId, Arc<EthClient<F, P, T>>>>,
+		clients: Arc<ClientMap<F, P, T>>,
 		bfc_client: Arc<EthClient<F, P, T>>,
 		task_manager: &TaskManager,
 	) -> Self {

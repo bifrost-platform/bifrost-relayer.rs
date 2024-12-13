@@ -1,4 +1,4 @@
-use alloy::sol;
+use super::*;
 
 sol!(
 	#[allow(missing_docs)]
@@ -7,3 +7,8 @@ sol!(
 	RegistrationPoolContract,
 	"../abi/abi.registration_pool.bifrost.json"
 );
+
+use RegistrationPoolContract::RegistrationPoolContractInstance;
+
+pub type RegistrationPoolInstance<F, P, T> =
+	RegistrationPoolContractInstance<T, Arc<FillProvider<F, P, T, AnyNetwork>>, AnyNetwork>;

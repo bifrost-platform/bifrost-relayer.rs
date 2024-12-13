@@ -13,16 +13,20 @@ use alloy::{
 use url::Url;
 
 use crate::{
-	constants::errors::{INVALID_CONTRACT_ADDRESS, MISSING_CONTRACT_ADDRESS},
+	cli::EVMProvider,
+	constants::{
+		cli::DEFAULT_GET_LOGS_BATCH_SIZE,
+		errors::{INVALID_CONTRACT_ADDRESS, MISSING_CONTRACT_ADDRESS},
+	},
 	contracts::{
-		authority::AuthorityContract::{self, AuthorityContractInstance},
-		bitcoin_socket::BitcoinSocketContract::{self, BitcoinSocketContractInstance},
-		chainlink_aggregator::ChainlinkContract::{self, ChainlinkContractInstance},
-		registration_pool::RegistrationPoolContract::{self, RegistrationPoolContractInstance},
-		relay_executive::RelayExecutiveContract::{self, RelayExecutiveContractInstance},
-		relayer_manager::RelayerManagerContract::{self, RelayerManagerContractInstance},
-		socket::SocketContract::{self, SocketContractInstance},
-		socket_queue::SocketQueueContract::{self, SocketQueueContractInstance},
+		authority::{AuthorityContract, AuthorityInstance},
+		bitcoin_socket::{BitcoinSocketContract, BitcoinSocketInstance},
+		chainlink_aggregator::{ChainlinkContract, ChainlinkInstance},
+		registration_pool::{RegistrationPoolContract, RegistrationPoolInstance},
+		relay_executive::{RelayExecutiveContract, RelayExecutiveInstance},
+		relayer_manager::{RelayerManagerContract, RelayerManagerInstance},
+		socket::{SocketContract, SocketInstance},
+		socket_queue::{SocketQueueContract, SocketQueueInstance},
 	},
 };
 
@@ -54,25 +58,24 @@ pub struct ProviderMetadata {
 
 impl ProviderMetadata {
 	pub fn new(
-		name: String,
+		evm_provider: EVMProvider,
 		url: Url,
-		id: ChainId,
 		bitcoin_chain_id: Option<ChainId>,
-		block_confirmations: u64,
-		call_interval: u64,
-		eip1559: bool,
-		get_logs_batch_size: u64,
 		is_native: bool,
 	) -> Self {
+		let get_logs_batch_size =
+			evm_provider.get_logs_batch_size.unwrap_or(DEFAULT_GET_LOGS_BATCH_SIZE);
 		Self {
-			name,
+			name: evm_provider.name,
 			url,
-			id,
+			id: evm_provider.id,
 			bitcoin_chain_id,
-			block_confirmations: block_confirmations.saturating_add(get_logs_batch_size),
+			block_confirmations: evm_provider
+				.block_confirmations
+				.saturating_add(get_logs_batch_size),
 			get_logs_batch_size,
-			call_interval,
-			eip1559,
+			call_interval: evm_provider.call_interval,
+			eip1559: evm_provider.eip1559.unwrap_or(false),
 			is_native,
 			if_destination_chain: match is_native {
 				true => RelayDirection::Inbound,
@@ -90,23 +93,17 @@ where
 	T: Transport + Clone,
 {
 	/// Chainlink usdc/usd aggregator
-	pub chainlink_usdc_usd:
-		Option<ChainlinkContractInstance<T, Arc<FillProvider<F, P, T, AnyNetwork>>, AnyNetwork>>,
+	pub chainlink_usdc_usd: Option<ChainlinkInstance<F, P, T>>,
 	/// Chainlink usdt/usd aggregator
-	pub chainlink_usdt_usd:
-		Option<ChainlinkContractInstance<T, Arc<FillProvider<F, P, T, AnyNetwork>>, AnyNetwork>>,
+	pub chainlink_usdt_usd: Option<ChainlinkInstance<F, P, T>>,
 	/// Chainlink dai/usd aggregator
-	pub chainlink_dai_usd:
-		Option<ChainlinkContractInstance<T, Arc<FillProvider<F, P, T, AnyNetwork>>, AnyNetwork>>,
+	pub chainlink_dai_usd: Option<ChainlinkInstance<F, P, T>>,
 	/// Chainlink btc/usd aggregator
-	pub chainlink_btc_usd:
-		Option<ChainlinkContractInstance<T, Arc<FillProvider<F, P, T, AnyNetwork>>, AnyNetwork>>,
+	pub chainlink_btc_usd: Option<ChainlinkInstance<F, P, T>>,
 	/// Chainlink wbtc/usd aggregator
-	pub chainlink_wbtc_usd:
-		Option<ChainlinkContractInstance<T, Arc<FillProvider<F, P, T, AnyNetwork>>, AnyNetwork>>,
+	pub chainlink_wbtc_usd: Option<ChainlinkInstance<F, P, T>>,
 	/// Chainlink cbbtc/usd aggregator
-	pub chainlink_cbbtc_usd:
-		Option<ChainlinkContractInstance<T, Arc<FillProvider<F, P, T, AnyNetwork>>, AnyNetwork>>,
+	pub chainlink_cbbtc_usd: Option<ChainlinkInstance<F, P, T>>,
 }
 
 impl<F, P, T> AggregatorContracts<F, P, T>
@@ -169,28 +166,19 @@ where
 	T: Transport + Clone,
 {
 	/// SocketContract
-	pub socket: SocketContractInstance<T, Arc<FillProvider<F, P, T, AnyNetwork>>, AnyNetwork>,
+	pub socket: SocketInstance<F, P, T>,
 	/// AuthorityContract
-	pub authority: AuthorityContractInstance<T, Arc<FillProvider<F, P, T, AnyNetwork>>, AnyNetwork>,
+	pub authority: AuthorityInstance<F, P, T>,
 	/// RelayerManagerContract (Bifrost only)
-	pub relayer_manager: Option<
-		RelayerManagerContractInstance<T, Arc<FillProvider<F, P, T, AnyNetwork>>, AnyNetwork>,
-	>,
+	pub relayer_manager: Option<RelayerManagerInstance<F, P, T>>,
 	/// BitcoinSocketContract (Bifrost only)
-	pub bitcoin_socket: Option<
-		BitcoinSocketContractInstance<T, Arc<FillProvider<F, P, T, AnyNetwork>>, AnyNetwork>,
-	>,
+	pub bitcoin_socket: Option<BitcoinSocketInstance<F, P, T>>,
 	/// SocketQueueContract (Bifrost only)
-	pub socket_queue:
-		Option<SocketQueueContractInstance<T, Arc<FillProvider<F, P, T, AnyNetwork>>, AnyNetwork>>,
+	pub socket_queue: Option<SocketQueueInstance<F, P, T>>,
 	/// RegistrationPoolContract (Bifrost only)
-	pub registration_pool: Option<
-		RegistrationPoolContractInstance<T, Arc<FillProvider<F, P, T, AnyNetwork>>, AnyNetwork>,
-	>,
+	pub registration_pool: Option<RegistrationPoolInstance<F, P, T>>,
 	/// RelayExecutiveContract (Bifrost only)
-	pub relay_executive: Option<
-		RelayExecutiveContractInstance<T, Arc<FillProvider<F, P, T, AnyNetwork>>, AnyNetwork>,
-	>,
+	pub relay_executive: Option<RelayExecutiveInstance<F, P, T>>,
 }
 
 impl<F, P, T> ProtocolContracts<F, P, T>
@@ -202,21 +190,15 @@ where
 	pub fn new(
 		is_native: bool,
 		provider: Arc<FillProvider<F, P, T, AnyNetwork>>,
-		socket_address: String,
-		authority_address: String,
-		relayer_manager_address: Option<String>,
-		bitcoin_socket_address: Option<String>,
-		socket_queue_address: Option<String>,
-		registration_pool_address: Option<String>,
-		relay_executive_address: Option<String>,
+		evm_provider: EVMProvider,
 	) -> Self {
 		let mut contracts = Self {
 			socket: SocketContract::new(
-				Address::from_str(&socket_address).expect(INVALID_CONTRACT_ADDRESS),
+				Address::from_str(&evm_provider.socket_address).expect(INVALID_CONTRACT_ADDRESS),
 				provider.clone(),
 			),
 			authority: AuthorityContract::new(
-				Address::from_str(&authority_address).expect(INVALID_CONTRACT_ADDRESS),
+				Address::from_str(&evm_provider.authority_address).expect(INVALID_CONTRACT_ADDRESS),
 				provider.clone(),
 			),
 			relayer_manager: None,
@@ -227,28 +209,38 @@ where
 		};
 		if is_native {
 			contracts.relayer_manager = Some(RelayerManagerContract::new(
-				Address::from_str(&relayer_manager_address.expect(MISSING_CONTRACT_ADDRESS))
-					.expect(INVALID_CONTRACT_ADDRESS),
+				Address::from_str(
+					&evm_provider.relayer_manager_address.expect(MISSING_CONTRACT_ADDRESS),
+				)
+				.expect(INVALID_CONTRACT_ADDRESS),
 				provider.clone(),
 			));
 			contracts.bitcoin_socket = Some(BitcoinSocketContract::new(
-				Address::from_str(&bitcoin_socket_address.expect(MISSING_CONTRACT_ADDRESS))
-					.expect(INVALID_CONTRACT_ADDRESS),
+				Address::from_str(
+					&evm_provider.bitcoin_socket_address.expect(MISSING_CONTRACT_ADDRESS),
+				)
+				.expect(INVALID_CONTRACT_ADDRESS),
 				provider.clone(),
 			));
 			contracts.socket_queue = Some(SocketQueueContract::new(
-				Address::from_str(&socket_queue_address.expect(MISSING_CONTRACT_ADDRESS))
-					.expect(INVALID_CONTRACT_ADDRESS),
+				Address::from_str(
+					&evm_provider.socket_queue_address.expect(MISSING_CONTRACT_ADDRESS),
+				)
+				.expect(INVALID_CONTRACT_ADDRESS),
 				provider.clone(),
 			));
 			contracts.registration_pool = Some(RegistrationPoolContract::new(
-				Address::from_str(&registration_pool_address.expect(MISSING_CONTRACT_ADDRESS))
-					.expect(INVALID_CONTRACT_ADDRESS),
+				Address::from_str(
+					&evm_provider.registration_pool_address.expect(MISSING_CONTRACT_ADDRESS),
+				)
+				.expect(INVALID_CONTRACT_ADDRESS),
 				provider.clone(),
 			));
 			contracts.relay_executive = Some(RelayExecutiveContract::new(
-				Address::from_str(&relay_executive_address.expect(MISSING_CONTRACT_ADDRESS))
-					.expect(INVALID_CONTRACT_ADDRESS),
+				Address::from_str(
+					&evm_provider.relay_executive_address.expect(MISSING_CONTRACT_ADDRESS),
+				)
+				.expect(INVALID_CONTRACT_ADDRESS),
 				provider.clone(),
 			));
 		}

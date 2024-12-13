@@ -3,17 +3,14 @@ use std::{str::FromStr, sync::Arc, time::Duration};
 use alloy::{
 	network::AnyNetwork,
 	primitives::{Address, Bytes},
-	providers::{
-		fillers::{FillProvider, TxFiller},
-		Provider, WalletProvider,
-	},
+	providers::{fillers::TxFiller, Provider, WalletProvider},
 	transports::Transport,
 };
 use bitcoincore_rpc::bitcoin::PublicKey;
 use br_client::{btc::storage::keypair::KeypairStorage, eth::EthClient};
 use br_primitives::{
 	constants::{errors::INVALID_PERIODIC_SCHEDULE, schedule::PUB_KEY_SUBMITTER_SCHEDULE},
-	contracts::registration_pool::RegistrationPoolContract::RegistrationPoolContractInstance,
+	contracts::registration_pool::RegistrationPoolInstance,
 	substrate::{
 		bifrost_runtime::{
 			self, btc_registration_pool::storage::types::service_state::ServiceState,
@@ -165,7 +162,7 @@ where
 		let signature = self
 			.client
 			.sign_message(
-				&format!("{}:{}", pool_round, array_bytes::bytes2hex("0x", converted_pub_key))
+				format!("{}:{}", pool_round, array_bytes::bytes2hex("0x", converted_pub_key))
 					.as_bytes(),
 			)
 			.await?
@@ -220,7 +217,7 @@ where
 					sub_display_format(SUB_LOG_TARGET),
 					self.client.address(),
 					metadata,
-					error.to_string()
+					error
 				);
 				log::error!(target: &self.client.get_chain_name(), "{log_msg}");
 				sentry::capture_message(
@@ -245,9 +242,7 @@ where
 		Ok(self.registration_pool().registration_info(who, round).call().await?.into())
 	}
 
-	fn registration_pool(
-		&self,
-	) -> &RegistrationPoolContractInstance<T, Arc<FillProvider<F, P, T, AnyNetwork>>, AnyNetwork> {
+	fn registration_pool(&self) -> &RegistrationPoolInstance<F, P, T> {
 		self.client.protocol_contracts.registration_pool.as_ref().unwrap()
 	}
 

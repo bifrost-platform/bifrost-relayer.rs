@@ -120,7 +120,7 @@ impl GetKey for KeypairStorage {
 						.expect(KEYSTORE_INTERNAL_ERROR),
 				) {
 					Ok(pair) => {
-						return if let Some(pair) = pair {
+						if let Some(pair) = pair {
 							Ok(Some(
 								PrivateKey::from_slice(&pair.into_inner().seed(), self.network)
 									.expect(KEYSTORE_INTERNAL_ERROR),

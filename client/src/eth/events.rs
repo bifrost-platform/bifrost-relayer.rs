@@ -138,14 +138,14 @@ where
 				.from_block(BlockNumber::from(from))
 				.to_block(BlockNumber::from(to))
 				.address(vec![
-					self.client.protocol_contracts.socket.address().clone(),
-					bitcoin_socket.address().clone(),
+					*self.client.protocol_contracts.socket.address(),
+					*bitcoin_socket.address(),
 				])
 		} else {
 			Filter::new()
 				.from_block(BlockNumber::from(from))
 				.to_block(BlockNumber::from(to))
-				.address(self.client.protocol_contracts.socket.address().clone())
+				.address(*self.client.protocol_contracts.socket.address())
 		};
 
 		let target_logs = self.client.get_logs(&filter).await?;

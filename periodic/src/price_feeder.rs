@@ -2,7 +2,7 @@ use std::{collections::BTreeMap, fmt::Error, str::FromStr, sync::Arc};
 
 use alloy::{
 	network::AnyNetwork,
-	primitives::{utils::parse_ether, ChainId, FixedBytes, B256, U256},
+	primitives::{utils::parse_ether, FixedBytes, B256, U256},
 	providers::{fillers::TxFiller, Provider, WalletProvider},
 	rpc::types::{TransactionInput, TransactionRequest},
 	transports::Transport,
@@ -15,7 +15,7 @@ use rand::Rng;
 use sc_service::SpawnTaskHandle;
 use tokio::time::sleep;
 
-use br_client::eth::{send_transaction, EthClient};
+use br_client::eth::{send_transaction, ClientMap, EthClient};
 use br_primitives::{
 	constants::{errors::INVALID_PERIODIC_SCHEDULE, schedule::PRICE_FEEDER_SCHEDULE},
 	contracts::socket::get_asset_oids,
@@ -50,7 +50,7 @@ where
 	/// The pre-defined oracle ID's for each asset.
 	asset_oid: BTreeMap<&'static str, B256>,
 	/// The vector that contains each `EthClient`.
-	clients: Arc<BTreeMap<ChainId, Arc<EthClient<F, P, T>>>>,
+	clients: Arc<ClientMap<F, P, T>>,
 	/// The handle to spawn tasks.
 	handle: SpawnTaskHandle,
 }
@@ -99,7 +99,7 @@ where
 {
 	pub fn new(
 		client: Arc<EthClient<F, P, T>>,
-		clients: Arc<BTreeMap<ChainId, Arc<EthClient<F, P, T>>>>,
+		clients: Arc<ClientMap<F, P, T>>,
 		handle: SpawnTaskHandle,
 	) -> Self {
 		let asset_oid = get_asset_oids();
@@ -274,7 +274,7 @@ where
 		let mut price_bytes_list: Vec<FixedBytes<32>> = vec![];
 
 		price_responses.iter().for_each(|(symbol, price_response)| {
-			oid_bytes_list.push(self.asset_oid.get(symbol.as_str()).unwrap().clone());
+			oid_bytes_list.push(*self.asset_oid.get(symbol.as_str()).unwrap());
 			price_bytes_list.push(price_response.price.into());
 		});
 

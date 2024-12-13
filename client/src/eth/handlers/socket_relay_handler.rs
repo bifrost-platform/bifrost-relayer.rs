@@ -36,7 +36,7 @@ use crate::eth::{
 	events::EventMessage,
 	send_transaction,
 	traits::{BootstrapHandler, Handler, SocketRelayBuilder},
-	EthClient,
+	ClientMap, EthClient,
 };
 
 const SUB_LOG_TARGET: &str = "socket-handler";
@@ -53,7 +53,7 @@ where
 	/// The receiver that consumes new events from the block channel.
 	event_receiver: Receiver<EventMessage>,
 	/// The entire clients instantiated in the system. <chain_id, Arc<EthClient>>
-	system_clients: Arc<BTreeMap<ChainId, Arc<EthClient<F, P, T>>>>,
+	system_clients: Arc<ClientMap<F, P, T>>,
 	/// The bifrost client.
 	bifrost_client: Arc<EthClient<F, P, T>>,
 	/// The rollback sender for each chain.
@@ -264,7 +264,7 @@ where
 	pub fn new(
 		id: ChainId,
 		event_receiver: Receiver<EventMessage>,
-		system_clients: Arc<BTreeMap<ChainId, Arc<EthClient<F, P, T>>>>,
+		system_clients: Arc<ClientMap<F, P, T>>,
 		bifrost_client: Arc<EthClient<F, P, T>>,
 		rollback_senders: Arc<BTreeMap<ChainId, Arc<UnboundedSender<Socket_Message>>>>,
 		handle: SpawnTaskHandle,
@@ -472,7 +472,7 @@ where
 						sub_display_format(SUB_LOG_TARGET),
 						self.client.address(),
 						metadata,
-						error.to_string()
+						error
 					);
 					log::error!(target: &self.client.get_chain_name(), "{msg}");
 					sentry::capture_message(

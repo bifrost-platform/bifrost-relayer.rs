@@ -3,10 +3,7 @@ use std::{collections::BTreeMap, str::FromStr, sync::Arc, time::Duration};
 use alloy::{
 	network::AnyNetwork,
 	primitives::{keccak256, Address as EvmAddress, Bytes, B256},
-	providers::{
-		fillers::{FillProvider, TxFiller},
-		Provider, WalletProvider,
-	},
+	providers::{fillers::TxFiller, Provider, WalletProvider},
 	transports::Transport,
 };
 use bitcoincore_rpc::{
@@ -21,9 +18,7 @@ use br_primitives::{
 		schedule::BITCOIN_ROLLBACK_CHECK_SCHEDULE,
 		tx::{DEFAULT_CALL_RETRIES, DEFAULT_CALL_RETRY_INTERVAL_MS},
 	},
-	contracts::socket_queue::SocketQueueContract::{
-		rollback_requestReturn, SocketQueueContractInstance,
-	},
+	contracts::socket_queue::{SocketQueueContract::rollback_requestReturn, SocketQueueInstance},
 	substrate::{bifrost_runtime, AccountId20, EthereumSignature, RollbackPollMessage},
 	tx::{SubmitRollbackPollMetadata, XtRequest, XtRequestMetadata, XtRequestSender},
 	utils::sub_display_format,
@@ -320,9 +315,7 @@ where
 	}
 
 	/// Get the `BtcSocketQueue` precompile contract instance.
-	fn socket_queue(
-		&self,
-	) -> &SocketQueueContractInstance<T, Arc<FillProvider<F, P, T, AnyNetwork>>, AnyNetwork> {
+	fn socket_queue(&self) -> &SocketQueueInstance<F, P, T> {
 		self.bfc_client.protocol_contracts.socket_queue.as_ref().unwrap()
 	}
 }

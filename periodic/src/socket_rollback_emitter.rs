@@ -12,7 +12,7 @@ use sc_service::SpawnTaskHandle;
 use std::{collections::BTreeMap, str::FromStr, sync::Arc};
 use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
 
-use br_client::eth::{send_transaction, traits::SocketRelayBuilder, EthClient};
+use br_client::eth::{send_transaction, traits::SocketRelayBuilder, ClientMap, EthClient};
 use br_primitives::{
 	constants::{
 		errors::{INVALID_BIFROST_NATIVENESS, INVALID_PERIODIC_SCHEDULE},
@@ -41,7 +41,7 @@ where
 	/// The `EthClient` to interact with the connected blockchain.
 	pub client: Arc<EthClient<F, P, T>>,
 	/// The entire clients instantiated in the system. <chain_id, Arc<EthClient>>
-	system_clients: Arc<BTreeMap<ChainId, Arc<EthClient<F, P, T>>>>,
+	system_clients: Arc<ClientMap<F, P, T>>,
 	/// The receiver connected to the socket rollback channel.
 	rollback_receiver: UnboundedReceiver<Socket_Message>,
 	/// The local storage saving emitted `Socket` event messages.
@@ -61,7 +61,7 @@ where
 	/// Instantiates a new `SocketRollbackEmitter`.
 	pub fn new(
 		client: Arc<EthClient<F, P, T>>,
-		system_clients: Arc<BTreeMap<ChainId, Arc<EthClient<F, P, T>>>>,
+		system_clients: Arc<ClientMap<F, P, T>>,
 		handle: SpawnTaskHandle,
 	) -> (Self, Arc<UnboundedSender<Socket_Message>>) {
 		let (sender, rollback_receiver) = mpsc::unbounded_channel::<Socket_Message>();

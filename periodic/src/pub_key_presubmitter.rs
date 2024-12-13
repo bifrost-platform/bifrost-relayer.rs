@@ -147,7 +147,7 @@ where
 
 	async fn build_payload(
 		&self,
-		pub_keys: &Vec<PublicKey>,
+		pub_keys: &[PublicKey],
 	) -> Result<(VaultKeyPreSubmission<AccountId20>, EthereumSignature)> {
 		let converted_pub_keys = pub_keys
 			.iter()
@@ -167,7 +167,7 @@ where
 		let signature = self
 			.bfc_client
 			.sign_message(
-				&format!(
+				format!(
 					"{}:{}",
 					pool_round,
 					converted_pub_keys
@@ -202,7 +202,7 @@ where
 					sub_display_format(SUB_LOG_TARGET),
 					self.bfc_client.address(),
 					metadata,
-					error.to_string()
+					error
 				);
 				log::error!(target: &self.bfc_client.get_chain_name(), "{log_msg}");
 				sentry::capture_message(

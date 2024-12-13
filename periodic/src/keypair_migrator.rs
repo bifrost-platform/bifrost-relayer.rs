@@ -171,36 +171,31 @@ where
 				let mut write_lock = self.migration_sequence.write().await;
 				match *write_lock {
 					MigrationSequence::Normal | MigrationSequence::SetExecutiveMembers => {
-						match service_state {
-							ServiceState::PrepareNextSystemVault => {
-								self.keypair_storage
-									.write()
-									.await
-									.load(self.get_current_round().await + 1)
-									.await;
-							},
-							_ => {},
+						if service_state == ServiceState::PrepareNextSystemVault {
+							self.keypair_storage
+								.write()
+								.await
+								.load(self.get_current_round().await + 1)
+								.await;
 						}
 					},
-					MigrationSequence::PrepareNextSystemVault => match service_state {
-						ServiceState::UTXOTransfer => {
+					MigrationSequence::PrepareNextSystemVault => {
+						if service_state == ServiceState::UTXOTransfer {
 							self.keypair_storage
 								.write()
 								.await
 								.load(self.get_current_round().await)
 								.await;
-						},
-						_ => {},
+						}
 					},
-					MigrationSequence::UTXOTransfer => match service_state {
-						ServiceState::Normal => {
+					MigrationSequence::UTXOTransfer => {
+						if service_state == ServiceState::Normal {
 							self.keypair_storage
 								.write()
 								.await
 								.load(self.get_current_round().await)
 								.await;
-						},
-						_ => {},
+						}
 					},
 				}
 				*write_lock = service_state;

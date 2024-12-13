@@ -29,13 +29,20 @@ use eyre::{eyre, Result};
 use k256::ecdsa::SigningKey;
 use sc_service::SpawnTaskHandle;
 use sha3::{Digest, Keccak256};
-use std::{cmp::max, collections::VecDeque, sync::Arc, time::Duration};
+use std::{
+	cmp::max,
+	collections::{BTreeMap, VecDeque},
+	sync::Arc,
+	time::Duration,
+};
 use tokio::sync::Mutex;
 use url::Url;
 
 pub mod events;
 pub mod handlers;
 pub mod traits;
+
+pub type ClientMap<F, P, T> = BTreeMap<ChainId, Arc<EthClient<F, P, T>>>;
 
 #[derive(Clone)]
 pub struct EthClient<F, P, T>
@@ -192,11 +199,11 @@ where
 
 		let mut content: TxpoolContent<AnyRpcTransaction> = self.txpool_content().await?;
 		let pending = content.remove_from(&self.address()).pending;
-		let mut transactions = pending.into_iter().map(|(_, tx)| tx).collect::<VecDeque<_>>();
-		transactions.make_contiguous().sort_by(|a, b| a.nonce().cmp(&b.nonce()));
+		let mut transactions = pending.into_values().collect::<VecDeque<_>>();
+		transactions.make_contiguous().sort_by_key(|a| a.nonce());
 
 		while let Some(tx) = transactions.pop_front() {
-			if self.get_transaction_receipt(tx.tx_hash()).await.unwrap().is_some() {
+			if self.get_transaction_receipt(tx.tx_hash()).await?.is_some() {
 				continue;
 			}
 
@@ -207,11 +214,11 @@ where
 			// RBF
 			if tx.is_legacy_gas() {
 				let new_gas_price = ((tx_request.gas_price.unwrap() as f64) * 1.1).ceil() as u128;
-				let current_gas_price = self.get_gas_price().await.unwrap();
+				let current_gas_price = self.get_gas_price().await?;
 
 				tx_request.gas_price = Some(max(new_gas_price, current_gas_price));
 			} else {
-				let current_gas_price = self.estimate_eip1559_fees(None).await.unwrap();
+				let current_gas_price = self.estimate_eip1559_fees(None).await?;
 
 				let new_max_fee_per_gas =
 					(tx_request.max_fee_per_gas.unwrap() as f64 * 1.1).ceil() as u128;
@@ -374,8 +381,7 @@ pub mod retry {
 		}
 	}
 
-	/// [RetryPolicy] implements [RetryPolicyT] to determine whether to retry depending on the
-	/// err.
+	/// [RetryPolicy] implements [RetryPolicyT] to determine whether to retry depending on err.
 	#[derive(Debug, Copy, Clone, Default)]
 	#[non_exhaustive]
 	pub struct RetryPolicy;
@@ -387,7 +393,7 @@ pub mod retry {
 		}
 
 		/// Provides a backoff hint if the error response contains it
-		fn backoff_hint(&self, error: &TransportError) -> Option<std::time::Duration> {
+		fn backoff_hint(&self, error: &TransportError) -> Option<Duration> {
 			if let RpcError::ErrorResp(resp) = error {
 				let data = resp.try_data_as::<serde_json::Value>();
 				if let Some(Ok(data)) = data {
@@ -396,10 +402,10 @@ pub mod retry {
 					let backoff_seconds = &data["rate"]["backoff_seconds"];
 					// infura rate limit error
 					if let Some(seconds) = backoff_seconds.as_u64() {
-						return Some(std::time::Duration::from_secs(seconds));
+						return Some(Duration::from_secs(seconds));
 					}
 					if let Some(seconds) = backoff_seconds.as_f64() {
-						return Some(std::time::Duration::from_secs(seconds as u64 + 1));
+						return Some(Duration::from_secs(seconds as u64 + 1));
 					}
 				}
 			}

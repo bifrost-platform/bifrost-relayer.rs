@@ -20,10 +20,7 @@ use sc_service::{config::PrometheusConfig, Error as ServiceError, TaskManager};
 use tokio::sync::RwLock;
 
 use br_client::{
-	btc::{
-		handlers::Handler as _,
-		storage::{keypair::KeypairStorage, pending_outbound::PendingOutboundPool},
-	},
+	btc::{handlers::Handler as _, storage::keypair::KeypairStorage},
 	eth::{retry::RetryBackoffLayer, traits::Handler as _, EthClient},
 };
 use br_periodic::traits::PeriodicWorker;
@@ -31,7 +28,7 @@ use br_primitives::{
 	bootstrap::BootstrapSharedData,
 	cli::{Configuration, HandlerType},
 	constants::{
-		cli::{DEFAULT_GET_LOGS_BATCH_SIZE, DEFAULT_KEYSTORE_PATH, DEFAULT_PROMETHEUS_PORT},
+		cli::{DEFAULT_KEYSTORE_PATH, DEFAULT_PROMETHEUS_PORT},
 		errors::{INVALID_BITCOIN_NETWORK, INVALID_PRIVATE_KEY, INVALID_PROVIDER_URL},
 		tx::DEFAULT_CALL_RETRIES,
 	},
@@ -86,27 +83,12 @@ pub fn relay(config: Configuration) -> Result<TaskManager, ServiceError> {
 				provider.clone(),
 				signer.clone(),
 				ProviderMetadata::new(
-					evm_provider.name.clone(),
+					evm_provider.clone(),
 					url.clone(),
-					evm_provider.id,
 					if is_native { Some(btc_provider.id) } else { None },
-					evm_provider.block_confirmations,
-					evm_provider.call_interval,
-					evm_provider.eip1559.unwrap_or(false),
-					evm_provider.get_logs_batch_size.unwrap_or(DEFAULT_GET_LOGS_BATCH_SIZE),
 					is_native,
 				),
-				ProtocolContracts::new(
-					is_native,
-					provider.clone(),
-					evm_provider.socket_address.clone(),
-					evm_provider.authority_address.clone(),
-					evm_provider.relayer_manager_address.clone(),
-					evm_provider.bitcoin_socket_address.clone(),
-					evm_provider.socket_queue_address.clone(),
-					evm_provider.registration_pool_address.clone(),
-					evm_provider.relay_executive_address.clone(),
-				),
+				ProtocolContracts::new(is_native, provider.clone(), evm_provider.clone()),
 				AggregatorContracts::new(
 					provider.clone(),
 					evm_provider.chainlink_usdc_usd_address.clone(),
@@ -123,7 +105,6 @@ pub fn relay(config: Configuration) -> Result<TaskManager, ServiceError> {
 
 	let bootstrap_shared_data = BootstrapSharedData::new(&config);
 
-	let pending_outbounds = PendingOutboundPool::new();
 	let keypair_storage = Arc::new(RwLock::new(KeypairStorage::new(
 		config
 			.clone()
@@ -161,7 +142,6 @@ pub fn relay(config: Configuration) -> Result<TaskManager, ServiceError> {
 	);
 	let btc_deps = BtcDeps::new(
 		&config,
-		pending_outbounds.clone(),
 		keypair_storage.clone(),
 		bootstrap_shared_data.clone(),
 		&substrate_deps,
