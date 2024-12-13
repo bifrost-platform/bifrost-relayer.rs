@@ -267,14 +267,18 @@ pub enum GasCoefficient {
 	High,
 }
 
-impl GasCoefficient {
-	pub fn into_f64(&self) -> f64 {
-		f64::from(self)
+impl From<bool> for GasCoefficient {
+	fn from(is_native: bool) -> Self {
+		if is_native {
+			GasCoefficient::Mid
+		} else {
+			GasCoefficient::Low
+		}
 	}
 }
 
-impl From<&GasCoefficient> for f64 {
-	fn from(value: &GasCoefficient) -> Self {
+impl From<GasCoefficient> for f64 {
+	fn from(value: GasCoefficient) -> Self {
 		match value {
 			GasCoefficient::Low => 1.2,
 			GasCoefficient::Mid => 7.0,

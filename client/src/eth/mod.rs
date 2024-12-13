@@ -4,7 +4,7 @@ use br_primitives::{
 		errors::{INSUFFICIENT_FUNDS, INVALID_CHAIN_ID, PROVIDER_INTERNAL_ERROR},
 	},
 	contracts::authority::BfcStaking::round_meta_data,
-	eth::{AggregatorContracts, ProtocolContracts, ProviderMetadata},
+	eth::{AggregatorContracts, GasCoefficient, ProtocolContracts, ProviderMetadata},
 	tx::TxRequestMetadata,
 	utils::generate_delay,
 };
@@ -271,6 +271,28 @@ pub fn send_transaction<F, P, T>(
 {
 	let this_handle = handle.clone();
 	this_handle.spawn("send_transaction", None, async move {
+		request.from = Some(client.address());
+
+		match client.estimate_gas(&WithOtherFields::new(request.clone())).await {
+			Ok(gas) => {
+				let coefficient: f64 = GasCoefficient::from(client.metadata.is_native).into();
+				let estimated_gas = gas as f64 * coefficient;
+				request.gas = Some(estimated_gas.ceil() as u64);
+			},
+			Err(err) => {
+				let msg = format!(
+					" ❗️ Failed to estimate gas ({} address:{}): {}, Error: {}",
+					client.get_chain_name(),
+					client.address(),
+					metadata,
+					err
+				);
+				log::error!(target: &requester, "{msg}");
+				sentry::capture_message(&msg, sentry::Level::Error);
+				return;
+			},
+		};
+
 		if client.metadata.is_native {
 			// gas price is fixed to 1000 Gwei on bifrost network
 			request.max_fee_per_gas = Some(1000 * Unit::GWEI.wei().to::<u128>());
@@ -280,7 +302,6 @@ pub fn send_transaction<F, P, T>(
 			tokio::time::sleep(Duration::from_millis(generate_delay())).await;
 
 			if !client.metadata.eip1559 {
-				// TODO: if transaction failed by gas price issue, should bring back `GasCoefficient` here.
 				request.gas_price = Some(client.get_gas_price().await.unwrap());
 			}
 		}
