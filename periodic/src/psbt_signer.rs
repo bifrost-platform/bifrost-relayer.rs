@@ -15,7 +15,7 @@ use br_primitives::{
 		bifrost_runtime, AccountId20, EthereumSignature, MigrationSequence, SignedPsbtMessage,
 	},
 	tx::{SubmitSignedPsbtMetadata, XtRequest, XtRequestMetadata, XtRequestSender},
-	utils::{convert_ethers_to_ecdsa_signature, hash_bytes, sub_display_format},
+	utils::{hash_bytes, sub_display_format},
 };
 use cron::Schedule;
 use eyre::Result;
@@ -137,13 +137,11 @@ where
 				unsigned_psbt: unsigned_psbt.serialize(),
 				signed_psbt: signed_psbt.clone(),
 			};
-			let signature = convert_ethers_to_ecdsa_signature(
-				self.client
-					.sign_message(
-						&[keccak256("SignedPsbt").as_slice(), signed_psbt.as_ref()].concat(),
-					)
-					.await?,
-			);
+			let signature = self
+				.client
+				.sign_message(&[keccak256("SignedPsbt").as_slice(), signed_psbt.as_ref()].concat())
+				.await?
+				.into();
 			return Ok(Some((msg, signature)));
 		}
 		log::warn!(

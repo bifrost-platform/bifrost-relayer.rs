@@ -1,4 +1,4 @@
-use alloy::primitives::{keccak256, Address, PrimitiveSignature as EthersSignature, B256};
+use alloy::primitives::{keccak256, Address, PrimitiveSignature, B256};
 use k256::{ecdsa::VerifyingKey, elliptic_curve::sec1::ToEncodedPoint};
 use rand::Rng as _;
 use sha3::{Digest, Keccak256};
@@ -13,10 +13,11 @@ pub fn generate_delay() -> u64 {
 	rand::thread_rng().gen_range(0..=12000)
 }
 
-/// Converts the ethers::Signature to a bifrost_runtime::Signature.
-pub fn convert_ethers_to_ecdsa_signature(ethers_signature: EthersSignature) -> EthereumSignature {
-	let sig: [u8; 65] = ethers_signature.into();
-	EthereumSignature(Signature(sig))
+impl From<PrimitiveSignature> for EthereumSignature {
+	fn from(signature: PrimitiveSignature) -> Self {
+		let sig: [u8; 65] = signature.into();
+		EthereumSignature(Signature(sig))
+	}
 }
 
 /// Hash the given bytes.
@@ -25,7 +26,7 @@ pub fn hash_bytes(bytes: &Vec<u8>) -> B256 {
 }
 
 /// Recovers the address from the given signature and message.
-pub fn recover_message(sig: EthersSignature, msg: &[u8]) -> Address {
+pub fn recover_message(sig: PrimitiveSignature, msg: &[u8]) -> Address {
 	let v = sig.recid();
 	let rs = sig.to_k256().unwrap();
 

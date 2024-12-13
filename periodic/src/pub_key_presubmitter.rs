@@ -21,7 +21,7 @@ use br_primitives::{
 		VaultKeyPresubmissionMetadata, XtRequest, XtRequestMessage, XtRequestMetadata,
 		XtRequestSender,
 	},
-	utils::{convert_ethers_to_ecdsa_signature, sub_display_format},
+	utils::sub_display_format,
 };
 use cron::Schedule;
 use eyre::Result;
@@ -164,22 +164,22 @@ where
 			pub_keys: converted_pub_keys.iter().map(|x| Public(*x)).collect(),
 			pool_round,
 		};
-		let signature = convert_ethers_to_ecdsa_signature(
-			self.bfc_client
-				.sign_message(
-					&format!(
-						"{}:{}",
-						pool_round,
-						converted_pub_keys
-							.iter()
-							.map(|x| array_bytes::bytes2hex("0x", *x))
-							.collect::<Vec<String>>()
-							.concat()
-					)
-					.as_bytes(),
+		let signature = self
+			.bfc_client
+			.sign_message(
+				&format!(
+					"{}:{}",
+					pool_round,
+					converted_pub_keys
+						.iter()
+						.map(|x| array_bytes::bytes2hex("0x", *x))
+						.collect::<Vec<String>>()
+						.concat()
 				)
-				.await?,
-		);
+				.as_bytes(),
+			)
+			.await?
+			.into();
 
 		Ok((msg, signature))
 	}

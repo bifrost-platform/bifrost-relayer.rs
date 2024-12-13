@@ -21,7 +21,7 @@ use br_primitives::{
 		AccountId20, EthereumSignature, MigrationSequence, Public, VaultKeySubmission,
 	},
 	tx::{SubmitVaultKeyMetadata, XtRequest, XtRequestMessage, XtRequestMetadata, XtRequestSender},
-	utils::{convert_ethers_to_ecdsa_signature, sub_display_format},
+	utils::sub_display_format,
 };
 use cron::Schedule;
 use eyre::Result;
@@ -162,14 +162,14 @@ where
 			pub_key: Public(converted_pub_key),
 			pool_round,
 		};
-		let signature = convert_ethers_to_ecdsa_signature(
-			self.client
-				.sign_message(
-					&format!("{}:{}", pool_round, array_bytes::bytes2hex("0x", converted_pub_key))
-						.as_bytes(),
-				)
-				.await?,
-		);
+		let signature = self
+			.client
+			.sign_message(
+				&format!("{}:{}", pool_round, array_bytes::bytes2hex("0x", converted_pub_key))
+					.as_bytes(),
+			)
+			.await?
+			.into();
 
 		Ok((msg, signature))
 	}

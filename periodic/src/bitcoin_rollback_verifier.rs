@@ -26,7 +26,7 @@ use br_primitives::{
 	},
 	substrate::{bifrost_runtime, AccountId20, EthereumSignature, RollbackPollMessage},
 	tx::{SubmitRollbackPollMetadata, XtRequest, XtRequestMetadata, XtRequestSender},
-	utils::{convert_ethers_to_ecdsa_signature, sub_display_format},
+	utils::sub_display_format,
 };
 use cron::Schedule;
 use eyre::Result;
@@ -280,14 +280,14 @@ where
 			txid: H256::from(txid.0),
 			is_approved,
 		};
-		let signature = convert_ethers_to_ecdsa_signature(
-			self.bfc_client
-				.sign_message(
-					&[keccak256("RollbackPoll").as_slice(), txid.as_ref(), &[is_approved as u8]]
-						.concat(),
-				)
-				.await?,
-		);
+		let signature = self
+			.bfc_client
+			.sign_message(
+				&[keccak256("RollbackPoll").as_slice(), txid.as_ref(), &[is_approved as u8]]
+					.concat(),
+			)
+			.await?
+			.into();
 
 		Ok((msg, signature))
 	}
