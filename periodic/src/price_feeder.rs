@@ -53,6 +53,8 @@ where
 	clients: Arc<ClientMap<F, P, T>>,
 	/// The handle to spawn tasks.
 	handle: SpawnTaskHandle,
+	/// Whether to enable debug mode.
+	debug_mode: bool,
 }
 
 #[async_trait]
@@ -101,6 +103,7 @@ where
 		client: Arc<EthClient<F, P, T>>,
 		clients: Arc<ClientMap<F, P, T>>,
 		handle: SpawnTaskHandle,
+		debug_mode: bool,
 	) -> Self {
 		let asset_oid = get_asset_oids();
 
@@ -112,6 +115,7 @@ where
 			client,
 			clients,
 			handle,
+			debug_mode,
 		}
 	}
 
@@ -315,6 +319,7 @@ where
 			tx_request,
 			SUB_LOG_TARGET.to_string(),
 			TxRequestMetadata::PriceFeed(metadata),
+			self.debug_mode,
 			self.handle.clone(),
 		);
 	}

@@ -34,6 +34,7 @@ where
 		migration_sequence: Arc<RwLock<MigrationSequence>>,
 		bfc_client: Arc<EthClient<F, P, T>>,
 		task_manager: &TaskManager,
+		debug_mode: bool,
 	) -> Self {
 		let bootstrap_shared_data = Arc::new(bootstrap_shared_data.clone());
 		let network = Network::from_core_arg(&config.relayer_config.btc_provider.chain)
@@ -70,12 +71,14 @@ where
 			block_manager.subscribe(),
 			bootstrap_shared_data.clone(),
 			task_manager.spawn_handle(),
+			debug_mode,
 		);
 		let outbound = OutboundHandler::new(
 			bfc_client.clone(),
 			block_manager.subscribe(),
 			bootstrap_shared_data.clone(),
 			task_manager.spawn_handle(),
+			debug_mode,
 		);
 
 		let psbt_signer = PsbtSigner::new(

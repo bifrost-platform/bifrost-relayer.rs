@@ -270,6 +270,7 @@ pub fn send_transaction<F, P, T>(
 	mut request: TransactionRequest,
 	requester: String,
 	metadata: TxRequestMetadata,
+	debug_mode: bool,
 	handle: SpawnTaskHandle,
 ) where
 	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork> + 'static,
@@ -287,15 +288,17 @@ pub fn send_transaction<F, P, T>(
 				request.gas = Some(estimated_gas.ceil() as u64);
 			},
 			Err(err) => {
-				let msg = format!(
-					" ❗️ Failed to estimate gas ({} address:{}): {}, Error: {}",
-					client.get_chain_name(),
-					client.address(),
-					metadata,
-					err
-				);
-				log::error!(target: &requester, "{msg}");
-				sentry::capture_message(&msg, sentry::Level::Error);
+				if debug_mode {
+					let msg = format!(
+						" ❗️ Failed to estimate gas ({} address:{}): {}, Error: {}",
+						client.get_chain_name(),
+						client.address(),
+						metadata,
+						err
+					);
+					log::error!(target: &requester, "{msg}");
+					sentry::capture_message(&msg, sentry::Level::Error);
+				}
 				return;
 			},
 		};
@@ -336,7 +339,7 @@ pub fn send_transaction<F, P, T>(
 
 				if err.to_string().to_lowercase().contains("nonce too low") {
 					client.flush_stalled_transactions().await.unwrap();
-					send_transaction(client, request, requester, metadata, handle);
+					send_transaction(client, request, requester, metadata, debug_mode, handle);
 				}
 			},
 		}

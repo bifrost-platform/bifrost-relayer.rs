@@ -48,6 +48,8 @@ where
 	bootstrap_shared_data: Arc<BootstrapSharedData>,
 	/// The handle to spawn tasks.
 	handle: SpawnTaskHandle,
+	/// Whether to enable debug mode.
+	debug_mode: bool,
 }
 
 impl<F, P, T> OutboundHandler<F, P, T>
@@ -61,6 +63,7 @@ where
 		event_receiver: Receiver<BTCEventMessage>,
 		bootstrap_shared_data: Arc<BootstrapSharedData>,
 		handle: SpawnTaskHandle,
+		debug_mode: bool,
 	) -> Self {
 		Self {
 			bfc_client,
@@ -68,6 +71,7 @@ where
 			target_event: EventType::Outbound,
 			bootstrap_shared_data,
 			handle,
+			debug_mode,
 		}
 	}
 
@@ -146,6 +150,7 @@ where
 						msg.params.to,
 						false,
 					)),
+					self.debug_mode,
 					self.handle.clone(),
 				);
 			}

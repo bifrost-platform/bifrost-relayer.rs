@@ -49,6 +49,8 @@ where
 	bootstrap_shared_data: Arc<BootstrapSharedData>,
 	/// The handle to spawn tasks.
 	handle: SpawnTaskHandle,
+	/// Whether to enable debug mode.
+	debug_mode: bool,
 }
 
 #[async_trait::async_trait]
@@ -117,6 +119,7 @@ where
 		client: Arc<EthClient<F, P, T>>,
 		bootstrap_shared_data: Arc<BootstrapSharedData>,
 		handle: SpawnTaskHandle,
+		debug_mode: bool,
 	) -> Self {
 		Self {
 			current_round: U256::default(),
@@ -125,6 +128,7 @@ where
 				.expect(INVALID_PERIODIC_SCHEDULE),
 			bootstrap_shared_data,
 			handle,
+			debug_mode,
 		}
 	}
 
@@ -188,6 +192,7 @@ where
 			tx_request,
 			SUB_LOG_TARGET.to_string(),
 			TxRequestMetadata::VSPPhase1(metadata),
+			self.debug_mode,
 			self.handle.clone(),
 		);
 	}

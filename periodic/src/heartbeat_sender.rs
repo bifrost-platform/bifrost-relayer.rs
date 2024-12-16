@@ -31,6 +31,8 @@ where
 	pub client: Arc<EthClient<F, P, T>>,
 	/// The handle to spawn tasks.
 	handle: SpawnTaskHandle,
+	/// Whether to enable debug mode.
+	debug_mode: bool,
 }
 
 #[async_trait::async_trait]
@@ -76,11 +78,12 @@ where
 	T: Transport + Clone,
 {
 	/// Instantiates a new `HeartbeatSender` instance.
-	pub fn new(client: Arc<EthClient<F, P, T>>, handle: SpawnTaskHandle) -> Self {
+	pub fn new(client: Arc<EthClient<F, P, T>>, handle: SpawnTaskHandle, debug_mode: bool) -> Self {
 		Self {
 			schedule: Schedule::from_str(HEARTBEAT_SCHEDULE).expect(INVALID_PERIODIC_SCHEDULE),
 			client,
 			handle,
+			debug_mode,
 		}
 	}
 
@@ -103,6 +106,7 @@ where
 			tx_request,
 			SUB_LOG_TARGET.to_string(),
 			TxRequestMetadata::Heartbeat(metadata),
+			self.debug_mode,
 			self.handle.clone(),
 		);
 	}

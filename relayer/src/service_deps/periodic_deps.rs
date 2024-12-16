@@ -38,16 +38,18 @@ where
 		clients: Arc<ClientMap<F, P, T>>,
 		bfc_client: Arc<EthClient<F, P, T>>,
 		task_manager: &TaskManager,
+		debug_mode: bool,
 	) -> Self {
 		// initialize the heartbeat sender
 		let heartbeat_sender =
-			HeartbeatSender::new(bfc_client.clone(), task_manager.spawn_handle());
+			HeartbeatSender::new(bfc_client.clone(), task_manager.spawn_handle(), debug_mode);
 
 		// initialize the oracle price feeder
 		let oracle_price_feeder = OraclePriceFeeder::new(
 			bfc_client.clone(),
 			clients.clone(),
 			task_manager.spawn_handle(),
+			debug_mode,
 		);
 
 		// initialize the roundup emitter
@@ -55,6 +57,7 @@ where
 			bfc_client.clone(),
 			Arc::new(bootstrap_shared_data.clone()),
 			task_manager.spawn_handle(),
+			debug_mode,
 		);
 
 		let mut rollback_emitters = vec![];
@@ -64,6 +67,7 @@ where
 				client.clone(),
 				clients.clone(),
 				task_manager.spawn_handle(),
+				debug_mode,
 			);
 			rollback_emitters.push(rollback_emitter);
 			rollback_senders.insert(*chain_id, rollback_sender);

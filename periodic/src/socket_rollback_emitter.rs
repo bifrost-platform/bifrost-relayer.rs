@@ -50,6 +50,8 @@ where
 	schedule: Schedule,
 	/// The handle to spawn tasks.
 	handle: SpawnTaskHandle,
+	/// Whether to enable debug mode.
+	debug_mode: bool,
 }
 
 impl<F, P, T> SocketRollbackEmitter<F, P, T>
@@ -63,6 +65,7 @@ where
 		client: Arc<EthClient<F, P, T>>,
 		system_clients: Arc<ClientMap<F, P, T>>,
 		handle: SpawnTaskHandle,
+		debug_mode: bool,
 	) -> (Self, Arc<UnboundedSender<Socket_Message>>) {
 		let (sender, rollback_receiver) = mpsc::unbounded_channel::<Socket_Message>();
 
@@ -75,6 +78,7 @@ where
 				schedule: Schedule::from_str(ROLLBACK_CHECK_SCHEDULE)
 					.expect(INVALID_PERIODIC_SCHEDULE),
 				handle,
+				debug_mode,
 			},
 			Arc::new(sender),
 		)
@@ -251,6 +255,7 @@ where
 			tx_request,
 			SUB_LOG_TARGET.to_string(),
 			TxRequestMetadata::Rollback(metadata),
+			self.debug_mode,
 			self.handle.clone(),
 		);
 	}

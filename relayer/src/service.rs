@@ -131,6 +131,7 @@ pub fn relay(config: Configuration) -> Result<TaskManager, ServiceError> {
 		manager_deps.clients.clone(),
 		bfc_client.clone(),
 		&task_manager,
+		system.debug_mode.unwrap_or(false),
 	);
 	let handler_deps = HandlerDeps::new(
 		&config,
@@ -139,6 +140,7 @@ pub fn relay(config: Configuration) -> Result<TaskManager, ServiceError> {
 		bfc_client.clone(),
 		periodic_deps.rollback_senders.clone(),
 		&task_manager,
+		system.debug_mode.unwrap_or(false),
 	);
 	let btc_deps = BtcDeps::new(
 		&config,
@@ -148,6 +150,7 @@ pub fn relay(config: Configuration) -> Result<TaskManager, ServiceError> {
 		migration_sequence.clone(),
 		bfc_client.clone(),
 		&task_manager,
+		system.debug_mode.unwrap_or(false),
 	);
 
 	print_relay_targets(&manager_deps);

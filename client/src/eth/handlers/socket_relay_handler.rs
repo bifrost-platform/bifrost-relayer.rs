@@ -64,6 +64,8 @@ where
 	socket_signature: B256,
 	/// The bootstrap shared data.
 	bootstrap_shared_data: Arc<BootstrapSharedData>,
+	/// Whether to enable debug mode.
+	debug_mode: bool,
 }
 
 #[async_trait::async_trait]
@@ -269,6 +271,7 @@ where
 		rollback_senders: Arc<BTreeMap<ChainId, Arc<UnboundedSender<Socket_Message>>>>,
 		handle: SpawnTaskHandle,
 		bootstrap_shared_data: Arc<BootstrapSharedData>,
+		debug_mode: bool,
 	) -> Self {
 		let client = system_clients.get(&id).expect(INVALID_CHAIN_ID).clone();
 
@@ -281,6 +284,7 @@ where
 			rollback_senders,
 			handle,
 			bootstrap_shared_data,
+			debug_mode,
 		}
 	}
 
@@ -445,6 +449,7 @@ where
 				tx_request,
 				format!("{} ({})", SUB_LOG_TARGET, self.client.get_chain_name()),
 				metadata,
+				self.debug_mode,
 				self.handle.clone(),
 			);
 		}

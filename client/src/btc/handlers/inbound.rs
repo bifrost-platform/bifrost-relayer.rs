@@ -49,6 +49,8 @@ where
 	bootstrap_shared_data: Arc<BootstrapSharedData>,
 	/// The handle to spawn tasks.
 	handle: SpawnTaskHandle,
+	/// Whether to enable debug mode.
+	debug_mode: bool,
 }
 
 impl<F, P, T> InboundHandler<F, P, T>
@@ -62,6 +64,7 @@ where
 		event_receiver: Receiver<BTCEventMessage>,
 		bootstrap_shared_data: Arc<BootstrapSharedData>,
 		handle: SpawnTaskHandle,
+		debug_mode: bool,
 	) -> Self {
 		Self {
 			bfc_client,
@@ -69,6 +72,7 @@ where
 			target_event: EventType::Inbound,
 			bootstrap_shared_data,
 			handle,
+			debug_mode,
 		}
 	}
 
@@ -211,6 +215,7 @@ where
 				tx_request,
 				format!("{} ({})", SUB_LOG_TARGET, self.bfc_client.get_chain_name()),
 				TxRequestMetadata::BitcoinSocketRelay(metadata),
+				self.debug_mode,
 				self.handle.clone(),
 			);
 		}

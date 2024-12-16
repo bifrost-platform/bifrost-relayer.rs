@@ -56,6 +56,8 @@ where
 	bootstrap_shared_data: Arc<BootstrapSharedData>,
 	/// The handle to spawn tasks.
 	handle: SpawnTaskHandle,
+	/// Whether to enable debug mode.
+	debug_mode: bool,
 }
 
 #[async_trait]
@@ -177,6 +179,7 @@ where
 		clients: Arc<ClientMap<F, P, T>>,
 		bootstrap_shared_data: Arc<BootstrapSharedData>,
 		handle: SpawnTaskHandle,
+		debug_mode: bool,
 	) -> Self {
 		Self {
 			event_receiver,
@@ -185,6 +188,7 @@ where
 			roundup_signature: RoundUp::SIGNATURE_HASH,
 			bootstrap_shared_data,
 			handle,
+			debug_mode,
 		}
 	}
 
@@ -285,6 +289,7 @@ where
 						roundup_submit.round,
 						*dst_chain_id,
 					)),
+					self.debug_mode,
 					self.handle.clone(),
 				);
 			}

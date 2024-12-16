@@ -25,6 +25,7 @@ where
 		bfc_client: Arc<EthClient<F, P, T>>,
 		rollback_senders: Arc<BTreeMap<ChainId, Arc<UnboundedSender<Socket_Message>>>>,
 		task_manager: &TaskManager,
+		debug_mode: bool,
 	) -> Self {
 		let mut handlers = (vec![], vec![]);
 		let ManagerDeps { bifrost_client, clients, event_managers } = manager_deps;
@@ -40,6 +41,7 @@ where
 						rollback_senders.clone(),
 						task_manager.spawn_handle(),
 						Arc::new(bootstrap_shared_data.clone()),
+						debug_mode,
 					));
 				}),
 				HandlerType::Roundup => {
@@ -53,6 +55,7 @@ where
 						clients.clone(),
 						Arc::new(bootstrap_shared_data.clone()),
 						task_manager.spawn_handle(),
+						debug_mode,
 					));
 				},
 			},
