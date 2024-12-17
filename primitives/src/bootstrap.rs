@@ -50,11 +50,7 @@ impl BootstrapSharedData {
 		// 1. One for the roundup handler for each external chain
 		// 2. One for the roundup emitter
 		let roundup_barrier = Arc::new(Barrier::new(
-			evm_providers
-				.iter()
-				.filter(|p| !p.is_native.unwrap_or(false)) // Count all external chains
-				.count()
-				.saturating_add(1), // +1 for emitter
+			evm_providers.iter().filter(|evm_provider| evm_provider.is_relay_target).count(),
 		));
 		let socket_bootstrap_count = Arc::new(Mutex::new(u8::default()));
 		let roundup_bootstrap_count = Arc::new(Mutex::new(u8::default()));
