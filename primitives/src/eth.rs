@@ -54,6 +54,8 @@ pub struct ProviderMetadata {
 	pub if_destination_chain: RelayDirection,
 	/// The flag whether the chain is Bifrost(native) or an external chain.
 	pub is_native: bool,
+	/// The flag whether the chain is relay target.
+	pub is_relay_target: bool,
 }
 
 impl ProviderMetadata {
@@ -81,6 +83,7 @@ impl ProviderMetadata {
 				true => RelayDirection::Inbound,
 				false => RelayDirection::Outbound,
 			},
+			is_relay_target: evm_provider.is_relay_target,
 		}
 	}
 }

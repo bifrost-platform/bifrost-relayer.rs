@@ -277,6 +277,10 @@ pub fn send_transaction<F, P, T>(
 	P: Provider<T, AnyNetwork> + 'static,
 	T: Transport + Clone,
 {
+	if !client.metadata.is_relay_target {
+		return;
+	}
+
 	let this_handle = handle.clone();
 	this_handle.spawn("send_transaction", None, async move {
 		request.from = Some(client.address());
