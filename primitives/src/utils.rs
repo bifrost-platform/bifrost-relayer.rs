@@ -1,4 +1,7 @@
-use alloy::primitives::{keccak256, Address, PrimitiveSignature, B256};
+use alloy::{
+	dyn_abi::DynSolValue,
+	primitives::{keccak256, Address, PrimitiveSignature, B256, U256},
+};
 use k256::{ecdsa::VerifyingKey, elliptic_curve::sec1::ToEncodedPoint};
 use rand::Rng as _;
 use sha3::{Digest, Keccak256};
@@ -11,6 +14,17 @@ pub fn sub_display_format(log_target: &str) -> String {
 
 pub fn generate_delay() -> u64 {
 	rand::thread_rng().gen_range(0..=12000)
+}
+
+/// Encodes the given round and new relayers to bytes.
+pub fn encode_roundup_param(round: U256, new_relayers: &[Address]) -> Vec<u8> {
+	DynSolValue::Tuple(vec![
+		DynSolValue::Uint(round, 256),
+		DynSolValue::Array(
+			new_relayers.iter().map(|address| DynSolValue::Address(*address)).collect(),
+		),
+	])
+	.abi_encode_params()
 }
 
 impl From<PrimitiveSignature> for EthereumSignature {

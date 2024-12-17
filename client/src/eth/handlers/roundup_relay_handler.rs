@@ -1,7 +1,6 @@
 use std::{sync::Arc, time::Duration};
 
 use alloy::{
-	dyn_abi::DynSolValue,
 	network::{primitives::ReceiptResponse as _, AnyNetwork},
 	primitives::{Address, PrimitiveSignature, B256, U256},
 	providers::{fillers::TxFiller, Provider, WalletProvider},
@@ -25,7 +24,7 @@ use br_primitives::{
 	},
 	eth::{BootstrapState, RoundUpEventStatus},
 	tx::{TxRequestMetadata, VSPPhase2Metadata},
-	utils::{recover_message, sub_display_format},
+	utils::{encode_roundup_param, recover_message, sub_display_format},
 };
 
 use crate::eth::{
@@ -197,17 +196,6 @@ where
 		Ok(log.log_decode::<RoundUp>()?.inner.data)
 	}
 
-	/// Encodes the given round and new relayers to bytes.
-	fn encode_relayer_array(&self, round: U256, new_relayers: &[Address]) -> Vec<u8> {
-		DynSolValue::Tuple(vec![
-			DynSolValue::Uint(round, 256),
-			DynSolValue::Array(
-				new_relayers.iter().map(|address| DynSolValue::Address(*address)).collect(),
-			),
-		])
-		.abi_encode()
-	}
-
 	/// Get the submitted signatures of the updated round.
 	async fn get_sorted_signatures(
 		&self,
@@ -225,7 +213,7 @@ where
 
 		let mut signature_vec = Vec::<PrimitiveSignature>::from(signatures);
 		signature_vec
-			.sort_by_key(|k| recover_message(*k, &self.encode_relayer_array(round, new_relayers)));
+			.sort_by_key(|k| recover_message(*k, &encode_roundup_param(round, &new_relayers)));
 
 		Ok(Signatures::from(signature_vec))
 	}

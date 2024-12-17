@@ -1,5 +1,4 @@
 use alloy::{
-	dyn_abi::DynSolValue,
 	network::AnyNetwork,
 	primitives::{Address, U256},
 	providers::{fillers::TxFiller, Provider, WalletProvider},
@@ -25,7 +24,7 @@ use br_primitives::{
 	},
 	eth::{BootstrapState, RoundUpEventStatus},
 	tx::{TxRequestMetadata, VSPPhase1Metadata},
-	utils::sub_display_format,
+	utils::{encode_roundup_param, sub_display_format},
 };
 use eyre::Result;
 
@@ -157,13 +156,7 @@ where
 		round: U256,
 		new_relayers: Vec<Address>,
 	) -> Result<TransactionRequest> {
-		let encoded_msg = DynSolValue::Tuple(vec![
-			DynSolValue::Uint(round, 256),
-			DynSolValue::Array(
-				new_relayers.iter().map(|address| DynSolValue::Address(*address)).collect(),
-			),
-		])
-		.abi_encode();
+		let encoded_msg = encode_roundup_param(round, &new_relayers);
 
 		let sigs = Signatures::from(self.client.sign_message(&encoded_msg).await?);
 		let round_up_submit = Round_Up_Submit { round, new_relayers, sigs };
