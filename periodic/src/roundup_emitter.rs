@@ -221,17 +221,6 @@ where
 			let round_up_events: Vec<RoundUp> =
 				logs.iter().map(|log| log.log_decode::<RoundUp>().unwrap().inner.data).collect();
 
-			let mut prev_status = round_up_events[0].status;
-			let mut prev_round = round_up_events[0].roundup.round;
-			for event in round_up_events.iter().skip(1) {
-				if event.roundup.round > prev_round && prev_status == 9 {
-					return prev_round;
-				}
-
-				prev_status = event.status;
-				prev_round = event.roundup.round;
-			}
-
 			let max_round = round_up_events
 				.iter()
 				.map(|round_up_event| round_up_event.roundup.round)
