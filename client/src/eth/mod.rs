@@ -11,15 +11,16 @@ use br_primitives::{
 
 use alloy::{
 	consensus::Transaction,
+	eips::BlockNumberOrTag,
 	network::{AnyNetwork, AnyRpcTransaction, AnyTypedTransaction, TransactionResponse as _},
 	primitives::{
 		utils::{format_units, parse_ether, Unit},
-		Address, ChainId,
+		Address, ChainId, U64,
 	},
 	providers::{
 		ext::TxPoolApi as _,
 		fillers::{FillProvider, TxFiller},
-		PendingTransactionBuilder, Provider, RootProvider, SendableTx, WalletProvider,
+		EthCall, PendingTransactionBuilder, Provider, RootProvider, SendableTx, WalletProvider,
 	},
 	rpc::types::{serde_helpers::WithOtherFields, txpool::TxpoolContent, TransactionRequest},
 	signers::{local::LocalSigner, Signature},
@@ -262,6 +263,19 @@ where
 		tx: SendableTx<AnyNetwork>,
 	) -> TransportResult<PendingTransactionBuilder<T, AnyNetwork>> {
 		self.inner.send_transaction_internal(tx).await
+	}
+
+	fn estimate_gas<'req>(
+		&self,
+		tx: &'req <AnyNetwork as alloy::providers::Network>::TransactionRequest,
+	) -> EthCall<'req, T, AnyNetwork, U64, u64> {
+		let call = EthCall::gas_estimate(self.inner.weak_client(), tx);
+
+		if self.chain_id() == 56 || self.chain_id() == 97 {
+			call.map_resp(|r| r.to::<u64>())
+		} else {
+			call.block(BlockNumberOrTag::Pending.into()).map_resp(|r| r.to::<u64>())
+		}
 	}
 }
 
