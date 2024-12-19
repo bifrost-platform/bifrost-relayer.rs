@@ -2,6 +2,7 @@ use br_primitives::{
 	constants::{
 		config::{BOOTSTRAP_BLOCK_OFFSET, NATIVE_BLOCK_TIME},
 		errors::{INSUFFICIENT_FUNDS, INVALID_CHAIN_ID, PROVIDER_INTERNAL_ERROR},
+		tx::DEFAULT_CALL_RETRIES,
 	},
 	contracts::authority::BfcStaking::round_meta_data,
 	eth::{AggregatorContracts, GasCoefficient, ProtocolContracts, ProviderMetadata},
@@ -36,7 +37,7 @@ use std::{
 	sync::Arc,
 	time::Duration,
 };
-use tokio::sync::Mutex;
+use tokio::{sync::Mutex, time::sleep};
 use url::Url;
 
 pub mod events;
@@ -196,7 +197,7 @@ where
 		}
 
 		// possibility of txpool being flushed automatically. wait for 2 blocks.
-		tokio::time::sleep(Duration::from_millis(self.metadata.call_interval * 2)).await;
+		sleep(Duration::from_millis(self.metadata.call_interval * 2)).await;
 
 		let mut content: TxpoolContent<AnyRpcTransaction> = self.txpool_content().await?;
 		let pending = content.remove_from(&self.address()).pending;
@@ -299,27 +300,35 @@ pub fn send_transaction<F, P, T>(
 	this_handle.spawn("send_transaction", None, async move {
 		request.from = Some(client.address());
 
-		match client.estimate_gas(&WithOtherFields::new(request.clone())).await {
-			Ok(gas) => {
-				let coefficient: f64 = GasCoefficient::from(client.metadata.is_native).into();
-				let estimated_gas = gas as f64 * coefficient;
-				request.gas = Some(estimated_gas.ceil() as u64);
-			},
-			Err(err) => {
-				if debug_mode {
-					let msg = format!(
-						" ❗️ Failed to estimate gas ({} address:{}): {}, Error: {}",
-						client.get_chain_name(),
-						client.address(),
-						metadata,
-						err
-					);
-					log::error!(target: &requester, "{msg}");
-					sentry::capture_message(&msg, sentry::Level::Error);
-				}
-				return;
-			},
-		};
+		loop {
+			match client.estimate_gas(&WithOtherFields::new(request.clone())).await {
+				Ok(gas) => {
+					let coefficient: f64 = GasCoefficient::from(client.metadata.is_native).into();
+					let estimated_gas = gas as f64 * coefficient;
+					request.gas = Some(estimated_gas.ceil() as u64);
+					break;
+				},
+				Err(err) => {
+					// only retry infinitely if the error is related to the round sync issue
+					if err.to_string().contains("latest round") {
+						sleep(Duration::from_millis(client.metadata.call_interval * 2)).await;
+					} else {
+						if debug_mode {
+							let msg = format!(
+								" ❗️ Failed to estimate gas ({} address:{}): {}, Error: {}",
+								client.get_chain_name(),
+								client.address(),
+								metadata,
+								err
+							);
+							log::error!(target: &requester, "{msg}");
+							sentry::capture_message(&msg, sentry::Level::Error);
+						}
+						return;
+					}
+				},
+			};
+		}
 
 		if client.metadata.is_native {
 			// gas price is fixed to 1000 Gwei on bifrost network
@@ -327,7 +336,7 @@ pub fn send_transaction<F, P, T>(
 			request.max_priority_fee_per_gas = Some(0);
 		} else {
 			// to avoid duplicate(will revert) external networks transactions
-			tokio::time::sleep(Duration::from_millis(generate_delay())).await;
+			sleep(Duration::from_millis(generate_delay())).await;
 
 			if !client.metadata.eip1559 {
 				request.gas_price = Some(client.get_gas_price().await.unwrap());
