@@ -2,7 +2,6 @@ use br_primitives::{
 	constants::{
 		config::{BOOTSTRAP_BLOCK_OFFSET, NATIVE_BLOCK_TIME},
 		errors::{INSUFFICIENT_FUNDS, INVALID_CHAIN_ID, PROVIDER_INTERNAL_ERROR},
-		tx::DEFAULT_CALL_RETRIES,
 	},
 	contracts::authority::BfcStaking::round_meta_data,
 	eth::{AggregatorContracts, GasCoefficient, ProtocolContracts, ProviderMetadata},
@@ -310,7 +309,7 @@ pub fn send_transaction<F, P, T>(
 				},
 				Err(err) => {
 					// only retry infinitely if the error is related to the round sync issue
-					if err.to_string().contains("latest round") {
+					if err.to_string().contains("latest round") && !client.metadata.is_native {
 						sleep(Duration::from_millis(client.metadata.call_interval * 2)).await;
 					} else {
 						if debug_mode {
