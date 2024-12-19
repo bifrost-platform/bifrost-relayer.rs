@@ -1,7 +1,10 @@
-use ethers::{
-	types::{Signature as EthersSignature, H256},
-	utils::keccak256,
+use alloy::{
+	dyn_abi::DynSolValue,
+	primitives::{keccak256, Address, PrimitiveSignature, B256, U256},
 };
+use k256::{ecdsa::VerifyingKey, elliptic_curve::sec1::ToEncodedPoint};
+use rand::Rng as _;
+use sha3::{Digest, Keccak256};
 
 use crate::substrate::{EthereumSignature, Signature};
 
@@ -9,13 +12,42 @@ pub fn sub_display_format(log_target: &str) -> String {
 	format!("{:<019}", log_target)
 }
 
-/// Converts the ethers::Signature to a bifrost_runtime::Signature.
-pub fn convert_ethers_to_ecdsa_signature(ethers_signature: EthersSignature) -> EthereumSignature {
-	let sig: [u8; 65] = ethers_signature.into();
-	EthereumSignature(Signature(sig))
+pub fn generate_delay() -> u64 {
+	rand::thread_rng().gen_range(0..=12000)
+}
+
+/// Encodes the given round and new relayers to bytes.
+pub fn encode_roundup_param(round: U256, new_relayers: &[Address]) -> Vec<u8> {
+	DynSolValue::Tuple(vec![
+		DynSolValue::Uint(round, 256),
+		DynSolValue::Array(
+			new_relayers.iter().map(|address| DynSolValue::Address(*address)).collect(),
+		),
+	])
+	.abi_encode_params()
+}
+
+impl From<PrimitiveSignature> for EthereumSignature {
+	fn from(signature: PrimitiveSignature) -> Self {
+		let sig: [u8; 65] = signature.into();
+		EthereumSignature(Signature(sig))
+	}
 }
 
 /// Hash the given bytes.
-pub fn hash_bytes(bytes: &Vec<u8>) -> H256 {
-	H256::from(keccak256(bytes))
+pub fn hash_bytes(bytes: &Vec<u8>) -> B256 {
+	B256::from(keccak256(bytes))
+}
+
+/// Recovers the address from the given signature and message.
+pub fn recover_message(sig: PrimitiveSignature, msg: &[u8]) -> Address {
+	let v = sig.recid();
+	let rs = sig.to_k256().unwrap();
+
+	let verify_key =
+		VerifyingKey::recover_from_digest(Keccak256::new_with_prefix(msg), &rs, v).unwrap();
+	let public_key = k256::PublicKey::from(&verify_key).to_encoded_point(false);
+	let hash = keccak256(&public_key.as_bytes()[1..]);
+
+	Address::from_slice(&hash[12..])
 }

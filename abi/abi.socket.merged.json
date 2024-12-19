@@ -143,8 +143,8 @@
           {
             "components": [
               {
-                "internalType": "ChainIndex",
-                "name": "chain",
+                "internalType": "bytes4",
+                "name": "ChainIndex",
                 "type": "bytes4"
               },
               {
@@ -170,13 +170,13 @@
           {
             "components": [
               {
-                "internalType": "ChainIndex",
-                "name": "chain",
+                "internalType": "bytes4",
+                "name": "ChainIndex",
                 "type": "bytes4"
               },
               {
-                "internalType": "RBCmethod",
-                "name": "method",
+                "internalType": "bytes16",
+                "name": "RBCmethod",
                 "type": "bytes16"
               }
             ],
@@ -187,12 +187,12 @@
           {
             "components": [
               {
-                "internalType": "Asset_Index",
+                "internalType": "bytes32",
                 "name": "tokenIDX0",
                 "type": "bytes32"
               },
               {
-                "internalType": "Asset_Index",
+                "internalType": "bytes32",
                 "name": "tokenIDX1",
                 "type": "bytes32"
               },
@@ -272,8 +272,8 @@
     "name": "BFC_MAIN",
     "outputs": [
       {
-        "internalType": "ChainIndex",
-        "name": "",
+        "internalType": "bytes4",
+        "name": "ChainIndex",
         "type": "bytes4"
       }
     ],
@@ -496,8 +496,8 @@
       {
         "components": [
           {
-            "internalType": "ChainIndex",
-            "name": "chain",
+            "internalType": "bytes4",
+            "name": "ChainIndex",
             "type": "bytes4"
           },
           {
@@ -537,8 +537,8 @@
       {
         "components": [
           {
-            "internalType": "ChainIndex",
-            "name": "chain",
+            "internalType": "bytes4",
+            "name": "ChainIndex",
             "type": "bytes4"
           },
           {
@@ -626,8 +626,8 @@
       {
         "components": [
           {
-            "internalType": "ChainIndex",
-            "name": "chain",
+            "internalType": "bytes4",
+            "name": "ChainIndex",
             "type": "bytes4"
           },
           {
@@ -818,8 +818,8 @@
               {
                 "components": [
                   {
-                    "internalType": "ChainIndex",
-                    "name": "chain",
+                    "internalType": "bytes4",
+                    "name": "ChainIndex",
                     "type": "bytes4"
                   },
                   {
@@ -845,13 +845,13 @@
               {
                 "components": [
                   {
-                    "internalType": "ChainIndex",
-                    "name": "chain",
+                    "internalType": "bytes4",
+                    "name": "ChainIndex",
                     "type": "bytes4"
                   },
                   {
-                    "internalType": "RBCmethod",
-                    "name": "method",
+                    "internalType": "bytes16",
+                    "name": "RBCmethod",
                     "type": "bytes16"
                   }
                 ],
@@ -862,12 +862,12 @@
               {
                 "components": [
                   {
-                    "internalType": "Asset_Index",
+                    "internalType": "bytes32",
                     "name": "tokenIDX0",
                     "type": "bytes32"
                   },
                   {
-                    "internalType": "Asset_Index",
+                    "internalType": "bytes32",
                     "name": "tokenIDX1",
                     "type": "bytes32"
                   },
@@ -1354,8 +1354,8 @@
   {
     "inputs": [
       {
-        "internalType": "ChainIndex",
-        "name": "_this",
+        "internalType": "bytes4",
+        "name": "ChainIndex",
         "type": "bytes4"
       }
     ],
@@ -1447,8 +1447,8 @@
     "name": "this_chain",
     "outputs": [
       {
-        "internalType": "ChainIndex",
-        "name": "",
+        "internalType": "bytes4",
+        "name": "ChainIndex",
         "type": "bytes4"
       }
     ],
@@ -1460,8 +1460,8 @@
       {
         "components": [
           {
-            "internalType": "ChainIndex",
-            "name": "chain",
+            "internalType": "bytes4",
+            "name": "ChainIndex",
             "type": "bytes4"
           },
           {
@@ -1484,13 +1484,13 @@
           {
             "components": [
               {
-                "internalType": "ChainIndex",
-                "name": "chain",
+                "internalType": "bytes4",
+                "name": "ChainIndex",
                 "type": "bytes4"
               },
               {
-                "internalType": "RBCmethod",
-                "name": "method",
+                "internalType": "bytes16",
+                "name": "RBCmethod",
                 "type": "bytes16"
               }
             ],
@@ -1501,12 +1501,12 @@
           {
             "components": [
               {
-                "internalType": "Asset_Index",
+                "internalType": "bytes32",
                 "name": "tokenIDX0",
                 "type": "bytes32"
               },
               {
-                "internalType": "Asset_Index",
+                "internalType": "bytes32",
                 "name": "tokenIDX1",
                 "type": "bytes32"
               },
@@ -1578,13 +1578,13 @@
           {
             "components": [
               {
-                "internalType": "ChainIndex",
-                "name": "chain",
+                "internalType": "bytes4",
+                "name": "ChainIndex",
                 "type": "bytes4"
               },
               {
-                "internalType": "RBCmethod",
-                "name": "method",
+                "internalType": "bytes16",
+                "name": "RBCmethod",
                 "type": "bytes16"
               }
             ],
@@ -1595,12 +1595,12 @@
           {
             "components": [
               {
-                "internalType": "Asset_Index",
+                "internalType": "bytes32",
                 "name": "tokenIDX0",
                 "type": "bytes32"
               },
               {
-                "internalType": "Asset_Index",
+                "internalType": "bytes32",
                 "name": "tokenIDX1",
                 "type": "bytes32"
               },

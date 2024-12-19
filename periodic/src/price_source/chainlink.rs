@@ -1,22 +1,36 @@
-use std::{collections::BTreeMap, fmt::Error, sync::Arc};
-
-use br_primitives::periodic::PriceResponse;
-use ethers::{providers::JsonRpcClient, types::U256};
-
-use br_client::eth::EthClient;
+use std::{collections::BTreeMap, sync::Arc};
 
 use crate::traits::PriceFetcher;
+use alloy::{
+	network::AnyNetwork,
+	primitives::U256,
+	providers::{fillers::TxFiller, Provider, WalletProvider},
+	transports::Transport,
+};
+use br_client::eth::EthClient;
+use br_primitives::periodic::PriceResponse;
+use eyre::{eyre, Result};
 
 #[derive(Clone)]
-pub struct ChainlinkPriceFetcher<T> {
-	client: Option<Arc<EthClient<T>>>,
+pub struct ChainlinkPriceFetcher<F, P, T>
+where
+	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
+	P: Provider<T, AnyNetwork>,
+	T: Transport + Clone,
+{
+	client: Option<Arc<EthClient<F, P, T>>>,
 }
 
 #[async_trait::async_trait]
-impl<T: JsonRpcClient + 'static> PriceFetcher for ChainlinkPriceFetcher<T> {
+impl<F, P, T> PriceFetcher for ChainlinkPriceFetcher<F, P, T>
+where
+	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
+	P: Provider<T, AnyNetwork>,
+	T: Transport + Clone,
+{
 	/// Get the price of a symbol from Chainlink aggregator.
 	/// Available symbols: USDC, USDT, DAI, BTC, WBTC, CBBTC
-	async fn get_ticker_with_symbol(&self, symbol: String) -> Result<PriceResponse, Error> {
+	async fn get_ticker_with_symbol(&self, symbol: String) -> Result<PriceResponse> {
 		if let Some(client) = &self.client {
 			let symbol_str = symbol.as_str();
 
@@ -29,47 +43,57 @@ impl<T: JsonRpcClient + 'static> PriceFetcher for ChainlinkPriceFetcher<T> {
 						"BTC" => &client.aggregator_contracts.chainlink_btc_usd,
 						"WBTC" => &client.aggregator_contracts.chainlink_wbtc_usd,
 						"CBBTC" => &client.aggregator_contracts.chainlink_cbbtc_usd,
-						_ => todo!(),
+						_ => return Err(eyre!("Invalid symbol")),
 					} {
-						let (_, price, _, _, _) = contract.latest_round_data().await.unwrap();
-						let decimals = contract.decimals().await.unwrap();
+						let (_, price, _, _, _) = contract.latestRoundData().call().await?.into();
+						let price = price.into_raw();
+						let decimals = contract.decimals().call().await?._0;
 
-						Ok(PriceResponse {
-							price: U256::from(
-								(price * 10u128.pow((18 - decimals).into())).as_u128(),
-							),
-							volume: U256::from(1).into(),
-						})
+						let price = price * U256::from(10u128.pow((18 - decimals).into()));
+						let volume = Some(U256::from(1));
+
+						Ok(PriceResponse { price, volume })
 					} else {
-						Err(Error)
+						Err(eyre!("Invalid symbol"))
 					}
 				},
 				_ => {
-					todo!()
+					return Err(eyre!("Invalid symbol"));
 				},
 			}
 		} else {
-			return Err(Error);
+			return Err(eyre!("Client not found"));
 		}
 	}
 
-	async fn get_tickers(&self) -> Result<BTreeMap<String, PriceResponse>, Error> {
+	async fn get_tickers(&self) -> Result<BTreeMap<String, PriceResponse>> {
 		let mut ret = BTreeMap::new();
 
-		for symbol in ["USDC".to_string(), "USDT".to_string(), "DAI".to_string(), "BTC".to_string()]
-		{
+		for symbol in [
+			"USDC".to_string(),
+			"USDT".to_string(),
+			"DAI".to_string(),
+			"BTC".to_string(),
+			"WBTC".to_string(),
+			"CBBTC".to_string(),
+		] {
 			match self.get_ticker_with_symbol(symbol.clone()).await {
 				Ok(ticker) => ret.insert(symbol, ticker),
 				Err(_) => continue,
 			};
 		}
 
-		return if ret.is_empty() { Err(Error) } else { Ok(ret) };
+		return if ret.is_empty() { Err(eyre!("No tickers found")) } else { Ok(ret) };
 	}
 }
 
-impl<T: JsonRpcClient> ChainlinkPriceFetcher<T> {
-	pub async fn new(client: Option<Arc<EthClient<T>>>) -> Self {
+impl<F, P, T> ChainlinkPriceFetcher<F, P, T>
+where
+	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
+	P: Provider<T, AnyNetwork>,
+	T: Transport + Clone,
+{
+	pub async fn new(client: Option<Arc<EthClient<F, P, T>>>) -> Self {
 		ChainlinkPriceFetcher { client }
 	}
 }
