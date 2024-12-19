@@ -245,6 +245,60 @@ where
 
 		Ok(())
 	}
+
+	async fn fill_gas(&self, request: &mut TransactionRequest) -> Result<()> {
+		request.from = Some(self.address());
+
+		let gas = self.estimate_gas(&WithOtherFields::new(request.clone())).await?;
+		let coefficient: f64 = GasCoefficient::from(self.metadata.is_native).into();
+		let estimated_gas = gas as f64 * coefficient;
+		request.gas = Some(estimated_gas.ceil() as u64);
+
+		if self.metadata.is_native {
+			// gas price is fixed to 1000 Gwei on bifrost network
+			request.max_fee_per_gas = Some(1000 * Unit::GWEI.wei().to::<u128>());
+			request.max_priority_fee_per_gas = Some(0);
+		} else {
+			// to avoid duplicate(will revert) external networks transactions
+			sleep(Duration::from_millis(generate_delay())).await;
+
+			if !self.metadata.eip1559 {
+				request.gas_price = Some(self.get_gas_price().await.unwrap());
+			}
+		}
+
+		Ok(())
+	}
+
+	async fn sync_send_transaction(
+		&self,
+		mut request: TransactionRequest,
+		requester: String,
+		metadata: TxRequestMetadata,
+	) -> Result<()> {
+		self.fill_gas(&mut request).await?;
+		let pending = self.send_transaction(WithOtherFields::new(request)).await?;
+		match pending
+			.with_timeout(Some(Duration::from_millis(self.metadata.call_interval * 3)))
+			.watch()
+			.await
+		{
+			Ok(tx_hash) => {
+				log::info!(
+					target: &requester,
+					" 🔖 Transaction confirmed ({} tx:{}): {}",
+					self.get_chain_name(),
+					tx_hash,
+					metadata
+				);
+				Ok(())
+			},
+			Err(_) => {
+				self.flush_stalled_transactions().await?;
+				Ok(())
+			},
+		}
+	}
 }
 
 #[async_trait::async_trait]
@@ -297,49 +351,19 @@ pub fn send_transaction<F, P, T>(
 
 	let this_handle = handle.clone();
 	this_handle.spawn("send_transaction", None, async move {
-		request.from = Some(client.address());
-
-		loop {
-			match client.estimate_gas(&WithOtherFields::new(request.clone())).await {
-				Ok(gas) => {
-					let coefficient: f64 = GasCoefficient::from(client.metadata.is_native).into();
-					let estimated_gas = gas as f64 * coefficient;
-					request.gas = Some(estimated_gas.ceil() as u64);
-					break;
-				},
-				Err(err) => {
-					// only retry infinitely if the error is related to the round sync issue
-					if err.to_string().contains("latest round") && !client.metadata.is_native {
-						sleep(Duration::from_millis(client.metadata.call_interval * 2)).await;
-					} else {
-						if debug_mode {
-							let msg = format!(
-								" ❗️ Failed to estimate gas ({} address:{}): {}, Error: {}",
-								client.get_chain_name(),
-								client.address(),
-								metadata,
-								err
-							);
-							log::error!(target: &requester, "{msg}");
-							sentry::capture_message(&msg, sentry::Level::Error);
-						}
-						return;
-					}
-				},
-			};
-		}
-
-		if client.metadata.is_native {
-			// gas price is fixed to 1000 Gwei on bifrost network
-			request.max_fee_per_gas = Some(1000 * Unit::GWEI.wei().to::<u128>());
-			request.max_priority_fee_per_gas = Some(0);
-		} else {
-			// to avoid duplicate(will revert) external networks transactions
-			sleep(Duration::from_millis(generate_delay())).await;
-
-			if !client.metadata.eip1559 {
-				request.gas_price = Some(client.get_gas_price().await.unwrap());
+		if let Err(err) = client.fill_gas(&mut request).await {
+			if debug_mode {
+				let msg = format!(
+					" ❗️ Failed to estimate gas ({} address:{}): {}, Error: {}",
+					client.get_chain_name(),
+					client.address(),
+					metadata,
+					err
+				);
+				log::error!(target: &requester, "{msg}");
+				sentry::capture_message(&msg, sentry::Level::Error);
 			}
+			return;
 		}
 
 		match client.send_transaction(WithOtherFields::new(request.clone())).await {
