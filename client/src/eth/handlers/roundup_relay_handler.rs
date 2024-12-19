@@ -277,13 +277,24 @@ where
 				));
 
 				if is_bootstrap {
-					target_client
-						.sync_send_transaction(
-							transaction_request,
-							SUB_LOG_TARGET.to_string(),
-							metadata,
-						)
-						.await?
+					loop {
+						if let Err(e) = target_client
+							.sync_send_transaction(
+								transaction_request.clone(),
+								SUB_LOG_TARGET.to_string(),
+								metadata.clone(),
+							)
+							.await
+						{
+							if e.to_string().to_lowercase().contains("nonce too low") {
+								continue;
+							} else {
+								eyre::bail!(e);
+							}
+						} else {
+							break;
+						}
+					}
 				} else {
 					send_transaction(
 						target_client.clone(),

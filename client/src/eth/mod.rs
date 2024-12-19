@@ -292,12 +292,7 @@ where
 				log::error!(target: &requester, "{msg}");
 				sentry::capture_message(&msg, sentry::Level::Error);
 
-				if err.to_string().to_lowercase().contains("nonce too low") {
-					self.flush_stalled_transactions().await?;
-					return self.sync_send_transaction(request, requester, metadata).await;
-				} else {
-					eyre::bail!(err)
-				}
+				eyre::bail!(err)
 			},
 		};
 		match pending
