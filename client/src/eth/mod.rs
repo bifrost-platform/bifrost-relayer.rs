@@ -351,6 +351,36 @@ pub fn send_transaction<F, P, T>(
 					pending.tx_hash(),
 					metadata
 				);
+
+				// wait for the transaction to be confirmed in 3 blocks
+				match pending
+					.with_timeout(Some(Duration::from_millis(client.metadata.call_interval * 3)))
+					.watch()
+					.await
+				{
+					Ok(tx_hash) => {
+						log::info!(
+							target: &requester,
+							" 🔖 Transaction confirmed ({} tx:{}): {}",
+							client.get_chain_name(),
+							tx_hash,
+							metadata
+						);
+					},
+					Err(err) => {
+						let msg = format!(
+							" ❗️ Transaction failed to register ({} address:{}): {}, Error: {}",
+							client.get_chain_name(),
+							client.address(),
+							metadata,
+							err
+						);
+						log::error!(target: &requester, "{msg}");
+						sentry::capture_message(&msg, sentry::Level::Error);
+
+						client.flush_stalled_transactions().await.unwrap();
+					},
+				}
 			},
 			Err(err) => {
 				let msg = format!(
