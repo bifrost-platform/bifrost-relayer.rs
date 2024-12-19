@@ -287,6 +287,7 @@ where
 							.await
 						{
 							if e.to_string().to_lowercase().contains("nonce too low") {
+								target_client.flush_stalled_transactions().await?;
 								continue;
 							} else {
 								eyre::bail!(e);
