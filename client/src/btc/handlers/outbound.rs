@@ -103,9 +103,8 @@ where
 	T: Transport + Clone,
 {
 	async fn run(&mut self) -> Result<()> {
+		self.wait_for_normal_state().await?;
 		while let Some(Ok(msg)) = self.event_stream.next().await {
-			self.wait_for_normal_state().await?;
-
 			if !self.bfc_client.is_selected_relayer().await?
 				|| !self.is_target_event(msg.event_type)
 			{
