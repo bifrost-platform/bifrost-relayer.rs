@@ -3,6 +3,7 @@ mod outbound;
 
 pub use inbound::*;
 pub use outbound::*;
+use tokio::time::sleep;
 
 use crate::{
 	btc::{
@@ -24,7 +25,7 @@ use br_primitives::{
 	utils::sub_display_format,
 };
 use eyre::Result;
-use std::sync::Arc;
+use std::{sync::Arc, time::Duration};
 
 use super::block::EventMessage;
 
@@ -122,5 +123,13 @@ pub trait BootstrapHandler {
 			.await
 			.iter()
 			.all(|s| *s == state)
+	}
+
+	/// Waits for the bootstrap state to be synced to the normal start state.
+	async fn wait_for_normal_state(&self) -> Result<()> {
+		while !self.is_bootstrap_state_synced_as(BootstrapState::NormalStart).await {
+			sleep(Duration::from_millis(100)).await;
+		}
+		Ok(())
 	}
 }

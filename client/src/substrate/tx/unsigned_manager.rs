@@ -13,7 +13,8 @@ use br_primitives::{
 use sc_service::SpawnTaskHandle;
 use std::sync::Arc;
 use subxt::OnlineClient;
-use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
+use tokio::sync::mpsc::{self, UnboundedSender};
+use tokio_stream::{wrappers::UnboundedReceiverStream, StreamExt};
 
 use crate::{eth::EthClient, substrate::traits::ExtrinsicTask};
 
@@ -31,7 +32,7 @@ where
 	/// The Bifrost client.
 	bfc_client: Arc<EthClient<F, P, T>>,
 	/// The receiver connected to the tx request channel.
-	receiver: UnboundedReceiver<XtRequestMessage>,
+	message_stream: UnboundedReceiverStream<XtRequestMessage>,
 	/// A handle for spawning transaction tasks in the service.
 	xt_spawn_handle: SpawnTaskHandle,
 }
@@ -48,7 +49,15 @@ where
 		xt_spawn_handle: SpawnTaskHandle,
 	) -> (Self, UnboundedSender<XtRequestMessage>) {
 		let (sender, receiver) = mpsc::unbounded_channel::<XtRequestMessage>();
-		(Self { sub_client: None, bfc_client, receiver, xt_spawn_handle }, sender)
+		(
+			Self {
+				sub_client: None,
+				bfc_client,
+				message_stream: UnboundedReceiverStream::new(receiver),
+				xt_spawn_handle,
+			},
+			sender,
+		)
 	}
 
 	/// Initialize the substrate client.
@@ -71,7 +80,7 @@ where
 	pub async fn run(&mut self) {
 		self.initialize().await;
 
-		while let Some(msg) = self.receiver.recv().await {
+		while let Some(msg) = self.message_stream.next().await {
 			log::info!(
 				target: &self.bfc_client.get_chain_name(),
 				"-[{}] 🔖 Received unsigned transaction request: {}",

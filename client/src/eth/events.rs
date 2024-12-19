@@ -9,8 +9,9 @@ use eyre::Result;
 use std::sync::Arc;
 use tokio::{
 	sync::broadcast::{self, Receiver, Sender},
-	time::{sleep, Duration},
+	time::{interval, sleep, Duration},
 };
+use tokio_stream::{wrappers::IntervalStream, StreamExt};
 
 use br_primitives::{
 	bootstrap::BootstrapSharedData, eth::BootstrapState, utils::sub_display_format,
@@ -111,7 +112,11 @@ where
 	pub async fn run(&mut self) -> Result<()> {
 		self.initialize().await?;
 
-		loop {
+		let mut stream = IntervalStream::new(interval(Duration::from_millis(
+			self.client.metadata.call_interval,
+		)));
+
+		while let Some(_) = stream.next().await {
 			if self.is_bootstrap_state_synced_as(BootstrapState::NormalStart).await {
 				let latest_block = self.client.get_block_number().await?;
 				while self.is_block_confirmed(latest_block) {
@@ -122,9 +127,9 @@ where
 					}
 				}
 			}
-
-			sleep(Duration::from_millis(self.client.metadata.call_interval)).await;
 		}
+
+		Ok(())
 	}
 
 	/// Process the confirmed block and verifies if any events emitted from the target

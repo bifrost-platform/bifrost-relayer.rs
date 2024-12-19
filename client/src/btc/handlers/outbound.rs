@@ -20,7 +20,7 @@ use br_primitives::{
 		socket::{SocketContract::Socket, Socket_Struct::Socket_Message},
 		socket_queue::SocketQueueInstance,
 	},
-	eth::{BootstrapState, BuiltRelayTransaction, SocketEventStatus},
+	eth::{BuiltRelayTransaction, SocketEventStatus},
 	tx::{SocketRelayMetadata, TxRequestMetadata},
 	utils::sub_display_format,
 };
@@ -29,7 +29,7 @@ use miniscript::bitcoin::{hashes::Hash, Txid};
 use sc_service::SpawnTaskHandle;
 use std::sync::Arc;
 use tokio::sync::broadcast::Receiver;
-use tokio_stream::StreamExt;
+use tokio_stream::{wrappers::BroadcastStream, StreamExt};
 
 use super::{BootstrapHandler, EventMessage};
 
@@ -42,7 +42,7 @@ where
 	T: Transport + Clone,
 {
 	pub bfc_client: Arc<EthClient<F, P, T>>,
-	event_receiver: Receiver<BTCEventMessage>,
+	event_stream: BroadcastStream<BTCEventMessage>,
 	target_event: EventType,
 	/// The bootstrap shared data.
 	bootstrap_shared_data: Arc<BootstrapSharedData>,
@@ -67,7 +67,7 @@ where
 	) -> Self {
 		Self {
 			bfc_client,
-			event_receiver,
+			event_stream: BroadcastStream::new(event_receiver),
 			target_event: EventType::Outbound,
 			bootstrap_shared_data,
 			handle,
@@ -103,30 +103,30 @@ where
 	T: Transport + Clone,
 {
 	async fn run(&mut self) -> Result<()> {
-		loop {
-			if self.is_bootstrap_state_synced_as(BootstrapState::NormalStart).await {
-				let msg = self.event_receiver.recv().await.unwrap();
+		while let Some(Ok(msg)) = self.event_stream.next().await {
+			self.wait_for_normal_state().await?;
 
-				if !self.bfc_client.is_selected_relayer().await?
-					|| !self.is_target_event(msg.event_type)
-				{
-					continue;
-				}
+			if !self.bfc_client.is_selected_relayer().await?
+				|| !self.is_target_event(msg.event_type)
+			{
+				continue;
+			}
 
-				log::info!(
-					target: LOG_TARGET,
-					"-[{}] 📦 Imported #{:?} with target logs({:?})",
-					sub_display_format(SUB_LOG_TARGET),
-					msg.block_number,
-					msg.events.len()
-				);
+			log::info!(
+				target: LOG_TARGET,
+				"-[{}] 📦 Imported #{:?} with target logs({:?})",
+				sub_display_format(SUB_LOG_TARGET),
+				msg.block_number,
+				msg.events.len()
+			);
 
-				let mut stream = tokio_stream::iter(msg.events.into_iter());
-				while let Some(event) = stream.next().await {
-					self.process_event(event).await?;
-				}
+			let mut stream = tokio_stream::iter(msg.events);
+			while let Some(event) = stream.next().await {
+				self.process_event(event).await?;
 			}
 		}
+
+		Ok(())
 	}
 
 	async fn process_event(&self, event: Event) -> Result<()> {

@@ -25,13 +25,10 @@ use serde::Deserialize;
 use serde_json::Value;
 use std::{collections::BTreeSet, str::FromStr, sync::Arc};
 use tokio::{
-	sync::{
-		broadcast,
-		broadcast::{Receiver, Sender},
-	},
-	time::{sleep, Duration},
+	sync::broadcast::{self, Receiver, Sender},
+	time::{interval, sleep, Duration},
 };
-use tokio_stream::StreamExt;
+use tokio_stream::{wrappers::IntervalStream, StreamExt};
 
 use super::handlers::BootstrapHandler;
 
@@ -199,7 +196,8 @@ where
 			latest_block
 		);
 
-		loop {
+		let mut stream = IntervalStream::new(interval(Duration::from_millis(self.call_interval)));
+		while let Some(_) = stream.next().await {
 			if self.is_bootstrap_state_synced_as(BootstrapState::BootstrapSocketRelay).await {
 				self.bootstrap().await?;
 			} else if self.is_bootstrap_state_synced_as(BootstrapState::NormalStart).await {
@@ -214,9 +212,8 @@ where
 					.await;
 				}
 			}
-
-			sleep(Duration::from_millis(self.call_interval)).await;
 		}
+		Ok(())
 	}
 
 	/// Returns the generated user vault addresses.

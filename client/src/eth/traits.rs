@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{sync::Arc, time::Duration};
 
 use alloy::{
 	dyn_abi::DynSolValue,
@@ -17,6 +17,7 @@ use br_primitives::{
 	utils::recover_message,
 };
 use eyre::Result;
+use tokio::time::sleep;
 
 use super::EthClient;
 
@@ -153,5 +154,13 @@ pub trait BootstrapHandler {
 			.await
 			.iter()
 			.all(|s| *s == state)
+	}
+
+	/// Waits for the bootstrap state to be synced to the normal start state.
+	async fn wait_for_bootstrap_state(&self, state: BootstrapState) -> Result<()> {
+		while !self.is_bootstrap_state_synced_as(state).await {
+			sleep(Duration::from_millis(100)).await;
+		}
+		Ok(())
 	}
 }

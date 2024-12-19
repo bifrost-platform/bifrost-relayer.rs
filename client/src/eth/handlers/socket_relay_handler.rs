@@ -1,4 +1,4 @@
-use std::{collections::BTreeMap, sync::Arc, time::Duration};
+use std::{collections::BTreeMap, sync::Arc};
 
 use alloy::{
 	network::AnyNetwork,
@@ -10,11 +10,8 @@ use alloy::{
 };
 use eyre::Result;
 use sc_service::SpawnTaskHandle;
-use tokio::{
-	sync::{broadcast::Receiver, mpsc::UnboundedSender},
-	time::sleep,
-};
-use tokio_stream::StreamExt;
+use tokio::sync::{broadcast::Receiver, mpsc::UnboundedSender};
+use tokio_stream::{wrappers::BroadcastStream, StreamExt};
 
 use br_primitives::{
 	bootstrap::BootstrapSharedData,
@@ -51,7 +48,7 @@ where
 	/// The `EthClient` to interact with the connected blockchain.
 	pub client: Arc<EthClient<F, P, T>>,
 	/// The receiver that consumes new events from the block channel.
-	event_receiver: Receiver<EventMessage>,
+	event_stream: BroadcastStream<EventMessage>,
 	/// The entire clients instantiated in the system. <chain_id, Arc<EthClient>>
 	system_clients: Arc<ClientMap<F, P, T>>,
 	/// The bifrost client.
@@ -76,30 +73,28 @@ where
 	T: Transport + Clone,
 {
 	async fn run(&mut self) -> Result<()> {
-		loop {
-			if self.is_bootstrap_state_synced_as(BootstrapState::BootstrapSocketRelay).await {
-				self.bootstrap().await?;
+		self.wait_for_bootstrap_state(BootstrapState::BootstrapSocketRelay).await?;
+		self.bootstrap().await?;
 
-				sleep(Duration::from_millis(self.client.metadata.call_interval)).await;
-			} else if self.is_bootstrap_state_synced_as(BootstrapState::NormalStart).await {
-				let msg = self.event_receiver.recv().await.unwrap();
+		self.wait_for_bootstrap_state(BootstrapState::NormalStart).await?;
+		while let Some(Ok(msg)) = self.event_stream.next().await {
+			log::info!(
+				target: &self.client.get_chain_name(),
+				"-[{}] 📦 Imported #{:?} with target logs({:?})",
+				sub_display_format(SUB_LOG_TARGET),
+				msg.block_number,
+				msg.event_logs.len(),
+			);
 
-				log::info!(
-					target: &self.client.get_chain_name(),
-					"-[{}] 📦 Imported #{:?} with target logs({:?})",
-					sub_display_format(SUB_LOG_TARGET),
-					msg.block_number,
-					msg.event_logs.len(),
-				);
-
-				let mut stream = tokio_stream::iter(msg.event_logs);
-				while let Some(log) = stream.next().await {
-					if self.is_target_contract(&log) && self.is_target_event(log.topic0()) {
-						self.process_confirmed_log(&log, false).await?;
-					}
+			let mut stream = tokio_stream::iter(msg.event_logs);
+			while let Some(log) = stream.next().await {
+				if self.is_target_contract(&log) && self.is_target_event(log.topic0()) {
+					self.process_confirmed_log(&log, false).await?;
 				}
 			}
 		}
+
+		Ok(())
 	}
 
 	async fn process_confirmed_log(&self, log: &Log, is_bootstrap: bool) -> Result<()> {
@@ -276,7 +271,7 @@ where
 		let client = system_clients.get(&id).expect(INVALID_CHAIN_ID).clone();
 
 		Self {
-			event_receiver,
+			event_stream: BroadcastStream::new(event_receiver),
 			socket_signature: Socket::SIGNATURE_HASH,
 			client,
 			system_clients,
