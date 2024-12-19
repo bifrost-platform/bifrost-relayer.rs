@@ -366,9 +366,7 @@ where
 		if bootstrap_guard.iter().all(|s| *s == BootstrapState::BootstrapRoundUpPhase2) {
 			drop(bootstrap_guard);
 			let logs = self.get_bootstrap_events().await?;
-
-			let mut stream = tokio_stream::iter(logs);
-			while let Some(log) = stream.next().await {
+			for log in logs {
 				self.process_confirmed_log(&log, true).await?;
 			}
 		}
