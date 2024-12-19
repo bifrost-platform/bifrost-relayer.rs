@@ -272,12 +272,34 @@ where
 
 	async fn sync_send_transaction(
 		&self,
-		mut request: TransactionRequest,
+		request: TransactionRequest,
 		requester: String,
 		metadata: TxRequestMetadata,
 	) -> Result<()> {
-		self.fill_gas(&mut request).await?;
-		let pending = self.send_transaction(WithOtherFields::new(request)).await?;
+		let mut this_request = request.clone();
+		self.fill_gas(&mut this_request).await?;
+
+		let pending = match self.send_transaction(WithOtherFields::new(this_request)).await {
+			Ok(pending) => pending,
+			Err(err) => {
+				let msg = format!(
+					" ❗️ Failed to send transaction ({} address:{}): {}, Error: {}",
+					self.get_chain_name(),
+					self.address(),
+					metadata,
+					err
+				);
+				log::error!(target: &requester, "{msg}");
+				sentry::capture_message(&msg, sentry::Level::Error);
+
+				if err.to_string().to_lowercase().contains("nonce too low") {
+					self.flush_stalled_transactions().await?;
+					return self.sync_send_transaction(request, requester, metadata).await;
+				} else {
+					eyre::bail!(err)
+				}
+			},
+		};
 		match pending
 			.with_timeout(Some(Duration::from_millis(self.metadata.call_interval * 3)))
 			.watch()
