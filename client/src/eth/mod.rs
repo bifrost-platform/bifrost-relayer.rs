@@ -437,6 +437,8 @@ pub fn send_transaction<F, P, T>(
 				if err.to_string().to_lowercase().contains("nonce too low") {
 					client.flush_stalled_transactions().await.unwrap();
 					send_transaction(client, request, requester, metadata, debug_mode, handle);
+				} else if err.to_string().to_lowercase().contains("already known") {
+					send_transaction(client, request, requester, metadata, debug_mode, handle);
 				}
 			},
 		}
