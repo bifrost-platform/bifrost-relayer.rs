@@ -247,6 +247,7 @@ where
 	}
 
 	async fn fill_gas(&self, request: &mut TransactionRequest) -> Result<()> {
+		request.chain_id = Some(self.chain_id());
 		request.from = Some(self.address());
 
 		let gas = self.estimate_gas(&WithOtherFields::new(request.clone())).await?;
