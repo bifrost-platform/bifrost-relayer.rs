@@ -74,7 +74,7 @@ pub fn relay(config: Configuration) -> Result<TaskManager, ServiceError> {
 				.with_poll_interval(Duration::from_millis(evm_provider.call_interval));
 			let provider = Arc::new(
 				ProviderBuilder::new()
-					.with_recommended_fillers()
+					.with_cached_nonce_management()
 					.network::<AnyNetwork>()
 					.wallet(wallet)
 					.on_client(client),
