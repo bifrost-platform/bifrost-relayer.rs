@@ -66,16 +66,7 @@ where
 	async fn run(&mut self) -> Result<()> {
 		self.current_round = self.get_latest_round().await?;
 
-		loop {
-			if self.is_bootstrap_state_synced_as(BootstrapState::BootstrapRoundUpPhase1).await {
-				self.bootstrap().await?;
-				break;
-			} else if self.is_bootstrap_state_synced_as(BootstrapState::NormalStart).await {
-				break;
-			}
-
-			sleep(Duration::from_millis(self.client.metadata.call_interval)).await;
-		}
+		self.bootstrap().await?;
 
 		loop {
 			self.wait_until_next_time().await;
@@ -208,6 +199,8 @@ where
 	}
 
 	async fn bootstrap(&self) -> Result<()> {
+		self.wait_for_bootstrap_state(BootstrapState::BootstrapRoundUpPhase1).await?;
+
 		let get_next_poll_round = || async move {
 			let logs = self.get_bootstrap_events().await.unwrap();
 
@@ -269,11 +262,11 @@ where
 			}
 		}
 
-		for state in self.bootstrap_shared_data.bootstrap_states.write().await.iter_mut() {
-			if *state == BootstrapState::BootstrapRoundUpPhase1 {
-				*state = BootstrapState::BootstrapRoundUpPhase2;
-			}
+		let mut lock = self.bootstrap_shared_data.bootstrap_state.write().await;
+		if *lock == BootstrapState::BootstrapRoundUpPhase1 {
+			*lock = BootstrapState::BootstrapRoundUpPhase2;
 		}
+		drop(lock);
 
 		Ok(())
 	}

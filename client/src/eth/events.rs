@@ -112,19 +112,19 @@ where
 	pub async fn run(&mut self) -> Result<()> {
 		self.initialize().await?;
 
+		self.wait_for_bootstrap_state(BootstrapState::NormalStart).await?;
+
 		let mut stream = IntervalStream::new(interval(Duration::from_millis(
 			self.client.metadata.call_interval,
 		)));
 
 		while let Some(_) = stream.next().await {
-			if self.is_bootstrap_state_synced_as(BootstrapState::NormalStart).await {
-				let latest_block = self.client.get_block_number().await?;
-				while self.is_block_confirmed(latest_block) {
-					self.process_confirmed_block().await?;
+			let latest_block = self.client.get_block_number().await?;
+			while self.is_block_confirmed(latest_block) {
+				self.process_confirmed_block().await?;
 
-					if self.is_balance_sync_enabled {
-						self.client.sync_balance().await?;
-					}
+				if self.is_balance_sync_enabled {
+					self.client.sync_balance().await?;
 				}
 			}
 		}
@@ -200,13 +200,12 @@ where
 		loop {
 			match self.client.syncing().await? {
 				SyncStatus::None => {
-					for state in
-						self.bootstrap_shared_data.bootstrap_states.write().await.iter_mut()
-					{
-						if *state == BootstrapState::NodeSyncing {
-							*state = BootstrapState::BootstrapRoundUpPhase1;
-						}
+					let mut bootstrap_state =
+						self.bootstrap_shared_data.bootstrap_state.write().await;
+					if *bootstrap_state == BootstrapState::NodeSyncing {
+						*bootstrap_state = BootstrapState::BootstrapRoundUpPhase1;
 					}
+
 					return Ok(());
 				},
 				SyncStatus::Info(status) => {

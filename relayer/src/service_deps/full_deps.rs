@@ -7,7 +7,6 @@ where
 	P: Provider<T, AnyNetwork> + 'static,
 	T: Transport + Clone,
 {
-	pub bootstrap_shared_data: BootstrapSharedData,
 	pub manager_deps: ManagerDeps<F, P, T>,
 	pub periodic_deps: PeriodicDeps<F, P, T>,
 	pub handler_deps: HandlerDeps<F, P, T>,

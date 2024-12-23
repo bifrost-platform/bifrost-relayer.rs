@@ -385,19 +385,8 @@ where
 		self.bootstrap_shared_data.roundup_barrier.clone().wait().await;
 
 		// set all of state to BootstrapSocketRelay
-		self.bootstrap_shared_data
-			.bootstrap_states
-			.write()
-			.await
-			.iter_mut()
-			.for_each(|state| *state = BootstrapState::BootstrapSocketRelay);
-
-		// Poll socket barrier to call wait()
-		let socket_barrier_clone = self.bootstrap_shared_data.socket_barrier.clone();
-
-		tokio::spawn(async move {
-			socket_barrier_clone.clone().wait().await;
-		});
+		*self.bootstrap_shared_data.bootstrap_state.write().await =
+			BootstrapState::BootstrapSocketRelay;
 
 		Ok(())
 	}

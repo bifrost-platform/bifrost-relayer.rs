@@ -196,21 +196,22 @@ where
 			latest_block
 		);
 
+		self.wait_for_bootstrap_state(BootstrapState::BootstrapSocketRelay).await?;
+		self.bootstrap().await?;
+
+		self.wait_for_bootstrap_state(BootstrapState::NormalStart).await?;
+
 		let mut stream = IntervalStream::new(interval(Duration::from_millis(self.call_interval)));
 		while let Some(_) = stream.next().await {
-			if self.is_bootstrap_state_synced_as(BootstrapState::BootstrapSocketRelay).await {
-				self.bootstrap().await?;
-			} else if self.is_bootstrap_state_synced_as(BootstrapState::NormalStart).await {
-				let latest_block_num = self.get_block_count().await.unwrap();
-				if self.is_block_confirmed(latest_block_num) {
-					let (vault_set, refund_set) = self.fetch_registration_sets().await?;
-					self.process_confirmed_block(
-						latest_block_num.saturating_sub(self.block_confirmations),
-						&vault_set,
-						&refund_set,
-					)
-					.await;
-				}
+			let latest_block_num = self.get_block_count().await.unwrap();
+			if self.is_block_confirmed(latest_block_num) {
+				let (vault_set, refund_set) = self.fetch_registration_sets().await?;
+				self.process_confirmed_block(
+					latest_block_num.saturating_sub(self.block_confirmations),
+					&vault_set,
+					&refund_set,
+				)
+				.await;
 			}
 		}
 		Ok(())
@@ -389,11 +390,7 @@ where
 		*bootstrap_count += 1;
 
 		if *bootstrap_count == self.bootstrap_shared_data.system_providers_len as u8 {
-			let mut bootstrap_guard = self.bootstrap_shared_data.bootstrap_states.write().await;
-
-			for state in bootstrap_guard.iter_mut() {
-				*state = BootstrapState::NormalStart;
-			}
+			*self.bootstrap_shared_data.bootstrap_state.write().await = BootstrapState::NormalStart;
 
 			log::info!(
 				target: "bifrost-relayer",

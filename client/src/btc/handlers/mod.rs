@@ -115,19 +115,9 @@ pub trait BootstrapHandler {
 	/// Fetch the historical events to bootstrap.
 	async fn get_bootstrap_events(&self) -> Result<(EventMessage, EventMessage)>;
 
-	/// Verifies whether the bootstrap state has been synced to the given state.
-	async fn is_bootstrap_state_synced_as(&self, state: BootstrapState) -> bool {
-		self.bootstrap_shared_data()
-			.bootstrap_states
-			.read()
-			.await
-			.iter()
-			.all(|s| *s == state)
-	}
-
 	/// Waits for the bootstrap state to be synced to the normal start state.
-	async fn wait_for_normal_state(&self) -> Result<()> {
-		while !self.is_bootstrap_state_synced_as(BootstrapState::NormalStart).await {
+	async fn wait_for_bootstrap_state(&self, state: BootstrapState) -> Result<()> {
+		while *self.bootstrap_shared_data().bootstrap_state.read().await != state {
 			sleep(Duration::from_millis(100)).await;
 		}
 		Ok(())

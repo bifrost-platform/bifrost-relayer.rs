@@ -73,7 +73,6 @@ where
 	T: Transport + Clone,
 {
 	async fn run(&mut self) -> Result<()> {
-		self.wait_for_bootstrap_state(BootstrapState::BootstrapSocketRelay).await?;
 		self.bootstrap().await?;
 
 		self.wait_for_bootstrap_state(BootstrapState::NormalStart).await?;
@@ -497,6 +496,8 @@ where
 	}
 
 	async fn bootstrap(&self) -> Result<()> {
+		self.wait_for_bootstrap_state(BootstrapState::BootstrapSocketRelay).await?;
+
 		log::info!(
 			target: &self.client.get_chain_name(),
 			"-[{}] ⚙️  [Bootstrap mode] Bootstrapping Socket events.",
@@ -515,11 +516,7 @@ where
 
 		// If All thread complete the task, starts the blockManager
 		if *bootstrap_count == self.bootstrap_shared_data.system_providers_len as u8 {
-			let mut bootstrap_guard = self.bootstrap_shared_data.bootstrap_states.write().await;
-
-			for state in bootstrap_guard.iter_mut() {
-				*state = BootstrapState::NormalStart;
-			}
+			*self.bootstrap_shared_data.bootstrap_state.write().await = BootstrapState::NormalStart;
 
 			log::info!(
 				target: "bifrost-relayer",

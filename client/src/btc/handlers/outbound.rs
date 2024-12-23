@@ -20,7 +20,7 @@ use br_primitives::{
 		socket::{SocketContract::Socket, Socket_Struct::Socket_Message},
 		socket_queue::SocketQueueInstance,
 	},
-	eth::{BuiltRelayTransaction, SocketEventStatus},
+	eth::{BootstrapState, BuiltRelayTransaction, SocketEventStatus},
 	tx::{SocketRelayMetadata, TxRequestMetadata},
 	utils::sub_display_format,
 };
@@ -103,7 +103,7 @@ where
 	T: Transport + Clone,
 {
 	async fn run(&mut self) -> Result<()> {
-		self.wait_for_normal_state().await?;
+		self.wait_for_bootstrap_state(BootstrapState::NormalStart).await?;
 		while let Some(Ok(msg)) = self.event_stream.next().await {
 			if !self.bfc_client.is_selected_relayer().await?
 				|| !self.is_target_event(msg.event_type)

@@ -35,7 +35,7 @@ use br_primitives::{
 		errors::{INVALID_BITCOIN_NETWORK, INVALID_PRIVATE_KEY, INVALID_PROVIDER_URL},
 		tx::DEFAULT_CALL_RETRIES,
 	},
-	eth::{AggregatorContracts, BootstrapState, ProtocolContracts, ProviderMetadata},
+	eth::{AggregatorContracts, ProtocolContracts, ProviderMetadata},
 	substrate::MigrationSequence,
 	utils::sub_display_format,
 };
@@ -162,14 +162,7 @@ pub fn relay(config: Configuration) -> Result<TaskManager, ServiceError> {
 
 	Ok(spawn_relayer_tasks(
 		task_manager,
-		FullDeps {
-			bootstrap_shared_data,
-			manager_deps,
-			periodic_deps,
-			handler_deps,
-			substrate_deps,
-			btc_deps,
-		},
+		FullDeps { manager_deps, periodic_deps, handler_deps, substrate_deps, btc_deps },
 		&config,
 	))
 }
@@ -187,16 +180,8 @@ where
 {
 	let prometheus_config = &config.relayer_config.prometheus_config;
 
-	let FullDeps {
-		bootstrap_shared_data,
-		manager_deps,
-		periodic_deps,
-		handler_deps,
-		substrate_deps,
-		btc_deps,
-	} = deps;
+	let FullDeps { manager_deps, periodic_deps, handler_deps, substrate_deps, btc_deps } = deps;
 
-	let BootstrapSharedData { socket_barrier, bootstrap_states, .. } = bootstrap_shared_data;
 	let ManagerDeps { event_managers, .. } = manager_deps;
 	let PeriodicDeps {
 		mut heartbeat_sender,
@@ -325,9 +310,6 @@ where
 
 	// spawn socket relay handlers
 	socket_relay_handlers.into_iter().for_each(|mut handler| {
-		let socket_barrier_clone = socket_barrier.clone();
-		let is_bootstrapped = bootstrap_states.clone();
-
 		task_manager.spawn_essential_handle().spawn(
 			Box::leak(
 				format!("{}-{}-handler", handler.client.get_chain_name(), HandlerType::Socket,)
@@ -335,17 +317,6 @@ where
 			),
 			Some("handlers"),
 			async move {
-				socket_barrier_clone.wait().await;
-
-				// After All of barrier complete the waiting
-				let mut guard = is_bootstrapped.write().await;
-				if guard.iter().all(|s| *s == BootstrapState::BootstrapRoundUpPhase2) {
-					for state in guard.iter_mut() {
-						*state = BootstrapState::BootstrapSocketRelay;
-					}
-				}
-				drop(guard);
-
 				loop {
 					let report = handler.run().await;
 					let log_msg = format!(
@@ -509,17 +480,6 @@ where
 		"bitcoin-block-manager",
 		Some("block-manager"),
 		async move {
-			socket_barrier.wait().await;
-
-			// After All of barrier complete the waiting
-			let mut guard = bootstrap_states.write().await;
-			if guard.iter().all(|s| *s == BootstrapState::BootstrapRoundUpPhase2) {
-				for state in guard.iter_mut() {
-					*state = BootstrapState::BootstrapSocketRelay;
-				}
-			}
-			drop(guard);
-
 			loop {
 				let report = block_manager.run().await;
 				let log_msg = format!(
