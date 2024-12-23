@@ -9,7 +9,10 @@ use std::{
 use alloy::{
 	network::{AnyNetwork, EthereumWallet},
 	primitives::ChainId,
-	providers::{fillers::TxFiller, Provider, ProviderBuilder, WalletProvider},
+	providers::{
+		fillers::{ChainIdFiller, GasFiller, TxFiller},
+		Provider, ProviderBuilder, WalletProvider,
+	},
 	rpc::client::RpcClient,
 	signers::{local::PrivateKeySigner, Signer},
 	transports::{http::reqwest::Url, Transport},
@@ -75,6 +78,8 @@ pub fn relay(config: Configuration) -> Result<TaskManager, ServiceError> {
 			let provider = Arc::new(
 				ProviderBuilder::new()
 					.with_cached_nonce_management()
+					.filler(GasFiller::default())
+					.filler(ChainIdFiller::new(evm_provider.id.into()))
 					.network::<AnyNetwork>()
 					.wallet(wallet)
 					.on_client(client),
