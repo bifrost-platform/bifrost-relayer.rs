@@ -16,8 +16,6 @@ pub struct BootstrapSharedData {
 	pub roundup_barrier: Arc<Barrier>,
 	/// The current number of finished socket bootstrap processes.
 	pub socket_bootstrap_count: Arc<Mutex<u8>>,
-	/// The current number of finished roundup bootstrap processes.
-	pub roundup_bootstrap_count: Arc<Mutex<u8>>,
 	/// The current shared state of the bootstrap process.
 	pub bootstrap_states: Arc<RwLock<Vec<BootstrapState>>>,
 	/// The bootstrap configurations.
@@ -46,18 +44,14 @@ impl BootstrapSharedData {
 		};
 
 		let socket_barrier = Arc::new(Barrier::new(socket_barrier_len));
-		// For roundup barrier, we need:
-		// 1. One for the roundup handler for each external chain
-		// 2. One for the roundup emitter
+		// For roundup barrier, we need to count all external chains
 		let roundup_barrier = Arc::new(Barrier::new(
 			evm_providers
 				.iter()
 				.filter(|p| !p.is_native.unwrap_or(false)) // Count all external chains
-				.count()
-				.saturating_add(1), // +1 for emitter
+				.count(),
 		));
 		let socket_bootstrap_count = Arc::new(Mutex::new(u8::default()));
-		let roundup_bootstrap_count = Arc::new(Mutex::new(u8::default()));
 		let bootstrap_states = Arc::new(RwLock::new(vec![bootstrap_states; system_providers_len]));
 
 		Self {
@@ -65,7 +59,6 @@ impl BootstrapSharedData {
 			socket_barrier,
 			roundup_barrier,
 			socket_bootstrap_count,
-			roundup_bootstrap_count,
 			bootstrap_states,
 			bootstrap_config: bootstrap_config.clone(),
 		}
@@ -77,7 +70,6 @@ impl BootstrapSharedData {
 			socket_barrier: Arc::new(Barrier::new(0)),
 			roundup_barrier: Arc::new(Barrier::new(0)),
 			socket_bootstrap_count: Arc::new(Default::default()),
-			roundup_bootstrap_count: Arc::new(Default::default()),
 			bootstrap_states: Arc::new(RwLock::new(vec![BootstrapState::NormalStart])),
 			bootstrap_config: None,
 		}

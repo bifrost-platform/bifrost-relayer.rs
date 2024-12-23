@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{sync::Arc, time::Duration};
 
 use alloy::{
 	network::{primitives::ReceiptResponse as _, AnyNetwork},
@@ -16,7 +16,10 @@ use tokio_stream::{wrappers::BroadcastStream, StreamExt};
 
 use br_primitives::{
 	bootstrap::BootstrapSharedData,
-	constants::{cli::DEFAULT_BOOTSTRAP_ROUND_OFFSET, config::BOOTSTRAP_BLOCK_CHUNK_SIZE},
+	constants::{
+		cli::DEFAULT_BOOTSTRAP_ROUND_OFFSET, config::BOOTSTRAP_BLOCK_CHUNK_SIZE,
+		tx::DEFAULT_CALL_RETRY_INTERVAL_MS,
+	},
 	contracts::socket::{
 		SocketContract::RoundUp,
 		SocketInstance,
@@ -67,7 +70,6 @@ where
 	T: Transport + Clone,
 {
 	async fn run(&mut self) -> Result<()> {
-		self.wait_for_bootstrap_state(BootstrapState::BootstrapRoundUpPhase2).await?;
 		self.bootstrap().await?;
 
 		self.wait_for_bootstrap_state(BootstrapState::NormalStart).await?;
@@ -179,10 +181,23 @@ where
 		handle: SpawnTaskHandle,
 		debug_mode: bool,
 	) -> Self {
+		let external_clients = Arc::new(
+			clients
+				.iter()
+				.filter_map(|(id, client)| {
+					if !client.metadata.is_native {
+						Some((*id, client.clone()))
+					} else {
+						None
+					}
+				})
+				.collect::<ClientMap<F, P, T>>(),
+		);
+
 		Self {
 			event_stream: BroadcastStream::new(event_receiver),
 			client,
-			external_clients: clients,
+			external_clients,
 			roundup_signature: RoundUp::SIGNATURE_HASH,
 			bootstrap_shared_data,
 			handle,
@@ -314,23 +329,21 @@ where
 
 	/// Check if external clients are in the latest round.
 	async fn wait_if_latest_round(&self) -> Result<()> {
-		let barrier_clone = self.bootstrap_shared_data.roundup_barrier.clone();
 		let external_clients = &self.external_clients;
 
 		for (_, target_client) in external_clients.iter() {
-			let barrier_clone_inner = barrier_clone.clone();
-			let current_round =
-				self.client.protocol_contracts.authority.latest_round().call().await?._0;
-			let target_chain_round =
-				target_client.protocol_contracts.authority.latest_round().call().await?._0;
-
-			let bootstrap_guard = self.bootstrap_shared_data.roundup_bootstrap_count.clone();
+			let this_roundup_barrier = self.bootstrap_shared_data.roundup_barrier.clone();
+			let bifrost_authority = self.client.protocol_contracts.authority.clone();
+			let target_authority = target_client.protocol_contracts.authority.clone();
 
 			tokio::spawn(async move {
-				if current_round == target_chain_round {
-					*bootstrap_guard.lock().await += 1;
+				while target_authority.latest_round().call().await.unwrap()._0
+					< bifrost_authority.latest_round().call().await.unwrap()._0
+				{
+					tokio::time::sleep(Duration::from_millis(DEFAULT_CALL_RETRY_INTERVAL_MS)).await;
 				}
-				barrier_clone_inner.wait().await;
+
+				this_roundup_barrier.wait().await;
 			});
 		}
 
@@ -350,36 +363,34 @@ where
 	}
 
 	async fn bootstrap(&self) -> Result<()> {
+		self.wait_for_bootstrap_state(BootstrapState::BootstrapRoundUpPhase2).await?;
+
 		log::info!(
 			target: &self.client.get_chain_name(),
 			"-[{}] ⚙️  [Bootstrap mode] Bootstrapping RoundUp events.",
 			sub_display_format(SUB_LOG_TARGET),
 		);
 
-		let mut bootstrap_guard = self.bootstrap_shared_data.bootstrap_states.write().await;
+		// Fetch roundup events
+		let logs = self.get_bootstrap_events().await?;
+		for log in logs {
+			// Process roundup events
+			self.process_confirmed_log(&log, true).await?;
+		}
+
 		// Checking if the current round is the latest round
 		self.wait_if_latest_round().await?;
 
 		// Wait to lock after checking if it is latest round
 		self.bootstrap_shared_data.roundup_barrier.clone().wait().await;
 
-		// if all of chain is the latest round already
-		if *self.bootstrap_shared_data.roundup_bootstrap_count.lock().await
-			== self.external_clients.len() as u8
-		{
-			// set all of state to BootstrapSocket
-			for state in bootstrap_guard.iter_mut() {
-				*state = BootstrapState::BootstrapSocketRelay;
-			}
-		}
-
-		if bootstrap_guard.iter().all(|s| *s == BootstrapState::BootstrapRoundUpPhase2) {
-			drop(bootstrap_guard);
-			let logs = self.get_bootstrap_events().await?;
-			for log in logs {
-				self.process_confirmed_log(&log, true).await?;
-			}
-		}
+		// set all of state to BootstrapSocketRelay
+		self.bootstrap_shared_data
+			.bootstrap_states
+			.write()
+			.await
+			.iter_mut()
+			.for_each(|state| *state = BootstrapState::BootstrapSocketRelay);
 
 		// Poll socket barrier to call wait()
 		let socket_barrier_clone = self.bootstrap_shared_data.socket_barrier.clone();
