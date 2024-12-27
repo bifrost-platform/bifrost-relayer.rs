@@ -202,7 +202,7 @@ where
 		self.wait_for_bootstrap_state(BootstrapState::NormalStart).await?;
 
 		let mut stream = IntervalStream::new(interval(Duration::from_millis(self.call_interval)));
-		while let Some(_) = stream.next().await {
+		while (stream.next().await).is_some() {
 			let latest_block_num = self.get_block_count().await.unwrap();
 			if self.is_block_confirmed(latest_block_num) {
 				let (vault_set, refund_set) = self.fetch_registration_sets().await?;

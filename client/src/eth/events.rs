@@ -118,7 +118,7 @@ where
 			self.client.metadata.call_interval,
 		)));
 
-		while let Some(_) = stream.next().await {
+		while (stream.next().await).is_some() {
 			let latest_block = self.client.get_block_number().await?;
 			while self.is_block_confirmed(latest_block) {
 				self.process_confirmed_block().await?;

@@ -227,7 +227,7 @@ where
 
 		let mut signature_vec = Vec::<PrimitiveSignature>::from(signatures);
 		signature_vec
-			.sort_by_key(|k| recover_message(*k, &encode_roundup_param(round, &new_relayers)));
+			.sort_by_key(|k| recover_message(*k, &encode_roundup_param(round, new_relayers)));
 
 		Ok(Signatures::from(signature_vec))
 	}
@@ -292,23 +292,19 @@ where
 				));
 
 				if is_bootstrap {
-					loop {
-						if let Err(e) = target_client
-							.sync_send_transaction(
-								transaction_request.clone(),
-								SUB_LOG_TARGET.to_string(),
-								metadata.clone(),
-							)
-							.await
-						{
-							if e.to_string().to_lowercase().contains("nonce too low") {
-								target_client.flush_stalled_transactions().await?;
-								continue;
-							} else {
-								eyre::bail!(e);
-							}
+					while let Err(e) = target_client
+						.sync_send_transaction(
+							transaction_request.clone(),
+							SUB_LOG_TARGET.to_string(),
+							metadata.clone(),
+						)
+						.await
+					{
+						if e.to_string().to_lowercase().contains("nonce too low") {
+							target_client.flush_stalled_transactions().await?;
+							continue;
 						} else {
-							break;
+							eyre::bail!(e);
 						}
 					}
 				} else {
