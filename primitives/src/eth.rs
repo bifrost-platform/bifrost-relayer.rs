@@ -374,7 +374,7 @@ pub enum RelayDirection {
 	Outbound,
 }
 
-#[derive(Copy, Clone, Debug, PartialEq)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 /// The state for bootstrapping
 pub enum BootstrapState {
 	/// phase 0. check if the node is in syncing
