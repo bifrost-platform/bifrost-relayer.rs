@@ -66,7 +66,11 @@ where
 	async fn run(&mut self) -> Result<()> {
 		self.current_round = self.get_latest_round().await?;
 
-		self.bootstrap().await?;
+		if *self.bootstrap_shared_data.bootstrap_state.read().await
+			<= BootstrapState::BootstrapRoundUpPhase1
+		{
+			self.bootstrap().await?;
+		}
 
 		loop {
 			self.wait_until_next_time().await;

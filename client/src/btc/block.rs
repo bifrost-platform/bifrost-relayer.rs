@@ -196,8 +196,11 @@ where
 			latest_block
 		);
 
-		self.wait_for_bootstrap_state(BootstrapState::BootstrapSocketRelay).await?;
-		self.bootstrap().await?;
+		if *self.bootstrap_shared_data.bootstrap_state.read().await
+			<= BootstrapState::BootstrapSocketRelay
+		{
+			self.bootstrap().await?;
+		}
 
 		self.wait_for_bootstrap_state(BootstrapState::NormalStart).await?;
 
@@ -375,6 +378,8 @@ where
 	}
 
 	async fn bootstrap(&self) -> Result<()> {
+		self.wait_for_bootstrap_state(BootstrapState::BootstrapSocketRelay).await?;
+
 		log::info!(
 			target: LOG_TARGET,
 			"-[{}] ⚙️  [Bootstrap mode] Bootstrapping Bitcoin events",

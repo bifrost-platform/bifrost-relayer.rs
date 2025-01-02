@@ -70,7 +70,11 @@ where
 	T: Transport + Clone,
 {
 	async fn run(&mut self) -> Result<()> {
-		self.bootstrap().await?;
+		if *self.bootstrap_shared_data.bootstrap_state.read().await
+			<= BootstrapState::BootstrapRoundUpPhase2
+		{
+			self.bootstrap().await?;
+		}
 
 		self.wait_for_bootstrap_state(BootstrapState::NormalStart).await?;
 		while let Some(Ok(msg)) = self.event_stream.next().await {
