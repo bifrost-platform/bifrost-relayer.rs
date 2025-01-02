@@ -52,8 +52,6 @@ where
 	event_stream: BroadcastStream<EventMessage>,
 	/// `EthClient`s to interact with provided networks except bifrost network.
 	external_clients: Arc<ClientMap<F, P, T>>,
-	/// Signature of RoundUp Event.
-	roundup_signature: B256,
 	/// The bootstrap shared data.
 	bootstrap_shared_data: Arc<BootstrapSharedData>,
 	/// The handle to spawn tasks.
@@ -164,7 +162,7 @@ where
 
 	fn is_target_event(&self, topic: Option<&B256>) -> bool {
 		match topic {
-			Some(topic) => topic == &self.roundup_signature,
+			Some(topic) => topic == &RoundUp::SIGNATURE_HASH,
 			None => false,
 		}
 	}
@@ -202,7 +200,6 @@ where
 			event_stream: BroadcastStream::new(event_receiver),
 			client,
 			external_clients,
-			roundup_signature: RoundUp::SIGNATURE_HASH,
 			bootstrap_shared_data,
 			handle,
 			debug_mode,
@@ -414,7 +411,7 @@ where
 
 				let filter = Filter::new()
 					.address(*self.client.protocol_contracts.socket.address())
-					.event_signature(self.roundup_signature)
+					.event_signature(RoundUp::SIGNATURE_HASH)
 					.from_block(from_block)
 					.to_block(chunk_to_block);
 

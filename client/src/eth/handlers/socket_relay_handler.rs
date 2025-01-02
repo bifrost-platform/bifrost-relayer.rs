@@ -57,8 +57,6 @@ where
 	rollback_senders: Arc<BTreeMap<ChainId, Arc<UnboundedSender<Socket_Message>>>>,
 	/// The handle to spawn tasks.
 	handle: SpawnTaskHandle,
-	/// Signature of the `Socket` Event.
-	socket_signature: B256,
 	/// The bootstrap shared data.
 	bootstrap_shared_data: Arc<BootstrapSharedData>,
 	/// Whether to enable debug mode.
@@ -153,7 +151,7 @@ where
 	#[inline]
 	fn is_target_event(&self, topic: Option<&B256>) -> bool {
 		match topic {
-			Some(topic) => topic == &self.socket_signature,
+			Some(topic) => topic == &Socket::SIGNATURE_HASH,
 			None => false,
 		}
 	}
@@ -275,7 +273,6 @@ where
 
 		Self {
 			event_stream: BroadcastStream::new(event_receiver),
-			socket_signature: Socket::SIGNATURE_HASH,
 			client,
 			system_clients,
 			bifrost_client,
@@ -575,13 +572,13 @@ where
 								*self.client.protocol_contracts.socket.address(),
 								*bitcoin_socket.address(),
 							])
-							.event_signature(self.socket_signature)
+							.event_signature(Socket::SIGNATURE_HASH)
 							.from_block(from_block)
 							.to_block(chunk_to_block)
 					} else {
 						Filter::new()
 							.address(*self.client.protocol_contracts.socket.address())
-							.event_signature(self.socket_signature)
+							.event_signature(Socket::SIGNATURE_HASH)
 							.from_block(from_block)
 							.to_block(chunk_to_block)
 					};
