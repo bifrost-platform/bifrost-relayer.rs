@@ -8,13 +8,12 @@ use std::{
 
 use alloy::{
 	network::{AnyNetwork, EthereumWallet},
-	primitives::ChainId,
 	providers::{
 		fillers::{ChainIdFiller, GasFiller, TxFiller},
 		Provider, ProviderBuilder, WalletProvider,
 	},
 	rpc::client::RpcClient,
-	signers::{local::PrivateKeySigner, Signer},
+	signers::{aws::AwsSigner, local::PrivateKeySigner, Signer},
 	transports::{http::reqwest::Url, Transport},
 };
 use futures::FutureExt;
@@ -32,7 +31,10 @@ use br_primitives::{
 	cli::{Configuration, HandlerType},
 	constants::{
 		cli::{DEFAULT_KEYSTORE_PATH, DEFAULT_PROMETHEUS_PORT},
-		errors::{INVALID_BITCOIN_NETWORK, INVALID_PRIVATE_KEY, INVALID_PROVIDER_URL},
+		errors::{
+			INVALID_BITCOIN_NETWORK, INVALID_PRIVATE_KEY, INVALID_PROVIDER_URL,
+			KMS_INITIALIZATION_ERROR,
+		},
 		tx::DEFAULT_CALL_RETRIES,
 	},
 	eth::{AggregatorContracts, ProtocolContracts, ProviderMetadata},
@@ -47,7 +49,7 @@ use crate::{
 };
 
 /// Starts the relayer service.
-pub fn relay(config: Configuration) -> Result<TaskManager, ServiceError> {
+pub async fn relay(config: Configuration) -> Result<TaskManager, ServiceError> {
 	assert_configuration_validity(&config);
 
 	let task_manager = TaskManager::new(config.clone().tokio_handle, None)?;
@@ -56,43 +58,49 @@ pub fn relay(config: Configuration) -> Result<TaskManager, ServiceError> {
 	let btc_provider = &config.relayer_config.btc_provider;
 	let system = &config.relayer_config.system;
 
-	let clients = evm_providers
-		.iter()
-		.map(|evm_provider| {
-			let url: Url = evm_provider.provider.clone().parse().expect(INVALID_PROVIDER_URL);
-			let is_native = evm_provider.is_native.unwrap_or(false);
+	let mut clients = BTreeMap::new();
+	for evm_provider in evm_providers {
+		let url: Url = evm_provider.provider.clone().parse().expect(INVALID_PROVIDER_URL);
+		let is_native = evm_provider.is_native.unwrap_or(false);
 
-			let mut signer =
-				PrivateKeySigner::from_str(&system.private_key).expect(INVALID_PRIVATE_KEY);
-			signer.set_chain_id(Some(evm_provider.id));
-			let wallet = EthereumWallet::from(signer.clone());
+		let metadata = ProviderMetadata::new(
+			evm_provider.clone(),
+			url.clone(),
+			if is_native { Some(btc_provider.id) } else { None },
+			is_native,
+		);
 
-			let client = RpcClient::builder()
-				.layer(RetryBackoffLayer::new(
-					DEFAULT_CALL_RETRIES,
-					evm_provider.call_interval,
-					evm_provider.name.clone(),
-				))
-				.http(url.clone())
-				.with_poll_interval(Duration::from_millis(evm_provider.call_interval));
+		let retry_client = RpcClient::builder()
+			.layer(RetryBackoffLayer::new(
+				DEFAULT_CALL_RETRIES,
+				evm_provider.call_interval,
+				evm_provider.name.clone(),
+			))
+			.http(url.clone())
+			.with_poll_interval(Duration::from_millis(evm_provider.call_interval));
+		let provider_builder = ProviderBuilder::new()
+			.with_cached_nonce_management()
+			.filler(GasFiller)
+			.filler(ChainIdFiller::new(evm_provider.id.into()))
+			.network::<AnyNetwork>();
+
+		let (id, client) = if let Some(key_id) = &config.relayer_config.signer_config.kms_key_id {
+			let config = aws_config::load_defaults(aws_config::BehaviorVersion::latest()).await;
+			let client = aws_sdk_kms::Client::new(&config);
+			let signer = Arc::new(
+				AwsSigner::new(client, key_id.clone(), evm_provider.id.into())
+					.await
+					.expect(KMS_INITIALIZATION_ERROR),
+			);
 			let provider = Arc::new(
-				ProviderBuilder::new()
-					.with_cached_nonce_management()
-					.filler(GasFiller)
-					.filler(ChainIdFiller::new(evm_provider.id.into()))
-					.network::<AnyNetwork>()
-					.wallet(wallet)
-					.on_client(client),
+				provider_builder
+					.wallet(EthereumWallet::from(signer.clone()))
+					.on_client(retry_client),
 			);
 			let client = Arc::new(EthClient::new(
 				provider.clone(),
 				signer.clone(),
-				ProviderMetadata::new(
-					evm_provider.clone(),
-					url.clone(),
-					if is_native { Some(btc_provider.id) } else { None },
-					is_native,
-				),
+				metadata,
 				ProtocolContracts::new(is_native, provider.clone(), evm_provider.clone()),
 				AggregatorContracts::new(
 					provider.clone(),
@@ -105,8 +113,42 @@ pub fn relay(config: Configuration) -> Result<TaskManager, ServiceError> {
 				),
 			));
 			(evm_provider.id, client)
-		})
-		.collect::<BTreeMap<ChainId, _>>();
+		} else {
+			let mut signer = PrivateKeySigner::from_str(
+				&config
+					.relayer_config
+					.signer_config
+					.private_key
+					.clone()
+					.expect(INVALID_PRIVATE_KEY),
+			)
+			.expect(INVALID_PRIVATE_KEY);
+			signer.set_chain_id(Some(evm_provider.id));
+			let signer = Arc::new(signer);
+			let provider = Arc::new(
+				provider_builder
+					.wallet(EthereumWallet::from(signer.clone()))
+					.on_client(retry_client),
+			);
+			let client = Arc::new(EthClient::new(
+				provider.clone(),
+				signer.clone(),
+				metadata,
+				ProtocolContracts::new(is_native, provider.clone(), evm_provider.clone()),
+				AggregatorContracts::new(
+					provider.clone(),
+					evm_provider.chainlink_usdc_usd_address.clone(),
+					evm_provider.chainlink_usdt_usd_address.clone(),
+					evm_provider.chainlink_dai_usd_address.clone(),
+					evm_provider.chainlink_btc_usd_address.clone(),
+					evm_provider.chainlink_wbtc_usd_address.clone(),
+					evm_provider.chainlink_cbbtc_usd_address.clone(),
+				),
+			));
+			(evm_provider.id, client)
+		};
+		clients.insert(id, client);
+	}
 
 	let bootstrap_shared_data = BootstrapSharedData::new(&config);
 

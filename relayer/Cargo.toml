@@ -28,6 +28,8 @@ bitcoincore-rpc = { workspace = true }
 subxt = { workspace = true }
 eyre = { workspace = true }
 sentry = { workspace = true }
+aws-sdk-kms = { workspace = true }
+aws-config = { workspace = true }
 
 # Bifrost Relayer
 br-cli = { path = "../client/cli", default-features = false }
