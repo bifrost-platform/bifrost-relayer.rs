@@ -51,6 +51,8 @@ pub struct RelayerConfig {
 	pub sentry_config: Option<SentryConfig>,
 	/// Prometheus config
 	pub prometheus_config: Option<PrometheusConfig>,
+	/// Signer config (for AWS KMS signer)
+	pub signer_config: Option<SignerConfig>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -208,4 +210,10 @@ pub struct PrometheusConfig {
 	pub is_external: Option<bool>,
 	/// Prometheus exporter TCP Port.
 	pub port: Option<u16>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct SignerConfig {
+	/// AWS KMS key ID
+	pub key_id: String,
 }

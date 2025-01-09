@@ -14,6 +14,7 @@ use alloy::{
 	eips::BlockNumberOrTag,
 	network::{AnyNetwork, AnyRpcTransaction, AnyTypedTransaction, TransactionResponse as _},
 	primitives::{
+		keccak256,
 		utils::{format_units, parse_ether, Unit},
 		Address, ChainId, U64,
 	},
@@ -23,13 +24,11 @@ use alloy::{
 		EthCall, PendingTransactionBuilder, Provider, RootProvider, SendableTx, WalletProvider,
 	},
 	rpc::types::{serde_helpers::WithOtherFields, txpool::TxpoolContent, TransactionRequest},
-	signers::{local::LocalSigner, Signature},
+	signers::{Signature, Signer},
 	transports::{Transport, TransportResult},
 };
 use eyre::{eyre, Result};
-use k256::ecdsa::SigningKey;
 use sc_service::SpawnTaskHandle;
-use sha3::{Digest, Keccak256};
 use std::{
 	cmp::max,
 	collections::{BTreeMap, VecDeque},
@@ -55,7 +54,7 @@ where
 	/// The inner provider.
 	inner: Arc<FillProvider<F, P, T, AnyNetwork>>,
 	/// The signer.
-	pub signer: LocalSigner<SigningKey>,
+	pub signer: Arc<dyn Signer + Send + Sync>,
 	/// The provider metadata.
 	pub metadata: ProviderMetadata,
 	/// The protocol contracts.
@@ -75,7 +74,7 @@ where
 	/// Create a new EthClient
 	pub fn new(
 		inner: Arc<FillProvider<F, P, T, AnyNetwork>>,
-		signer: LocalSigner<SigningKey>,
+		signer: Arc<dyn Signer + Send + Sync>,
 		metadata: ProviderMetadata,
 		protocol_contracts: ProtocolContracts<F, P, T>,
 		aggregator_contracts: AggregatorContracts<F, P, T>,
@@ -146,8 +145,7 @@ where
 
 	/// Signs the given message.
 	pub async fn sign_message(&self, message: &[u8]) -> Result<Signature> {
-		let cred = self.signer.credential();
-		Ok(Signature::from(cred.sign_digest_recoverable(Keccak256::new_with_prefix(message))?))
+		Ok(self.signer.sign_hash(&keccak256(message)).await?)
 	}
 
 	/// Get the bootstrap offset height based on the block time.
