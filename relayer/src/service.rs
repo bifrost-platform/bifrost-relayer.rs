@@ -84,12 +84,11 @@ pub async fn relay(config: Configuration) -> Result<TaskManager, ServiceError> {
 			.filler(ChainIdFiller::new(evm_provider.id.into()))
 			.network::<AnyNetwork>();
 
-		let (id, client) = if let Some(signer_config) = &config.relayer_config.signer_config {
-			let key_id = signer_config.key_id.clone();
+		let (id, client) = if let Some(key_id) = &config.relayer_config.signer_config.kms_key_id {
 			let config = aws_config::load_defaults(aws_config::BehaviorVersion::latest()).await;
 			let client = aws_sdk_kms::Client::new(&config);
 			let signer = Arc::new(
-				AwsSigner::new(client, key_id, evm_provider.id.into())
+				AwsSigner::new(client, key_id.clone(), evm_provider.id.into())
 					.await
 					.expect(KMS_INITIALIZATION_ERROR),
 			);
@@ -115,8 +114,15 @@ pub async fn relay(config: Configuration) -> Result<TaskManager, ServiceError> {
 			));
 			(evm_provider.id, client)
 		} else {
-			let mut signer =
-				PrivateKeySigner::from_str(&system.private_key).expect(INVALID_PRIVATE_KEY);
+			let mut signer = PrivateKeySigner::from_str(
+				&config
+					.relayer_config
+					.signer_config
+					.private_key
+					.clone()
+					.expect(INVALID_PRIVATE_KEY),
+			)
+			.expect(INVALID_PRIVATE_KEY);
 			signer.set_chain_id(Some(evm_provider.id));
 			let signer = Arc::new(signer);
 			let provider = Arc::new(

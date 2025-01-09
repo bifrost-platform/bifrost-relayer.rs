@@ -39,6 +39,8 @@ pub struct Configuration {
 pub struct RelayerConfig {
 	/// System config
 	pub system: SystemConfig,
+	/// Signer config
+	pub signer_config: SignerConfig,
 	/// EVM configs
 	pub evm_providers: Vec<EVMProvider>,
 	/// BTC configs
@@ -51,14 +53,10 @@ pub struct RelayerConfig {
 	pub sentry_config: Option<SentryConfig>,
 	/// Prometheus config
 	pub prometheus_config: Option<PrometheusConfig>,
-	/// Signer config (for AWS KMS signer)
-	pub signer_config: Option<SignerConfig>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct SystemConfig {
-	/// The private key of the relayer.
-	pub private_key: String,
 	/// Path of the keystore. (default: `./keys`)
 	pub keystore_path: Option<String>,
 	/// Password of the keystore. (default: `None`)
@@ -214,6 +212,8 @@ pub struct PrometheusConfig {
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct SignerConfig {
-	/// AWS KMS key ID
-	pub key_id: String,
+	/// AWS KMS key ID. (to use AwsSigner)
+	pub kms_key_id: Option<String>,
+	/// The private key of the relayer. (to use LocalSigner)
+	pub private_key: Option<String>,
 }
