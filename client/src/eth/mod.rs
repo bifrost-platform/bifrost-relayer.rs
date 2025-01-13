@@ -255,22 +255,33 @@ where
 				},
 			}
 
-			let pending = self
+			match self
 				.send_transaction(tx_request.clone())
 				.await?
-				.with_timeout(Some(Duration::from_millis(self.metadata.call_interval * 3)));
-			let tx_hash = *pending.tx_hash();
-			if pending.watch().await.is_err() {
-				let msg = format!(
-					"-[{}] Failed to send flush transaction ({}): {}, retrying...",
-					sub_display_format(SUB_LOG_TARGET),
-					self.get_chain_name(),
-					tx_hash
-				);
-				log::warn!(target: &self.get_chain_name(), "{msg}");
+				.with_timeout(Some(Duration::from_millis(self.metadata.call_interval * 3)))
+				.watch()
+				.await
+			{
+				Ok(tx_hash) => {
+					log::info!(
+						target: &self.get_chain_name(),
+						" 🔖 Transaction confirmed ({} tx:{}): Flush",
+						self.get_chain_name(),
+						tx_hash,
+					);
+				},
+				Err(err) => {
+					let msg = format!(
+						" ❗️ Failed to send transaction ({} address:{}): Flush, Error: {}",
+						self.get_chain_name(),
+						self.address(),
+						err
+					);
+					log::warn!(target: &self.get_chain_name(), "{msg}");
 
-				sentry::capture_message(&msg, sentry::Level::Error);
-				transactions.push_front(tx_request);
+					sentry::capture_message(&msg, sentry::Level::Error);
+					transactions.push_front(tx_request);
+				},
 			}
 		}
 
