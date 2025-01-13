@@ -23,7 +23,7 @@ use alloy::{
 		fillers::{FillProvider, TxFiller},
 		EthCall, PendingTransactionBuilder, Provider, RootProvider, SendableTx, WalletProvider,
 	},
-	rpc::types::{serde_helpers::WithOtherFields, txpool::TxpoolContent, TransactionRequest},
+	rpc::types::{serde_helpers::WithOtherFields, txpool::TxpoolContentFrom, TransactionRequest},
 	signers::{Signature, Signer},
 	transports::{Transport, TransportResult},
 };
@@ -201,8 +201,11 @@ where
 		// possibility of txpool being flushed automatically. wait for 2 blocks.
 		sleep(Duration::from_millis(self.metadata.call_interval * 2)).await;
 
-		let mut content: TxpoolContent<AnyRpcTransaction> = self.txpool_content().await?;
-		let pending = content.remove_from(&self.address()).pending;
+		let content: TxpoolContentFrom<AnyRpcTransaction> =
+			self.txpool_content().await?.remove_from(&self.address());
+		let mut pending = content.pending;
+		pending.extend(content.queued);
+
 		let mut transactions = pending
 			.into_values()
 			.map(|tx| {
