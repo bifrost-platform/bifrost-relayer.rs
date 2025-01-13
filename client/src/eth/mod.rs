@@ -206,6 +206,10 @@ where
 		let mut pending = content.pending;
 		pending.extend(content.queued);
 
+		if pending.is_empty() {
+			return Ok(());
+		}
+
 		let mut transactions = pending
 			.into_values()
 			.map(|tx| {
