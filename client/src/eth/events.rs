@@ -195,15 +195,15 @@ where
 		latest_block.saturating_sub(self.waiting_block) >= self.client.metadata.block_confirmations
 	}
 
-	/// Verifies if the connected provider is in block sync mode.
-	pub async fn wait_provider_sync(&self) -> Result<()> {
+	/// Bootstrap phase 0-1.
+	async fn wait_provider_sync(&self) -> Result<()> {
 		loop {
 			match self.client.syncing().await? {
 				SyncStatus::None => {
 					let mut bootstrap_state =
 						self.bootstrap_shared_data.bootstrap_state.write().await;
 					if *bootstrap_state == BootstrapState::NodeSyncing {
-						*bootstrap_state = BootstrapState::BootstrapRoundUpPhase1;
+						*bootstrap_state = BootstrapState::FlushingStalledTransactions;
 					}
 
 					return Ok(());
@@ -221,6 +221,23 @@ where
 
 			sleep(Duration::from_millis(self.client.metadata.call_interval)).await;
 		}
+	}
+
+	/// Bootstrap phase 0-2.
+	async fn initial_flushing(&self) -> Result<()> {
+		let mut bootstrap_state = self.bootstrap_shared_data.bootstrap_state.write().await;
+		if *bootstrap_state == BootstrapState::FlushingStalledTransactions {
+			self.client.flush_stalled_transactions().await?;
+			*bootstrap_state = BootstrapState::BootstrapRoundUpPhase1;
+		}
+		Ok(())
+	}
+
+	/// Bootstrap phase 0-1, 0-2.
+	pub async fn bootstrap_0(&self) -> Result<()> {
+		self.wait_provider_sync().await?;
+		self.initial_flushing().await?;
+		Ok(())
 	}
 }
 

@@ -422,7 +422,7 @@ where
 			),
 			Some("event-managers"),
 			async move {
-				let _ = event_manager.wait_provider_sync().await;
+				let _ = event_manager.bootstrap_0().await;
 				loop {
 					let report = event_manager.run().await;
 					let log_msg = format!(

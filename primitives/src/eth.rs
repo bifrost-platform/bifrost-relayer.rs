@@ -377,8 +377,10 @@ pub enum RelayDirection {
 #[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 /// The state for bootstrapping
 pub enum BootstrapState {
-	/// phase 0. check if the node is in syncing
+	/// phase 0-1. check if the node is in syncing
 	NodeSyncing,
+	/// phase 0-2. check if stalled transactions are flushed
+	FlushingStalledTransactions,
 	/// phase 1-1. emit all pushed RoundUp event
 	BootstrapRoundUpPhase1,
 	/// phase 1-2. bootstrap for RoundUp event
