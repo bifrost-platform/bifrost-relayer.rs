@@ -10,9 +10,9 @@ use br_primitives::{
 };
 
 use alloy::{
-	consensus::Transaction,
+	consensus::TxType,
 	eips::BlockNumberOrTag,
-	network::{AnyNetwork, AnyRpcTransaction, AnyTypedTransaction, TransactionResponse as _},
+	network::{AnyNetwork, AnyRpcTransaction, AnyTypedTransaction},
 	primitives::{
 		keccak256,
 		utils::{format_units, parse_ether, Unit},
@@ -27,6 +27,7 @@ use alloy::{
 	signers::{Signature, Signer},
 	transports::{Transport, TransportResult},
 };
+use br_primitives::utils::sub_display_format;
 use eyre::{eyre, Result};
 use sc_service::SpawnTaskHandle;
 use std::{
@@ -43,6 +44,8 @@ pub mod handlers;
 pub mod traits;
 
 pub type ClientMap<F, P, T> = BTreeMap<ChainId, Arc<EthClient<F, P, T>>>;
+
+const SUB_LOG_TARGET: &str = "eth-client";
 
 #[derive(Clone)]
 pub struct EthClient<F, P, T>
@@ -188,6 +191,8 @@ where
 	pub async fn flush_stalled_transactions(&self) -> Result<()> {
 		let _lock = self.martial_law.lock().await;
 
+		log::info!(target: &self.get_chain_name(), "-[{}] Flushing stalled transactions", sub_display_format(SUB_LOG_TARGET));
+
 		// if the chain is native or txpool is not enabled, do nothing
 		if self.metadata.is_native || self.txpool_status().await.is_err() {
 			return Ok(());
@@ -198,48 +203,75 @@ where
 
 		let mut content: TxpoolContent<AnyRpcTransaction> = self.txpool_content().await?;
 		let pending = content.remove_from(&self.address()).pending;
-		let mut transactions = pending.into_values().collect::<VecDeque<_>>();
-		transactions.make_contiguous().sort_by_key(|a| a.nonce());
+		let mut transactions = pending
+			.into_values()
+			.map(|tx| {
+				WithOtherFields::<TransactionRequest>::from(AnyTypedTransaction::from(
+					tx.inner.inner,
+				))
+			})
+			.collect::<VecDeque<WithOtherFields<TransactionRequest>>>();
+		transactions.make_contiguous().sort_by_key(|a| a.nonce.unwrap());
 
-		while let Some(tx) = transactions.pop_front() {
-			if self.get_transaction_receipt(tx.tx_hash()).await?.is_some() {
-				continue;
+		// if the nonce of the first transaction is not equal to the current nonce, update the nonce
+		let mut count = self.get_transaction_count(self.address()).await?;
+		if transactions.front().unwrap().nonce.unwrap() != count {
+			for tx in transactions.iter_mut() {
+				tx.nonce = Some(count);
+				count += 1;
 			}
+		}
 
-			let mut tx_request = WithOtherFields::<TransactionRequest>::from(
-				AnyTypedTransaction::from(tx.inner.inner.clone()),
-			);
-
+		while let Some(mut tx_request) = transactions.pop_front() {
 			// RBF
-			if tx.is_legacy_gas() {
-				let new_gas_price = ((tx_request.gas_price.unwrap() as f64) * 1.1).ceil() as u128;
-				let current_gas_price = self.get_gas_price().await?;
+			match tx_request.preferred_type() {
+				TxType::Legacy => {
+					let new_gas_price =
+						((tx_request.gas_price.unwrap() as f64) * 1.1).ceil() as u128;
+					let current_gas_price = self.get_gas_price().await?;
 
-				tx_request.gas_price = Some(max(new_gas_price, current_gas_price));
-			} else {
-				let current_gas_price = self.estimate_eip1559_fees(None).await?;
+					tx_request.gas_price = Some(max(new_gas_price, current_gas_price));
+				},
+				TxType::Eip1559 => {
+					let current_gas_price = self.estimate_eip1559_fees(None).await?;
 
-				let new_max_fee_per_gas =
-					(tx_request.max_fee_per_gas.unwrap() as f64 * 1.1).ceil() as u128;
-				let new_max_priority_fee_per_gas =
-					(tx_request.max_priority_fee_per_gas.unwrap() as f64 * 1.1).ceil() as u128;
+					let new_max_fee_per_gas =
+						(tx_request.max_fee_per_gas.unwrap() as f64 * 1.1).ceil() as u128;
+					let new_max_priority_fee_per_gas =
+						(tx_request.max_priority_fee_per_gas.unwrap() as f64 * 1.1).ceil() as u128;
 
-				tx_request.max_fee_per_gas =
-					Some(max(new_max_fee_per_gas, current_gas_price.max_fee_per_gas));
-				tx_request.max_priority_fee_per_gas = Some(max(
-					new_max_priority_fee_per_gas,
-					current_gas_price.max_priority_fee_per_gas,
-				));
+					tx_request.max_fee_per_gas =
+						Some(max(new_max_fee_per_gas, current_gas_price.max_fee_per_gas));
+					tx_request.max_priority_fee_per_gas = Some(max(
+						new_max_priority_fee_per_gas,
+						current_gas_price.max_priority_fee_per_gas,
+					));
+				},
+				_ => {
+					eyre::bail!("Unsupported transaction type: {}", tx_request.preferred_type());
+				},
 			}
 
 			let pending = self
-				.send_transaction(tx_request)
+				.send_transaction(tx_request.clone())
 				.await?
 				.with_timeout(Some(Duration::from_millis(self.metadata.call_interval * 3)));
+			let tx_hash = *pending.tx_hash();
 			if pending.watch().await.is_err() {
-				transactions.push_front(tx);
+				let msg = format!(
+					"-[{}] Failed to send flush transaction ({}): {}, retrying...",
+					sub_display_format(SUB_LOG_TARGET),
+					self.get_chain_name(),
+					tx_hash
+				);
+				log::warn!(target: &self.get_chain_name(), "{msg}");
+
+				sentry::capture_message(&msg, sentry::Level::Error);
+				transactions.push_front(tx_request);
 			}
 		}
+
+		log::info!(target: &self.get_chain_name(), "-[{}] Flushing stalled transactions completed", sub_display_format(SUB_LOG_TARGET));
 
 		Ok(())
 	}
