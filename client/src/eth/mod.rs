@@ -464,7 +464,7 @@ where
 			let pending = self
 				.send_transaction(tx_request)
 				.await?
-				.with_timeout(Some(Duration::from_millis(self.metadata.call_interval)));
+				.with_timeout(Some(Duration::from_millis(self.metadata.call_interval * 3)));
 			if pending.watch().await.is_err() {
 				transactions.push_front(tx);
 			}
