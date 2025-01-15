@@ -88,10 +88,11 @@ pub async fn relay(config: Configuration) -> Result<TaskManager, ServiceError> {
 			.network::<AnyNetwork>();
 
 		let (id, client) = if let Some(key_id) = &config.relayer_config.signer_config.kms_key_id {
-			let config = aws_config::load_defaults(aws_config::BehaviorVersion::latest()).await;
-			let client = aws_sdk_kms::Client::new(&config);
+			let aws_client = aws_sdk_kms::Client::new(
+				&aws_config::load_defaults(aws_config::BehaviorVersion::latest()).await,
+			);
 			let signer = Arc::new(
-				AwsSigner::new(client, key_id.clone(), evm_provider.id.into())
+				AwsSigner::new(aws_client, key_id.clone(), evm_provider.id.into())
 					.await
 					.expect(KMS_INITIALIZATION_ERROR),
 			);
@@ -155,7 +156,7 @@ pub async fn relay(config: Configuration) -> Result<TaskManager, ServiceError> {
 
 	let bootstrap_shared_data = BootstrapSharedData::new(&config);
 
-	let base_path = config
+	let keystore_path = config
 		.clone()
 		.relayer_config
 		.keystore_config
@@ -165,18 +166,18 @@ pub async fn relay(config: Configuration) -> Result<TaskManager, ServiceError> {
 		.expect(INVALID_BITCOIN_NETWORK);
 	let keypair_storage = {
 		let storage = if let Some(key_id) = &config.relayer_config.signer_config.kms_key_id {
-			let client = Arc::new(aws_sdk_kms::Client::new(
+			let aws_client = Arc::new(aws_sdk_kms::Client::new(
 				&aws_config::load_defaults(aws_config::BehaviorVersion::latest()).await,
 			));
 			KeypairStorage::new(KeypairStorageKind::new_kms(
-				base_path.clone(),
+				keystore_path.clone(),
 				network,
 				key_id.clone(),
-				client,
+				aws_client,
 			))
 		} else {
 			KeypairStorage::new(KeypairStorageKind::new_password(
-				base_path,
+				keystore_path,
 				network,
 				config.relayer_config.keystore_config.password.clone(),
 			))
