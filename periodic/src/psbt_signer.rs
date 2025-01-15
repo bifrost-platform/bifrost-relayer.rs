@@ -6,7 +6,10 @@ use alloy::{
 	transports::Transport,
 };
 use br_client::{
-	btc::{handlers::XtRequester, storage::keypair::KeypairStorage},
+	btc::{
+		handlers::XtRequester,
+		storage::keypair::{KeypairStorage, KeypairAccessor},
+	},
 	eth::EthClient,
 };
 use br_primitives::{
@@ -27,18 +30,19 @@ use tokio_stream::StreamExt;
 const SUB_LOG_TARGET: &str = "psbt-signer";
 
 /// The essential task that submits signed PSBT's.
-pub struct PsbtSigner<F, P, T>
+pub struct PsbtSigner<F, P, T, K>
 where
 	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
 	P: Provider<T, AnyNetwork>,
 	T: Transport + Clone,
+	K: KeypairAccessor + Send + Sync + 'static,
 {
 	/// The Bifrost client.
 	pub client: Arc<EthClient<F, P, T>>,
 	/// The unsigned transaction message sender.
 	xt_request_sender: Arc<XtRequestSender>,
 	/// The public and private keypair local storage.
-	keypair_storage: Arc<RwLock<KeypairStorage>>,
+	keypair_storage: Arc<RwLock<KeypairStorage<K>>>,
 	/// The migration sequence.
 	migration_sequence: Arc<RwLock<MigrationSequence>>,
 	/// The Bitcoin network.
@@ -47,17 +51,18 @@ where
 	schedule: Schedule,
 }
 
-impl<F, P, T> PsbtSigner<F, P, T>
+impl<F, P, T, K> PsbtSigner<F, P, T, K>
 where
 	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
 	P: Provider<T, AnyNetwork>,
 	T: Transport + Clone,
+	K: KeypairAccessor + Send + Sync + 'static,
 {
 	/// Instantiates a new `PsbtSigner` instance.
 	pub fn new(
 		client: Arc<EthClient<F, P, T>>,
 		xt_request_sender: Arc<XtRequestSender>,
-		keypair_storage: Arc<RwLock<KeypairStorage>>,
+		keypair_storage: Arc<RwLock<KeypairStorage<K>>>,
 		migration_sequence: Arc<RwLock<MigrationSequence>>,
 		btc_network: Network,
 	) -> Self {
@@ -119,7 +124,7 @@ where
 		};
 
 		let mut psbt = unsigned_psbt.clone();
-		if self.keypair_storage.read().await.sign_psbt(&mut psbt) {
+		if self.keypair_storage.read().await.inner.sign_psbt(&mut psbt).await {
 			let signed_psbt = psbt.serialize();
 
 			if self
@@ -200,11 +205,12 @@ where
 }
 
 #[async_trait::async_trait]
-impl<F, P, T> XtRequester<F, P, T> for PsbtSigner<F, P, T>
+impl<F, P, T, K> XtRequester<F, P, T> for PsbtSigner<F, P, T, K>
 where
 	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
 	P: Provider<T, AnyNetwork>,
 	T: Transport + Clone,
+	K: KeypairAccessor + Send + Sync + 'static,
 {
 	fn xt_request_sender(&self) -> Arc<XtRequestSender> {
 		self.xt_request_sender.clone()
@@ -216,11 +222,12 @@ where
 }
 
 #[async_trait::async_trait]
-impl<F, P, T> PeriodicWorker for PsbtSigner<F, P, T>
+impl<F, P, T, K> PeriodicWorker for PsbtSigner<F, P, T, K>
 where
 	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
 	P: Provider<T, AnyNetwork>,
 	T: Transport + Clone,
+	K: KeypairAccessor + Send + Sync + 'static,
 {
 	fn schedule(&self) -> Schedule {
 		self.schedule.clone()

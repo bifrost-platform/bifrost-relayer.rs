@@ -23,12 +23,12 @@ use br_client::{
 	btc::{
 		block::BlockManager,
 		handlers::{InboundHandler, OutboundHandler},
-		storage::keypair::KeypairStorage,
+		storage::keypair::{KeypairStorage, KeypairAccessor},
 	},
 	eth::{
 		events::EventManager,
 		handlers::{RoundupRelayHandler, SocketRelayHandler},
-		EthClient,
+		ClientMap, EthClient,
 	},
 	substrate::tx::UnsignedTransactionManager,
 };

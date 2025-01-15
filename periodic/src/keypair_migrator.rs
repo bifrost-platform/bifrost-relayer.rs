@@ -5,7 +5,10 @@ use alloy::{
 	providers::{fillers::TxFiller, Provider, WalletProvider},
 	transports::Transport,
 };
-use br_client::{btc::storage::keypair::KeypairStorage, eth::EthClient};
+use br_client::{
+	btc::storage::keypair::{KeypairAccessor, KeypairStorage},
+	eth::EthClient,
+};
 use br_primitives::{
 	constants::{
 		errors::INVALID_PROVIDER_URL, schedule::MIGRATION_DETECTOR_SCHEDULE,
@@ -24,30 +27,32 @@ use std::{str::FromStr, sync::Arc, time::Duration};
 use subxt::OnlineClient;
 use tokio::sync::RwLock;
 
-pub struct KeypairMigrator<F, P, T>
+pub struct KeypairMigrator<F, P, T, K>
 where
 	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
 	P: Provider<T, AnyNetwork>,
 	T: Transport + Clone,
+	K: KeypairAccessor + Send + Sync,
 {
 	sub_client: Option<OnlineClient<CustomConfig>>,
 	bfc_client: Arc<EthClient<F, P, T>>,
 	migration_sequence: Arc<RwLock<MigrationSequence>>,
-	keypair_storage: Arc<RwLock<KeypairStorage>>,
+	keypair_storage: Arc<RwLock<KeypairStorage<K>>>,
 	schedule: Schedule,
 }
 
-impl<F, P, T> KeypairMigrator<F, P, T>
+impl<F, P, T, K> KeypairMigrator<F, P, T, K>
 where
 	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
 	P: Provider<T, AnyNetwork>,
 	T: Transport + Clone,
+	K: KeypairAccessor + Send + Sync,
 {
 	/// Instantiates a new `KeypairMigrator` instance.
 	pub fn new(
 		bfc_client: Arc<EthClient<F, P, T>>,
 		migration_sequence: Arc<RwLock<MigrationSequence>>,
-		keypair_storage: Arc<RwLock<KeypairStorage>>,
+		keypair_storage: Arc<RwLock<KeypairStorage<K>>>,
 	) -> Self {
 		Self {
 			sub_client: None,
@@ -76,12 +81,18 @@ where
 			ServiceState::Normal
 			| MigrationSequence::SetExecutiveMembers
 			| ServiceState::UTXOTransfer => {
-				self.keypair_storage.write().await.load(self.get_current_round().await).await;
+				self.keypair_storage
+					.write()
+					.await
+					.inner
+					.load(self.get_current_round().await)
+					.await;
 			},
 			ServiceState::PrepareNextSystemVault => {
 				self.keypair_storage
 					.write()
 					.await
+					.inner
 					.load(self.get_current_round().await + 1)
 					.await;
 			},
@@ -150,11 +161,12 @@ where
 }
 
 #[async_trait::async_trait]
-impl<F, P, T> PeriodicWorker for KeypairMigrator<F, P, T>
+impl<F, P, T, K> PeriodicWorker for KeypairMigrator<F, P, T, K>
 where
 	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
 	P: Provider<T, AnyNetwork>,
 	T: Transport + Clone,
+	K: KeypairAccessor + Send + Sync,
 {
 	fn schedule(&self) -> Schedule {
 		self.schedule.clone()
@@ -175,6 +187,7 @@ where
 							self.keypair_storage
 								.write()
 								.await
+								.inner
 								.load(self.get_current_round().await + 1)
 								.await;
 						}
@@ -184,6 +197,7 @@ where
 							self.keypair_storage
 								.write()
 								.await
+								.inner
 								.load(self.get_current_round().await)
 								.await;
 						}
@@ -193,6 +207,7 @@ where
 							self.keypair_storage
 								.write()
 								.await
+								.inner
 								.load(self.get_current_round().await)
 								.await;
 						}

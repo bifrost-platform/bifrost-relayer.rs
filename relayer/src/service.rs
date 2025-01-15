@@ -22,7 +22,10 @@ use sc_service::{config::PrometheusConfig, Error as ServiceError, TaskManager};
 use tokio::sync::RwLock;
 
 use br_client::{
-	btc::{handlers::Handler as _, storage::keypair::KeypairStorage},
+	btc::{
+		handlers::Handler as _,
+		storage::keypair::{KeypairAccessor, KeypairStorage, KeypairStorageKind},
+	},
 	eth::{retry::RetryBackoffLayer, traits::Handler as _, EthClient},
 };
 use br_periodic::traits::PeriodicWorker;
@@ -152,23 +155,42 @@ pub async fn relay(config: Configuration) -> Result<TaskManager, ServiceError> {
 
 	let bootstrap_shared_data = BootstrapSharedData::new(&config);
 
-	let keypair_storage = Arc::new(RwLock::new(KeypairStorage::new(
-		config
-			.clone()
-			.relayer_config
-			.system
-			.keystore_path
-			.unwrap_or(DEFAULT_KEYSTORE_PATH.to_string()),
-		config.relayer_config.system.keystore_password.clone(),
-		Network::from_core_arg(&config.relayer_config.btc_provider.chain)
-			.expect(INVALID_BITCOIN_NETWORK),
-	)));
+	let base_path = config
+		.clone()
+		.relayer_config
+		.keystore_config
+		.path
+		.unwrap_or(DEFAULT_KEYSTORE_PATH.to_string());
+	let network = Network::from_core_arg(&config.relayer_config.btc_provider.chain)
+		.expect(INVALID_BITCOIN_NETWORK);
+	let keypair_storage = {
+		let storage = if let Some(key_id) = &config.relayer_config.signer_config.kms_key_id {
+			let client = Arc::new(aws_sdk_kms::Client::new(
+				&aws_config::load_defaults(aws_config::BehaviorVersion::latest()).await,
+			));
+			KeypairStorage::new(KeypairStorageKind::new_kms(
+				base_path.clone(),
+				network,
+				key_id.clone(),
+				client,
+			))
+		} else {
+			KeypairStorage::new(KeypairStorageKind::new_password(
+				base_path,
+				network,
+				config.relayer_config.keystore_config.password.clone(),
+			))
+		};
+		Arc::new(RwLock::new(storage))
+	};
 
 	let migration_sequence = Arc::new(RwLock::new(MigrationSequence::Normal));
 
 	let manager_deps = ManagerDeps::new(&config, Arc::new(clients), bootstrap_shared_data.clone());
 	let bfc_client = manager_deps.bifrost_client.clone();
 
+	let debug_mode =
+		if let Some(system) = system { system.debug_mode.unwrap_or(false) } else { false };
 	let substrate_deps = SubstrateDeps::new(bfc_client.clone(), &task_manager);
 	let periodic_deps = PeriodicDeps::new(
 		bootstrap_shared_data.clone(),
@@ -178,7 +200,7 @@ pub async fn relay(config: Configuration) -> Result<TaskManager, ServiceError> {
 		manager_deps.clients.clone(),
 		bfc_client.clone(),
 		&task_manager,
-		system.debug_mode.unwrap_or(false),
+		debug_mode,
 	);
 	let handler_deps = HandlerDeps::new(
 		&config,
@@ -187,7 +209,7 @@ pub async fn relay(config: Configuration) -> Result<TaskManager, ServiceError> {
 		bfc_client.clone(),
 		periodic_deps.rollback_senders.clone(),
 		&task_manager,
-		system.debug_mode.unwrap_or(false),
+		debug_mode,
 	);
 	let btc_deps = BtcDeps::new(
 		&config,
@@ -197,7 +219,7 @@ pub async fn relay(config: Configuration) -> Result<TaskManager, ServiceError> {
 		migration_sequence.clone(),
 		bfc_client.clone(),
 		&task_manager,
-		system.debug_mode.unwrap_or(false),
+		debug_mode,
 	);
 
 	print_relay_targets(&manager_deps);
@@ -210,15 +232,16 @@ pub async fn relay(config: Configuration) -> Result<TaskManager, ServiceError> {
 }
 
 /// Spawn relayer service tasks by the `TaskManager`.
-fn spawn_relayer_tasks<F, P, T>(
+fn spawn_relayer_tasks<F, P, T, K>(
 	task_manager: TaskManager,
-	deps: FullDeps<F, P, T>,
+	deps: FullDeps<F, P, T, K>,
 	config: &Configuration,
 ) -> TaskManager
 where
 	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork> + 'static,
 	P: Provider<T, AnyNetwork> + 'static,
 	T: Transport + Clone,
+	K: KeypairAccessor + 'static,
 {
 	let prometheus_config = &config.relayer_config.prometheus_config;
 

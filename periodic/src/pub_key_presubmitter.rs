@@ -5,7 +5,10 @@ use alloy::{
 	transports::Transport,
 };
 use bitcoincore_rpc::bitcoin::PublicKey;
-use br_client::{btc::storage::keypair::KeypairStorage, eth::EthClient};
+use br_client::{
+	btc::storage::keypair::{KeypairStorage, KeypairAccessor},
+	eth::EthClient,
+};
 use br_primitives::{
 	constants::{
 		errors::INVALID_PROVIDER_URL, schedule::PRESUBMISSION_SCHEDULE,
@@ -31,11 +34,12 @@ use tokio::sync::RwLock;
 
 const SUB_LOG_TARGET: &str = "pubkey-presubmitter";
 
-pub struct PubKeyPreSubmitter<F, P, T>
+pub struct PubKeyPreSubmitter<F, P, T, K>
 where
 	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
 	P: Provider<T, AnyNetwork>,
 	T: Transport + Clone,
+	K: KeypairAccessor + Send + Sync + 'static,
 {
 	pub bfc_client: Arc<EthClient<F, P, T>>,
 	/// The Bifrost client.
@@ -43,7 +47,7 @@ where
 	/// The unsigned transaction message sender.
 	xt_request_sender: Arc<XtRequestSender>,
 	/// The public and private keypair local storage.
-	keypair_storage: Arc<RwLock<KeypairStorage>>,
+	keypair_storage: Arc<RwLock<KeypairStorage<K>>>,
 	/// The migration sequence.
 	migration_sequence: Arc<RwLock<MigrationSequence>>,
 	/// The time schedule that represents when check pending registrations.
@@ -51,11 +55,12 @@ where
 }
 
 #[async_trait::async_trait]
-impl<F, P, T> PeriodicWorker for PubKeyPreSubmitter<F, P, T>
+impl<F, P, T, K> PeriodicWorker for PubKeyPreSubmitter<F, P, T, K>
 where
 	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
 	P: Provider<T, AnyNetwork>,
 	T: Transport + Clone,
+	K: KeypairAccessor + Send + Sync + 'static,
 {
 	fn schedule(&self) -> Schedule {
 		self.schedule.clone()
@@ -90,17 +95,18 @@ where
 	}
 }
 
-impl<F, P, T> PubKeyPreSubmitter<F, P, T>
+impl<F, P, T, K> PubKeyPreSubmitter<F, P, T, K>
 where
 	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
 	P: Provider<T, AnyNetwork>,
 	T: Transport + Clone,
+	K: KeypairAccessor + Send + Sync + 'static,
 {
 	/// Instantiates a new `PubKeyPreSubmitter` instance.
 	pub fn new(
 		bfc_client: Arc<EthClient<F, P, T>>,
 		xt_request_sender: Arc<XtRequestSender>,
-		keypair_storage: Arc<RwLock<KeypairStorage>>,
+		keypair_storage: Arc<RwLock<KeypairStorage<K>>>,
 		migration_sequence: Arc<RwLock<MigrationSequence>>,
 	) -> Self {
 		Self {
@@ -218,7 +224,7 @@ where
 		let mut res = Vec::new();
 		let mut keypair_storage = self.keypair_storage.write().await;
 		for _ in 0..amount {
-			let key = keypair_storage.create_new_keypair().await;
+			let key = keypair_storage.inner.create_new_keypair().await;
 			res.push(key);
 		}
 		res

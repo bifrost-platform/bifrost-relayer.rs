@@ -38,9 +38,11 @@ pub struct Configuration {
 #[derive(Debug, Clone, Deserialize)]
 pub struct RelayerConfig {
 	/// System config
-	pub system: SystemConfig,
+	pub system: Option<SystemConfig>,
 	/// Signer config
 	pub signer_config: SignerConfig,
+	/// Keystore config
+	pub keystore_config: KeystoreConfig,
 	/// EVM configs
 	pub evm_providers: Vec<EVMProvider>,
 	/// BTC configs
@@ -57,10 +59,6 @@ pub struct RelayerConfig {
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct SystemConfig {
-	/// Path of the keystore. (default: `./keys`)
-	pub keystore_path: Option<String>,
-	/// Password of the keystore. (default: `None`)
-	pub keystore_password: Option<SecretString>,
 	/// Debug mode enabled if set to `true`.
 	pub debug_mode: Option<bool>,
 }
@@ -216,4 +214,14 @@ pub struct SignerConfig {
 	pub kms_key_id: Option<String>,
 	/// The private key of the relayer. (to use LocalSigner)
 	pub private_key: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct KeystoreConfig {
+	/// Path of the keystore. (default: `./keys`)
+	pub path: Option<String>,
+	/// Password of the keystore. (default: `None`)
+	pub password: Option<SecretString>,
+	/// AWS KMS key ID. (to use keystore encryption/decryption)
+	pub kms_key_id: Option<String>,
 }
