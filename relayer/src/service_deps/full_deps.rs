@@ -6,7 +6,7 @@ where
 	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork> + 'static,
 	P: Provider<T, AnyNetwork> + 'static,
 	T: Transport + Clone,
-	K: KeypairAccessor + 'static,
+	K: KeypairManager + 'static,
 {
 	pub manager_deps: ManagerDeps<F, P, T>,
 	pub periodic_deps: PeriodicDeps<F, P, T, K>,

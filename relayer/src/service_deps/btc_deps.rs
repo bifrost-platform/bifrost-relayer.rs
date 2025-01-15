@@ -5,7 +5,7 @@ where
 	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
 	P: Provider<T, AnyNetwork>,
 	T: Transport + Clone,
-	K: KeypairAccessor + 'static,
+	K: KeypairManager + 'static,
 {
 	/// The Bitcoin outbound handler.
 	pub outbound: OutboundHandler<F, P, T>,
@@ -26,7 +26,7 @@ where
 	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
 	P: Provider<T, AnyNetwork>,
 	T: Transport + Clone,
-	K: KeypairAccessor + 'static,
+	K: KeypairManager + 'static,
 {
 	pub fn new(
 		config: &Configuration,

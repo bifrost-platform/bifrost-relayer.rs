@@ -8,7 +8,7 @@ use alloy::{
 use br_client::{
 	btc::{
 		handlers::XtRequester,
-		storage::keypair::{KeypairStorage, KeypairAccessor},
+		storage::keypair::{KeypairManager, KeypairStorage},
 	},
 	eth::EthClient,
 };
@@ -35,7 +35,7 @@ where
 	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
 	P: Provider<T, AnyNetwork>,
 	T: Transport + Clone,
-	K: KeypairAccessor + Send + Sync + 'static,
+	K: KeypairManager + Send + Sync + 'static,
 {
 	/// The Bifrost client.
 	pub client: Arc<EthClient<F, P, T>>,
@@ -56,7 +56,7 @@ where
 	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
 	P: Provider<T, AnyNetwork>,
 	T: Transport + Clone,
-	K: KeypairAccessor + Send + Sync + 'static,
+	K: KeypairManager + Send + Sync + 'static,
 {
 	/// Instantiates a new `PsbtSigner` instance.
 	pub fn new(
@@ -124,7 +124,7 @@ where
 		};
 
 		let mut psbt = unsigned_psbt.clone();
-		if self.keypair_storage.read().await.inner.sign_psbt(&mut psbt).await {
+		if self.keypair_storage.read().await.0.sign_psbt(&mut psbt).await {
 			let signed_psbt = psbt.serialize();
 
 			if self
@@ -210,7 +210,7 @@ where
 	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
 	P: Provider<T, AnyNetwork>,
 	T: Transport + Clone,
-	K: KeypairAccessor + Send + Sync + 'static,
+	K: KeypairManager + Send + Sync + 'static,
 {
 	fn xt_request_sender(&self) -> Arc<XtRequestSender> {
 		self.xt_request_sender.clone()
@@ -227,7 +227,7 @@ where
 	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
 	P: Provider<T, AnyNetwork>,
 	T: Transport + Clone,
-	K: KeypairAccessor + Send + Sync + 'static,
+	K: KeypairManager + Send + Sync + 'static,
 {
 	fn schedule(&self) -> Schedule {
 		self.schedule.clone()

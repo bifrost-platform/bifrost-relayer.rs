@@ -24,7 +24,7 @@ use tokio::sync::RwLock;
 use br_client::{
 	btc::{
 		handlers::Handler as _,
-		storage::keypair::{KeypairAccessor, KeypairStorage, KeypairStorageKind},
+		storage::keypair::{KeypairManager, KeypairStorage, KeypairStorageKind},
 	},
 	eth::{retry::RetryBackoffLayer, traits::Handler as _, EthClient},
 };
@@ -241,7 +241,7 @@ where
 	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork> + 'static,
 	P: Provider<T, AnyNetwork> + 'static,
 	T: Transport + Clone,
-	K: KeypairAccessor + 'static,
+	K: KeypairManager + 'static,
 {
 	let prometheus_config = &config.relayer_config.prometheus_config;
 

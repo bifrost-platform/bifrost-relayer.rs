@@ -5,7 +5,7 @@ where
 	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
 	P: Provider<T, AnyNetwork>,
 	T: Transport + Clone,
-	K: KeypairAccessor + 'static,
+	K: KeypairManager + 'static,
 {
 	/// The `HeartbeatSender` used for system health checks.
 	pub heartbeat_sender: HeartbeatSender<F, P, T>,
@@ -28,7 +28,7 @@ where
 	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork> + 'static,
 	P: Provider<T, AnyNetwork> + 'static,
 	T: Transport + Clone,
-	K: KeypairAccessor + 'static,
+	K: KeypairManager + 'static,
 {
 	pub fn new(
 		bootstrap_shared_data: BootstrapSharedData,

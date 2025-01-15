@@ -6,7 +6,7 @@ use alloy::{
 	transports::Transport,
 };
 use br_client::{
-	btc::storage::keypair::{KeypairAccessor, KeypairStorage},
+	btc::storage::keypair::{KeypairManager, KeypairStorage},
 	eth::EthClient,
 };
 use br_primitives::{
@@ -32,7 +32,7 @@ where
 	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
 	P: Provider<T, AnyNetwork>,
 	T: Transport + Clone,
-	K: KeypairAccessor + Send + Sync,
+	K: KeypairManager + Send + Sync,
 {
 	sub_client: Option<OnlineClient<CustomConfig>>,
 	bfc_client: Arc<EthClient<F, P, T>>,
@@ -46,7 +46,7 @@ where
 	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
 	P: Provider<T, AnyNetwork>,
 	T: Transport + Clone,
-	K: KeypairAccessor + Send + Sync,
+	K: KeypairManager + Send + Sync,
 {
 	/// Instantiates a new `KeypairMigrator` instance.
 	pub fn new(
@@ -81,18 +81,13 @@ where
 			ServiceState::Normal
 			| MigrationSequence::SetExecutiveMembers
 			| ServiceState::UTXOTransfer => {
-				self.keypair_storage
-					.write()
-					.await
-					.inner
-					.load(self.get_current_round().await)
-					.await;
+				self.keypair_storage.write().await.0.load(self.get_current_round().await).await;
 			},
 			ServiceState::PrepareNextSystemVault => {
 				self.keypair_storage
 					.write()
 					.await
-					.inner
+					.0
 					.load(self.get_current_round().await + 1)
 					.await;
 			},
@@ -166,7 +161,7 @@ where
 	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
 	P: Provider<T, AnyNetwork>,
 	T: Transport + Clone,
-	K: KeypairAccessor + Send + Sync,
+	K: KeypairManager + Send + Sync,
 {
 	fn schedule(&self) -> Schedule {
 		self.schedule.clone()
@@ -187,7 +182,7 @@ where
 							self.keypair_storage
 								.write()
 								.await
-								.inner
+								.0
 								.load(self.get_current_round().await + 1)
 								.await;
 						}
@@ -197,7 +192,7 @@ where
 							self.keypair_storage
 								.write()
 								.await
-								.inner
+								.0
 								.load(self.get_current_round().await)
 								.await;
 						}
@@ -207,7 +202,7 @@ where
 							self.keypair_storage
 								.write()
 								.await
-								.inner
+								.0
 								.load(self.get_current_round().await)
 								.await;
 						}

@@ -23,7 +23,7 @@ use br_client::{
 	btc::{
 		block::BlockManager,
 		handlers::{InboundHandler, OutboundHandler},
-		storage::keypair::{KeypairStorage, KeypairAccessor},
+		storage::keypair::{KeypairStorage, KeypairManager},
 	},
 	eth::{
 		events::EventManager,

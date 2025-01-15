@@ -8,7 +8,7 @@ use alloy::{
 };
 use bitcoincore_rpc::bitcoin::PublicKey;
 use br_client::{
-	btc::storage::keypair::{KeypairStorage, KeypairAccessor},
+	btc::storage::keypair::{KeypairManager, KeypairStorage},
 	eth::EthClient,
 };
 use br_primitives::{
@@ -37,7 +37,7 @@ where
 	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
 	P: Provider<T, AnyNetwork>,
 	T: Transport + Clone,
-	K: KeypairAccessor + Send + Sync + 'static,
+	K: KeypairManager + Send + Sync + 'static,
 {
 	/// The Bifrost client.
 	pub client: Arc<EthClient<F, P, T>>,
@@ -57,7 +57,7 @@ where
 	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
 	P: Provider<T, AnyNetwork>,
 	T: Transport + Clone,
-	K: KeypairAccessor + Send + Sync + 'static,
+	K: KeypairManager + Send + Sync + 'static,
 {
 	fn schedule(&self) -> Schedule {
 		self.schedule.clone()
@@ -110,8 +110,7 @@ where
 						continue;
 					}
 
-					let pub_key =
-						self.keypair_storage.write().await.inner.create_new_keypair().await;
+					let pub_key = self.keypair_storage.write().await.0.create_new_keypair().await;
 					let (call, metadata) = self.build_unsigned_tx(who, pub_key).await?;
 					self.request_send_transaction(call, metadata);
 				}
@@ -125,7 +124,7 @@ where
 	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
 	P: Provider<T, AnyNetwork>,
 	T: Transport + Clone,
-	K: KeypairAccessor + Send + Sync + 'static,
+	K: KeypairManager + Send + Sync + 'static,
 {
 	/// Instantiates a new `PubKeySubmitter` instance.
 	pub fn new(
