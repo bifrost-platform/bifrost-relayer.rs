@@ -30,6 +30,10 @@ sentry = { version = "0.35.0", default-features = false, features = [
 	"contexts",
 	"panic",
 ] }
+secrecy = { version = "0.8.0", default-features = false, features = [
+	"alloc",
+	"serde",
+] }
 
 async-trait = "0.1.73"
 async-recursion = "1.0.5"

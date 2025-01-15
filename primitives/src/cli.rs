@@ -1,7 +1,7 @@
 use alloy::primitives::ChainId;
+use secrecy::SecretString;
 use serde::Deserialize;
 use std::{borrow::Cow, fmt::Display};
-
 pub type Result<T> = std::result::Result<T, Error>;
 
 /// Error type for the CLI.
@@ -60,7 +60,7 @@ pub struct SystemConfig {
 	/// Path of the keystore. (default: `./keys`)
 	pub keystore_path: Option<String>,
 	/// Password of the keystore. (default: `None`)
-	pub keystore_password: Option<String>,
+	pub keystore_password: Option<SecretString>,
 	/// Debug mode enabled if set to `true`.
 	pub debug_mode: Option<bool>,
 }

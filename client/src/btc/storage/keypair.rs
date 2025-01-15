@@ -14,7 +14,7 @@ use miniscript::bitcoin::{Network, Psbt};
 use sc_keystore::{Keystore, LocalKeystore};
 use sp_application_crypto::ecdsa::{AppPair, AppPublic};
 use sp_core::{crypto::SecretString, testing::ECDSA, ByteArray};
-use std::{str::FromStr, sync::Arc};
+use std::sync::Arc;
 
 use crate::btc::LOG_TARGET;
 
@@ -34,13 +34,8 @@ impl KeypairStorage {
 		self.db.clone().expect("Keystore not loaded")
 	}
 
-	pub fn new(path: String, secret: Option<String>, network: Network) -> Self {
-		let mut password = None;
-		if let Some(secret) = secret {
-			password = Some(SecretString::from_str(&secret).unwrap());
-		}
-
-		Self { db: None, base_path: path, secret: password, network }
+	pub fn new(path: String, secret: Option<SecretString>, network: Network) -> Self {
+		Self { db: None, base_path: path, secret, network }
 	}
 
 	pub async fn load(&mut self, round: u32) {
@@ -141,6 +136,8 @@ impl GetKey for KeypairStorage {
 
 #[cfg(test)]
 mod tests {
+	use std::str::FromStr as _;
+
 	use super::KeypairStorage;
 	use bitcoincore_rpc::bitcoin::key::Secp256k1;
 	use miniscript::bitcoin::{
@@ -167,7 +164,7 @@ mod tests {
 
 		let keypair_storage = KeypairStorage::new(
 			"../localkeystore_test".into(),
-			Some("test".into()),
+			Some(SecretString::from_str("test").unwrap()),
 			Network::Regtest,
 		);
 		for key in keys {
