@@ -96,8 +96,11 @@ impl<K: KeypairManager> KeypairStorage<K> {
 #[derive(Clone)]
 /// A container for a keystore.
 pub struct KeystoreContainer {
+	/// The keystore database.
 	db: Option<Arc<LocalKeystore>>,
+	/// The path to the keystore.
 	path: String,
+	/// The network of the keystore.
 	network: Network,
 }
 
@@ -114,22 +117,29 @@ impl KeystoreContainer {
 #[derive(Clone)]
 /// A keystore for password-based keypairs.
 pub struct PasswordKeypairStorage {
+	/// The keystore container.
 	inner: KeystoreContainer,
+	/// The secret for the keystore.
 	secret: Option<SecretString>,
 }
 
 #[derive(Clone)]
 /// A keystore for KMS-based keypairs.
 pub struct KmsKeypairStorage {
+	/// The keystore container.
 	inner: KeystoreContainer,
+	/// The KMS key ID for encryption/decryption.
 	key_id: String,
+	/// The KMS client.
 	client: Arc<KmsClient>,
 }
 
 #[derive(Clone)]
 /// A variant for different types of keystores.
 pub enum KeypairStorageKind {
+	/// A password-based keystore.
 	Password(PasswordKeypairStorage),
+	/// A KMS-based keystore.
 	Kms(KmsKeypairStorage),
 }
 
@@ -315,7 +325,7 @@ impl GetKey for KmsKeypairStorage {
 				) {
 					Ok(pair) => {
 						if let Some(pair) = pair {
-							let encrypted_bytes = hex::decode(pair.into_inner().seed())
+							let encrypted_key = hex::decode(pair.into_inner().seed())
 								.expect(KEYSTORE_INTERNAL_ERROR);
 
 							let decrypt_result = tokio::runtime::Handle::current()
@@ -323,7 +333,7 @@ impl GetKey for KmsKeypairStorage {
 									self.client
 										.decrypt()
 										.key_id(self.key_id.clone())
-										.ciphertext_blob(Blob::new(encrypted_bytes))
+										.ciphertext_blob(Blob::new(encrypted_key))
 										.send(),
 								)
 								.expect(KEYSTORE_INTERNAL_ERROR);
