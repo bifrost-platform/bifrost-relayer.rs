@@ -2,6 +2,7 @@ use br_primitives::{
 	constants::{
 		config::{BOOTSTRAP_BLOCK_OFFSET, NATIVE_BLOCK_TIME},
 		errors::{INSUFFICIENT_FUNDS, INVALID_CHAIN_ID, PROVIDER_INTERNAL_ERROR},
+		tx::DEFAULT_TX_TIMEOUT_MS,
 	},
 	contracts::authority::BfcStaking::round_meta_data,
 	eth::{AggregatorContracts, GasCoefficient, ProtocolContracts, ProviderMetadata},
@@ -262,7 +263,7 @@ where
 			match self
 				.send_transaction(tx_request.clone())
 				.await?
-				.with_timeout(Some(Duration::from_millis(self.metadata.call_interval * 3)))
+				.with_timeout(Some(Duration::from_millis(DEFAULT_TX_TIMEOUT_MS)))
 				.watch()
 				.await
 			{
@@ -344,7 +345,7 @@ where
 			},
 		};
 		match pending
-			.with_timeout(Some(Duration::from_millis(self.metadata.call_interval * 3)))
+			.with_timeout(Some(Duration::from_millis(DEFAULT_TX_TIMEOUT_MS)))
 			.watch()
 			.await
 		{
@@ -443,7 +444,7 @@ pub fn send_transaction<F, P, T>(
 
 				// wait for the transaction to be confirmed in 3 blocks
 				match pending
-					.with_timeout(Some(Duration::from_millis(client.metadata.call_interval * 3)))
+					.with_timeout(Some(Duration::from_millis(DEFAULT_TX_TIMEOUT_MS)))
 					.watch()
 					.await
 				{
