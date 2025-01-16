@@ -312,7 +312,7 @@ where
 			sleep(Duration::from_millis(generate_delay())).await;
 
 			if !self.metadata.eip1559 {
-				request.gas_price = Some(self.get_gas_price().await.unwrap());
+				request.gas_price = Some(self.get_gas_price().await?);
 			}
 		}
 
