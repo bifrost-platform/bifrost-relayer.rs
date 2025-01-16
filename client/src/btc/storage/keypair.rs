@@ -145,7 +145,7 @@ pub enum KeypairStorageKind {
 
 impl KeypairStorageKind {
 	/// Create a new password-based keystore.
-	pub fn new_password(path: String, network: Network, secret: Option<String>) -> Self {
+	pub fn new_password(path: String, network: Network, secret: Option<SecretString>) -> Self {
 		Self::Password(PasswordKeypairStorage::new(path, network, secret))
 	}
 
@@ -195,12 +195,8 @@ impl GetKey for KeypairStorageKind {
 }
 
 impl PasswordKeypairStorage {
-	pub fn new(path: String, network: Network, secret: Option<String>) -> Self {
-		let mut password = None;
-		if let Some(secret) = secret {
-			password = Some(SecretString::from_str(&secret).unwrap());
-		}
-		Self { inner: KeystoreContainer::new(path, network), secret: password }
+	pub fn new(path: String, network: Network, secret: Option<SecretString>) -> Self {
+		Self { inner: KeystoreContainer::new(path, network), secret }
 	}
 }
 
