@@ -101,7 +101,7 @@ pub struct KeystoreContainer {
 	/// The path to the keystore.
 	path: String,
 	/// The network of the keystore.
-	network: Network,
+	pub network: Network,
 }
 
 impl KeystoreContainer {
@@ -109,7 +109,7 @@ impl KeystoreContainer {
 		Self { db: None, path, network }
 	}
 
-	fn db(&self) -> Arc<LocalKeystore> {
+	pub fn db(&self) -> Arc<LocalKeystore> {
 		self.db.clone().expect("Keystore not loaded")
 	}
 }
@@ -118,20 +118,20 @@ impl KeystoreContainer {
 /// A keystore for password-based keypairs.
 pub struct PasswordKeypairStorage {
 	/// The keystore container.
-	inner: KeystoreContainer,
+	pub inner: KeystoreContainer,
 	/// The secret for the keystore.
-	secret: Option<SecretString>,
+	pub secret: Option<SecretString>,
 }
 
 #[derive(Clone)]
 /// A keystore for KMS-based keypairs.
 pub struct KmsKeypairStorage {
 	/// The keystore container.
-	inner: KeystoreContainer,
+	pub inner: KeystoreContainer,
 	/// The KMS key ID for encryption/decryption.
-	key_id: String,
+	pub key_id: String,
 	/// The KMS client.
-	client: Arc<KmsClient>,
+	pub client: Arc<KmsClient>,
 }
 
 #[derive(Clone)]
@@ -362,7 +362,7 @@ impl GetKey for KmsKeypairStorage {
 
 #[cfg(test)]
 mod tests {
-	use super::{KeypairStorage, KeypairStorageKind};
+	use super::{KeypairManager, KeypairStorage, KeypairStorageKind};
 	use bitcoincore_rpc::bitcoin::key::Secp256k1;
 	use miniscript::bitcoin::{
 		psbt::{GetKey, KeyRequest},
@@ -374,11 +374,9 @@ mod tests {
 
 	#[tokio::test]
 	async fn test_load_sc_keystore() {
-		let keystore = sc_keystore::LocalKeystore::open(
-			"../localkeystore_test",
-			Some(SecretString::new("test".into())),
-		)
-		.unwrap();
+		let keystore =
+			sc_keystore::LocalKeystore::open("../keys/1", Some(SecretString::new("test".into())))
+				.unwrap();
 
 		let mut keys = vec![];
 		for i in 0..3 {
@@ -387,11 +385,12 @@ mod tests {
 			keys.push(key);
 		}
 
-		let keypair_storage = KeypairStorage::new(KeypairStorageKind::new_password(
-			"../localkeystore_test".into(),
+		let mut keypair_storage = KeypairStorage::new(KeypairStorageKind::new_password(
+			"../keys".into(),
 			Network::Regtest,
 			Some(SecretString::from_str("test").unwrap()),
 		));
+		keypair_storage.0.load(1).await;
 		for key in keys {
 			let pk = PublicKey::from_slice(key.as_slice()).unwrap();
 			println!(

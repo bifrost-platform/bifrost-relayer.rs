@@ -2,8 +2,18 @@ use br_primitives::utils::sub_display_format;
 use chrono::{Datelike, Local};
 use clap::{CommandFactory, FromArgMatches, Parser};
 
+use crate::commands::migrate_keystore_cmd::MigrateKeystoreCmd;
+
+#[derive(Debug, clap::Subcommand)]
+pub enum Subcommand {
+	MigrateKeystore(MigrateKeystoreCmd),
+}
+
 #[derive(Debug, Parser)]
 pub struct Cli {
+	#[command(subcommand)]
+	pub subcommand: Option<Subcommand>,
+
 	/// Specify the chain specification.
 	///
 	/// It can be one of the predefined ones (testnet or mainnet) or it can be a path to a file
@@ -152,5 +162,5 @@ impl Cli {
 pub const LOG_TARGET: &str = "bifrost-relayer";
 pub const SUB_LOG_TARGET: &str = "main";
 
-const TESTNET_CONFIG_FILE_PATH: &str = "configs/config.testnet.yaml";
-const MAINNET_CONFIG_FILE_PATH: &str = "configs/config.mainnet.yaml";
+pub const TESTNET_CONFIG_FILE_PATH: &str = "configs/config.testnet.yaml";
+pub const MAINNET_CONFIG_FILE_PATH: &str = "configs/config.mainnet.yaml";
