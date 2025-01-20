@@ -42,7 +42,7 @@ pub struct RelayerConfig {
 	/// Signer config
 	pub signer_config: SignerConfig,
 	/// Keystore config
-	pub keystore_config: KeystoreConfig,
+	pub keystore_config: Option<KeystoreConfig>,
 	/// EVM configs
 	pub evm_providers: Vec<EVMProvider>,
 	/// BTC configs

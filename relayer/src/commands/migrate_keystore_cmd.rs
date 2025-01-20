@@ -60,32 +60,42 @@ impl MigrateKeystoreCmd {
 	pub async fn run(&self, config: Configuration) -> Result<(), CliError> {
 		println!("Migrating keystore for chain: {}", self.chain);
 
-		let keystore_path = config
-			.clone()
-			.relayer_config
-			.keystore_config
-			.path
-			.unwrap_or(DEFAULT_KEYSTORE_PATH.to_string());
 		let network = Network::from_core_arg(&config.relayer_config.btc_provider.chain)
 			.expect(INVALID_BITCOIN_NETWORK);
 
-		// 1. Create a new keystore instance with the old credentials.
-		let mut old_keystore = if let Some(key_id) = &config.relayer_config.signer_config.kms_key_id
+		let mut password = None;
+		let mut keystore_path = DEFAULT_KEYSTORE_PATH.to_string();
+
+		let mut old_keystore = if let Some(keystore_config) = &config.relayer_config.keystore_config
 		{
-			let aws_client = Arc::new(aws_sdk_kms::Client::new(
-				&aws_config::load_defaults(aws_config::BehaviorVersion::latest()).await,
-			));
-			KeypairStorage::new(KeypairStorageKind::new_kms(
-				keystore_path.clone(),
-				network,
-				key_id.clone(),
-				aws_client,
-			))
+			keystore_path =
+				keystore_config.path.clone().unwrap_or(DEFAULT_KEYSTORE_PATH.to_string());
+
+			// 1. Create a new keystore instance with the old credentials.
+			let keystore = if let Some(key_id) = &keystore_config.kms_key_id {
+				let aws_client = Arc::new(aws_sdk_kms::Client::new(
+					&aws_config::load_defaults(aws_config::BehaviorVersion::latest()).await,
+				));
+				KeypairStorage::new(KeypairStorageKind::new_kms(
+					keystore_path.clone(),
+					network,
+					key_id.clone(),
+					aws_client,
+				))
+			} else {
+				password = keystore_config.password.clone();
+				KeypairStorage::new(KeypairStorageKind::new_password(
+					keystore_path.clone(),
+					network,
+					password.clone(),
+				))
+			};
+			keystore
 		} else {
 			KeypairStorage::new(KeypairStorageKind::new_password(
-				keystore_path.clone(),
+				DEFAULT_KEYSTORE_PATH.to_string(),
 				network,
-				config.relayer_config.keystore_config.password.clone(),
+				None,
 			))
 		};
 
@@ -93,10 +103,7 @@ impl MigrateKeystoreCmd {
 		if self.version == 1 {
 			match old_keystore.0 {
 				KeypairStorageKind::Password(ref mut storage) => {
-					storage.inner.load_v1(
-						self.round,
-						config.relayer_config.keystore_config.password.clone(),
-					);
+					storage.inner.load_v1(self.round, password.clone());
 				},
 				KeypairStorageKind::Kms(_) => panic!("KMS keystore is not supported for version 1"),
 			}

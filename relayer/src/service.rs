@@ -156,34 +156,38 @@ pub async fn relay(config: Configuration) -> Result<TaskManager, ServiceError> {
 
 	let bootstrap_shared_data = BootstrapSharedData::new(&config);
 
-	let keystore_path = config
-		.clone()
-		.relayer_config
-		.keystore_config
-		.path
-		.unwrap_or(DEFAULT_KEYSTORE_PATH.to_string());
 	let network = Network::from_core_arg(&config.relayer_config.btc_provider.chain)
 		.expect(INVALID_BITCOIN_NETWORK);
-	let keypair_storage = {
-		let storage = if let Some(key_id) = &config.relayer_config.signer_config.kms_key_id {
-			let aws_client = Arc::new(aws_sdk_kms::Client::new(
-				&aws_config::load_defaults(aws_config::BehaviorVersion::latest()).await,
-			));
-			KeypairStorage::new(KeypairStorageKind::new_kms(
-				keystore_path.clone(),
-				network,
-				key_id.clone(),
-				aws_client,
-			))
+	let keypair_storage = Arc::new(RwLock::new(
+		if let Some(keystore_config) = &config.relayer_config.keystore_config {
+			let keystore_path =
+				keystore_config.path.clone().unwrap_or(DEFAULT_KEYSTORE_PATH.to_string());
+			let keystore = if let Some(key_id) = &keystore_config.kms_key_id {
+				let aws_client = Arc::new(aws_sdk_kms::Client::new(
+					&aws_config::load_defaults(aws_config::BehaviorVersion::latest()).await,
+				));
+				KeypairStorage::new(KeypairStorageKind::new_kms(
+					keystore_path.clone(),
+					network,
+					key_id.clone(),
+					aws_client,
+				))
+			} else {
+				KeypairStorage::new(KeypairStorageKind::new_password(
+					keystore_path,
+					network,
+					keystore_config.password.clone(),
+				))
+			};
+			keystore
 		} else {
 			KeypairStorage::new(KeypairStorageKind::new_password(
-				keystore_path,
+				DEFAULT_KEYSTORE_PATH.to_string(),
 				network,
-				config.relayer_config.keystore_config.password.clone(),
+				None,
 			))
-		};
-		Arc::new(RwLock::new(storage))
-	};
+		},
+	));
 
 	let migration_sequence = Arc::new(RwLock::new(MigrationSequence::Normal));
 
