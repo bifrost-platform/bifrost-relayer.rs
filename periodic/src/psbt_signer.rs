@@ -124,7 +124,7 @@ where
 		};
 
 		let mut psbt = unsigned_psbt.clone();
-		if self.keypair_storage.read().await.0.sign_psbt(&mut psbt).await {
+		if self.keypair_storage.read().await.0.sign_psbt(&mut psbt) {
 			let signed_psbt = psbt.serialize();
 
 			if self

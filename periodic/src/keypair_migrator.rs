@@ -81,15 +81,10 @@ where
 			ServiceState::Normal
 			| MigrationSequence::SetExecutiveMembers
 			| ServiceState::UTXOTransfer => {
-				self.keypair_storage.write().await.0.load(self.get_current_round().await).await;
+				self.keypair_storage.write().await.0.load(self.get_current_round().await);
 			},
 			ServiceState::PrepareNextSystemVault => {
-				self.keypair_storage
-					.write()
-					.await
-					.0
-					.load(self.get_current_round().await + 1)
-					.await;
+				self.keypair_storage.write().await.0.load(self.get_current_round().await + 1);
 			},
 		}
 	}
@@ -183,8 +178,7 @@ where
 								.write()
 								.await
 								.0
-								.load(self.get_current_round().await + 1)
-								.await;
+								.load(self.get_current_round().await + 1);
 						}
 					},
 					MigrationSequence::PrepareNextSystemVault => {
@@ -193,8 +187,7 @@ where
 								.write()
 								.await
 								.0
-								.load(self.get_current_round().await)
-								.await;
+								.load(self.get_current_round().await);
 						}
 					},
 					MigrationSequence::UTXOTransfer => {
@@ -203,8 +196,7 @@ where
 								.write()
 								.await
 								.0
-								.load(self.get_current_round().await)
-								.await;
+								.load(self.get_current_round().await);
 						}
 					},
 				}

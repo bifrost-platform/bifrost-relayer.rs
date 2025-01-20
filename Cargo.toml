@@ -70,6 +70,8 @@ alloy = { version = "0.8", features = [
 ] }
 k256 = "0.13.1"
 sha3 = "0.10.8"
+aes-gcm = "0.10.3"
+pbkdf2 = "0.12.2"
 
 aws-sdk-kms = "1.54.0"
 aws-config = { version = "1.5.13", features = ["behavior-version-latest"] }
@@ -83,19 +85,19 @@ tokio-stream = "0.1.14"
 subxt = "0.37.0"
 
 # Substrate Clients
-sc-cli = { git = "https://github.com/bifrost-platform/polkadot-sdk", default-features = false, branch = "bifrost-polkadot-stable2407" }
-sc-utils = { git = "https://github.com/bifrost-platform/polkadot-sdk", default-features = false, branch = "bifrost-polkadot-stable2407" }
-sc-service = { git = "https://github.com/bifrost-platform/polkadot-sdk", default-features = false, branch = "bifrost-polkadot-stable2407" }
-sc-sysinfo = { git = "https://github.com/bifrost-platform/polkadot-sdk", default-features = false, branch = "bifrost-polkadot-stable2407" }
-sc-keystore = { git = "https://github.com/bifrost-platform/polkadot-sdk", default-features = false, branch = "bifrost-polkadot-stable2407" }
-prometheus-endpoint = { package = "substrate-prometheus-endpoint", default-features = false, git = "https://github.com/bifrost-platform/polkadot-sdk", branch = "bifrost-polkadot-stable2407" }
+sc-cli = { git = "https://github.com/bifrost-platform/polkadot-sdk", default-features = false, branch = "alex/bifrost-polkadot-stable2407-patch01" }
+sc-utils = { git = "https://github.com/bifrost-platform/polkadot-sdk", default-features = false, branch = "alex/bifrost-polkadot-stable2407-patch01" }
+sc-service = { git = "https://github.com/bifrost-platform/polkadot-sdk", default-features = false, branch = "alex/bifrost-polkadot-stable2407-patch01" }
+sc-sysinfo = { git = "https://github.com/bifrost-platform/polkadot-sdk", default-features = false, branch = "alex/bifrost-polkadot-stable2407-patch01" }
+sc-keystore = { git = "https://github.com/bifrost-platform/polkadot-sdk", default-features = false, branch = "alex/bifrost-polkadot-stable2407-patch01" }
+prometheus-endpoint = { package = "substrate-prometheus-endpoint", default-features = false, git = "https://github.com/bifrost-platform/polkadot-sdk", branch = "alex/bifrost-polkadot-stable2407-patch01" }
 
 # Substrate Primitives
-sp-core = { git = "https://github.com/bifrost-platform/polkadot-sdk", default-features = false, branch = "bifrost-polkadot-stable2407" }
-sp-application-crypto = { git = "https://github.com/bifrost-platform/polkadot-sdk", default-features = false, branch = "bifrost-polkadot-stable2407" }
+sp-core = { git = "https://github.com/bifrost-platform/polkadot-sdk", default-features = false, branch = "alex/bifrost-polkadot-stable2407-patch01" }
+sp-application-crypto = { git = "https://github.com/bifrost-platform/polkadot-sdk", default-features = false, branch = "alex/bifrost-polkadot-stable2407-patch01" }
 
 # Substrate Builds
-substrate-build-script-utils = { git = "https://github.com/bifrost-platform/polkadot-sdk", default-features = false, branch = "bifrost-polkadot-stable2407" }
+substrate-build-script-utils = { git = "https://github.com/bifrost-platform/polkadot-sdk", default-features = false, branch = "alex/bifrost-polkadot-stable2407-patch01" }
 
 [profile.production]
 inherits = "release"

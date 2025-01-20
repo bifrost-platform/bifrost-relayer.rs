@@ -35,6 +35,9 @@ alloy = { workspace = true }
 tower = { workspace = true }
 eyre = { workspace = true }
 aws-sdk-kms = { workspace = true }
+aes-gcm = { workspace = true }
+rand = { workspace = true }
+pbkdf2 = { workspace = true, features = ["simple"] }
 
 # subs
 sc-keystore = { workspace = true }

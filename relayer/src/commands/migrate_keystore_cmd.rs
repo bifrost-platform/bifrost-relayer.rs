@@ -86,7 +86,7 @@ impl MigrateKeystoreCmd {
 		};
 
 		// 2. Load the keys from the current (old) keystore.
-		old_keystore.0.load(self.round).await;
+		old_keystore.0.load(self.round);
 		let keys = match old_keystore.0.clone() {
 			KeypairStorageKind::Password(storage) => {
 				storage.inner.db().keys(ECDSA).expect("Failed to load keys")
@@ -124,7 +124,7 @@ impl MigrateKeystoreCmd {
 				self.new_password.clone(),
 			))
 		};
-		new_keystore.0.load(self.round).await;
+		new_keystore.0.load(self.round);
 
 		// 5. Insert the keys to the new keystore.
 		for key in keys {
