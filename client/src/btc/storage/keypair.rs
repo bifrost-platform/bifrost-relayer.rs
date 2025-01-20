@@ -402,10 +402,12 @@ impl GetKey for PasswordKeypairStorage {
 				) {
 					Ok(value) => {
 						if let Some(value) = value {
+							let decoded =
+								hex::decode(value.as_bytes()).expect(KEYSTORE_INTERNAL_ERROR);
 							let mut seed = if self.secret.is_some() {
-								self.decrypt_key(&hex::decode(value.as_bytes()).unwrap())
+								self.decrypt_key(&decoded)
 							} else {
-								hex::decode(value.as_bytes()).unwrap()
+								decoded
 							};
 							let private_key = PrivateKey::from_slice(&seed, self.inner.network)
 								.expect(KEYSTORE_INTERNAL_ERROR);
@@ -441,15 +443,13 @@ impl GetKey for KmsKeypairStorage {
 				) {
 					Ok(value) => {
 						if let Some(value) = value {
-							let mut seed = tokio::runtime::Handle::current().block_on(
-								self.decrypt_key(&hex::decode(value.as_bytes()).unwrap()),
-							);
-
+							let decoded =
+								hex::decode(value.as_bytes()).expect(KEYSTORE_INTERNAL_ERROR);
+							let mut seed = tokio::runtime::Handle::current()
+								.block_on(self.decrypt_key(&decoded));
 							let private_key = PrivateKey::from_slice(&seed, self.inner.network)
 								.expect(KEYSTORE_INTERNAL_ERROR);
-
 							seed.zeroize();
-
 							Ok(Some(private_key))
 						} else {
 							Ok(None)

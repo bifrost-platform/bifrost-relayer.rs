@@ -25,7 +25,6 @@ use crate::cli::{MAINNET_CONFIG_FILE_PATH, TESTNET_CONFIG_FILE_PATH};
 /// This command will migrate the keystore to the new KMS key ID or password.
 /// Either `new_kms_key_id` or `new_password` must be provided. (In case both are provided, `new_kms_key_id` will be used.)
 /// The specified configuration file will be used to load the keystore. Old credentials must be provided in the configuration file.
-/// # Steps
 pub struct MigrateKeystoreCmd {
 	#[arg(long)]
 	/// The RegistrationPool round to migrate.
@@ -173,10 +172,12 @@ impl MigrateKeystoreCmd {
 						) {
 							Ok(value) => {
 								if let Some(value) = value {
+									let decoded =
+										hex::decode(value.as_bytes()).expect("Failed to decode");
 									let mut seed = if storage.secret.is_some() {
-										storage.decrypt_key(&hex::decode(value.as_bytes()).unwrap())
+										storage.decrypt_key(&decoded)
 									} else {
-										hex::decode(value.as_bytes()).unwrap()
+										decoded
 									};
 									self.insert_key(&new_keystore.0, &key, &seed).await;
 									seed.zeroize();
@@ -197,7 +198,9 @@ impl MigrateKeystoreCmd {
 						Ok(value) => {
 							if let Some(value) = value {
 								let mut seed = storage
-									.decrypt_key(&hex::decode(value.as_bytes()).unwrap())
+									.decrypt_key(
+										&hex::decode(value.as_bytes()).expect("Failed to decode"),
+									)
 									.await;
 								self.insert_key(&new_keystore.0, &key, &seed).await;
 								seed.zeroize();
