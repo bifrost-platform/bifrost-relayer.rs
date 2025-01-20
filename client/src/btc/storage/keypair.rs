@@ -38,9 +38,12 @@ use crate::btc::LOG_TARGET;
 const SUB_LOG_TARGET: &str = "keystore";
 
 /// Load the keystore from the given path.
-fn load_keystore(path: String) -> Arc<LocalKeystore> {
-	let keystore = LocalKeystore::open(&path, None).expect(INVALID_KEYSTORE_PASSWORD);
-	let keystore = Arc::new(keystore);
+fn load_keystore(path: String, secret: Option<SecretString>, version: u32) -> Arc<LocalKeystore> {
+	let keystore = Arc::new(if version == 1 {
+		LocalKeystore::open(&path, secret).expect(INVALID_KEYSTORE_PASSWORD)
+	} else {
+		LocalKeystore::open(&path, None).expect(INVALID_KEYSTORE_PASSWORD)
+	});
 
 	let keys = keystore.keys(ECDSA).expect(INVALID_KEYSTORE_PATH);
 	log::info!(
@@ -123,7 +126,11 @@ impl KeystoreContainer {
 	}
 
 	pub fn load(&mut self, round: u32) {
-		self.db = Some(load_keystore(format!("{}/{}", self.path, round)));
+		self.db = Some(load_keystore(format!("{}/{}", self.path, round), None, 2));
+	}
+
+	pub fn load_v1(&mut self, round: u32, secret: Option<SecretString>) {
+		self.db = Some(load_keystore(format!("{}/{}", self.path, round), secret, 1));
 	}
 }
 
@@ -529,6 +536,23 @@ mod tests {
 
 				let decrypted_key = storage.decrypt_key(&hex::decode(raw_key.as_bytes()).unwrap());
 				println!("private key -> {:?}", hex::encode(decrypted_key));
+			},
+			KeypairStorageKind::Kms(_) => {},
+		}
+	}
+
+	#[tokio::test]
+	async fn test_create_new_keypair_v1() {
+		let keypair_storage = KeypairStorage::new(KeypairStorageKind::new_password(
+			"../keys".into(),
+			Network::Regtest,
+			Some(SecretString::from_str("test").unwrap()),
+		));
+		match keypair_storage.0 {
+			KeypairStorageKind::Password(mut storage) => {
+				storage.inner.load_v1(1, Some(SecretString::from_str("test").unwrap()));
+				let key = storage.inner.db().ecdsa_generate_new(ECDSA, None).unwrap();
+				println!("key -> {:?}", key);
 			},
 			KeypairStorageKind::Kms(_) => {},
 		}

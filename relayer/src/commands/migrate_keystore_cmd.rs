@@ -42,6 +42,10 @@ pub struct MigrateKeystoreCmd {
 	#[arg(long, value_name = "CHAIN_SPEC")]
 	/// The chain specification to use.
 	pub chain: String,
+
+	#[arg(long, default_value = "2")]
+	/// The keystore version to migrate.
+	version: u32,
 }
 
 impl MigrateKeystoreCmd {
@@ -87,7 +91,19 @@ impl MigrateKeystoreCmd {
 		};
 
 		// 2. Load the keys from the current (old) keystore.
-		old_keystore.0.load(self.round);
+		if self.version == 1 {
+			match old_keystore.0 {
+				KeypairStorageKind::Password(ref mut storage) => {
+					storage.inner.load_v1(
+						self.round,
+						config.relayer_config.keystore_config.password.clone(),
+					);
+				},
+				KeypairStorageKind::Kms(_) => panic!("KMS keystore is not supported for version 1"),
+			}
+		} else {
+			old_keystore.0.load(self.round);
+		}
 		let keys = match old_keystore.0.clone() {
 			KeypairStorageKind::Password(storage) => {
 				storage.inner.db().keys(ECDSA).expect("Failed to load keys")
@@ -131,25 +147,47 @@ impl MigrateKeystoreCmd {
 		for key in keys {
 			match old_keystore.0 {
 				KeypairStorageKind::Password(ref storage) => {
-					match storage.inner.db().raw_keystore_value::<AppPair>(
-						&AppPublic::from_slice(&key).expect("Failed to get key pair"),
-					) {
-						Ok(value) => {
-							if let Some(value) = value {
-								let mut seed = if storage.secret.is_some() {
-									storage.decrypt_key(&hex::decode(value.as_bytes()).unwrap())
+					if self.version == 1 {
+						match storage.inner.db().key_pair::<AppPair>(
+							&AppPublic::from_slice(&key).expect("Failed to get key pair"),
+						) {
+							Ok(pair) => {
+								if let Some(pair) = pair {
+									self.insert_key(
+										&new_keystore.0,
+										&key,
+										pair.into_inner().seed().as_slice(),
+									)
+									.await;
 								} else {
-									hex::decode(value.as_bytes()).unwrap()
-								};
-								self.insert_key(&new_keystore.0, &key, &seed).await;
-								seed.zeroize();
-							} else {
-								panic!("Failed to get key pair");
-							}
-						},
-						Err(err) => {
-							panic!("Failed to get key pair: {:?}", err)
-						},
+									panic!("Failed to get key pair");
+								}
+							},
+							Err(err) => {
+								panic!("Failed to get key pair: {:?}", err)
+							},
+						}
+					} else {
+						match storage.inner.db().raw_keystore_value::<AppPair>(
+							&AppPublic::from_slice(&key).expect("Failed to get key pair"),
+						) {
+							Ok(value) => {
+								if let Some(value) = value {
+									let mut seed = if storage.secret.is_some() {
+										storage.decrypt_key(&hex::decode(value.as_bytes()).unwrap())
+									} else {
+										hex::decode(value.as_bytes()).unwrap()
+									};
+									self.insert_key(&new_keystore.0, &key, &seed).await;
+									seed.zeroize();
+								} else {
+									panic!("Failed to get key pair");
+								}
+							},
+							Err(err) => {
+								panic!("Failed to get key pair: {:?}", err)
+							},
+						}
 					}
 				},
 				KeypairStorageKind::Kms(ref storage) => {
