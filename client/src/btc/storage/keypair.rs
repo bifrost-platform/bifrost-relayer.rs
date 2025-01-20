@@ -341,7 +341,7 @@ impl KeypairManager for KmsKeypairStorage {
 			.insert(ECDSA, &hex::encode(encrypted_key), key.as_slice())
 			.expect(KEYSTORE_INTERNAL_ERROR);
 
-		if let Err(error) = self.inner.db().key_pair::<AppPair>(
+		if let Err(error) = self.inner.db().raw_keystore_value::<AppPair>(
 			&AppPublic::from_slice(key.as_slice()).expect(KEYSTORE_INTERNAL_ERROR),
 		) {
 			panic!("[{}]-[{}] {}: {}", LOG_TARGET, SUB_LOG_TARGET, KEYSTORE_INTERNAL_ERROR, error);
