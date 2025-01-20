@@ -503,6 +503,38 @@ mod tests {
 	}
 
 	#[tokio::test]
+	async fn test_decrypt() {
+		let mut keypair_storage = KeypairStorage::new(KeypairStorageKind::new_password(
+			"../keys".into(),
+			Network::Regtest,
+			Some(SecretString::from_str("test2").unwrap()),
+		));
+		keypair_storage.0.load(1);
+
+		match keypair_storage.0 {
+			KeypairStorageKind::Password(storage) => {
+				let keys = storage.inner.db().keys(ECDSA).unwrap();
+				println!("keys -> {:?}", keys);
+
+				let raw_key = storage
+					.inner
+					.db()
+					.raw_keystore_value::<AppPair>(
+						&AppPublic::from_slice(&keys[0].clone()).unwrap(),
+					)
+					.unwrap()
+					.unwrap();
+
+				println!("public key -> {:?}", hex::encode(keys[0].clone()));
+
+				let decrypted_key = storage.decrypt_key(&hex::decode(raw_key.as_bytes()).unwrap());
+				println!("private key -> {:?}", hex::encode(decrypted_key));
+			},
+			KeypairStorageKind::Kms(_) => {},
+		}
+	}
+
+	#[tokio::test]
 	async fn test_create_new_keypair() {
 		let mut keypair_storage = KeypairStorage::new(KeypairStorageKind::new_password(
 			"../keys".into(),

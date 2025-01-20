@@ -10,6 +10,7 @@ use miniscript::bitcoin::Network;
 use sc_cli::Error as CliError;
 use sc_keystore::Keystore;
 use secrecy::SecretString;
+use secrecy::Zeroize;
 use sp_application_crypto::{
 	ecdsa::{AppPair, AppPublic},
 	ByteArray,
@@ -130,17 +131,18 @@ impl MigrateKeystoreCmd {
 		for key in keys {
 			match old_keystore.0 {
 				KeypairStorageKind::Password(ref storage) => {
-					match storage.inner.db().key_pair::<AppPair>(
+					match storage.inner.db().raw_keystore_value::<AppPair>(
 						&AppPublic::from_slice(&key).expect("Failed to get key pair"),
 					) {
-						Ok(pair) => {
-							if let Some(pair) = pair {
-								self.insert_key(
-									&new_keystore.0,
-									&key,
-									pair.into_inner().seed().as_slice(),
-								)
-								.await;
+						Ok(value) => {
+							if let Some(value) = value {
+								let mut seed = if storage.secret.is_some() {
+									storage.decrypt_key(&hex::decode(value.as_bytes()).unwrap())
+								} else {
+									hex::decode(value.as_bytes()).unwrap()
+								};
+								self.insert_key(&new_keystore.0, &key, &seed).await;
+								seed.zeroize();
 							} else {
 								panic!("Failed to get key pair");
 							}
@@ -151,29 +153,16 @@ impl MigrateKeystoreCmd {
 					}
 				},
 				KeypairStorageKind::Kms(ref storage) => {
-					match storage.inner.db().key_pair::<AppPair>(
+					match storage.inner.db().raw_keystore_value::<AppPair>(
 						&AppPublic::from_slice(&key).expect("Failed to get key pair"),
 					) {
-						Ok(pair) => {
-							if let Some(pair) = pair {
-								let encrypted_key = hex::decode(pair.into_inner().seed())
-									.expect("Failed to decode seed");
-
-								let decrypt_result = storage
-									.client
-									.decrypt()
-									.key_id(storage.key_id.clone())
-									.ciphertext_blob(Blob::new(encrypted_key))
-									.send()
-									.await
-									.expect("Failed to decrypt");
-
-								let decrypted_key = decrypt_result
-									.plaintext
-									.expect("Failed to decrypt")
-									.into_inner();
-
-								self.insert_key(&new_keystore.0, &key, &decrypted_key).await;
+						Ok(value) => {
+							if let Some(value) = value {
+								let mut seed = storage
+									.decrypt_key(&hex::decode(value.as_bytes()).unwrap())
+									.await;
+								self.insert_key(&new_keystore.0, &key, &seed).await;
+								seed.zeroize();
 							} else {
 								panic!("Failed to get key pair");
 							}
@@ -189,13 +178,19 @@ impl MigrateKeystoreCmd {
 		Ok(())
 	}
 
-	async fn insert_key(&self, keystore: &KeypairStorageKind, key: &[u8], seed: &[u8]) {
+	async fn insert_key(&self, keystore: &KeypairStorageKind, key: &[u8], value: &[u8]) {
 		match keystore {
 			KeypairStorageKind::Password(ref storage) => {
+				let value = if storage.secret.is_some() {
+					storage.encrypt_key(value)
+				} else {
+					value.to_vec()
+				};
+
 				storage
 					.inner
 					.db()
-					.insert(ECDSA, &hex::encode(seed), &key)
+					.insert(ECDSA, &hex::encode(value), &key)
 					.expect("Failed to insert key");
 			},
 			KeypairStorageKind::Kms(ref storage) => {
@@ -203,7 +198,7 @@ impl MigrateKeystoreCmd {
 					.client
 					.encrypt()
 					.key_id(storage.key_id.clone())
-					.plaintext(Blob::new(seed))
+					.plaintext(Blob::new(value))
 					.send()
 					.await
 					.expect("Failed to encrypt");
