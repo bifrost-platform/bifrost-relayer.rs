@@ -54,3 +54,4 @@ sc-service = { workspace = true }
 [dev-dependencies]
 serde_json = { workspace = true }
 array-bytes = { workspace = true }
+aws-config = { workspace = true }

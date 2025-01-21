@@ -479,7 +479,7 @@ mod tests {
 		Pair,
 	};
 	use sp_core::{crypto::SecretString, testing::ECDSA, ByteArray};
-	use std::str::FromStr as _;
+	use std::{str::FromStr as _, sync::Arc};
 
 	#[tokio::test]
 	async fn test_encrypt_decrypt() {
@@ -589,6 +589,45 @@ mod tests {
 				println!("private key -> {:?}", hex::encode(decrypted_key));
 			},
 			KeypairStorageKind::Kms(_) => {},
+		}
+	}
+
+	#[tokio::test]
+	async fn test_create_new_keypair_kms() {
+		let aws_client = Arc::new(aws_sdk_kms::Client::new(
+			&aws_config::load_defaults(aws_config::BehaviorVersion::latest()).await,
+		));
+		let mut keypair_storage = KeypairStorage::new(KeypairStorageKind::new_kms(
+			"../keys".into(),
+			Network::Regtest,
+			"".into(),
+			aws_client,
+		));
+		keypair_storage.0.load(1);
+		keypair_storage.0.create_new_keypair().await;
+
+		match keypair_storage.0 {
+			KeypairStorageKind::Password(_) => {},
+			KeypairStorageKind::Kms(storage) => {
+				let keys = storage.inner.db().keys(ECDSA).unwrap();
+				println!("keys -> {:?}", keys);
+
+				let raw_key = storage
+					.inner
+					.db()
+					.raw_keystore_value::<AppPair>(
+						&AppPublic::from_slice(&keys[0].clone()).unwrap(),
+					)
+					.unwrap()
+					.unwrap();
+				println!("raw_key -> {:?}", raw_key.as_bytes());
+
+				println!("public key -> {:?}", hex::encode(keys[0].clone()));
+
+				let decrypted_key =
+					storage.decrypt_key(&hex::decode(raw_key.as_bytes()).unwrap()).await;
+				println!("private key -> {:?}", hex::encode(decrypted_key));
+			},
 		}
 	}
 
