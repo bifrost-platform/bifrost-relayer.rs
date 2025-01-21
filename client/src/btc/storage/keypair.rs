@@ -514,7 +514,7 @@ mod tests {
 		let mut keypair_storage = KeypairStorage::new(KeypairStorageKind::new_password(
 			"../keys".into(),
 			Network::Regtest,
-			Some(SecretString::from_str("test2").unwrap()),
+			Some(SecretString::from_str("test").unwrap()),
 		));
 		keypair_storage.0.load(1);
 
@@ -538,6 +538,43 @@ mod tests {
 				println!("private key -> {:?}", hex::encode(decrypted_key));
 			},
 			KeypairStorageKind::Kms(_) => {},
+		}
+	}
+
+	#[tokio::test]
+	async fn test_decrypt_kms() {
+		let aws_client = Arc::new(aws_sdk_kms::Client::new(
+			&aws_config::load_defaults(aws_config::BehaviorVersion::latest()).await,
+		));
+		let mut keypair_storage = KeypairStorage::new(KeypairStorageKind::new_kms(
+			"../keys".into(),
+			Network::Regtest,
+			"".into(),
+			aws_client,
+		));
+		keypair_storage.0.load(1);
+
+		match keypair_storage.0 {
+			KeypairStorageKind::Password(_) => {},
+			KeypairStorageKind::Kms(storage) => {
+				let keys = storage.inner.db().keys(ECDSA).unwrap();
+				println!("keys -> {:?}", keys);
+
+				let raw_key = storage
+					.inner
+					.db()
+					.raw_keystore_value::<AppPair>(
+						&AppPublic::from_slice(&keys[0].clone()).unwrap(),
+					)
+					.unwrap()
+					.unwrap();
+
+				println!("public key -> {:?}", hex::encode(keys[0].clone()));
+
+				let decrypted_key =
+					storage.decrypt_key(&hex::decode(raw_key.as_bytes()).unwrap()).await;
+				println!("private key -> {:?}", hex::encode(decrypted_key));
+			},
 		}
 	}
 
