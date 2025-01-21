@@ -162,7 +162,7 @@ pub async fn relay(config: Configuration) -> Result<TaskManager, ServiceError> {
 		if let Some(keystore_config) = &config.relayer_config.keystore_config {
 			let keystore_path =
 				keystore_config.path.clone().unwrap_or(DEFAULT_KEYSTORE_PATH.to_string());
-			let keystore = if let Some(key_id) = &keystore_config.kms_key_id {
+			if let Some(key_id) = &keystore_config.kms_key_id {
 				let aws_client = Arc::new(aws_sdk_kms::Client::new(
 					&aws_config::load_defaults(aws_config::BehaviorVersion::latest()).await,
 				));
@@ -178,8 +178,7 @@ pub async fn relay(config: Configuration) -> Result<TaskManager, ServiceError> {
 					network,
 					keystore_config.password.clone(),
 				))
-			};
-			keystore
+			}
 		} else {
 			KeypairStorage::new(KeypairStorageKind::new_password(
 				DEFAULT_KEYSTORE_PATH.to_string(),

@@ -72,7 +72,7 @@ impl MigrateKeystoreCmd {
 				keystore_config.path.clone().unwrap_or(DEFAULT_KEYSTORE_PATH.to_string());
 
 			// 1. Create a new keystore instance with the old credentials.
-			let keystore = if let Some(key_id) = &keystore_config.kms_key_id {
+			if let Some(key_id) = &keystore_config.kms_key_id {
 				let aws_client = Arc::new(aws_sdk_kms::Client::new(
 					&aws_config::load_defaults(aws_config::BehaviorVersion::latest()).await,
 				));
@@ -89,8 +89,7 @@ impl MigrateKeystoreCmd {
 					network,
 					password.clone(),
 				))
-			};
-			keystore
+			}
 		} else {
 			KeypairStorage::new(KeypairStorageKind::new_password(
 				DEFAULT_KEYSTORE_PATH.to_string(),
@@ -238,7 +237,7 @@ impl MigrateKeystoreCmd {
 				storage
 					.inner
 					.db()
-					.insert(ECDSA, &hex::encode(value), &key)
+					.insert(ECDSA, &hex::encode(value), key)
 					.expect("Failed to insert key");
 			},
 			KeypairStorageKind::Kms(ref storage) => {
@@ -257,7 +256,7 @@ impl MigrateKeystoreCmd {
 					.insert(
 						ECDSA,
 						&hex::encode(encrypted_key.ciphertext_blob.unwrap().as_ref()),
-						&key,
+						key,
 					)
 					.expect("Failed to insert key");
 			},
