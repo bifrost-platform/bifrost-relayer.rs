@@ -1,7 +1,7 @@
 use alloy::primitives::ChainId;
 use secrecy::SecretString;
 use serde::Deserialize;
-use std::{borrow::Cow, fmt::Display};
+use std::borrow::Cow;
 pub type Result<T> = std::result::Result<T, Error>;
 
 /// Error type for the CLI.
@@ -154,16 +154,6 @@ pub enum HandlerType {
 	Socket,
 	/// Roundup handler
 	Roundup,
-}
-
-impl Display for HandlerType {
-	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-		let str = match *self {
-			HandlerType::Socket => "Socket",
-			HandlerType::Roundup => "Roundup",
-		};
-		write!(f, "{}", str)
-	}
 }
 
 #[derive(Debug, Clone, Deserialize)]

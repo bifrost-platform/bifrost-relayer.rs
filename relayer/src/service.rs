@@ -381,7 +381,7 @@ where
 	socket_relay_handlers.into_iter().for_each(|mut handler| {
 		task_manager.spawn_essential_handle().spawn(
 			Box::leak(
-				format!("{}-{}-handler", handler.client.get_chain_name(), HandlerType::Socket,)
+				format!("{}-{:?}-handler", handler.client.get_chain_name(), HandlerType::Socket)
 					.into_boxed_str(),
 			),
 			Some("handlers"),
@@ -404,7 +404,7 @@ where
 	roundup_relay_handlers.into_iter().for_each(|mut handler| {
 		task_manager.spawn_essential_handle().spawn(
 			Box::leak(
-				format!("{}-{}-handler", handler.client.get_chain_name(), HandlerType::Roundup)
+				format!("{}-{:?}-handler", handler.client.get_chain_name(), HandlerType::Roundup)
 					.into_boxed_str(),
 			),
 			Some("handlers"),
