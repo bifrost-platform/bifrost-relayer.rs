@@ -325,6 +325,10 @@ where
 		requester: String,
 		metadata: TxRequestMetadata,
 	) -> Result<()> {
+		if !self.metadata.is_relay_target {
+			return Ok(());
+		}
+
 		let mut this_request = request.clone();
 		self.fill_gas(&mut this_request).await?;
 
