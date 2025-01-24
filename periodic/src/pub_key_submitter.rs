@@ -8,7 +8,7 @@ use alloy::{
 };
 use bitcoincore_rpc::bitcoin::PublicKey;
 use br_client::{
-	btc::storage::keypair::{KeypairManager, KeypairStorage},
+	btc::storage::keypair::{KeypairStorage, KeypairStorageT},
 	eth::EthClient,
 };
 use br_primitives::{
@@ -32,19 +32,18 @@ use crate::traits::PeriodicWorker;
 
 const SUB_LOG_TARGET: &str = "pubkey-submitter";
 
-pub struct PubKeySubmitter<F, P, T, K>
+pub struct PubKeySubmitter<F, P, T>
 where
 	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
 	P: Provider<T, AnyNetwork>,
 	T: Transport + Clone,
-	K: KeypairManager + Send + Sync + 'static,
 {
 	/// The Bifrost client.
 	pub client: Arc<EthClient<F, P, T>>,
 	/// The unsigned transaction message sender.
 	xt_request_sender: Arc<XtRequestSender>,
 	/// The public and private keypair local storage.
-	keypair_storage: Arc<RwLock<KeypairStorage<K>>>,
+	keypair_storage: KeypairStorage,
 	/// The migration sequence.
 	migration_sequence: Arc<RwLock<MigrationSequence>>,
 	/// The time schedule that represents when check pending registrations.
@@ -52,12 +51,11 @@ where
 }
 
 #[async_trait::async_trait]
-impl<F, P, T, K> PeriodicWorker for PubKeySubmitter<F, P, T, K>
+impl<F, P, T> PeriodicWorker for PubKeySubmitter<F, P, T>
 where
 	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
 	P: Provider<T, AnyNetwork>,
 	T: Transport + Clone,
-	K: KeypairManager + Send + Sync + 'static,
 {
 	fn schedule(&self) -> Schedule {
 		self.schedule.clone()
@@ -110,7 +108,7 @@ where
 						continue;
 					}
 
-					let pub_key = self.keypair_storage.write().await.0.create_new_keypair().await;
+					let pub_key = self.keypair_storage.create_new_keypair().await;
 					let (call, metadata) = self.build_unsigned_tx(who, pub_key).await?;
 					self.request_send_transaction(call, metadata);
 				}
@@ -119,18 +117,17 @@ where
 	}
 }
 
-impl<F, P, T, K> PubKeySubmitter<F, P, T, K>
+impl<F, P, T> PubKeySubmitter<F, P, T>
 where
 	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
 	P: Provider<T, AnyNetwork>,
 	T: Transport + Clone,
-	K: KeypairManager + Send + Sync + 'static,
 {
 	/// Instantiates a new `PubKeySubmitter` instance.
 	pub fn new(
 		client: Arc<EthClient<F, P, T>>,
 		xt_request_sender: Arc<XtRequestSender>,
-		keypair_storage: Arc<RwLock<KeypairStorage<K>>>,
+		keypair_storage: KeypairStorage,
 		migration_sequence: Arc<RwLock<MigrationSequence>>,
 	) -> Self {
 		Self {

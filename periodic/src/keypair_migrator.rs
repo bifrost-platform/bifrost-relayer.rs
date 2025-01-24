@@ -6,7 +6,7 @@ use alloy::{
 	transports::Transport,
 };
 use br_client::{
-	btc::storage::keypair::{KeypairManager, KeypairStorage},
+	btc::storage::keypair::{KeypairStorage, KeypairStorageT},
 	eth::EthClient,
 };
 use br_primitives::{
@@ -27,32 +27,30 @@ use std::{str::FromStr, sync::Arc, time::Duration};
 use subxt::OnlineClient;
 use tokio::sync::RwLock;
 
-pub struct KeypairMigrator<F, P, T, K>
+pub struct KeypairMigrator<F, P, T>
 where
 	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
 	P: Provider<T, AnyNetwork>,
 	T: Transport + Clone,
-	K: KeypairManager + Send + Sync,
 {
 	sub_client: Option<OnlineClient<CustomConfig>>,
 	bfc_client: Arc<EthClient<F, P, T>>,
 	migration_sequence: Arc<RwLock<MigrationSequence>>,
-	keypair_storage: Arc<RwLock<KeypairStorage<K>>>,
+	keypair_storage: KeypairStorage,
 	schedule: Schedule,
 }
 
-impl<F, P, T, K> KeypairMigrator<F, P, T, K>
+impl<F, P, T> KeypairMigrator<F, P, T>
 where
 	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
 	P: Provider<T, AnyNetwork>,
 	T: Transport + Clone,
-	K: KeypairManager + Send + Sync,
 {
 	/// Instantiates a new `KeypairMigrator` instance.
 	pub fn new(
 		bfc_client: Arc<EthClient<F, P, T>>,
 		migration_sequence: Arc<RwLock<MigrationSequence>>,
-		keypair_storage: Arc<RwLock<KeypairStorage<K>>>,
+		keypair_storage: KeypairStorage,
 	) -> Self {
 		Self {
 			sub_client: None,
@@ -81,10 +79,10 @@ where
 			ServiceState::Normal
 			| MigrationSequence::SetExecutiveMembers
 			| ServiceState::UTXOTransfer => {
-				self.keypair_storage.write().await.0.load(self.get_current_round().await);
+				self.keypair_storage.load(self.get_current_round().await).await;
 			},
 			ServiceState::PrepareNextSystemVault => {
-				self.keypair_storage.write().await.0.load(self.get_current_round().await + 1);
+				self.keypair_storage.load(self.get_current_round().await + 1).await;
 			},
 		}
 	}
@@ -151,12 +149,11 @@ where
 }
 
 #[async_trait::async_trait]
-impl<F, P, T, K> PeriodicWorker for KeypairMigrator<F, P, T, K>
+impl<F, P, T> PeriodicWorker for KeypairMigrator<F, P, T>
 where
 	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
 	P: Provider<T, AnyNetwork>,
 	T: Transport + Clone,
-	K: KeypairManager + Send + Sync,
 {
 	fn schedule(&self) -> Schedule {
 		self.schedule.clone()
@@ -174,29 +171,17 @@ where
 				match *write_lock {
 					MigrationSequence::Normal | MigrationSequence::SetExecutiveMembers => {
 						if service_state == ServiceState::PrepareNextSystemVault {
-							self.keypair_storage
-								.write()
-								.await
-								.0
-								.load(self.get_current_round().await + 1);
+							self.keypair_storage.load(self.get_current_round().await + 1).await;
 						}
 					},
 					MigrationSequence::PrepareNextSystemVault => {
 						if service_state == ServiceState::UTXOTransfer {
-							self.keypair_storage
-								.write()
-								.await
-								.0
-								.load(self.get_current_round().await);
+							self.keypair_storage.load(self.get_current_round().await).await;
 						}
 					},
 					MigrationSequence::UTXOTransfer => {
 						if service_state == ServiceState::Normal {
-							self.keypair_storage
-								.write()
-								.await
-								.0
-								.load(self.get_current_round().await);
+							self.keypair_storage.load(self.get_current_round().await).await;
 						}
 					},
 				}

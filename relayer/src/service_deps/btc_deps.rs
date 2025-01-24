@@ -1,11 +1,10 @@
 use super::*;
 
-pub struct BtcDeps<F, P, T, K>
+pub struct BtcDeps<F, P, T>
 where
 	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
 	P: Provider<T, AnyNetwork>,
 	T: Transport + Clone,
-	K: KeypairManager + 'static,
 {
 	/// The Bitcoin outbound handler.
 	pub outbound: OutboundHandler<F, P, T>,
@@ -14,23 +13,22 @@ where
 	/// The Bitcoin block manager.
 	pub block_manager: BlockManager<F, P, T>,
 	/// The Bitcoin PSBT signer.
-	pub psbt_signer: PsbtSigner<F, P, T, K>,
+	pub psbt_signer: PsbtSigner<F, P, T>,
 	/// The Bitcoin vault public key submitter.
-	pub pub_key_submitter: PubKeySubmitter<F, P, T, K>,
+	pub pub_key_submitter: PubKeySubmitter<F, P, T>,
 	/// The Bitcoin rollback verifier.
 	pub rollback_verifier: BitcoinRollbackVerifier<F, P, T>,
 }
 
-impl<F, P, T, K> BtcDeps<F, P, T, K>
+impl<F, P, T> BtcDeps<F, P, T>
 where
 	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
 	P: Provider<T, AnyNetwork>,
 	T: Transport + Clone,
-	K: KeypairManager + 'static,
 {
 	pub fn new(
 		config: &Configuration,
-		keypair_storage: Arc<RwLock<KeypairStorage<K>>>,
+		keypair_storage: KeypairStorage,
 		bootstrap_shared_data: BootstrapSharedData,
 		substrate_deps: &SubstrateDeps<F, P, T>,
 		migration_sequence: Arc<RwLock<MigrationSequence>>,

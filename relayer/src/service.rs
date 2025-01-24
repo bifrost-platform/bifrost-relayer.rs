@@ -24,7 +24,7 @@ use tokio::sync::RwLock;
 use br_client::{
 	btc::{
 		handlers::Handler as _,
-		storage::keypair::{KeypairManager, KeypairStorage, KeypairStorageKind},
+		storage::keypair::{KeypairStorage, KmsKeypairStorage, PasswordKeypairStorage},
 	},
 	eth::{retry::RetryBackoffLayer, traits::Handler as _, EthClient},
 };
@@ -158,35 +158,33 @@ pub async fn relay(config: Configuration) -> Result<TaskManager, ServiceError> {
 
 	let network = Network::from_core_arg(&config.relayer_config.btc_provider.chain)
 		.expect(INVALID_BITCOIN_NETWORK);
-	let keypair_storage = Arc::new(RwLock::new(
-		if let Some(keystore_config) = &config.relayer_config.keystore_config {
-			let keystore_path =
-				keystore_config.path.clone().unwrap_or(DEFAULT_KEYSTORE_PATH.to_string());
-			if let Some(key_id) = &keystore_config.kms_key_id {
-				let aws_client = Arc::new(aws_sdk_kms::Client::new(
-					&aws_config::load_defaults(aws_config::BehaviorVersion::latest()).await,
-				));
-				KeypairStorage::new(KeypairStorageKind::new_kms(
-					keystore_path.clone(),
-					network,
-					key_id.clone(),
-					aws_client,
-				))
-			} else {
-				KeypairStorage::new(KeypairStorageKind::new_password(
-					keystore_path,
-					network,
-					keystore_config.password.clone(),
-				))
-			}
-		} else {
-			KeypairStorage::new(KeypairStorageKind::new_password(
-				DEFAULT_KEYSTORE_PATH.to_string(),
+	let keypair_storage = if let Some(keystore_config) = &config.relayer_config.keystore_config {
+		let keystore_path =
+			keystore_config.path.clone().unwrap_or(DEFAULT_KEYSTORE_PATH.to_string());
+		if let Some(key_id) = &keystore_config.kms_key_id {
+			let aws_client = Arc::new(aws_sdk_kms::Client::new(
+				&aws_config::load_defaults(aws_config::BehaviorVersion::latest()).await,
+			));
+			KeypairStorage::new(KmsKeypairStorage::new(
+				keystore_path.clone(),
 				network,
-				None,
+				key_id.clone(),
+				aws_client,
 			))
-		},
-	));
+		} else {
+			KeypairStorage::new(PasswordKeypairStorage::new(
+				keystore_path,
+				network,
+				keystore_config.password.clone(),
+			))
+		}
+	} else {
+		KeypairStorage::new(PasswordKeypairStorage::new(
+			DEFAULT_KEYSTORE_PATH.to_string(),
+			network,
+			None,
+		))
+	};
 
 	let migration_sequence = Arc::new(RwLock::new(MigrationSequence::Normal));
 
@@ -236,16 +234,15 @@ pub async fn relay(config: Configuration) -> Result<TaskManager, ServiceError> {
 }
 
 /// Spawn relayer service tasks by the `TaskManager`.
-fn spawn_relayer_tasks<F, P, T, K>(
+fn spawn_relayer_tasks<F, P, T>(
 	task_manager: TaskManager,
-	deps: FullDeps<F, P, T, K>,
+	deps: FullDeps<F, P, T>,
 	config: &Configuration,
 ) -> TaskManager
 where
 	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork> + 'static,
 	P: Provider<T, AnyNetwork> + 'static,
 	T: Transport + Clone,
-	K: KeypairManager + 'static,
 {
 	let prometheus_config = &config.relayer_config.prometheus_config;
 

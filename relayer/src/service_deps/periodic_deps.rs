@@ -1,11 +1,10 @@
 use super::*;
 
-pub struct PeriodicDeps<F, P, T, K>
+pub struct PeriodicDeps<F, P, T>
 where
 	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
 	P: Provider<T, AnyNetwork>,
 	T: Transport + Clone,
-	K: KeypairManager + 'static,
 {
 	/// The `HeartbeatSender` used for system health checks.
 	pub heartbeat_sender: HeartbeatSender<F, P, T>,
@@ -18,22 +17,21 @@ where
 	/// The `RollbackSender`'s for each specified chain.
 	pub rollback_senders: Arc<BTreeMap<ChainId, Arc<UnboundedSender<Socket_Message>>>>,
 	/// The `KeypairMigrator` used for detecting migration sequences.
-	pub keypair_migrator: KeypairMigrator<F, P, T, K>,
+	pub keypair_migrator: KeypairMigrator<F, P, T>,
 	/// The `PubKeyPreSubmitter` used for presubmitting public keys.
-	pub presubmitter: PubKeyPreSubmitter<F, P, T, K>,
+	pub presubmitter: PubKeyPreSubmitter<F, P, T>,
 }
 
-impl<F, P, T, K> PeriodicDeps<F, P, T, K>
+impl<F, P, T> PeriodicDeps<F, P, T>
 where
 	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork> + 'static,
 	P: Provider<T, AnyNetwork> + 'static,
 	T: Transport + Clone,
-	K: KeypairManager + 'static,
 {
 	pub fn new(
 		bootstrap_shared_data: BootstrapSharedData,
 		migration_sequence: Arc<RwLock<MigrationSequence>>,
-		keypair_storage: Arc<RwLock<KeypairStorage<K>>>,
+		keypair_storage: KeypairStorage,
 		substrate_deps: &SubstrateDeps<F, P, T>,
 		clients: Arc<ClientMap<F, P, T>>,
 		bfc_client: Arc<EthClient<F, P, T>>,
