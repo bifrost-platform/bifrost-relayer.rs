@@ -19,7 +19,8 @@ use bitcoincore_rpc::bitcoin::{
 };
 use br_primitives::{
 	constants::errors::{
-		INVALID_KEYSTORE_PASSWORD, INVALID_KEYSTORE_PATH, KEYSTORE_INTERNAL_ERROR,
+		INVALID_KEYSTORE_PASSWORD, INVALID_KEYSTORE_PATH, KEYSTORE_DECRYPTION_ERROR,
+		KEYSTORE_INTERNAL_ERROR,
 	},
 	utils::sub_display_format,
 };

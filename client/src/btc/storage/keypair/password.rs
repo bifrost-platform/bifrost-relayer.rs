@@ -132,7 +132,7 @@ impl GetKey for PasswordKeypairStorage {
 	fn get_key<C: Signing>(
 		&self,
 		key_request: KeyRequest,
-		_: &Secp256k1<C>,
+		secp: &Secp256k1<C>,
 	) -> Result<Option<PrivateKey>, Self::Error> {
 		match key_request {
 			KeyRequest::Pubkey(pk) => {
@@ -152,6 +152,9 @@ impl GetKey for PasswordKeypairStorage {
 							};
 							let private_key = PrivateKey::from_slice(&seed, self.inner.network)
 								.expect(KEYSTORE_INTERNAL_ERROR);
+							if private_key.public_key(secp) != pk {
+								panic!("{}", KEYSTORE_DECRYPTION_ERROR);
+							}
 							seed.zeroize();
 							Ok(Some(private_key))
 						} else {
