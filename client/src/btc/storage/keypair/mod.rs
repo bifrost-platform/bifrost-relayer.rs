@@ -305,14 +305,15 @@ mod tests {
 
 	#[tokio::test]
 	async fn test_create_new_keypair_v1() {
+		let secret = SecretString::from_str("test").unwrap();
 		let mut keypair_storage = KeypairStorage::new(PasswordKeypairStorage::new(
 			"../keys".into(),
 			Network::Regtest,
-			Some(SecretString::from_str("test").unwrap()),
+			Some(secret.clone()),
 		));
 
-		keypair_storage.load_v1(1, Some(SecretString::from_str("test").unwrap())).await;
-		let key = keypair_storage.create_new_keypair().await;
+		keypair_storage.load_v1(1, Some(secret)).await;
+		let key = keypair_storage.db().await.ecdsa_generate_new(ECDSA, None).unwrap();
 		println!("key -> {:?}", key);
 	}
 
