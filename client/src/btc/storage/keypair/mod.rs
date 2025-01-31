@@ -9,6 +9,7 @@ use aes_gcm::{
 	aead::{Aead, KeyInit},
 	Aes256Gcm, Key, Nonce,
 };
+use alloy::primitives::keccak256;
 use aws_sdk_kms::{primitives::Blob, Client as KmsClient};
 use bitcoincore_rpc::bitcoin::{
 	key::Secp256k1,
@@ -257,7 +258,7 @@ mod tests {
 	}
 
 	#[tokio::test]
-	async fn test_decrypt() {
+	async fn test_decrypt_pw() {
 		let mut keypair_storage = KeypairStorage::new(PasswordKeypairStorage::new(
 			"../keys".into(),
 			Network::Regtest,
@@ -316,7 +317,7 @@ mod tests {
 	}
 
 	#[tokio::test]
-	async fn test_create_new_keypair() {
+	async fn test_create_new_keypair_pw() {
 		let mut keypair_storage = KeypairStorage::new(PasswordKeypairStorage::new(
 			"../keys".into(),
 			Network::Regtest,

@@ -79,11 +79,12 @@ impl KeypairStorageT for PasswordKeypairStorage {
 			OsRng.fill_bytes(&mut nonce);
 
 			// Encrypt the private key
-			let cipher =
-				Aes256Gcm::new(Key::<Aes256Gcm>::from_slice(secret.expose_secret().as_bytes()));
+			let cipher = Aes256Gcm::new(Key::<Aes256Gcm>::from_slice(
+				keccak256(secret.expose_secret().as_bytes()).as_slice(),
+			));
 			let ciphertext = cipher.encrypt(Nonce::from_slice(&nonce), key.as_ref()).unwrap();
 
-			// Combine salt + nonce + ciphertext for storage
+			// Combine nonce + ciphertext for storage
 			let mut encrypted_key = Vec::with_capacity(nonce.len() + ciphertext.len());
 			encrypted_key.extend_from_slice(&nonce);
 			encrypted_key.extend_from_slice(&ciphertext);
@@ -100,8 +101,9 @@ impl KeypairStorageT for PasswordKeypairStorage {
 			let ciphertext = &key[12..];
 
 			// Decrypt the private key
-			let cipher =
-				Aes256Gcm::new(Key::<Aes256Gcm>::from_slice(secret.expose_secret().as_bytes()));
+			let cipher = Aes256Gcm::new(Key::<Aes256Gcm>::from_slice(
+				keccak256(secret.expose_secret().as_bytes()).as_slice(),
+			));
 			cipher.decrypt(Nonce::from_slice(nonce), ciphertext.as_ref()).unwrap()
 		} else {
 			key.to_vec()
