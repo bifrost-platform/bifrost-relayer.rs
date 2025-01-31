@@ -1,8 +1,7 @@
+use alloy::primitives::ChainId;
+use secrecy::SecretString;
 use serde::Deserialize;
 use std::{borrow::Cow, fmt::Display};
-
-use crate::eth::ChainID;
-
 pub type Result<T> = std::result::Result<T, Error>;
 
 /// Error type for the CLI.
@@ -40,6 +39,8 @@ pub struct Configuration {
 pub struct RelayerConfig {
 	/// System config
 	pub system: SystemConfig,
+	/// Signer config
+	pub signer_config: SignerConfig,
 	/// EVM configs
 	pub evm_providers: Vec<EVMProvider>,
 	/// BTC configs
@@ -56,12 +57,10 @@ pub struct RelayerConfig {
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct SystemConfig {
-	/// The private key of the relayer.
-	pub private_key: String,
 	/// Path of the keystore. (default: `./keys`)
 	pub keystore_path: Option<String>,
 	/// Password of the keystore. (default: `None`)
-	pub keystore_password: Option<String>,
+	pub keystore_password: Option<SecretString>,
 	/// Debug mode enabled if set to `true`.
 	pub debug_mode: Option<bool>,
 }
@@ -71,7 +70,7 @@ pub struct EVMProvider {
 	/// Network name
 	pub name: String,
 	/// Chain ID
-	pub id: ChainID,
+	pub id: ChainId,
 	/// Endpoint provider
 	pub provider: String,
 	/// The time interval(ms) used when to request a new block
@@ -134,7 +133,7 @@ pub struct EVMProvider {
 #[derive(Debug, Clone, Deserialize)]
 pub struct BTCProvider {
 	/// The bitcoin chain ID used for CCCP.
-	pub id: u32,
+	pub id: u64,
 	/// The Bitcoin provider URL.
 	pub provider: String,
 	/// The time interval(ms) used when to request a new block
@@ -174,7 +173,7 @@ pub struct HandlerConfig {
 	/// Handle type
 	pub handler_type: HandlerType,
 	/// Watch target list
-	pub watch_list: Vec<ChainID>,
+	pub watch_list: Vec<ChainId>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -182,7 +181,7 @@ pub struct BootstrapConfig {
 	/// Bootstrapping flag
 	pub is_enabled: bool,
 	/// Optional. The round offset used for EVM bootstrap.
-	pub round_offset: Option<u32>,
+	pub round_offset: Option<u64>,
 	/// Optional. The block offset used for Bitcoin bootstrap.
 	pub btc_block_offset: Option<u32>,
 }
@@ -209,4 +208,12 @@ pub struct PrometheusConfig {
 	pub is_external: Option<bool>,
 	/// Prometheus exporter TCP Port.
 	pub port: Option<u16>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct SignerConfig {
+	/// AWS KMS key ID. (to use AwsSigner)
+	pub kms_key_id: Option<String>,
+	/// The private key of the relayer. (to use LocalSigner)
+	pub private_key: Option<String>,
 }

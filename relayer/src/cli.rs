@@ -111,11 +111,11 @@ impl Cli {
 
 	/// Chain spec factory
 	pub fn load_spec(&self) -> &str {
-		return match self.chain.as_str() {
+		match self.chain.as_str() {
 			"testnet" => TESTNET_CONFIG_FILE_PATH,
 			"mainnet" => MAINNET_CONFIG_FILE_PATH,
 			path => path,
-		};
+		}
 	}
 
 	/// Log information about the relayer itself.

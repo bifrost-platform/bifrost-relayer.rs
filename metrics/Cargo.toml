@@ -10,9 +10,12 @@ repository = { workspace = true }
 
 [dependencies]
 # General
+log = { workspace = true }
 lazy_static = { workspace = true }
 sentry = { workspace = true }
-ethers = { workspace = true }
+alloy = { workspace = true }
 
 # Substrate
 prometheus-endpoint = { workspace = true }
+
+br-primitives = { path = "../primitives", default-features = false }

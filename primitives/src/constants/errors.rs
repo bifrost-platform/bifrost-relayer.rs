@@ -56,3 +56,6 @@ pub const KEYSTORE_INTERNAL_ERROR: &str =
 
 pub const PARAMETER_OUT_OF_RANGE: &str =
 	"An invalid parameter is out of range. Please check your configuration file.";
+
+pub const KMS_INITIALIZATION_ERROR: &str =
+	"An internal error thrown when initializing the KMS. Please check your KMS's status.";

@@ -1,5 +1,6 @@
 use cron::Schedule;
-use std::{collections::BTreeMap, fmt::Error};
+use eyre::Result;
+use std::collections::BTreeMap;
 use tokio::time::sleep;
 
 use br_primitives::periodic::PriceResponse;
@@ -10,7 +11,7 @@ pub trait PeriodicWorker {
 	fn schedule(&self) -> Schedule;
 
 	/// Starts the periodic worker.
-	async fn run(&mut self);
+	async fn run(&mut self) -> Result<()>;
 
 	/// Wait until it reaches the next schedule.
 	async fn wait_until_next_time(&self) {
@@ -27,8 +28,8 @@ pub trait PeriodicWorker {
 #[async_trait::async_trait]
 pub trait PriceFetcher {
 	/// Get price with ticker symbol.
-	async fn get_ticker_with_symbol(&self, symbol: String) -> Result<PriceResponse, Error>;
+	async fn get_ticker_with_symbol(&self, symbol: String) -> Result<PriceResponse>;
 
 	/// Get all prices of support coin/token.
-	async fn get_tickers(&self) -> Result<BTreeMap<String, PriceResponse>, Error>;
+	async fn get_tickers(&self) -> Result<BTreeMap<String, PriceResponse>>;
 }

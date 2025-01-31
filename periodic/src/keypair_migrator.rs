@@ -1,5 +1,10 @@
 use crate::traits::PeriodicWorker;
 
+use alloy::{
+	network::AnyNetwork,
+	providers::{fillers::TxFiller, Provider, WalletProvider},
+	transports::Transport,
+};
 use br_client::{btc::storage::keypair::KeypairStorage, eth::EthClient};
 use br_primitives::{
 	constants::{
@@ -14,23 +19,33 @@ use br_primitives::{
 	},
 };
 use cron::Schedule;
-use ethers::prelude::JsonRpcClient;
+use eyre::Result;
 use std::{str::FromStr, sync::Arc, time::Duration};
 use subxt::OnlineClient;
 use tokio::sync::RwLock;
 
-pub struct KeypairMigrator<T> {
+pub struct KeypairMigrator<F, P, T>
+where
+	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
+	P: Provider<T, AnyNetwork>,
+	T: Transport + Clone,
+{
 	sub_client: Option<OnlineClient<CustomConfig>>,
-	bfc_client: Arc<EthClient<T>>,
+	bfc_client: Arc<EthClient<F, P, T>>,
 	migration_sequence: Arc<RwLock<MigrationSequence>>,
 	keypair_storage: Arc<RwLock<KeypairStorage>>,
 	schedule: Schedule,
 }
 
-impl<T: JsonRpcClient> KeypairMigrator<T> {
+impl<F, P, T> KeypairMigrator<F, P, T>
+where
+	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
+	P: Provider<T, AnyNetwork>,
+	T: Transport + Clone,
+{
 	/// Instantiates a new `KeypairMigrator` instance.
 	pub fn new(
-		bfc_client: Arc<EthClient<T>>,
+		bfc_client: Arc<EthClient<F, P, T>>,
 		migration_sequence: Arc<RwLock<MigrationSequence>>,
 		keypair_storage: Arc<RwLock<KeypairStorage>>,
 	) -> Self {
@@ -135,12 +150,17 @@ impl<T: JsonRpcClient> KeypairMigrator<T> {
 }
 
 #[async_trait::async_trait]
-impl<T: JsonRpcClient> PeriodicWorker for KeypairMigrator<T> {
+impl<F, P, T> PeriodicWorker for KeypairMigrator<F, P, T>
+where
+	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
+	P: Provider<T, AnyNetwork>,
+	T: Transport + Clone,
+{
 	fn schedule(&self) -> Schedule {
 		self.schedule.clone()
 	}
 
-	async fn run(&mut self) {
+	async fn run(&mut self) -> Result<()> {
 		self.initialize().await;
 
 		loop {
@@ -151,36 +171,31 @@ impl<T: JsonRpcClient> PeriodicWorker for KeypairMigrator<T> {
 				let mut write_lock = self.migration_sequence.write().await;
 				match *write_lock {
 					MigrationSequence::Normal | MigrationSequence::SetExecutiveMembers => {
-						match service_state {
-							ServiceState::PrepareNextSystemVault => {
-								self.keypair_storage
-									.write()
-									.await
-									.load(self.get_current_round().await + 1)
-									.await;
-							},
-							_ => {},
+						if service_state == ServiceState::PrepareNextSystemVault {
+							self.keypair_storage
+								.write()
+								.await
+								.load(self.get_current_round().await + 1)
+								.await;
 						}
 					},
-					MigrationSequence::PrepareNextSystemVault => match service_state {
-						ServiceState::UTXOTransfer => {
+					MigrationSequence::PrepareNextSystemVault => {
+						if service_state == ServiceState::UTXOTransfer {
 							self.keypair_storage
 								.write()
 								.await
 								.load(self.get_current_round().await)
 								.await;
-						},
-						_ => {},
+						}
 					},
-					MigrationSequence::UTXOTransfer => match service_state {
-						ServiceState::Normal => {
+					MigrationSequence::UTXOTransfer => {
+						if service_state == ServiceState::Normal {
 							self.keypair_storage
 								.write()
 								.await
 								.load(self.get_current_round().await)
 								.await;
-						},
-						_ => {},
+						}
 					},
 				}
 				*write_lock = service_state;
