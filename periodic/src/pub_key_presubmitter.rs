@@ -65,8 +65,6 @@ where
 		self.initialize().await;
 
 		loop {
-			self.wait_until_next_time().await;
-
 			if self.is_relay_executive().await? {
 				if *self.migration_sequence.read().await != ServiceState::Normal {
 					continue;
@@ -86,6 +84,7 @@ where
 					self.request_send_transaction(call, metadata);
 				}
 			}
+			self.wait_until_next_time().await;
 		}
 	}
 }
