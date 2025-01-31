@@ -60,8 +60,22 @@ pub async fn relay(config: Configuration) -> Result<TaskManager, ServiceError> {
 	let evm_providers = &config.relayer_config.evm_providers;
 	let btc_provider = &config.relayer_config.btc_provider;
 	let system = &config.relayer_config.system;
+	let signer_config = &config.relayer_config.signer_config;
+	let keystore_config = &config.relayer_config.keystore_config;
 
 	let mut clients = BTreeMap::new();
+
+	// Initialize AWS client once if needed
+	let aws_client = if signer_config.kms_key_id.is_some()
+		|| keystore_config.as_ref().and_then(|c| c.kms_key_id.as_ref()).is_some()
+	{
+		Some(aws_sdk_kms::Client::new(
+			&aws_config::load_defaults(aws_config::BehaviorVersion::latest()).await,
+		))
+	} else {
+		None
+	};
+
 	for evm_provider in evm_providers {
 		let url: Url = evm_provider.provider.clone().parse().expect(INVALID_PROVIDER_URL);
 		let is_native = evm_provider.is_native.unwrap_or(false);
@@ -87,14 +101,15 @@ pub async fn relay(config: Configuration) -> Result<TaskManager, ServiceError> {
 			.filler(ChainIdFiller::new(evm_provider.id.into()))
 			.network::<AnyNetwork>();
 
-		let (id, client) = if let Some(key_id) = &config.relayer_config.signer_config.kms_key_id {
-			let aws_client = aws_sdk_kms::Client::new(
-				&aws_config::load_defaults(aws_config::BehaviorVersion::latest()).await,
-			);
+		let (id, client) = if let Some(key_id) = &signer_config.kms_key_id {
 			let signer = Arc::new(
-				AwsSigner::new(aws_client, key_id.clone(), evm_provider.id.into())
-					.await
-					.expect(KMS_INITIALIZATION_ERROR),
+				AwsSigner::new(
+					aws_client.as_ref().unwrap().clone(),
+					key_id.clone(),
+					evm_provider.id.into(),
+				)
+				.await
+				.expect(KMS_INITIALIZATION_ERROR),
 			);
 			let provider = Arc::new(
 				provider_builder
@@ -119,12 +134,7 @@ pub async fn relay(config: Configuration) -> Result<TaskManager, ServiceError> {
 			(evm_provider.id, client)
 		} else {
 			let mut signer = PrivateKeySigner::from_str(
-				&config
-					.relayer_config
-					.signer_config
-					.private_key
-					.clone()
-					.expect(INVALID_PRIVATE_KEY),
+				&signer_config.private_key.clone().expect(INVALID_PRIVATE_KEY),
 			)
 			.expect(INVALID_PRIVATE_KEY);
 			signer.set_chain_id(Some(evm_provider.id));
@@ -156,20 +166,16 @@ pub async fn relay(config: Configuration) -> Result<TaskManager, ServiceError> {
 
 	let bootstrap_shared_data = BootstrapSharedData::new(&config);
 
-	let network = Network::from_core_arg(&config.relayer_config.btc_provider.chain)
-		.expect(INVALID_BITCOIN_NETWORK);
-	let keypair_storage = if let Some(keystore_config) = &config.relayer_config.keystore_config {
+	let network = Network::from_core_arg(&btc_provider.chain).expect(INVALID_BITCOIN_NETWORK);
+	let keypair_storage = if let Some(keystore_config) = &keystore_config {
 		let keystore_path =
 			keystore_config.path.clone().unwrap_or(DEFAULT_KEYSTORE_PATH.to_string());
 		if let Some(key_id) = &keystore_config.kms_key_id {
-			let aws_client = Arc::new(aws_sdk_kms::Client::new(
-				&aws_config::load_defaults(aws_config::BehaviorVersion::latest()).await,
-			));
 			KeypairStorage::new(KmsKeypairStorage::new(
 				keystore_path.clone(),
 				network,
 				key_id.clone(),
-				aws_client,
+				Arc::new(aws_client.as_ref().unwrap().clone()),
 			))
 		} else {
 			KeypairStorage::new(PasswordKeypairStorage::new(
