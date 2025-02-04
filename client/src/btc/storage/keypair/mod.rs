@@ -29,7 +29,7 @@ use miniscript::bitcoin::{
 	psbt::{SigningErrors, SigningKeys},
 	Network, Psbt,
 };
-use rand::{rngs::OsRng, RngCore};
+use rand::{rngs::OsRng, Rng};
 use sc_keystore::{Keystore, LocalKeystore};
 use sp_application_crypto::{
 	ecdsa::{AppPair, AppPublic},

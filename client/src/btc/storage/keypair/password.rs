@@ -75,8 +75,7 @@ impl KeypairStorageT for PasswordKeypairStorage {
 	async fn encrypt_key(&self, key: &[u8]) -> Vec<u8> {
 		if let Some(secret) = &self.secret {
 			// Generate a random nonce for AES-GCM
-			let mut nonce = [0u8; 12];
-			OsRng.fill_bytes(&mut nonce);
+			let nonce = OsRng.gen::<[u8; 12]>();
 
 			// Encrypt the private key
 			let cipher = Aes256Gcm::new(Key::<Aes256Gcm>::from_slice(
