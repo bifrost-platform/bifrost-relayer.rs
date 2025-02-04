@@ -137,7 +137,12 @@ pub trait KeypairStorageT: Send + Sync {
 	) -> Result<SigningKeys, (SigningKeys, SigningErrors)>;
 
 	/// Create and store a new keypair.
-	async fn create_new_keypair(&self) -> PublicKey;
+	async fn create_new_keypair(&self) -> PublicKey {
+		let pair = sp_application_crypto::ecdsa::Pair::generate();
+		let public_key = pair.0.public().0;
+		self.insert_key(&public_key, &self.encrypt_key(&pair.1).await).await;
+		PublicKey::from_slice(&public_key).expect(KEYSTORE_INTERNAL_ERROR)
+	}
 
 	/// List public keys.
 	async fn keys(&self) -> Vec<Vec<u8>>;
@@ -152,7 +157,7 @@ pub trait KeypairStorageT: Send + Sync {
 	async fn decrypt_key(&self, key: &[u8]) -> Vec<u8>;
 
 	/// Insert the given key into the keystore.
-	async fn insert_key(&self, key: &[u8], value: &[u8]);
+	async fn insert_key(&self, public_key: &[u8], private_key: &[u8]);
 
 	#[cfg(test)]
 	async fn test_get_key(
@@ -192,10 +197,6 @@ impl KeypairStorageT for KeypairStorage {
 		self.0.read().await.sign_psbt_inner(psbt).await
 	}
 
-	async fn create_new_keypair(&self) -> PublicKey {
-		self.0.write().await.create_new_keypair().await
-	}
-
 	async fn keys(&self) -> Vec<Vec<u8>> {
 		self.0.read().await.keys().await
 	}
@@ -212,9 +213,8 @@ impl KeypairStorageT for KeypairStorage {
 		self.0.read().await.decrypt_key(key).await
 	}
 
-	async fn insert_key(&self, key: &[u8], value: &[u8]) {
-		let encrypted_value = self.encrypt_key(value).await;
-		self.0.write().await.insert_key(key, &encrypted_value).await;
+	async fn insert_key(&self, public_key: &[u8], private_key: &[u8]) {
+		self.0.write().await.insert_key(public_key, private_key).await;
 	}
 
 	#[cfg(test)]

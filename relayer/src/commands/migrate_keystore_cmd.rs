@@ -145,13 +145,20 @@ impl MigrateKeystoreCmd {
 					)
 					.expect("Failed to get key pair")
 					.expect("Failed to get key pair");
-				new_keystore.insert_key(&key, pair.into_inner().seed().as_slice()).await;
+				new_keystore
+					.insert_key(
+						&key,
+						&new_keystore.encrypt_key(pair.into_inner().seed().as_slice()).await,
+					)
+					.await;
 			} else {
 				let value =
 					old_keystore.raw_keystore_value(&key).await.expect("Failed to get key pair");
 				let decoded_value = hex::decode(value.as_bytes()).expect("Failed to decode");
-				let decrypted_value = old_keystore.decrypt_key(&decoded_value).await;
-				new_keystore.insert_key(&key, &decrypted_value).await;
+				let private_key = old_keystore.decrypt_key(&decoded_value).await;
+				new_keystore
+					.insert_key(&key, &new_keystore.encrypt_key(&private_key).await)
+					.await;
 			}
 		}
 

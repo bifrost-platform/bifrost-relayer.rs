@@ -29,29 +29,6 @@ impl KeypairStorageT for PasswordKeypairStorage {
 		self.inner.db()
 	}
 
-	async fn create_new_keypair(&self) -> PublicKey {
-		let pair = sp_application_crypto::ecdsa::Pair::generate();
-		let key = pair.0.public();
-
-		let value = if self.secret.is_some() {
-			self.encrypt_key(pair.0.to_raw_vec().as_slice()).await
-		} else {
-			pair.0.to_raw_vec()
-		};
-
-		self.inner
-			.db()
-			.insert(ECDSA, &hex::encode(value), key.as_slice())
-			.expect(KEYSTORE_INTERNAL_ERROR);
-
-		if let Err(error) = self.inner.db().raw_keystore_value::<AppPair>(
-			&AppPublic::from_slice(key.as_slice()).expect(KEYSTORE_INTERNAL_ERROR),
-		) {
-			panic!("[{}]-[{}] {}: {}", LOG_TARGET, SUB_LOG_TARGET, KEYSTORE_INTERNAL_ERROR, error);
-		}
-		PublicKey::from_slice(key.as_slice()).expect(KEYSTORE_INTERNAL_ERROR)
-	}
-
 	async fn sign_psbt_inner(
 		&self,
 		psbt: &mut Psbt,
@@ -109,10 +86,10 @@ impl KeypairStorageT for PasswordKeypairStorage {
 		}
 	}
 
-	async fn insert_key(&self, key: &[u8], value: &[u8]) {
+	async fn insert_key(&self, public_key: &[u8], private_key: &[u8]) {
 		self.inner
 			.db()
-			.insert(ECDSA, &hex::encode(value), key)
+			.insert(ECDSA, &hex::encode(private_key), public_key)
 			.expect(KEYSTORE_INTERNAL_ERROR)
 	}
 
