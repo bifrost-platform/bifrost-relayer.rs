@@ -115,8 +115,10 @@ impl GetKey for KmsKeypairStorage {
 						if let Some(value) = value {
 							let decoded =
 								hex::decode(value.as_bytes()).expect(KEYSTORE_INTERNAL_ERROR);
-							let mut seed = tokio::runtime::Handle::current()
-								.block_on(self.decrypt_key(&decoded));
+							let mut seed = tokio::task::block_in_place(|| {
+								tokio::runtime::Handle::current()
+									.block_on(self.decrypt_key(&decoded))
+							});
 							let private_key = PrivateKey::from_slice(&seed, self.inner.network)
 								.expect(KEYSTORE_INTERNAL_ERROR);
 							if private_key.public_key(secp) != pk {
