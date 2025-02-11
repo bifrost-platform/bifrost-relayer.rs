@@ -89,10 +89,19 @@ evm_providers:
     min_gas_price: 30000000000
     socket_address: "0x4C7a44F3FB37A53F33D3fe3cCdE97A444F105239"
     authority_address: "0xA069a57426Cd4c53925c1847Bec01aAB832A5118"
+  - name: "oasys"
+    id: 248
+    provider: "<YOUR_OASYS_RPC_ENDPOINT>"
+    call_interval: 6000
+    block_confirmations: 3
+    is_relay_target: false
+    eip1559: true
+    socket_address: "0x4C7a44F3FB37A53F33D3fe3cCdE97A444F105239"
+    authority_address: "0x48820089C1d4f5d768f6800CF647b4f5b8675CFA"
 
 handler_configs:
   - handler_type: Socket
-    watch_list: [3068, 1, 56, 137, 8453, 42161, 1116]
+    watch_list: [3068, 1, 56, 137, 8453, 42161, 1116, 248]
   - handler_type: Roundup
     watch_list: [3068]
 
