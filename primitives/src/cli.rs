@@ -81,20 +81,6 @@ pub struct EVMProvider {
 	pub is_relay_target: bool,
 	/// If true, enables Eip1559. (default: false)
 	pub eip1559: Option<bool>,
-	/// The minimum value use for gas_price. (default: 0, unit: WEI)
-	pub min_gas_price: Option<u64>,
-	/// The minimum priority fee required. (default: 0, unit: WEI)
-	pub min_priority_fee: Option<u64>,
-	/// Gas price increase percentage on gas price escalation such as when handling tx
-	/// replacements. (default: 15.0)
-	pub escalate_percentage: Option<f64>,
-	/// The flag whether if the gas price will be initially escalated. The `escalate_percentage`
-	/// will be used on escalation. This will only have effect on legacy transactions. (default:
-	/// false)
-	pub is_initially_escalated: Option<bool>,
-	/// If first relay transaction is stuck in mempool after waiting for this amount of time(ms),
-	/// ignore duplicate prevent logic. (default: 12s)
-	pub duplicate_confirm_delay: Option<u64>,
 	/// The batch size (=block range) used when requesting `eth_getLogs()`. If increased the RPC
 	/// request ratio will be reduced, however event processing will be delayed regarded to the
 	/// configured batch size. Default size is set to 1, which means it will be requested on every

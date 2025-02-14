@@ -67,7 +67,6 @@ evm_providers:
     block_confirmations: 7
     is_relay_target: false
     eip1559: true
-    min_priority_fee: 30000000000
     socket_address: "0x050606CC2Bcd9504991Be2c309D6c6c832Bb5bd0"
     authority_address: "0x7F48909fBd1E38f1e05B5E326A44175fc2462B13"
   - name: "base"
@@ -96,7 +95,6 @@ evm_providers:
     block_confirmations: 3
     is_relay_target: false
     eip1559: false
-    min_gas_price: 30000000000
     socket_address: "0x4C7a44F3FB37A53F33D3fe3cCdE97A444F105239"
     authority_address: "0xA069a57426Cd4c53925c1847Bec01aAB832A5118"
 
