@@ -7,7 +7,10 @@ use alloy::{
 	transports::Transport,
 };
 use bitcoincore_rpc::bitcoin::PublicKey;
-use br_client::{btc::storage::keypair::KeypairStorage, eth::EthClient};
+use br_client::{
+	btc::storage::keypair::{KeypairStorage, KeypairStorageT},
+	eth::EthClient,
+};
 use br_primitives::{
 	constants::{errors::INVALID_PERIODIC_SCHEDULE, schedule::PUB_KEY_SUBMITTER_SCHEDULE},
 	contracts::registration_pool::RegistrationPoolInstance,
@@ -40,7 +43,7 @@ where
 	/// The unsigned transaction message sender.
 	xt_request_sender: Arc<XtRequestSender>,
 	/// The public and private keypair local storage.
-	keypair_storage: Arc<RwLock<KeypairStorage>>,
+	keypair_storage: KeypairStorage,
 	/// The migration sequence.
 	migration_sequence: Arc<RwLock<MigrationSequence>>,
 	/// The time schedule that represents when check pending registrations.
@@ -105,7 +108,7 @@ where
 						continue;
 					}
 
-					let pub_key = self.keypair_storage.write().await.create_new_keypair().await;
+					let pub_key = self.keypair_storage.create_new_keypair().await;
 					let (call, metadata) = self.build_unsigned_tx(who, pub_key).await?;
 					self.request_send_transaction(call, metadata);
 				}
@@ -124,7 +127,7 @@ where
 	pub fn new(
 		client: Arc<EthClient<F, P, T>>,
 		xt_request_sender: Arc<XtRequestSender>,
-		keypair_storage: Arc<RwLock<KeypairStorage>>,
+		keypair_storage: KeypairStorage,
 		migration_sequence: Arc<RwLock<MigrationSequence>>,
 	) -> Self {
 		Self {

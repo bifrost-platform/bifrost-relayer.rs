@@ -6,7 +6,10 @@ use alloy::{
 	transports::Transport,
 };
 use br_client::{
-	btc::{handlers::XtRequester, storage::keypair::KeypairStorage},
+	btc::{
+		handlers::XtRequester,
+		storage::keypair::{KeypairStorage, KeypairStorageT},
+	},
 	eth::EthClient,
 };
 use br_primitives::{
@@ -38,7 +41,7 @@ where
 	/// The unsigned transaction message sender.
 	xt_request_sender: Arc<XtRequestSender>,
 	/// The public and private keypair local storage.
-	keypair_storage: Arc<RwLock<KeypairStorage>>,
+	keypair_storage: KeypairStorage,
 	/// The migration sequence.
 	migration_sequence: Arc<RwLock<MigrationSequence>>,
 	/// The Bitcoin network.
@@ -57,7 +60,7 @@ where
 	pub fn new(
 		client: Arc<EthClient<F, P, T>>,
 		xt_request_sender: Arc<XtRequestSender>,
-		keypair_storage: Arc<RwLock<KeypairStorage>>,
+		keypair_storage: KeypairStorage,
 		migration_sequence: Arc<RwLock<MigrationSequence>>,
 		btc_network: Network,
 	) -> Self {
@@ -119,7 +122,7 @@ where
 		};
 
 		let mut psbt = unsigned_psbt.clone();
-		if self.keypair_storage.read().await.sign_psbt(&mut psbt) {
+		if self.keypair_storage.sign_psbt(&mut psbt).await {
 			let signed_psbt = psbt.serialize();
 
 			if self

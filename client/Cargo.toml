@@ -10,6 +10,7 @@ repository = { workspace = true }
 
 [dependencies]
 # General
+hex = { workspace = true }
 bitcoincore-rpc = { workspace = true }
 miniscript = { workspace = true }
 log = { workspace = true }
@@ -33,6 +34,9 @@ array-bytes = { workspace = true }
 alloy = { workspace = true }
 tower = { workspace = true }
 eyre = { workspace = true }
+aws-sdk-kms = { workspace = true }
+aes-gcm = { workspace = true }
+rand = { workspace = true }
 
 # subs
 sc-keystore = { workspace = true }
@@ -49,3 +53,4 @@ sc-service = { workspace = true }
 [dev-dependencies]
 serde_json = { workspace = true }
 array-bytes = { workspace = true }
+aws-config = { workspace = true }
