@@ -2,8 +2,8 @@ use std::{collections::BTreeMap, fmt::Error, str::FromStr, sync::Arc};
 
 use alloy::{
 	network::AnyNetwork,
-	primitives::{utils::parse_ether, FixedBytes, B256, U256},
-	providers::{fillers::TxFiller, Provider, WalletProvider},
+	primitives::{B256, FixedBytes, U256, utils::parse_ether},
+	providers::{Provider, WalletProvider, fillers::TxFiller},
 	rpc::types::{TransactionInput, TransactionRequest},
 	transports::Transport,
 };
@@ -15,7 +15,7 @@ use rand::Rng;
 use sc_service::SpawnTaskHandle;
 use tokio::time::sleep;
 
-use br_client::eth::{send_transaction, ClientMap, EthClient};
+use br_client::eth::{ClientMap, EthClient, send_transaction};
 use br_primitives::{
 	constants::{errors::INVALID_PERIODIC_SCHEDULE, schedule::PRICE_FEEDER_SCHEDULE},
 	contracts::socket::get_asset_oids,
@@ -125,7 +125,7 @@ where
 		if in_between {
 			let sleep_duration = should_be_done_in
 				- chrono::Duration::seconds(
-					rand::thread_rng().gen_range(0..=should_be_done_in.num_seconds()),
+					rand::rng().random_range(0..=should_be_done_in.num_seconds()),
 				);
 
 			if let Ok(sleep_duration) = sleep_duration.to_std() {

@@ -1,8 +1,8 @@
 use crate::traits::PeriodicWorker;
 use alloy::{
 	network::AnyNetwork,
-	primitives::{keccak256, Bytes, B256},
-	providers::{fillers::TxFiller, Provider, WalletProvider},
+	primitives::{B256, Bytes, keccak256},
+	providers::{Provider, WalletProvider, fillers::TxFiller},
 	transports::Transport,
 };
 use br_client::{
@@ -14,9 +14,7 @@ use br_client::{
 };
 use br_primitives::{
 	constants::{errors::INVALID_PERIODIC_SCHEDULE, schedule::PSBT_SIGNER_SCHEDULE},
-	substrate::{
-		bifrost_runtime, AccountId20, EthereumSignature, MigrationSequence, SignedPsbtMessage,
-	},
+	substrate::{EthereumSignature, MigrationSequence, SignedPsbtMessage, bifrost_runtime},
 	tx::{SubmitSignedPsbtMetadata, XtRequest, XtRequestMetadata, XtRequestSender},
 	utils::{hash_bytes, sub_display_format},
 };
@@ -24,6 +22,7 @@ use cron::Schedule;
 use eyre::Result;
 use miniscript::bitcoin::{Address as BtcAddress, Network, Psbt};
 use std::{str::FromStr, sync::Arc};
+use subxt::ext::subxt_core::utils::AccountId20;
 use tokio::sync::RwLock;
 use tokio_stream::StreamExt;
 
@@ -136,7 +135,7 @@ where
 			}
 
 			let msg = SignedPsbtMessage {
-				authority_id: AccountId20(self.client.address().0 .0),
+				authority_id: AccountId20(self.client.address().0.0),
 				unsigned_psbt: unsigned_psbt.serialize(),
 				signed_psbt: signed_psbt.clone(),
 			};
@@ -182,7 +181,7 @@ where
 			.await?
 			._0;
 
-		Ok(BtcAddress::from_str(&system_vault).unwrap().assume_checked())
+		Ok(BtcAddress::from_str(&system_vault)?.assume_checked())
 	}
 
 	/// Get the current round number.

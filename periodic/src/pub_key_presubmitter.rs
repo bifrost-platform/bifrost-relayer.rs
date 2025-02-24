@@ -1,7 +1,7 @@
 use crate::traits::PeriodicWorker;
 use alloy::{
 	network::AnyNetwork,
-	providers::{fillers::TxFiller, Provider, WalletProvider},
+	providers::{Provider, WalletProvider, fillers::TxFiller},
 	transports::Transport,
 };
 use bitcoincore_rpc::bitcoin::PublicKey;
@@ -15,10 +15,9 @@ use br_primitives::{
 		tx::DEFAULT_CALL_RETRY_INTERVAL_MS,
 	},
 	substrate::{
+		CustomConfig, EthereumSignature, MigrationSequence, Public, VaultKeyPreSubmission,
 		bifrost_runtime,
 		bifrost_runtime::btc_registration_pool::storage::types::service_state::ServiceState,
-		AccountId20, CustomConfig, EthereumSignature, MigrationSequence, Public,
-		VaultKeyPreSubmission,
 	},
 	tx::{
 		VaultKeyPresubmissionMetadata, XtRequest, XtRequestMessage, XtRequestMetadata,
@@ -29,7 +28,7 @@ use br_primitives::{
 use cron::Schedule;
 use eyre::Result;
 use std::{str::FromStr, sync::Arc, time::Duration};
-use subxt::{storage::Storage, OnlineClient};
+use subxt::{OnlineClient, ext::subxt_core::utils::AccountId20, storage::Storage};
 use tokio::sync::RwLock;
 
 const SUB_LOG_TARGET: &str = "pubkey-presubmitter";
@@ -163,7 +162,7 @@ where
 
 		let pool_round = self.get_current_round().await;
 		let msg = VaultKeyPreSubmission {
-			authority_id: AccountId20(self.bfc_client.address().0 .0),
+			authority_id: AccountId20(self.bfc_client.address().0.0),
 			pub_keys: converted_pub_keys.iter().map(|x| Public(*x)).collect(),
 			pool_round,
 		};
@@ -255,16 +254,16 @@ where
 			match storage
 				.fetch(&bifrost_runtime::storage().btc_registration_pool().pre_submitted_pub_keys(
 					self.get_current_round().await,
-					AccountId20(self.bfc_client.address().0 .0),
+					AccountId20(self.bfc_client.address().0.0),
 				))
 				.await
 			{
 				Ok(Some(submitted)) => {
-					if submitted.len() > max_presubmission {
-						return 0;
+					return if submitted.len() > max_presubmission {
+						0
 					} else {
-						return max_presubmission - submitted.len();
-					}
+						max_presubmission - submitted.len()
+					};
 				},
 				Ok(None) => return max_presubmission,
 				Err(_) => {

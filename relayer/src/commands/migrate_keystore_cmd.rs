@@ -64,36 +64,36 @@ impl MigrateKeystoreCmd {
 		let mut password = None;
 		let mut keystore_path = DEFAULT_KEYSTORE_PATH.to_string();
 
-		let mut old_keystore = if let Some(keystore_config) = &config.relayer_config.keystore_config
-		{
-			keystore_path =
-				keystore_config.path.clone().unwrap_or(DEFAULT_KEYSTORE_PATH.to_string());
+		let mut old_keystore = match &config.relayer_config.keystore_config {
+			Some(keystore_config) => {
+				keystore_path =
+					keystore_config.path.clone().unwrap_or(DEFAULT_KEYSTORE_PATH.to_string());
 
-			// 1. Create a new keystore instance with the old credentials.
-			if let Some(key_id) = &keystore_config.kms_key_id {
-				let aws_client = Arc::new(aws_sdk_kms::Client::new(
-					&aws_config::load_defaults(aws_config::BehaviorVersion::latest()).await,
-				));
-				KeypairStorage::new(KmsKeypairStorage::new(
-					keystore_path.clone(),
-					network,
-					key_id.clone(),
-					aws_client,
-				))
-			} else {
-				password = keystore_config.password.clone();
-				KeypairStorage::new(PasswordKeypairStorage::new(
-					keystore_path.clone(),
-					network,
-					password.clone(),
-				))
-			}
-		} else {
-			KeypairStorage::new(PasswordKeypairStorage::new(
+				// 1. Create a new keystore instance with the old credentials.
+				if let Some(key_id) = &keystore_config.kms_key_id {
+					let aws_client = Arc::new(aws_sdk_kms::Client::new(
+						&aws_config::load_defaults(aws_config::BehaviorVersion::latest()).await,
+					));
+					KeypairStorage::new(KmsKeypairStorage::new(
+						keystore_path.clone(),
+						network,
+						key_id.clone(),
+						aws_client,
+					))
+				} else {
+					password = keystore_config.password.clone();
+					KeypairStorage::new(PasswordKeypairStorage::new(
+						keystore_path.clone(),
+						network,
+						password.clone(),
+					))
+				}
+			},
+			_ => KeypairStorage::new(PasswordKeypairStorage::new(
 				DEFAULT_KEYSTORE_PATH.to_string(),
 				network,
 				None,
-			))
+			)),
 		};
 
 		// 2. Load the keys from the current (old) keystore.

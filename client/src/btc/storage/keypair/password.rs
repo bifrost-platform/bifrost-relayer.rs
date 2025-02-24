@@ -50,39 +50,41 @@ impl KeypairStorageT for PasswordKeypairStorage {
 	}
 
 	async fn encrypt_key(&self, key: &[u8]) -> Vec<u8> {
-		if let Some(secret) = &self.secret {
-			// Generate a random nonce for AES-GCM
-			let nonce = OsRng.gen::<[u8; 12]>();
+		match &self.secret {
+			Some(secret) => {
+				// Generate a random nonce for AES-GCM
+				let nonce = rand::rng().random::<[u8; 12]>();
 
-			// Encrypt the private key
-			let cipher = Aes256Gcm::new(Key::<Aes256Gcm>::from_slice(
-				keccak256(secret.expose_secret().as_bytes()).as_slice(),
-			));
-			let ciphertext = cipher.encrypt(Nonce::from_slice(&nonce), key.as_ref()).unwrap();
+				// Encrypt the private key
+				let cipher = Aes256Gcm::new(Key::<Aes256Gcm>::from_slice(
+					keccak256(secret.expose_secret().as_bytes()).as_slice(),
+				));
+				let ciphertext = cipher.encrypt(Nonce::from_slice(&nonce), key.as_ref()).unwrap();
 
-			// Combine nonce + ciphertext for storage
-			let mut encrypted_key = Vec::with_capacity(nonce.len() + ciphertext.len());
-			encrypted_key.extend_from_slice(&nonce);
-			encrypted_key.extend_from_slice(&ciphertext);
+				// Combine nonce + ciphertext for storage
+				let mut encrypted_key = Vec::with_capacity(nonce.len() + ciphertext.len());
+				encrypted_key.extend_from_slice(&nonce);
+				encrypted_key.extend_from_slice(&ciphertext);
 
-			encrypted_key
-		} else {
-			key.to_vec()
+				encrypted_key
+			},
+			_ => key.to_vec(),
 		}
 	}
 
 	async fn decrypt_key(&self, key: &[u8]) -> Vec<u8> {
-		if let Some(secret) = &self.secret {
-			let nonce = &key[0..12];
-			let ciphertext = &key[12..];
+		match &self.secret {
+			Some(secret) => {
+				let nonce = &key[0..12];
+				let ciphertext = &key[12..];
 
-			// Decrypt the private key
-			let cipher = Aes256Gcm::new(Key::<Aes256Gcm>::from_slice(
-				keccak256(secret.expose_secret().as_bytes()).as_slice(),
-			));
-			cipher.decrypt(Nonce::from_slice(nonce), ciphertext.as_ref()).unwrap()
-		} else {
-			key.to_vec()
+				// Decrypt the private key
+				let cipher = Aes256Gcm::new(Key::<Aes256Gcm>::from_slice(
+					keccak256(secret.expose_secret().as_bytes()).as_slice(),
+				));
+				cipher.decrypt(Nonce::from_slice(nonce), ciphertext.as_ref()).unwrap()
+			},
+			_ => key.to_vec(),
 		}
 	}
 

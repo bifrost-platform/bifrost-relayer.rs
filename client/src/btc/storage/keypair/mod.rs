@@ -6,16 +6,16 @@ pub use password::PasswordKeypairStorage;
 
 use crate::btc::LOG_TARGET;
 use aes_gcm::{
-	aead::{Aead, KeyInit},
 	Aes256Gcm, Key, Nonce,
+	aead::{Aead, KeyInit},
 };
 use alloy::primitives::keccak256;
-use aws_sdk_kms::{primitives::Blob, Client as KmsClient};
+use aws_sdk_kms::{Client as KmsClient, primitives::Blob};
 use bitcoincore_rpc::bitcoin::{
+	PrivateKey, PublicKey,
 	key::Secp256k1,
 	psbt::{GetKey, GetKeyError, KeyRequest},
 	secp256k1::Signing,
-	PrivateKey, PublicKey,
 };
 use br_primitives::{
 	constants::errors::{
@@ -26,19 +26,19 @@ use br_primitives::{
 };
 use eyre::Result;
 use miniscript::bitcoin::{
-	psbt::{SigningErrors, SigningKeys},
 	Network, Psbt,
+	psbt::{SigningErrors, SigningKeys},
 };
-use rand::{rngs::OsRng, Rng};
+use rand::Rng;
 use sc_keystore::{Keystore, LocalKeystore};
 use sp_application_crypto::{
-	ecdsa::{AppPair, AppPublic},
 	Pair,
+	ecdsa::{AppPair, AppPublic},
 };
 use sp_core::{
+	ByteArray,
 	crypto::{ExposeSecret, SecretString, Zeroize},
 	testing::ECDSA,
-	ByteArray,
 };
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -229,10 +229,10 @@ impl KeypairStorageT for KeypairStorage {
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use miniscript::bitcoin::{psbt::KeyRequest, Network, PublicKey};
+	use miniscript::bitcoin::{Network, PublicKey, psbt::KeyRequest};
 	use sc_keystore::Keystore;
 	use sp_application_crypto::Pair;
-	use sp_core::{crypto::SecretString, testing::ECDSA, ByteArray};
+	use sp_core::{ByteArray, crypto::SecretString, testing::ECDSA};
 	use std::{str::FromStr as _, sync::Arc};
 
 	#[tokio::test]

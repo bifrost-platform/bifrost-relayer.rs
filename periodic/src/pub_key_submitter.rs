@@ -3,7 +3,7 @@ use std::{str::FromStr, sync::Arc, time::Duration};
 use alloy::{
 	network::AnyNetwork,
 	primitives::{Address, Bytes},
-	providers::{fillers::TxFiller, Provider, WalletProvider},
+	providers::{Provider, WalletProvider, fillers::TxFiller},
 	transports::Transport,
 };
 use bitcoincore_rpc::bitcoin::PublicKey;
@@ -15,16 +15,17 @@ use br_primitives::{
 	constants::{errors::INVALID_PERIODIC_SCHEDULE, schedule::PUB_KEY_SUBMITTER_SCHEDULE},
 	contracts::registration_pool::RegistrationPoolInstance,
 	substrate::{
+		EthereumSignature, MigrationSequence, Public, VaultKeySubmission,
 		bifrost_runtime::{
 			self, btc_registration_pool::storage::types::service_state::ServiceState,
 		},
-		AccountId20, EthereumSignature, MigrationSequence, Public, VaultKeySubmission,
 	},
 	tx::{SubmitVaultKeyMetadata, XtRequest, XtRequestMessage, XtRequestMetadata, XtRequestSender},
 	utils::sub_display_format,
 };
 use cron::Schedule;
 use eyre::Result;
+use subxt::ext::subxt_core::utils::AccountId20;
 use tokio::{sync::RwLock, time::sleep};
 use tokio_stream::StreamExt;
 
@@ -157,8 +158,8 @@ where
 		};
 
 		let msg = VaultKeySubmission {
-			authority_id: AccountId20(self.client.address().0 .0),
-			who: AccountId20(who.0 .0),
+			authority_id: AccountId20(self.client.address().0.0),
+			who: AccountId20(who.0.0),
 			pub_key: Public(converted_pub_key),
 			pool_round,
 		};
