@@ -5,7 +5,10 @@ use alloy::{
 	providers::{fillers::TxFiller, Provider, WalletProvider},
 	transports::Transport,
 };
-use br_client::{btc::storage::keypair::KeypairStorage, eth::EthClient};
+use br_client::{
+	btc::storage::keypair::{KeypairStorage, KeypairStorageT},
+	eth::EthClient,
+};
 use br_primitives::{
 	constants::{
 		errors::INVALID_PROVIDER_URL, schedule::MIGRATION_DETECTOR_SCHEDULE,
@@ -33,7 +36,7 @@ where
 	sub_client: Option<OnlineClient<CustomConfig>>,
 	bfc_client: Arc<EthClient<F, P, T>>,
 	migration_sequence: Arc<RwLock<MigrationSequence>>,
-	keypair_storage: Arc<RwLock<KeypairStorage>>,
+	keypair_storage: KeypairStorage,
 	schedule: Schedule,
 }
 
@@ -47,7 +50,7 @@ where
 	pub fn new(
 		bfc_client: Arc<EthClient<F, P, T>>,
 		migration_sequence: Arc<RwLock<MigrationSequence>>,
-		keypair_storage: Arc<RwLock<KeypairStorage>>,
+		keypair_storage: KeypairStorage,
 	) -> Self {
 		Self {
 			sub_client: None,
@@ -76,14 +79,10 @@ where
 			ServiceState::Normal
 			| MigrationSequence::SetExecutiveMembers
 			| ServiceState::UTXOTransfer => {
-				self.keypair_storage.write().await.load(self.get_current_round().await).await;
+				self.keypair_storage.load(self.get_current_round().await).await;
 			},
 			ServiceState::PrepareNextSystemVault => {
-				self.keypair_storage
-					.write()
-					.await
-					.load(self.get_current_round().await + 1)
-					.await;
+				self.keypair_storage.load(self.get_current_round().await + 1).await;
 			},
 		}
 	}
@@ -172,29 +171,17 @@ where
 				match *write_lock {
 					MigrationSequence::Normal | MigrationSequence::SetExecutiveMembers => {
 						if service_state == ServiceState::PrepareNextSystemVault {
-							self.keypair_storage
-								.write()
-								.await
-								.load(self.get_current_round().await + 1)
-								.await;
+							self.keypair_storage.load(self.get_current_round().await + 1).await;
 						}
 					},
 					MigrationSequence::PrepareNextSystemVault => {
 						if service_state == ServiceState::UTXOTransfer {
-							self.keypair_storage
-								.write()
-								.await
-								.load(self.get_current_round().await)
-								.await;
+							self.keypair_storage.load(self.get_current_round().await).await;
 						}
 					},
 					MigrationSequence::UTXOTransfer => {
 						if service_state == ServiceState::Normal {
-							self.keypair_storage
-								.write()
-								.await
-								.load(self.get_current_round().await)
-								.await;
+							self.keypair_storage.load(self.get_current_round().await).await;
 						}
 					},
 				}

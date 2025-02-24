@@ -1,19 +1,14 @@
 use alloy::{
 	dyn_abi::DynSolValue,
-	primitives::{keccak256, Address, PrimitiveSignature, B256, U256},
+	primitives::{Address, B256, PrimitiveSignature, U256, keccak256},
 };
 use k256::{ecdsa::VerifyingKey, elliptic_curve::sec1::ToEncodedPoint};
-use rand::Rng as _;
 use sha3::{Digest, Keccak256};
 
 use crate::substrate::{EthereumSignature, Signature};
 
 pub fn sub_display_format(log_target: &str) -> String {
 	format!("{:<019}", log_target)
-}
-
-pub fn generate_delay() -> u64 {
-	rand::thread_rng().gen_range(0..=12000)
 }
 
 /// Encodes the given round and new relayers to bytes.

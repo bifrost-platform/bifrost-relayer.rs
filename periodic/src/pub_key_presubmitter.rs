@@ -1,21 +1,23 @@
 use crate::traits::PeriodicWorker;
 use alloy::{
 	network::AnyNetwork,
-	providers::{fillers::TxFiller, Provider, WalletProvider},
+	providers::{Provider, WalletProvider, fillers::TxFiller},
 	transports::Transport,
 };
 use bitcoincore_rpc::bitcoin::PublicKey;
-use br_client::{btc::storage::keypair::KeypairStorage, eth::EthClient};
+use br_client::{
+	btc::storage::keypair::{KeypairStorage, KeypairStorageT},
+	eth::EthClient,
+};
 use br_primitives::{
 	constants::{
 		errors::INVALID_PROVIDER_URL, schedule::PRESUBMISSION_SCHEDULE,
 		tx::DEFAULT_CALL_RETRY_INTERVAL_MS,
 	},
 	substrate::{
+		CustomConfig, EthereumSignature, MigrationSequence, Public, VaultKeyPreSubmission,
 		bifrost_runtime,
 		bifrost_runtime::btc_registration_pool::storage::types::service_state::ServiceState,
-		AccountId20, CustomConfig, EthereumSignature, MigrationSequence, Public,
-		VaultKeyPreSubmission,
 	},
 	tx::{
 		VaultKeyPresubmissionMetadata, XtRequest, XtRequestMessage, XtRequestMetadata,
@@ -26,7 +28,7 @@ use br_primitives::{
 use cron::Schedule;
 use eyre::Result;
 use std::{str::FromStr, sync::Arc, time::Duration};
-use subxt::{storage::Storage, OnlineClient};
+use subxt::{OnlineClient, ext::subxt_core::utils::AccountId20, storage::Storage};
 use tokio::sync::RwLock;
 
 const SUB_LOG_TARGET: &str = "pubkey-presubmitter";
@@ -43,7 +45,7 @@ where
 	/// The unsigned transaction message sender.
 	xt_request_sender: Arc<XtRequestSender>,
 	/// The public and private keypair local storage.
-	keypair_storage: Arc<RwLock<KeypairStorage>>,
+	keypair_storage: KeypairStorage,
 	/// The migration sequence.
 	migration_sequence: Arc<RwLock<MigrationSequence>>,
 	/// The time schedule that represents when check pending registrations.
@@ -79,8 +81,8 @@ where
 						n,
 					);
 
-					let (call, metadata) =
-						self.build_unsigned_tx(self.create_pub_keys(n).await).await?;
+					let keys = self.create_pub_keys(n).await;
+					let (call, metadata) = self.build_unsigned_tx(keys).await?;
 					self.request_send_transaction(call, metadata);
 				}
 			}
@@ -99,7 +101,7 @@ where
 	pub fn new(
 		bfc_client: Arc<EthClient<F, P, T>>,
 		xt_request_sender: Arc<XtRequestSender>,
-		keypair_storage: Arc<RwLock<KeypairStorage>>,
+		keypair_storage: KeypairStorage,
 		migration_sequence: Arc<RwLock<MigrationSequence>>,
 	) -> Self {
 		Self {
@@ -159,7 +161,7 @@ where
 
 		let pool_round = self.get_current_round().await;
 		let msg = VaultKeyPreSubmission {
-			authority_id: AccountId20(self.bfc_client.address().0 .0),
+			authority_id: AccountId20(self.bfc_client.address().0.0),
 			pub_keys: converted_pub_keys.iter().map(|x| Public(*x)).collect(),
 			pool_round,
 		};
@@ -213,11 +215,10 @@ where
 	}
 
 	/// Create public key * amount
-	async fn create_pub_keys(&self, amount: usize) -> Vec<PublicKey> {
+	async fn create_pub_keys(&mut self, amount: usize) -> Vec<PublicKey> {
 		let mut res = Vec::new();
-		let mut keypair_storage = self.keypair_storage.write().await;
 		for _ in 0..amount {
-			let key = keypair_storage.create_new_keypair().await;
+			let key = self.keypair_storage.create_new_keypair().await;
 			res.push(key);
 		}
 		res
@@ -252,16 +253,16 @@ where
 			match storage
 				.fetch(&bifrost_runtime::storage().btc_registration_pool().pre_submitted_pub_keys(
 					self.get_current_round().await,
-					AccountId20(self.bfc_client.address().0 .0),
+					AccountId20(self.bfc_client.address().0.0),
 				))
 				.await
 			{
 				Ok(Some(submitted)) => {
-					if submitted.len() > max_presubmission {
-						return 0;
+					return if submitted.len() > max_presubmission {
+						0
 					} else {
-						return max_presubmission - submitted.len();
-					}
+						max_presubmission - submitted.len()
+					};
 				},
 				Ok(None) => return max_presubmission,
 				Err(_) => {

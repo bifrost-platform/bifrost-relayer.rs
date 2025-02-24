@@ -138,19 +138,18 @@ where
 		let from = self.waiting_block;
 		let to = from.saturating_add(self.client.metadata.get_logs_batch_size.saturating_sub(1u64));
 
-		let filter = if let Some(bitcoin_socket) = &self.client.protocol_contracts.bitcoin_socket {
-			Filter::new()
+		let filter = match &self.client.protocol_contracts.bitcoin_socket {
+			Some(bitcoin_socket) => Filter::new()
 				.from_block(BlockNumber::from(from))
 				.to_block(BlockNumber::from(to))
 				.address(vec![
 					*self.client.protocol_contracts.socket.address(),
 					*bitcoin_socket.address(),
-				])
-		} else {
-			Filter::new()
+				]),
+			_ => Filter::new()
 				.from_block(BlockNumber::from(from))
 				.to_block(BlockNumber::from(to))
-				.address(*self.client.protocol_contracts.socket.address())
+				.address(*self.client.protocol_contracts.socket.address()),
 		};
 
 		let target_logs = self.client.get_logs(&filter).await?;

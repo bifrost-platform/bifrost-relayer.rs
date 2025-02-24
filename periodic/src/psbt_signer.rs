@@ -1,19 +1,20 @@
 use crate::traits::PeriodicWorker;
 use alloy::{
 	network::AnyNetwork,
-	primitives::{keccak256, Bytes, B256},
-	providers::{fillers::TxFiller, Provider, WalletProvider},
+	primitives::{B256, Bytes, keccak256},
+	providers::{Provider, WalletProvider, fillers::TxFiller},
 	transports::Transport,
 };
 use br_client::{
-	btc::{handlers::XtRequester, storage::keypair::KeypairStorage},
+	btc::{
+		handlers::XtRequester,
+		storage::keypair::{KeypairStorage, KeypairStorageT},
+	},
 	eth::EthClient,
 };
 use br_primitives::{
 	constants::{errors::INVALID_PERIODIC_SCHEDULE, schedule::PSBT_SIGNER_SCHEDULE},
-	substrate::{
-		bifrost_runtime, AccountId20, EthereumSignature, MigrationSequence, SignedPsbtMessage,
-	},
+	substrate::{EthereumSignature, MigrationSequence, SignedPsbtMessage, bifrost_runtime},
 	tx::{SubmitSignedPsbtMetadata, XtRequest, XtRequestMetadata, XtRequestSender},
 	utils::{hash_bytes, sub_display_format},
 };
@@ -21,6 +22,7 @@ use cron::Schedule;
 use eyre::Result;
 use miniscript::bitcoin::{Address as BtcAddress, Network, Psbt};
 use std::{str::FromStr, sync::Arc};
+use subxt::ext::subxt_core::utils::AccountId20;
 use tokio::sync::RwLock;
 use tokio_stream::StreamExt;
 
@@ -38,7 +40,7 @@ where
 	/// The unsigned transaction message sender.
 	xt_request_sender: Arc<XtRequestSender>,
 	/// The public and private keypair local storage.
-	keypair_storage: Arc<RwLock<KeypairStorage>>,
+	keypair_storage: KeypairStorage,
 	/// The migration sequence.
 	migration_sequence: Arc<RwLock<MigrationSequence>>,
 	/// The Bitcoin network.
@@ -57,7 +59,7 @@ where
 	pub fn new(
 		client: Arc<EthClient<F, P, T>>,
 		xt_request_sender: Arc<XtRequestSender>,
-		keypair_storage: Arc<RwLock<KeypairStorage>>,
+		keypair_storage: KeypairStorage,
 		migration_sequence: Arc<RwLock<MigrationSequence>>,
 		btc_network: Network,
 	) -> Self {
@@ -119,7 +121,7 @@ where
 		};
 
 		let mut psbt = unsigned_psbt.clone();
-		if self.keypair_storage.read().await.sign_psbt(&mut psbt) {
+		if self.keypair_storage.sign_psbt(&mut psbt).await {
 			let signed_psbt = psbt.serialize();
 
 			if self
@@ -133,7 +135,7 @@ where
 			}
 
 			let msg = SignedPsbtMessage {
-				authority_id: AccountId20(self.client.address().0 .0),
+				authority_id: AccountId20(self.client.address().0.0),
 				unsigned_psbt: unsigned_psbt.serialize(),
 				signed_psbt: signed_psbt.clone(),
 			};
@@ -179,7 +181,7 @@ where
 			.await?
 			._0;
 
-		Ok(BtcAddress::from_str(&system_vault).unwrap().assume_checked())
+		Ok(BtcAddress::from_str(&system_vault)?.assume_checked())
 	}
 
 	/// Get the current round number.

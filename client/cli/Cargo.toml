@@ -10,20 +10,21 @@ repository = { workspace = true }
 
 [dependencies]
 # General
-log = { workspace = true }
 sentry = { workspace = true }
-chrono = { workspace = true }
 futures = { workspace = true }
-thiserror = { workspace = true }
 serde_yaml = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
-tokio = { workspace = true, features = ["signal", "rt-multi-thread", "parking_lot"] }
+tokio = { workspace = true, features = [
+	"signal",
+	"rt-multi-thread",
+	"parking_lot",
+] }
 
 # Bifrost Relayer
-br-client = { path = "../../client", default-features = false }
 br-primitives = { path = "../../primitives", default-features = false }
 br-metrics = { path = "../../metrics", default-features = false }
 
 # Substrate
 sc-service = { workspace = true }
 sc-utils = { workspace = true }
+sc-cli = { workspace = true }

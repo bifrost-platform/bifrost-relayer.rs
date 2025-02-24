@@ -7,7 +7,6 @@ use br_primitives::{
 	contracts::authority::BfcStaking::round_meta_data,
 	eth::{AggregatorContracts, GasCoefficient, ProtocolContracts, ProviderMetadata},
 	tx::TxRequestMetadata,
-	utils::generate_delay,
 };
 
 use alloy::{
@@ -30,6 +29,7 @@ use alloy::{
 };
 use br_primitives::utils::sub_display_format;
 use eyre::{eyre, Result};
+use rand::Rng as _;
 use sc_service::SpawnTaskHandle;
 use std::{
 	cmp::max,
@@ -165,20 +165,21 @@ where
 
 		let current_block = self.get_block(block_number.into(), true.into()).await?;
 		let prev_block = self.get_block(prev_block_number.into(), true.into()).await?;
-		if let (Some(current_block), Some(prev_block)) = (current_block, prev_block) {
-			let current_timestamp = current_block.header.timestamp;
-			let prev_timestamp = prev_block.header.timestamp;
-			let timestamp_diff = current_timestamp.checked_sub(prev_timestamp).unwrap() as f64;
-			let avg_block_time = timestamp_diff / block_diff as f64;
+		match (current_block, prev_block) {
+			(Some(current_block), Some(prev_block)) => {
+				let current_timestamp = current_block.header.timestamp;
+				let prev_timestamp = prev_block.header.timestamp;
+				let timestamp_diff = current_timestamp.checked_sub(prev_timestamp).unwrap() as f64;
+				let avg_block_time = timestamp_diff / block_diff as f64;
 
-			let blocks = round_offset
-				.checked_mul(round_info.round_length.saturating_to::<u64>())
-				.unwrap();
-			let blocks_to_native_chain_time = blocks.checked_mul(NATIVE_BLOCK_TIME).unwrap();
-			let bootstrap_offset_height = blocks_to_native_chain_time as f64 / avg_block_time;
-			Ok(bootstrap_offset_height.ceil() as u64)
-		} else {
-			Err(eyre!(PROVIDER_INTERNAL_ERROR))
+				let blocks = round_offset
+					.checked_mul(round_info.round_length.saturating_to::<u64>())
+					.unwrap();
+				let blocks_to_native_chain_time = blocks.checked_mul(NATIVE_BLOCK_TIME).unwrap();
+				let bootstrap_offset_height = blocks_to_native_chain_time as f64 / avg_block_time;
+				Ok(bootstrap_offset_height.ceil() as u64)
+			},
+			_ => Err(eyre!(PROVIDER_INTERNAL_ERROR)),
 		}
 	}
 
@@ -309,7 +310,8 @@ where
 			request.max_priority_fee_per_gas = Some(0);
 		} else {
 			// to avoid duplicate(will revert) external networks transactions
-			sleep(Duration::from_millis(generate_delay())).await;
+			let duration = Duration::from_millis(rand::rng().random_range(0..=12000));
+			sleep(duration).await;
 
 			if !self.metadata.eip1559 {
 				request.gas_price = Some(self.get_gas_price().await?);

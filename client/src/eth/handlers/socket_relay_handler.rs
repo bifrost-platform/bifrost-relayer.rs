@@ -140,11 +140,12 @@ where
 
 	#[inline]
 	fn is_target_contract(&self, log: &Log) -> bool {
-		if let Some(bitcoin_socket) = self.client.protocol_contracts.bitcoin_socket.as_ref() {
-			log.address() == *self.client.protocol_contracts.socket.address()
-				|| log.address() == *bitcoin_socket.address()
-		} else {
-			log.address() == *self.client.protocol_contracts.socket.address()
+		match self.client.protocol_contracts.bitcoin_socket.as_ref() {
+			Some(bitcoin_socket) => {
+				log.address() == *self.client.protocol_contracts.socket.address()
+					|| log.address() == *bitcoin_socket.address()
+			},
+			_ => log.address() == *self.client.protocol_contracts.socket.address(),
 		}
 	}
 
@@ -535,17 +536,20 @@ where
 		if let Some(bootstrap_config) = &self.bootstrap_shared_data.bootstrap_config {
 			let round_info = if self.client.metadata.is_native {
 				self.client.protocol_contracts.authority.round_info().call().await?._0
-			} else if let Some((_id, native_client)) =
-				self.system_clients.iter().find(|(_id, client)| client.metadata.is_native)
-			{
-				native_client.protocol_contracts.authority.round_info().call().await?._0
 			} else {
-				panic!(
-					"[{}]-[{}] {}",
-					self.client.get_chain_name(),
-					SUB_LOG_TARGET,
-					INVALID_BIFROST_NATIVENESS,
-				);
+				match self.system_clients.iter().find(|(_id, client)| client.metadata.is_native) {
+					Some((_id, native_client)) => {
+						native_client.protocol_contracts.authority.round_info().call().await?._0
+					},
+					_ => {
+						panic!(
+							"[{}]-[{}] {}",
+							self.client.get_chain_name(),
+							SUB_LOG_TARGET,
+							INVALID_BIFROST_NATIVENESS,
+						);
+					},
+				}
 			};
 
 			let bootstrap_offset_height = self
@@ -565,23 +569,21 @@ where
 				let chunk_to_block =
 					std::cmp::min(from_block + BOOTSTRAP_BLOCK_CHUNK_SIZE - 1, to_block);
 
-				let filter =
-					if let Some(bitcoin_socket) = &self.client.protocol_contracts.bitcoin_socket {
-						Filter::new()
-							.address(vec![
-								*self.client.protocol_contracts.socket.address(),
-								*bitcoin_socket.address(),
-							])
-							.event_signature(Socket::SIGNATURE_HASH)
-							.from_block(from_block)
-							.to_block(chunk_to_block)
-					} else {
-						Filter::new()
-							.address(*self.client.protocol_contracts.socket.address())
-							.event_signature(Socket::SIGNATURE_HASH)
-							.from_block(from_block)
-							.to_block(chunk_to_block)
-					};
+				let filter = match &self.client.protocol_contracts.bitcoin_socket {
+					Some(bitcoin_socket) => Filter::new()
+						.address(vec![
+							*self.client.protocol_contracts.socket.address(),
+							*bitcoin_socket.address(),
+						])
+						.event_signature(Socket::SIGNATURE_HASH)
+						.from_block(from_block)
+						.to_block(chunk_to_block),
+					_ => Filter::new()
+						.address(*self.client.protocol_contracts.socket.address())
+						.event_signature(Socket::SIGNATURE_HASH)
+						.from_block(from_block)
+						.to_block(chunk_to_block),
+				};
 				let target_logs_chunk = self.client.get_logs(&filter).await?;
 				logs.extend(target_logs_chunk);
 
