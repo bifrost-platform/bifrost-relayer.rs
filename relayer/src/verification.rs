@@ -2,10 +2,8 @@ use br_primitives::{
 	cli::Configuration,
 	constants::{
 		cli::{
-			DEFAULT_BOOTSTRAP_ROUND_OFFSET, DEFAULT_DUPLICATE_CONFIRM_DELAY_MS,
-			DEFAULT_ESCALATE_PERCENTAGE, DEFAULT_GET_LOGS_BATCH_SIZE, MAX_BLOCK_CONFIRMATIONS,
-			MAX_BOOTSTRAP_ROUND_OFFSET, MAX_CALL_INTERVAL_MS, MAX_DUPLICATE_CONFIRM_DELAY_MS,
-			MAX_ESCALATE_PERCENTAGE, MIN_GET_LOGS_BATCH_SIZE,
+			DEFAULT_BOOTSTRAP_ROUND_OFFSET, DEFAULT_GET_LOGS_BATCH_SIZE, MAX_BLOCK_CONFIRMATIONS,
+			MAX_BOOTSTRAP_ROUND_OFFSET, MAX_CALL_INTERVAL_MS, MIN_GET_LOGS_BATCH_SIZE,
 		},
 		errors::PARAMETER_OUT_OF_RANGE,
 	},
@@ -47,26 +45,6 @@ pub(super) fn assert_configuration_validity(config: &Configuration) {
 			"evm_provider.block_confirmations",
 			MAX_BLOCK_CONFIRMATIONS
 		);
-		if let Some(escalate_percentage) = evm_provider.escalate_percentage {
-			assert!(
-				(f64::from(0)..=MAX_ESCALATE_PERCENTAGE).contains(&escalate_percentage),
-				"{} [parameter: {}, range: 0…{}, default: {}]",
-				PARAMETER_OUT_OF_RANGE,
-				"evm_provider.escalate_percentage",
-				MAX_ESCALATE_PERCENTAGE,
-				DEFAULT_ESCALATE_PERCENTAGE
-			);
-		}
-		if let Some(duplicate_confirm_delay) = evm_provider.duplicate_confirm_delay {
-			assert!(
-				(0..=MAX_DUPLICATE_CONFIRM_DELAY_MS).contains(&duplicate_confirm_delay),
-				"{} [parameter: {}, range: 0…{}, default: {}]",
-				PARAMETER_OUT_OF_RANGE,
-				"evm_provider.duplicate_confirm_delay",
-				MAX_DUPLICATE_CONFIRM_DELAY_MS,
-				DEFAULT_DUPLICATE_CONFIRM_DELAY_MS
-			);
-		}
 		if let Some(get_logs_batch_size) = evm_provider.get_logs_batch_size {
 			let max_get_logs_batch_size =
 				MAX_CALL_INTERVAL_MS.saturating_div(evm_provider.call_interval);

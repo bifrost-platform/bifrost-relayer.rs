@@ -28,7 +28,7 @@ use br_client::{
 	eth::{
 		events::EventManager,
 		handlers::{RoundupRelayHandler, SocketRelayHandler},
-		EthClient,
+		ClientMap, EthClient,
 	},
 	substrate::tx::UnsignedTransactionManager,
 };

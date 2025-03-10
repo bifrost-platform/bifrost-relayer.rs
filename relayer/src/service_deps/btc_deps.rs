@@ -28,7 +28,7 @@ where
 {
 	pub fn new(
 		config: &Configuration,
-		keypair_storage: Arc<RwLock<KeypairStorage>>,
+		keypair_storage: KeypairStorage,
 		bootstrap_shared_data: BootstrapSharedData,
 		substrate_deps: &SubstrateDeps<F, P, T>,
 		migration_sequence: Arc<RwLock<MigrationSequence>>,
@@ -36,35 +36,24 @@ where
 		task_manager: &TaskManager,
 		debug_mode: bool,
 	) -> Self {
+		let btc_provider = &config.relayer_config.btc_provider;
 		let bootstrap_shared_data = Arc::new(bootstrap_shared_data.clone());
-		let network = Network::from_core_arg(&config.relayer_config.btc_provider.chain)
-			.expect(INVALID_BITCOIN_NETWORK);
+		let network = Network::from_core_arg(&btc_provider.chain).expect(INVALID_BITCOIN_NETWORK);
 
-		let auth = match (
-			config.relayer_config.btc_provider.username.clone(),
-			config.relayer_config.btc_provider.password.clone(),
-		) {
+		let auth = match (btc_provider.username.clone(), btc_provider.password.clone()) {
 			(Some(username), Some(password)) => Auth::UserPass(username, password),
 			_ => Auth::None,
 		};
-		let btc_client = BitcoinClient::new(
-			&config.relayer_config.btc_provider.provider,
-			auth,
-			config.relayer_config.btc_provider.wallet.clone(),
-			Some(60),
-		)
-		.expect(INVALID_PROVIDER_URL);
+		let btc_client =
+			BitcoinClient::new(&btc_provider.provider, auth, btc_provider.wallet.clone(), Some(60))
+				.expect(INVALID_PROVIDER_URL);
 
 		let block_manager = BlockManager::new(
 			btc_client.clone(),
 			bfc_client.clone(),
 			bootstrap_shared_data.clone(),
-			config.relayer_config.btc_provider.call_interval,
-			config
-				.relayer_config
-				.btc_provider
-				.block_confirmations
-				.unwrap_or(DEFAULT_BITCOIN_BLOCK_CONFIRMATIONS),
+			btc_provider.call_interval,
+			btc_provider.block_confirmations.unwrap_or(DEFAULT_BITCOIN_BLOCK_CONFIRMATIONS),
 		);
 		let inbound = InboundHandler::new(
 			bfc_client.clone(),

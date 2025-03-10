@@ -1,7 +1,7 @@
 use alloy::primitives::ChainId;
 use secrecy::SecretString;
 use serde::Deserialize;
-use std::{borrow::Cow, fmt::Display};
+use std::borrow::Cow;
 pub type Result<T> = std::result::Result<T, Error>;
 
 /// Error type for the CLI.
@@ -38,9 +38,11 @@ pub struct Configuration {
 #[derive(Debug, Clone, Deserialize)]
 pub struct RelayerConfig {
 	/// System config
-	pub system: SystemConfig,
+	pub system: Option<SystemConfig>,
 	/// Signer config
 	pub signer_config: SignerConfig,
+	/// Keystore config
+	pub keystore_config: Option<KeystoreConfig>,
 	/// EVM configs
 	pub evm_providers: Vec<EVMProvider>,
 	/// BTC configs
@@ -57,10 +59,6 @@ pub struct RelayerConfig {
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct SystemConfig {
-	/// Path of the keystore. (default: `./keys`)
-	pub keystore_path: Option<String>,
-	/// Password of the keystore. (default: `None`)
-	pub keystore_password: Option<SecretString>,
 	/// Debug mode enabled if set to `true`.
 	pub debug_mode: Option<bool>,
 }
@@ -83,20 +81,6 @@ pub struct EVMProvider {
 	pub is_relay_target: bool,
 	/// If true, enables Eip1559. (default: false)
 	pub eip1559: Option<bool>,
-	/// The minimum value use for gas_price. (default: 0, unit: WEI)
-	pub min_gas_price: Option<u64>,
-	/// The minimum priority fee required. (default: 0, unit: WEI)
-	pub min_priority_fee: Option<u64>,
-	/// Gas price increase percentage on gas price escalation such as when handling tx
-	/// replacements. (default: 15.0)
-	pub escalate_percentage: Option<f64>,
-	/// The flag whether if the gas price will be initially escalated. The `escalate_percentage`
-	/// will be used on escalation. This will only have effect on legacy transactions. (default:
-	/// false)
-	pub is_initially_escalated: Option<bool>,
-	/// If first relay transaction is stuck in mempool after waiting for this amount of time(ms),
-	/// ignore duplicate prevent logic. (default: 12s)
-	pub duplicate_confirm_delay: Option<u64>,
 	/// The batch size (=block range) used when requesting `eth_getLogs()`. If increased the RPC
 	/// request ratio will be reduced, however event processing will be delayed regarded to the
 	/// configured batch size. Default size is set to 1, which means it will be requested on every
@@ -158,16 +142,6 @@ pub enum HandlerType {
 	Roundup,
 }
 
-impl Display for HandlerType {
-	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-		let str = match *self {
-			HandlerType::Socket => "Socket",
-			HandlerType::Roundup => "Roundup",
-		};
-		write!(f, "{}", str)
-	}
-}
-
 #[derive(Debug, Clone, Deserialize)]
 pub struct HandlerConfig {
 	/// Handle type
@@ -216,4 +190,14 @@ pub struct SignerConfig {
 	pub kms_key_id: Option<String>,
 	/// The private key of the relayer. (to use LocalSigner)
 	pub private_key: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct KeystoreConfig {
+	/// Path of the keystore. (default: `./keys`)
+	pub path: Option<String>,
+	/// Password of the keystore. (default: `None`)
+	pub password: Option<SecretString>,
+	/// AWS KMS key ID. (to use keystore encryption/decryption)
+	pub kms_key_id: Option<String>,
 }

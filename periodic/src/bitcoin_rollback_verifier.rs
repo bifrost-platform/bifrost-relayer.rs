@@ -2,14 +2,14 @@ use std::{collections::BTreeMap, str::FromStr, sync::Arc, time::Duration};
 
 use alloy::{
 	network::AnyNetwork,
-	primitives::{keccak256, Address as EvmAddress, Bytes, B256},
-	providers::{fillers::TxFiller, Provider, WalletProvider},
+	primitives::{Address as EvmAddress, B256, Bytes, keccak256},
+	providers::{Provider, WalletProvider, fillers::TxFiller},
 	transports::Transport,
 };
 use bitcoincore_rpc::{
-	bitcoin::{hashes::sha256d::Hash, Address, Amount, Psbt, Txid},
-	bitcoincore_rpc_json::GetRawTransactionResult,
 	Client as BtcClient, Error, RpcApi,
+	bitcoin::{Address, Amount, Psbt, Txid, hashes::sha256d::Hash},
+	bitcoincore_rpc_json::GetRawTransactionResult,
 };
 use br_client::{btc::handlers::XtRequester, eth::EthClient};
 use br_primitives::{
@@ -19,7 +19,7 @@ use br_primitives::{
 		tx::{DEFAULT_CALL_RETRIES, DEFAULT_CALL_RETRY_INTERVAL_MS},
 	},
 	contracts::socket_queue::{SocketQueueContract::rollback_requestReturn, SocketQueueInstance},
-	substrate::{bifrost_runtime, AccountId20, EthereumSignature, RollbackPollMessage},
+	substrate::{EthereumSignature, RollbackPollMessage, bifrost_runtime},
 	tx::{SubmitRollbackPollMetadata, XtRequest, XtRequestMetadata, XtRequestSender},
 	utils::sub_display_format,
 };
@@ -27,7 +27,7 @@ use cron::Schedule;
 use eyre::Result;
 use serde::Deserialize;
 use serde_json::Value;
-use subxt::utils::H256;
+use subxt::{ext::subxt_core::utils::AccountId20, utils::H256};
 use tokio::time::sleep;
 use tokio_stream::StreamExt;
 
@@ -163,8 +163,8 @@ where
 
 				let mut stream = tokio_stream::iter(pending_rollback_psbts);
 				while let Some(raw_psbt) = stream.next().await {
-					let psbt = Psbt::deserialize(&raw_psbt).unwrap();
-					let txid = B256::from_str(&psbt.unsigned_tx.txid().to_string()).unwrap();
+					let psbt = Psbt::deserialize(&raw_psbt)?;
+					let txid = B256::from_str(&psbt.unsigned_tx.txid().to_string())?;
 					let request = self.get_rollback_request(txid).await?;
 
 					// the request must exist
@@ -271,7 +271,7 @@ where
 		is_approved: bool,
 	) -> Result<(RollbackPollMessage<AccountId20>, EthereumSignature)> {
 		let msg = RollbackPollMessage {
-			authority_id: AccountId20(self.bfc_client.address().0 .0),
+			authority_id: AccountId20(self.bfc_client.address().0.0),
 			txid: H256::from(txid.0),
 			is_approved,
 		};

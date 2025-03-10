@@ -1,5 +1,3 @@
-use br_client::eth::ClientMap;
-
 use super::*;
 
 pub struct PeriodicDeps<F, P, T>
@@ -33,7 +31,7 @@ where
 	pub fn new(
 		bootstrap_shared_data: BootstrapSharedData,
 		migration_sequence: Arc<RwLock<MigrationSequence>>,
-		keypair_storage: Arc<RwLock<KeypairStorage>>,
+		keypair_storage: KeypairStorage,
 		substrate_deps: &SubstrateDeps<F, P, T>,
 		clients: Arc<ClientMap<F, P, T>>,
 		bfc_client: Arc<EthClient<F, P, T>>,

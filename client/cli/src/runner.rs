@@ -1,5 +1,6 @@
 use br_primitives::cli::{Configuration, Result as CliResult};
 
+use sc_cli::Signals;
 use sc_service::{Error as ServiceError, TaskManager};
 use sc_utils::metrics::{TOKIO_THREADS_ALIVE, TOKIO_THREADS_TOTAL};
 
@@ -88,5 +89,22 @@ impl Runner {
 		self.tokio_runtime.shutdown_timeout(Duration::from_secs(60));
 
 		res.map_err(Into::into)
+	}
+
+	pub fn async_run<F, E>(
+		self,
+		runner: impl FnOnce(Configuration) -> std::result::Result<F, E>,
+	) -> std::result::Result<(), E>
+	where
+		F: Future<Output = std::result::Result<(), E>>,
+		E: std::error::Error + Send + Sync + 'static + From<ServiceError> + From<sc_cli::Error>,
+	{
+		let future = runner(self.config)?;
+		let signals = self.tokio_runtime.block_on(async { Signals::capture() })?;
+		self.tokio_runtime.block_on(signals.run_until_signal(future.fuse()))?;
+		// Drop the task manager before dropping the rest, to ensure that all futures were informed
+		// about the shut down.
+		// drop(task_manager);
+		Ok(())
 	}
 }
