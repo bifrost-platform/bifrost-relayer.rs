@@ -444,7 +444,6 @@ pub fn send_transaction<F, P, T>(
 					metadata
 				);
 
-				// wait for the transaction to be confirmed in 3 blocks
 				match pending
 					.with_timeout(Some(Duration::from_millis(DEFAULT_TX_TIMEOUT_MS)))
 					.watch()
