@@ -15,8 +15,7 @@ pub use substrate_deps::SubstrateDeps;
 use alloy::{
 	network::AnyNetwork,
 	primitives::ChainId,
-	providers::{fillers::TxFiller, Provider, WalletProvider},
-	transports::Transport,
+	providers::{Provider, WalletProvider, fillers::TxFiller},
 };
 use bitcoincore_rpc::{Auth, Client as BitcoinClient};
 use br_client::{
@@ -26,9 +25,9 @@ use br_client::{
 		storage::keypair::KeypairStorage,
 	},
 	eth::{
+		ClientMap, EthClient,
 		events::EventManager,
 		handlers::{RoundupRelayHandler, SocketRelayHandler},
-		ClientMap, EthClient,
 	},
 	substrate::tx::UnsignedTransactionManager,
 };
@@ -53,4 +52,4 @@ use br_primitives::{
 use miniscript::bitcoin::Network;
 use sc_service::TaskManager;
 use std::{collections::BTreeMap, sync::Arc};
-use tokio::sync::{mpsc::UnboundedSender, RwLock};
+use tokio::sync::{RwLock, mpsc::UnboundedSender};

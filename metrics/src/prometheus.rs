@@ -1,7 +1,7 @@
 use std::time::SystemTime;
 
 use alloy::{primitives::utils::format_units, rpc::types::TransactionReceipt};
-use prometheus_endpoint::{Gauge, GaugeVec, Opts, Registry, F64, U64};
+use prometheus_endpoint::{F64, Gauge, GaugeVec, Opts, Registry, U64};
 
 lazy_static! {
 	pub static ref BLOCK_HEIGHT: GaugeVec<U64> = GaugeVec::<U64>::new(
@@ -71,7 +71,7 @@ pub fn set_payed_fees(label: &str, receipt: &TransactionReceipt) {
 	let gas_price = receipt.effective_gas_price;
 	let gas_used = receipt.gas_used;
 
-	let payed_fee = format_units(gas_price.saturating_mul(gas_used), "eth")
+	let payed_fee = format_units(gas_price.saturating_mul(gas_used.into()), "eth")
 		.unwrap()
 		.parse::<f64>()
 		.unwrap();

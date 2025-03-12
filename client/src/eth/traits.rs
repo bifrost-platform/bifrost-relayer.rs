@@ -3,12 +3,11 @@ use std::{sync::Arc, time::Duration};
 use alloy::{
 	dyn_abi::DynSolValue,
 	network::AnyNetwork,
-	primitives::{ChainId, FixedBytes, B256, U256},
-	providers::{fillers::TxFiller, Provider, WalletProvider},
+	primitives::{B256, ChainId, FixedBytes, U256},
+	providers::{Provider, WalletProvider, fillers::TxFiller},
 	rpc::types::{Log, TransactionInput},
 	signers::Signature,
 	sol_types::SolValue,
-	transports::Transport,
 };
 use br_primitives::{
 	bootstrap::BootstrapSharedData,
@@ -38,14 +37,13 @@ pub trait Handler {
 
 #[async_trait::async_trait]
 /// The client to interact with the `Socket` contract instance.
-pub trait SocketRelayBuilder<F, P, T>
+pub trait SocketRelayBuilder<F, P>
 where
 	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
-	P: Provider<T, AnyNetwork>,
-	T: Transport + Clone,
+	P: Provider<AnyNetwork>,
 {
 	/// Get the `EthClient` of the implemented handler.
-	fn get_client(&self) -> Arc<EthClient<F, P, T>>;
+	fn get_client(&self) -> Arc<EthClient<F, P>>;
 
 	/// Builds the `poll()` function call data.
 	fn build_poll_call_data(&self, msg: Socket_Message, sigs: Signatures) -> TransactionInput {

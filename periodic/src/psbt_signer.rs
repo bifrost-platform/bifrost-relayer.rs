@@ -3,7 +3,6 @@ use alloy::{
 	network::AnyNetwork,
 	primitives::{B256, Bytes, keccak256},
 	providers::{Provider, WalletProvider, fillers::TxFiller},
-	transports::Transport,
 };
 use br_client::{
 	btc::{
@@ -29,14 +28,13 @@ use tokio_stream::StreamExt;
 const SUB_LOG_TARGET: &str = "psbt-signer";
 
 /// The essential task that submits signed PSBT's.
-pub struct PsbtSigner<F, P, T>
+pub struct PsbtSigner<F, P>
 where
 	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
-	P: Provider<T, AnyNetwork>,
-	T: Transport + Clone,
+	P: Provider<AnyNetwork>,
 {
 	/// The Bifrost client.
-	pub client: Arc<EthClient<F, P, T>>,
+	pub client: Arc<EthClient<F, P>>,
 	/// The unsigned transaction message sender.
 	xt_request_sender: Arc<XtRequestSender>,
 	/// The public and private keypair local storage.
@@ -49,15 +47,14 @@ where
 	schedule: Schedule,
 }
 
-impl<F, P, T> PsbtSigner<F, P, T>
+impl<F, P> PsbtSigner<F, P>
 where
 	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
-	P: Provider<T, AnyNetwork>,
-	T: Transport + Clone,
+	P: Provider<AnyNetwork>,
 {
 	/// Instantiates a new `PsbtSigner` instance.
 	pub fn new(
-		client: Arc<EthClient<F, P, T>>,
+		client: Arc<EthClient<F, P>>,
 		xt_request_sender: Arc<XtRequestSender>,
 		keypair_storage: KeypairStorage,
 		migration_sequence: Arc<RwLock<MigrationSequence>>,
@@ -202,27 +199,25 @@ where
 }
 
 #[async_trait::async_trait]
-impl<F, P, T> XtRequester<F, P, T> for PsbtSigner<F, P, T>
+impl<F, P> XtRequester<F, P> for PsbtSigner<F, P>
 where
 	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
-	P: Provider<T, AnyNetwork>,
-	T: Transport + Clone,
+	P: Provider<AnyNetwork>,
 {
 	fn xt_request_sender(&self) -> Arc<XtRequestSender> {
 		self.xt_request_sender.clone()
 	}
 
-	fn bfc_client(&self) -> Arc<EthClient<F, P, T>> {
+	fn bfc_client(&self) -> Arc<EthClient<F, P>> {
 		self.client.clone()
 	}
 }
 
 #[async_trait::async_trait]
-impl<F, P, T> PeriodicWorker for PsbtSigner<F, P, T>
+impl<F, P> PeriodicWorker for PsbtSigner<F, P>
 where
 	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
-	P: Provider<T, AnyNetwork>,
-	T: Transport + Clone,
+	P: Provider<AnyNetwork>,
 {
 	fn schedule(&self) -> Schedule {
 		self.schedule.clone()

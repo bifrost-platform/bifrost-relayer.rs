@@ -10,5 +10,5 @@ sol!(
 
 use RelayerManagerContract::RelayerManagerContractInstance;
 
-pub type RelayerManagerInstance<F, P, T> =
-	RelayerManagerContractInstance<T, Arc<FillProvider<F, P, T, AnyNetwork>>, AnyNetwork>;
+pub type RelayerManagerInstance<F, P> =
+	RelayerManagerContractInstance<(), Arc<FillProvider<F, P, AnyNetwork>>, AnyNetwork>;

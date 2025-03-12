@@ -3,8 +3,7 @@ use std::{collections::BTreeMap, fmt::Error, ops::Mul, sync::Arc};
 use alloy::{
 	network::AnyNetwork,
 	primitives::U256,
-	providers::{fillers::TxFiller, Provider, WalletProvider},
-	transports::Transport,
+	providers::{Provider, WalletProvider, fillers::TxFiller},
 };
 use async_trait::async_trait;
 use eyre::Result;
@@ -32,14 +31,13 @@ mod upbit;
 const LOG_TARGET: &str = "price-fetcher";
 
 #[derive(Clone)]
-pub enum PriceFetchers<F, P, T>
+pub enum PriceFetchers<F, P>
 where
 	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
-	P: Provider<T, AnyNetwork>,
-	T: Transport + Clone,
+	P: Provider<AnyNetwork>,
 {
 	Binance(BinancePriceFetcher),
-	Chainlink(ChainlinkPriceFetcher<F, P, T>),
+	Chainlink(ChainlinkPriceFetcher<F, P>),
 	CoinGecko(CoingeckoPriceFetcher),
 	Gateio(GateioPriceFetcher),
 	Kucoin(KucoinPriceFetcher),
@@ -84,16 +82,12 @@ pub async fn krw_to_usd(krw_amount: U256) -> Result<U256, Error> {
 	}
 }
 
-impl<F, P, T> PriceFetchers<F, P, T>
+impl<F, P> PriceFetchers<F, P>
 where
 	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
-	P: Provider<T, AnyNetwork>,
-	T: Transport + Clone,
+	P: Provider<AnyNetwork>,
 {
-	pub async fn new(
-		exchange: PriceSource,
-		client: Option<Arc<EthClient<F, P, T>>>,
-	) -> Result<Self> {
+	pub async fn new(exchange: PriceSource, client: Option<Arc<EthClient<F, P>>>) -> Result<Self> {
 		match exchange {
 			PriceSource::Binance => Ok(PriceFetchers::Binance(BinancePriceFetcher::new().await?)),
 			PriceSource::Chainlink => {
@@ -110,11 +104,10 @@ where
 }
 
 #[async_trait]
-impl<F, P, T> PriceFetcher for PriceFetchers<F, P, T>
+impl<F, P> PriceFetcher for PriceFetchers<F, P>
 where
 	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
-	P: Provider<T, AnyNetwork>,
-	T: Transport + Clone,
+	P: Provider<AnyNetwork>,
 {
 	async fn get_ticker_with_symbol(&self, symbol: String) -> Result<PriceResponse> {
 		match self {

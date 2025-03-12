@@ -3,21 +3,20 @@ use crate::{
 		block::{Event, EventMessage as BTCEventMessage, EventType},
 		handlers::{Handler, LOG_TARGET},
 	},
-	eth::{send_transaction, traits::SocketRelayBuilder, EthClient},
+	eth::{EthClient, send_transaction, traits::SocketRelayBuilder},
 };
 
 use alloy::{
 	network::AnyNetwork,
 	primitives::ChainId,
-	providers::{fillers::TxFiller, Provider, WalletProvider},
+	providers::{Provider, WalletProvider, fillers::TxFiller},
 	rpc::types::TransactionRequest,
 	sol_types::SolEvent,
-	transports::Transport,
 };
 use br_primitives::{
 	bootstrap::BootstrapSharedData,
 	contracts::{
-		socket::{SocketContract::Socket, Socket_Struct::Socket_Message},
+		socket::{Socket_Struct::Socket_Message, SocketContract::Socket},
 		socket_queue::SocketQueueInstance,
 	},
 	eth::{BootstrapState, BuiltRelayTransaction, SocketEventStatus},
@@ -25,23 +24,22 @@ use br_primitives::{
 	utils::sub_display_format,
 };
 use eyre::Result;
-use miniscript::bitcoin::{hashes::Hash, Txid};
+use miniscript::bitcoin::{Txid, hashes::Hash};
 use sc_service::SpawnTaskHandle;
 use std::sync::Arc;
 use tokio::sync::broadcast::Receiver;
-use tokio_stream::{wrappers::BroadcastStream, StreamExt};
+use tokio_stream::{StreamExt, wrappers::BroadcastStream};
 
 use super::{BootstrapHandler, EventMessage};
 
 const SUB_LOG_TARGET: &str = "outbound-handler";
 
-pub struct OutboundHandler<F, P, T>
+pub struct OutboundHandler<F, P>
 where
 	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
-	P: Provider<T, AnyNetwork>,
-	T: Transport + Clone,
+	P: Provider<AnyNetwork>,
 {
-	pub bfc_client: Arc<EthClient<F, P, T>>,
+	pub bfc_client: Arc<EthClient<F, P>>,
 	event_stream: BroadcastStream<BTCEventMessage>,
 	target_event: EventType,
 	/// The bootstrap shared data.
@@ -52,14 +50,13 @@ where
 	debug_mode: bool,
 }
 
-impl<F, P, T> OutboundHandler<F, P, T>
+impl<F, P> OutboundHandler<F, P>
 where
 	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
-	P: Provider<T, AnyNetwork>,
-	T: Transport + Clone,
+	P: Provider<AnyNetwork>,
 {
 	pub fn new(
-		bfc_client: Arc<EthClient<F, P, T>>,
+		bfc_client: Arc<EthClient<F, P>>,
 		event_receiver: Receiver<BTCEventMessage>,
 		bootstrap_shared_data: Arc<BootstrapSharedData>,
 		handle: SpawnTaskHandle,
@@ -76,7 +73,7 @@ where
 	}
 
 	#[inline]
-	fn socket_queue(&self) -> &SocketQueueInstance<F, P, T> {
+	fn socket_queue(&self) -> &SocketQueueInstance<F, P> {
 		self.bfc_client.protocol_contracts.socket_queue.as_ref().unwrap()
 	}
 
@@ -96,11 +93,10 @@ where
 }
 
 #[async_trait::async_trait]
-impl<F, P, T> Handler for OutboundHandler<F, P, T>
+impl<F, P> Handler for OutboundHandler<F, P>
 where
 	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork> + 'static,
-	P: Provider<T, AnyNetwork> + 'static,
-	T: Transport + Clone,
+	P: Provider<AnyNetwork> + 'static,
 {
 	async fn run(&mut self) -> Result<()> {
 		self.wait_for_bootstrap_state(BootstrapState::NormalStart).await?;
@@ -165,13 +161,12 @@ where
 }
 
 #[async_trait::async_trait]
-impl<F, P, T> SocketRelayBuilder<F, P, T> for OutboundHandler<F, P, T>
+impl<F, P> SocketRelayBuilder<F, P> for OutboundHandler<F, P>
 where
 	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
-	P: Provider<T, AnyNetwork>,
-	T: Transport + Clone,
+	P: Provider<AnyNetwork>,
 {
-	fn get_client(&self) -> Arc<EthClient<F, P, T>> {
+	fn get_client(&self) -> Arc<EthClient<F, P>> {
 		self.bfc_client.clone()
 	}
 
@@ -193,11 +188,10 @@ where
 }
 
 #[async_trait::async_trait]
-impl<F, P, T> BootstrapHandler for OutboundHandler<F, P, T>
+impl<F, P> BootstrapHandler for OutboundHandler<F, P>
 where
 	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
-	P: Provider<T, AnyNetwork>,
-	T: Transport + Clone,
+	P: Provider<AnyNetwork>,
 {
 	fn bootstrap_shared_data(&self) -> Arc<BootstrapSharedData> {
 		self.bootstrap_shared_data.clone()

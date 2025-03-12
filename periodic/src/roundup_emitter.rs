@@ -1,17 +1,16 @@
 use alloy::{
 	network::AnyNetwork,
 	primitives::{Address, U256},
-	providers::{fillers::TxFiller, Provider, WalletProvider},
+	providers::{Provider, WalletProvider, fillers::TxFiller},
 	rpc::types::{Filter, Log, TransactionInput, TransactionRequest},
 	sol_types::SolEvent as _,
-	transports::Transport,
 };
 use cron::Schedule;
 use sc_service::SpawnTaskHandle;
 use std::{str::FromStr, sync::Arc, time::Duration};
 use tokio::time::sleep;
 
-use br_client::eth::{send_transaction, traits::BootstrapHandler, EthClient};
+use br_client::eth::{EthClient, send_transaction, traits::BootstrapHandler};
 use br_primitives::{
 	bootstrap::BootstrapSharedData,
 	constants::{
@@ -19,8 +18,8 @@ use br_primitives::{
 		errors::INVALID_PERIODIC_SCHEDULE, schedule::ROUNDUP_EMITTER_SCHEDULE,
 	},
 	contracts::socket::{
-		SocketContract::RoundUp,
 		Socket_Struct::{Round_Up_Submit, Signatures},
+		SocketContract::RoundUp,
 	},
 	eth::{BootstrapState, RoundUpEventStatus},
 	tx::{TxRequestMetadata, VSPPhase1Metadata},
@@ -32,16 +31,15 @@ use crate::traits::PeriodicWorker;
 
 const SUB_LOG_TARGET: &str = "roundup-emitter";
 
-pub struct RoundupEmitter<F, P, T>
+pub struct RoundupEmitter<F, P>
 where
 	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
-	P: Provider<T, AnyNetwork>,
-	T: Transport + Clone,
+	P: Provider<AnyNetwork>,
 {
 	/// Current round number
 	current_round: U256,
 	/// The ethereum client for the Bifrost network.
-	pub client: Arc<EthClient<F, P, T>>,
+	pub client: Arc<EthClient<F, P>>,
 	/// The time schedule that represents when to check round info.
 	schedule: Schedule,
 	/// The bootstrap shared data.
@@ -53,11 +51,10 @@ where
 }
 
 #[async_trait::async_trait]
-impl<F, P, T> PeriodicWorker for RoundupEmitter<F, P, T>
+impl<F, P> PeriodicWorker for RoundupEmitter<F, P>
 where
 	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork> + 'static,
-	P: Provider<T, AnyNetwork> + 'static,
-	T: Transport + Clone,
+	P: Provider<AnyNetwork> + 'static,
 {
 	fn schedule(&self) -> Schedule {
 		self.schedule.clone()
@@ -102,15 +99,14 @@ where
 	}
 }
 
-impl<F, P, T> RoundupEmitter<F, P, T>
+impl<F, P> RoundupEmitter<F, P>
 where
 	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork> + 'static,
-	P: Provider<T, AnyNetwork> + 'static,
-	T: Transport + Clone,
+	P: Provider<AnyNetwork> + 'static,
 {
 	/// Instantiates a new `RoundupEmitter` instance.
 	pub fn new(
-		client: Arc<EthClient<F, P, T>>,
+		client: Arc<EthClient<F, P>>,
 		bootstrap_shared_data: Arc<BootstrapSharedData>,
 		handle: SpawnTaskHandle,
 		debug_mode: bool,
@@ -192,11 +188,10 @@ where
 }
 
 #[async_trait::async_trait]
-impl<F, P, T> BootstrapHandler for RoundupEmitter<F, P, T>
+impl<F, P> BootstrapHandler for RoundupEmitter<F, P>
 where
 	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork> + 'static,
-	P: Provider<T, AnyNetwork> + 'static,
-	T: Transport + Clone,
+	P: Provider<AnyNetwork> + 'static,
 {
 	fn bootstrap_shared_data(&self) -> Arc<BootstrapSharedData> {
 		self.bootstrap_shared_data.clone()

@@ -7,16 +7,15 @@ use tokio::time::sleep;
 
 use crate::{
 	btc::{
-		block::{Event, EventType},
 		LOG_TARGET,
+		block::{Event, EventType},
 	},
 	eth::EthClient,
 };
 
 use alloy::{
 	network::AnyNetwork,
-	providers::{fillers::TxFiller, Provider, WalletProvider},
-	transports::Transport,
+	providers::{Provider, WalletProvider, fillers::TxFiller},
 };
 use br_primitives::{
 	bootstrap::BootstrapSharedData,
@@ -30,15 +29,14 @@ use std::{sync::Arc, time::Duration};
 use super::block::EventMessage;
 
 #[async_trait::async_trait]
-pub trait XtRequester<F, P, T>
+pub trait XtRequester<F, P>
 where
 	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
-	P: Provider<T, AnyNetwork>,
-	T: Transport + Clone,
+	P: Provider<AnyNetwork>,
 {
 	fn xt_request_sender(&self) -> Arc<XtRequestSender>;
 
-	fn bfc_client(&self) -> Arc<EthClient<F, P, T>>;
+	fn bfc_client(&self) -> Arc<EthClient<F, P>>;
 
 	fn request_send_transaction(
 		&self,

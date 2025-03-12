@@ -4,29 +4,26 @@ use crate::traits::PriceFetcher;
 use alloy::{
 	network::AnyNetwork,
 	primitives::U256,
-	providers::{fillers::TxFiller, Provider, WalletProvider},
-	transports::Transport,
+	providers::{Provider, WalletProvider, fillers::TxFiller},
 };
 use br_client::eth::EthClient;
 use br_primitives::periodic::PriceResponse;
-use eyre::{eyre, Result};
+use eyre::{Result, eyre};
 
 #[derive(Clone)]
-pub struct ChainlinkPriceFetcher<F, P, T>
+pub struct ChainlinkPriceFetcher<F, P>
 where
 	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
-	P: Provider<T, AnyNetwork>,
-	T: Transport + Clone,
+	P: Provider<AnyNetwork>,
 {
-	client: Option<Arc<EthClient<F, P, T>>>,
+	client: Option<Arc<EthClient<F, P>>>,
 }
 
 #[async_trait::async_trait]
-impl<F, P, T> PriceFetcher for ChainlinkPriceFetcher<F, P, T>
+impl<F, P> PriceFetcher for ChainlinkPriceFetcher<F, P>
 where
 	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
-	P: Provider<T, AnyNetwork>,
-	T: Transport + Clone,
+	P: Provider<AnyNetwork>,
 {
 	/// Get the price of a symbol from Chainlink aggregator.
 	/// Available symbols: USDC, USDT, DAI, BTC, WBTC, CBBTC
@@ -83,21 +80,16 @@ where
 			};
 		}
 
-		if ret.is_empty() {
-			Err(eyre!("No tickers found"))
-		} else {
-			Ok(ret)
-		}
+		if ret.is_empty() { Err(eyre!("No tickers found")) } else { Ok(ret) }
 	}
 }
 
-impl<F, P, T> ChainlinkPriceFetcher<F, P, T>
+impl<F, P> ChainlinkPriceFetcher<F, P>
 where
 	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
-	P: Provider<T, AnyNetwork>,
-	T: Transport + Clone,
+	P: Provider<AnyNetwork>,
 {
-	pub async fn new(client: Option<Arc<EthClient<F, P, T>>>) -> Self {
+	pub async fn new(client: Option<Arc<EthClient<F, P>>>) -> Self {
 		ChainlinkPriceFetcher { client }
 	}
 }

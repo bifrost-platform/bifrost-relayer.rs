@@ -2,16 +2,15 @@ use std::{collections::BTreeMap, sync::Arc};
 
 use alloy::{
 	network::AnyNetwork,
-	primitives::{ChainId, B256, U256},
-	providers::{fillers::TxFiller, Provider, WalletProvider},
+	primitives::{B256, ChainId, U256},
+	providers::{Provider, WalletProvider, fillers::TxFiller},
 	rpc::types::{Filter, Log, TransactionRequest},
 	sol_types::SolEvent,
-	transports::Transport,
 };
 use eyre::Result;
 use sc_service::SpawnTaskHandle;
 use tokio::sync::{broadcast::Receiver, mpsc::UnboundedSender};
-use tokio_stream::{wrappers::BroadcastStream, StreamExt};
+use tokio_stream::{StreamExt, wrappers::BroadcastStream};
 
 use br_primitives::{
 	bootstrap::BootstrapSharedData,
@@ -21,8 +20,8 @@ use br_primitives::{
 		errors::{INVALID_BIFROST_NATIVENESS, INVALID_CHAIN_ID},
 	},
 	contracts::socket::{
-		SocketContract::Socket,
 		Socket_Struct::{Instruction, RequestID, Signatures, Socket_Message},
+		SocketContract::Socket,
 	},
 	eth::{BootstrapState, BuiltRelayTransaction, RelayDirection, SocketEventStatus},
 	tx::{SocketRelayMetadata, TxRequestMetadata},
@@ -30,29 +29,28 @@ use br_primitives::{
 };
 
 use crate::eth::{
+	ClientMap, EthClient,
 	events::EventMessage,
 	send_transaction,
 	traits::{BootstrapHandler, Handler, SocketRelayBuilder},
-	ClientMap, EthClient,
 };
 
 const SUB_LOG_TARGET: &str = "socket-handler";
 
 /// The essential task that handles `socket relay` related events.
-pub struct SocketRelayHandler<F, P, T>
+pub struct SocketRelayHandler<F, P>
 where
 	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork> + 'static,
-	P: Provider<T, AnyNetwork> + 'static,
-	T: Transport + Clone,
+	P: Provider<AnyNetwork> + 'static,
 {
 	/// The `EthClient` to interact with the connected blockchain.
-	pub client: Arc<EthClient<F, P, T>>,
+	pub client: Arc<EthClient<F, P>>,
 	/// The receiver that consumes new events from the block channel.
 	event_stream: BroadcastStream<EventMessage>,
 	/// The entire clients instantiated in the system. <chain_id, Arc<EthClient>>
-	system_clients: Arc<ClientMap<F, P, T>>,
+	system_clients: Arc<ClientMap<F, P>>,
 	/// The bifrost client.
-	bifrost_client: Arc<EthClient<F, P, T>>,
+	bifrost_client: Arc<EthClient<F, P>>,
 	/// The rollback sender for each chain.
 	rollback_senders: Arc<BTreeMap<ChainId, Arc<UnboundedSender<Socket_Message>>>>,
 	/// The handle to spawn tasks.
@@ -64,11 +62,10 @@ where
 }
 
 #[async_trait::async_trait]
-impl<F, P, T> Handler for SocketRelayHandler<F, P, T>
+impl<F, P> Handler for SocketRelayHandler<F, P>
 where
 	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
-	P: Provider<T, AnyNetwork>,
-	T: Transport + Clone,
+	P: Provider<AnyNetwork>,
 {
 	async fn run(&mut self) -> Result<()> {
 		if *self.bootstrap_shared_data.bootstrap_state.read().await
@@ -159,13 +156,12 @@ where
 }
 
 #[async_trait::async_trait]
-impl<F, P, T> SocketRelayBuilder<F, P, T> for SocketRelayHandler<F, P, T>
+impl<F, P> SocketRelayBuilder<F, P> for SocketRelayHandler<F, P>
 where
 	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
-	P: Provider<T, AnyNetwork>,
-	T: Transport + Clone,
+	P: Provider<AnyNetwork>,
 {
-	fn get_client(&self) -> Arc<EthClient<F, P, T>> {
+	fn get_client(&self) -> Arc<EthClient<F, P>> {
 		self.client.clone()
 	}
 
@@ -253,18 +249,17 @@ where
 	}
 }
 
-impl<F, P, T> SocketRelayHandler<F, P, T>
+impl<F, P> SocketRelayHandler<F, P>
 where
 	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork> + 'static,
-	P: Provider<T, AnyNetwork> + 'static,
-	T: Transport + Clone,
+	P: Provider<AnyNetwork> + 'static,
 {
 	/// Instantiates a new `SocketRelayHandler` instance.
 	pub fn new(
 		id: ChainId,
 		event_receiver: Receiver<EventMessage>,
-		system_clients: Arc<ClientMap<F, P, T>>,
-		bifrost_client: Arc<EthClient<F, P, T>>,
+		system_clients: Arc<ClientMap<F, P>>,
+		bifrost_client: Arc<EthClient<F, P>>,
 		rollback_senders: Arc<BTreeMap<ChainId, Arc<UnboundedSender<Socket_Message>>>>,
 		handle: SpawnTaskHandle,
 		bootstrap_shared_data: Arc<BootstrapSharedData>,
@@ -487,11 +482,10 @@ where
 }
 
 #[async_trait::async_trait]
-impl<F, P, T> BootstrapHandler for SocketRelayHandler<F, P, T>
+impl<F, P> BootstrapHandler for SocketRelayHandler<F, P>
 where
 	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
-	P: Provider<T, AnyNetwork>,
-	T: Transport + Clone,
+	P: Provider<AnyNetwork>,
 {
 	fn bootstrap_shared_data(&self) -> Arc<BootstrapSharedData> {
 		self.bootstrap_shared_data.clone()
@@ -633,7 +627,9 @@ mod tests {
 
 	#[test]
 	fn test_socket_event_decode() {
-		let data = bytes!("00000000000000000000000000000000000000000000000000000000000000200000bfc000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001e000000000000000000000000000000000000000000000000000000000000000200000000000000000000000000000000000000000000000000000000000000050000271200000000000000000000000000000000000000000000000000000000030203010000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000e000000003000000030000bfc0148a26ea2376f006c09b7d3163f1fc70ad4134a300000000000000000000000000000000000000000000000000000000000000000000000000000000000000006e661745856b03130d03932f683cda020d7ee9ea0000000000000000000000006e661745856b03130d03932f683cda020d7ee9ea00000000000000000000000000000000000000000000000000000000000ee5e800000000000000000000000000000000000000000000000000000000000000c00000000000000000000000000000000000000000000000000000000000000000");
+		let data = bytes!(
+			"00000000000000000000000000000000000000000000000000000000000000200000bfc000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001e000000000000000000000000000000000000000000000000000000000000000200000000000000000000000000000000000000000000000000000000000000050000271200000000000000000000000000000000000000000000000000000000030203010000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000e000000003000000030000bfc0148a26ea2376f006c09b7d3163f1fc70ad4134a300000000000000000000000000000000000000000000000000000000000000000000000000000000000000006e661745856b03130d03932f683cda020d7ee9ea0000000000000000000000006e661745856b03130d03932f683cda020d7ee9ea00000000000000000000000000000000000000000000000000000000000ee5e800000000000000000000000000000000000000000000000000000000000000c00000000000000000000000000000000000000000000000000000000000000000"
+		);
 
 		match Socket::abi_decode_data(&data, true) {
 			Ok(socket) => {

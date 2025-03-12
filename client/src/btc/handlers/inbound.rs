@@ -3,15 +3,14 @@ use crate::{
 		block::{Event, EventMessage as BTCEventMessage, EventType},
 		handlers::{Handler, LOG_TARGET},
 	},
-	eth::{send_transaction, EthClient},
+	eth::{EthClient, send_transaction},
 };
 
 use alloy::{
 	network::AnyNetwork,
 	primitives::{Address as EthAddress, B256, U256},
-	providers::{fillers::TxFiller, Provider, WalletProvider},
+	providers::{Provider, WalletProvider, fillers::TxFiller},
 	rpc::types::{TransactionInput, TransactionRequest},
-	transports::Transport,
 };
 use bitcoincore_rpc::bitcoin::Txid;
 use br_primitives::{
@@ -23,24 +22,23 @@ use br_primitives::{
 };
 use eyre::Result;
 
-use miniscript::bitcoin::{address::NetworkUnchecked, hashes::Hash, Address as BtcAddress};
+use miniscript::bitcoin::{Address as BtcAddress, address::NetworkUnchecked, hashes::Hash};
 use sc_service::SpawnTaskHandle;
 use std::sync::Arc;
 use tokio::sync::broadcast::Receiver;
-use tokio_stream::{wrappers::BroadcastStream, StreamExt};
+use tokio_stream::{StreamExt, wrappers::BroadcastStream};
 
 use super::{BootstrapHandler, EventMessage};
 
 const SUB_LOG_TARGET: &str = "inbound-handler";
 
-pub struct InboundHandler<F, P, T>
+pub struct InboundHandler<F, P>
 where
 	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
-	P: Provider<T, AnyNetwork>,
-	T: Transport + Clone,
+	P: Provider<AnyNetwork>,
 {
 	/// `EthClient` for interact with Bifrost network.
-	pub bfc_client: Arc<EthClient<F, P, T>>,
+	pub bfc_client: Arc<EthClient<F, P>>,
 	/// The receiver that consumes new events from the block channel.
 	event_stream: BroadcastStream<BTCEventMessage>,
 	/// Event type which this handler should handle.
@@ -53,14 +51,13 @@ where
 	debug_mode: bool,
 }
 
-impl<F, P, T> InboundHandler<F, P, T>
+impl<F, P> InboundHandler<F, P>
 where
 	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
-	P: Provider<T, AnyNetwork>,
-	T: Transport + Clone,
+	P: Provider<AnyNetwork>,
 {
 	pub fn new(
-		bfc_client: Arc<EthClient<F, P, T>>,
+		bfc_client: Arc<EthClient<F, P>>,
 		event_receiver: Receiver<BTCEventMessage>,
 		bootstrap_shared_data: Arc<BootstrapSharedData>,
 		handle: SpawnTaskHandle,
@@ -87,11 +84,7 @@ where
 		let round = self.get_current_round().await?;
 		let user_address = registration_pool.user_address(vault_address, round).call().await?._0;
 
-		if user_address == EthAddress::ZERO {
-			Ok(None)
-		} else {
-			Ok(Some(user_address))
-		}
+		if user_address == EthAddress::ZERO { Ok(None) } else { Ok(Some(user_address)) }
 	}
 
 	async fn is_rollback_output(&self, txid: Txid, index: u32) -> Result<bool> {
@@ -150,17 +143,16 @@ where
 	}
 
 	#[inline]
-	fn bitcoin_socket(&self) -> &BitcoinSocketInstance<F, P, T> {
+	fn bitcoin_socket(&self) -> &BitcoinSocketInstance<F, P> {
 		self.bfc_client.protocol_contracts.bitcoin_socket.as_ref().unwrap()
 	}
 }
 
 #[async_trait::async_trait]
-impl<F, P, T> Handler for InboundHandler<F, P, T>
+impl<F, P> Handler for InboundHandler<F, P>
 where
 	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork> + 'static,
-	P: Provider<T, AnyNetwork> + 'static,
-	T: Transport + Clone,
+	P: Provider<AnyNetwork> + 'static,
 {
 	async fn run(&mut self) -> Result<()> {
 		self.wait_for_bootstrap_state(BootstrapState::NormalStart).await?;
@@ -229,11 +221,10 @@ where
 }
 
 #[async_trait::async_trait]
-impl<F, P, T> BootstrapHandler for InboundHandler<F, P, T>
+impl<F, P> BootstrapHandler for InboundHandler<F, P>
 where
 	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
-	P: Provider<T, AnyNetwork>,
-	T: Transport + Clone,
+	P: Provider<AnyNetwork>,
 {
 	fn bootstrap_shared_data(&self) -> Arc<BootstrapSharedData> {
 		self.bootstrap_shared_data.clone()

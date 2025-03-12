@@ -10,5 +10,5 @@ sol!(
 
 use SocketQueueContract::SocketQueueContractInstance;
 
-pub type SocketQueueInstance<F, P, T> =
-	SocketQueueContractInstance<T, Arc<FillProvider<F, P, T, AnyNetwork>>, AnyNetwork>;
+pub type SocketQueueInstance<F, P> =
+	SocketQueueContractInstance<(), Arc<FillProvider<F, P, AnyNetwork>>, AnyNetwork>;

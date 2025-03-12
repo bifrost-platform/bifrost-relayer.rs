@@ -2,8 +2,7 @@ use crate::traits::PeriodicWorker;
 
 use alloy::{
 	network::AnyNetwork,
-	providers::{fillers::TxFiller, Provider, WalletProvider},
-	transports::Transport,
+	providers::{Provider, WalletProvider, fillers::TxFiller},
 };
 use br_client::{
 	btc::storage::keypair::{KeypairStorage, KeypairStorageT},
@@ -15,10 +14,10 @@ use br_primitives::{
 		tx::DEFAULT_CALL_RETRY_INTERVAL_MS,
 	},
 	substrate::{
+		CustomConfig, MigrationSequence,
 		bifrost_runtime::{
 			self, btc_registration_pool::storage::types::service_state::ServiceState,
 		},
-		CustomConfig, MigrationSequence,
 	},
 };
 use cron::Schedule;
@@ -27,28 +26,26 @@ use std::{str::FromStr, sync::Arc, time::Duration};
 use subxt::OnlineClient;
 use tokio::sync::RwLock;
 
-pub struct KeypairMigrator<F, P, T>
+pub struct KeypairMigrator<F, P>
 where
 	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
-	P: Provider<T, AnyNetwork>,
-	T: Transport + Clone,
+	P: Provider<AnyNetwork>,
 {
 	sub_client: Option<OnlineClient<CustomConfig>>,
-	bfc_client: Arc<EthClient<F, P, T>>,
+	bfc_client: Arc<EthClient<F, P>>,
 	migration_sequence: Arc<RwLock<MigrationSequence>>,
 	keypair_storage: KeypairStorage,
 	schedule: Schedule,
 }
 
-impl<F, P, T> KeypairMigrator<F, P, T>
+impl<F, P> KeypairMigrator<F, P>
 where
 	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
-	P: Provider<T, AnyNetwork>,
-	T: Transport + Clone,
+	P: Provider<AnyNetwork>,
 {
 	/// Instantiates a new `KeypairMigrator` instance.
 	pub fn new(
-		bfc_client: Arc<EthClient<F, P, T>>,
+		bfc_client: Arc<EthClient<F, P>>,
 		migration_sequence: Arc<RwLock<MigrationSequence>>,
 		keypair_storage: KeypairStorage,
 	) -> Self {
@@ -149,11 +146,10 @@ where
 }
 
 #[async_trait::async_trait]
-impl<F, P, T> PeriodicWorker for KeypairMigrator<F, P, T>
+impl<F, P> PeriodicWorker for KeypairMigrator<F, P>
 where
 	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
-	P: Provider<T, AnyNetwork>,
-	T: Transport + Clone,
+	P: Provider<AnyNetwork>,
 {
 	fn schedule(&self) -> Schedule {
 		self.schedule.clone()

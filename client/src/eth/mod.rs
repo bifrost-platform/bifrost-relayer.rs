@@ -14,21 +14,20 @@ use alloy::{
 	eips::BlockNumberOrTag,
 	network::{AnyNetwork, AnyRpcTransaction, AnyTypedTransaction},
 	primitives::{
-		keccak256,
-		utils::{format_units, parse_ether, Unit},
-		Address, ChainId, U64,
+		Address, ChainId, U64, keccak256,
+		utils::{Unit, format_units, parse_ether},
 	},
 	providers::{
+		EthCall, PendingTransactionBuilder, Provider, RootProvider, SendableTx, WalletProvider,
 		ext::TxPoolApi as _,
 		fillers::{FillProvider, TxFiller},
-		EthCall, PendingTransactionBuilder, Provider, RootProvider, SendableTx, WalletProvider,
 	},
-	rpc::types::{serde_helpers::WithOtherFields, txpool::TxpoolContentFrom, TransactionRequest},
+	rpc::types::{TransactionRequest, serde_helpers::WithOtherFields, txpool::TxpoolContentFrom},
 	signers::{Signature, Signer},
-	transports::{Transport, TransportResult},
+	transports::TransportResult,
 };
 use br_primitives::utils::sub_display_format;
-use eyre::{eyre, Result};
+use eyre::{Result, eyre};
 use rand::Rng as _;
 use sc_service::SpawnTaskHandle;
 use std::{
@@ -44,44 +43,42 @@ pub mod events;
 pub mod handlers;
 pub mod traits;
 
-pub type ClientMap<F, P, T> = BTreeMap<ChainId, Arc<EthClient<F, P, T>>>;
+pub type ClientMap<F, P> = BTreeMap<ChainId, Arc<EthClient<F, P>>>;
 
 const SUB_LOG_TARGET: &str = "eth-client";
 
 #[derive(Clone)]
-pub struct EthClient<F, P, T>
+pub struct EthClient<F, P>
 where
 	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
-	P: Provider<T, AnyNetwork>,
-	T: Transport + Clone,
+	P: Provider<AnyNetwork>,
 {
 	/// The inner provider.
-	inner: Arc<FillProvider<F, P, T, AnyNetwork>>,
+	inner: Arc<FillProvider<F, P, AnyNetwork>>,
 	/// The signer.
 	pub signer: Arc<dyn Signer + Send + Sync>,
 	/// The provider metadata.
 	pub metadata: ProviderMetadata,
 	/// The protocol contracts.
-	pub protocol_contracts: ProtocolContracts<F, P, T>,
+	pub protocol_contracts: ProtocolContracts<F, P>,
 	/// The aggregator contracts.
-	pub aggregator_contracts: AggregatorContracts<F, P, T>,
+	pub aggregator_contracts: AggregatorContracts<F, P>,
 	/// flushing not allowed to work concurrently.
 	pub martial_law: Arc<Mutex<()>>,
 }
 
-impl<F, P, T> EthClient<F, P, T>
+impl<F, P> EthClient<F, P>
 where
 	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
-	P: Provider<T, AnyNetwork>,
-	T: Transport + Clone,
+	P: Provider<AnyNetwork>,
 {
 	/// Create a new EthClient
 	pub fn new(
-		inner: Arc<FillProvider<F, P, T, AnyNetwork>>,
+		inner: Arc<FillProvider<F, P, AnyNetwork>>,
 		signer: Arc<dyn Signer + Send + Sync>,
 		metadata: ProviderMetadata,
-		protocol_contracts: ProtocolContracts<F, P, T>,
-		aggregator_contracts: AggregatorContracts<F, P, T>,
+		protocol_contracts: ProtocolContracts<F, P>,
+		aggregator_contracts: AggregatorContracts<F, P>,
 	) -> Self {
 		Self {
 			inner,
@@ -96,11 +93,7 @@ where
 	/// Verifies whether the configured chain id and the provider's chain id match.
 	pub async fn verify_chain_id(&self) -> Result<()> {
 		let chain_id = self.get_chain_id().await?;
-		if chain_id != self.metadata.id {
-			Err(eyre!(INVALID_CHAIN_ID))
-		} else {
-			Ok(())
-		}
+		if chain_id != self.metadata.id { Err(eyre!(INVALID_CHAIN_ID)) } else { Ok(()) }
 	}
 
 	/// Verifies whether the relayer has enough balance to pay for the transaction fees.
@@ -163,8 +156,8 @@ where
 		let prev_block_number = block_number.saturating_sub(BOOTSTRAP_BLOCK_OFFSET);
 		let block_diff = block_number.checked_sub(prev_block_number).unwrap();
 
-		let current_block = self.get_block(block_number.into(), true.into()).await?;
-		let prev_block = self.get_block(prev_block_number.into(), true.into()).await?;
+		let current_block = self.get_block(block_number.into()).full().await?;
+		let prev_block = self.get_block(prev_block_number.into()).full().await?;
 		match (current_block, prev_block) {
 			(Some(current_block), Some(prev_block)) => {
 				let current_timestamp = current_block.header.timestamp;
@@ -216,7 +209,7 @@ where
 			.into_values()
 			.map(|tx| {
 				WithOtherFields::<TransactionRequest>::from(AnyTypedTransaction::from(
-					tx.inner.inner,
+					tx.0.inner.into_inner(),
 				))
 			})
 			.collect::<VecDeque<WithOtherFields<TransactionRequest>>>();
@@ -242,7 +235,7 @@ where
 					tx_request.gas_price = Some(max(new_gas_price, current_gas_price));
 				},
 				TxType::Eip1559 => {
-					let current_gas_price = self.estimate_eip1559_fees(None).await?;
+					let current_gas_price = self.estimate_eip1559_fees().await?;
 
 					let new_max_fee_per_gas =
 						(tx_request.max_fee_per_gas.unwrap() as f64 * 1.1).ceil() as u128;
@@ -299,7 +292,7 @@ where
 	async fn fill_gas(&self, request: &mut TransactionRequest) -> Result<()> {
 		request.from = Some(self.address());
 
-		let gas = self.estimate_gas(&WithOtherFields::new(request.clone())).await?;
+		let gas = self.estimate_gas(WithOtherFields::new(request.clone())).await?;
 		let coefficient: f64 = GasCoefficient::from(self.metadata.is_native).into();
 		let estimated_gas = gas as f64 * coefficient;
 		request.gas = Some(estimated_gas.ceil() as u64);
@@ -374,27 +367,26 @@ where
 }
 
 #[async_trait::async_trait]
-impl<F, P, T> Provider<T, AnyNetwork> for EthClient<F, P, T>
+impl<F, P> Provider<AnyNetwork> for EthClient<F, P>
 where
 	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
-	P: Provider<T, AnyNetwork>,
-	T: Transport + Clone,
+	P: Provider<AnyNetwork>,
 {
-	fn root(&self) -> &RootProvider<T, AnyNetwork> {
+	fn root(&self) -> &RootProvider<AnyNetwork> {
 		self.inner.root()
 	}
 
 	async fn send_transaction_internal(
 		&self,
 		tx: SendableTx<AnyNetwork>,
-	) -> TransportResult<PendingTransactionBuilder<T, AnyNetwork>> {
+	) -> TransportResult<PendingTransactionBuilder<AnyNetwork>> {
 		self.inner.send_transaction_internal(tx).await
 	}
 
-	fn estimate_gas<'req>(
+	fn estimate_gas(
 		&self,
-		tx: &'req <AnyNetwork as alloy::providers::Network>::TransactionRequest,
-	) -> EthCall<'req, T, AnyNetwork, U64, u64> {
+		tx: <AnyNetwork as alloy::providers::Network>::TransactionRequest,
+	) -> EthCall<AnyNetwork, U64, u64> {
 		let call = EthCall::gas_estimate(self.inner.weak_client(), tx);
 
 		if self.chain_id() == 56 || self.chain_id() == 97 {
@@ -405,8 +397,8 @@ where
 	}
 }
 
-pub fn send_transaction<F, P, T>(
-	client: Arc<EthClient<F, P, T>>,
+pub fn send_transaction<F, P>(
+	client: Arc<EthClient<F, P>>,
 	mut request: TransactionRequest,
 	requester: String,
 	metadata: TxRequestMetadata,
@@ -414,8 +406,7 @@ pub fn send_transaction<F, P, T>(
 	handle: SpawnTaskHandle,
 ) where
 	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork> + 'static,
-	P: Provider<T, AnyNetwork> + 'static,
-	T: Transport + Clone,
+	P: Provider<AnyNetwork> + 'static,
 {
 	if !client.metadata.is_relay_target {
 		return;
@@ -501,14 +492,14 @@ pub mod retry {
 	use alloy::{
 		rpc::json_rpc::{RequestPacket, ResponsePacket},
 		transports::{
-			layers::RetryPolicy as RetryPolicyT, RpcError, TransportError, TransportErrorKind,
-			TransportFut,
+			RpcError, TransportError, TransportErrorKind, TransportFut,
+			layers::RetryPolicy as RetryPolicyT,
 		},
 	};
 	use std::{
 		sync::{
-			atomic::{AtomicU32, Ordering},
 			Arc,
+			atomic::{AtomicU32, Ordering},
 		},
 		task::{Context, Poll},
 		time::Duration,

@@ -1,38 +1,36 @@
 use super::*;
 
-pub struct BtcDeps<F, P, T>
+pub struct BtcDeps<F, P>
 where
 	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
-	P: Provider<T, AnyNetwork>,
-	T: Transport + Clone,
+	P: Provider<AnyNetwork>,
 {
 	/// The Bitcoin outbound handler.
-	pub outbound: OutboundHandler<F, P, T>,
+	pub outbound: OutboundHandler<F, P>,
 	/// The Bitcoin inbound handler.
-	pub inbound: InboundHandler<F, P, T>,
+	pub inbound: InboundHandler<F, P>,
 	/// The Bitcoin block manager.
-	pub block_manager: BlockManager<F, P, T>,
+	pub block_manager: BlockManager<F, P>,
 	/// The Bitcoin PSBT signer.
-	pub psbt_signer: PsbtSigner<F, P, T>,
+	pub psbt_signer: PsbtSigner<F, P>,
 	/// The Bitcoin vault public key submitter.
-	pub pub_key_submitter: PubKeySubmitter<F, P, T>,
+	pub pub_key_submitter: PubKeySubmitter<F, P>,
 	/// The Bitcoin rollback verifier.
-	pub rollback_verifier: BitcoinRollbackVerifier<F, P, T>,
+	pub rollback_verifier: BitcoinRollbackVerifier<F, P>,
 }
 
-impl<F, P, T> BtcDeps<F, P, T>
+impl<F, P> BtcDeps<F, P>
 where
 	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
-	P: Provider<T, AnyNetwork>,
-	T: Transport + Clone,
+	P: Provider<AnyNetwork>,
 {
 	pub fn new(
 		config: &Configuration,
 		keypair_storage: KeypairStorage,
 		bootstrap_shared_data: BootstrapSharedData,
-		substrate_deps: &SubstrateDeps<F, P, T>,
+		substrate_deps: &SubstrateDeps<F, P>,
 		migration_sequence: Arc<RwLock<MigrationSequence>>,
-		bfc_client: Arc<EthClient<F, P, T>>,
+		bfc_client: Arc<EthClient<F, P>>,
 		task_manager: &TaskManager,
 		debug_mode: bool,
 	) -> Self {

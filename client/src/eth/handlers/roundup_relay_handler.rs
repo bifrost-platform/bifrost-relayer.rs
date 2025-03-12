@@ -1,18 +1,17 @@
 use std::{sync::Arc, time::Duration};
 
 use alloy::{
-	network::{primitives::ReceiptResponse as _, AnyNetwork},
-	primitives::{Address, PrimitiveSignature, B256, U256},
-	providers::{fillers::TxFiller, Provider, WalletProvider},
+	network::{AnyNetwork, primitives::ReceiptResponse as _},
+	primitives::{Address, B256, PrimitiveSignature, U256},
+	providers::{Provider, WalletProvider, fillers::TxFiller},
 	rpc::types::{Filter, Log, TransactionInput, TransactionRequest},
 	sol_types::SolEvent as _,
-	transports::Transport,
 };
 use async_trait::async_trait;
 use eyre::Result;
 use sc_service::SpawnTaskHandle;
 use tokio::sync::broadcast::Receiver;
-use tokio_stream::{wrappers::BroadcastStream, StreamExt};
+use tokio_stream::{StreamExt, wrappers::BroadcastStream};
 
 use br_primitives::{
 	bootstrap::BootstrapSharedData,
@@ -21,9 +20,9 @@ use br_primitives::{
 		tx::DEFAULT_CALL_RETRY_INTERVAL_MS,
 	},
 	contracts::socket::{
+		Socket_Struct::{Round_Up_Submit, Signatures},
 		SocketContract::RoundUp,
 		SocketInstance,
-		Socket_Struct::{Round_Up_Submit, Signatures},
 	},
 	eth::{BootstrapState, RoundUpEventStatus},
 	tx::{TxRequestMetadata, VSPPhase2Metadata},
@@ -31,27 +30,26 @@ use br_primitives::{
 };
 
 use crate::eth::{
+	ClientMap, EthClient,
 	events::EventMessage,
 	send_transaction,
 	traits::{BootstrapHandler, Handler},
-	ClientMap, EthClient,
 };
 
 const SUB_LOG_TARGET: &str = "roundup-handler";
 
 /// The essential task that handles `roundup relay` related events.
-pub struct RoundupRelayHandler<F, P, T>
+pub struct RoundupRelayHandler<F, P>
 where
 	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
-	P: Provider<T, AnyNetwork>,
-	T: Transport + Clone,
+	P: Provider<AnyNetwork>,
 {
 	/// The `EthClient` to interact with the bifrost network.
-	pub client: Arc<EthClient<F, P, T>>,
+	pub client: Arc<EthClient<F, P>>,
 	/// The receiver that consumes new events from the block channel.
 	event_stream: BroadcastStream<EventMessage>,
 	/// `EthClient`s to interact with provided networks except bifrost network.
-	external_clients: Arc<ClientMap<F, P, T>>,
+	external_clients: Arc<ClientMap<F, P>>,
 	/// The bootstrap shared data.
 	bootstrap_shared_data: Arc<BootstrapSharedData>,
 	/// The handle to spawn tasks.
@@ -61,11 +59,10 @@ where
 }
 
 #[async_trait]
-impl<F, P, T> Handler for RoundupRelayHandler<F, P, T>
+impl<F, P> Handler for RoundupRelayHandler<F, P>
 where
 	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork> + 'static,
-	P: Provider<T, AnyNetwork> + 'static,
-	T: Transport + Clone,
+	P: Provider<AnyNetwork> + 'static,
 {
 	async fn run(&mut self) -> Result<()> {
 		if *self.bootstrap_shared_data.bootstrap_state.read().await
@@ -168,17 +165,16 @@ where
 	}
 }
 
-impl<F, P, T> RoundupRelayHandler<F, P, T>
+impl<F, P> RoundupRelayHandler<F, P>
 where
 	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork> + 'static,
-	P: Provider<T, AnyNetwork> + 'static,
-	T: Transport + Clone,
+	P: Provider<AnyNetwork> + 'static,
 {
 	/// Instantiates a new `RoundupRelayHandler` instance.
 	pub fn new(
-		client: Arc<EthClient<F, P, T>>,
+		client: Arc<EthClient<F, P>>,
 		event_receiver: Receiver<EventMessage>,
-		clients: Arc<ClientMap<F, P, T>>,
+		clients: Arc<ClientMap<F, P>>,
 		bootstrap_shared_data: Arc<BootstrapSharedData>,
 		handle: SpawnTaskHandle,
 		debug_mode: bool,
@@ -187,13 +183,9 @@ where
 			clients
 				.iter()
 				.filter_map(|(id, client)| {
-					if !client.metadata.is_native {
-						Some((*id, client.clone()))
-					} else {
-						None
-					}
+					if !client.metadata.is_native { Some((*id, client.clone())) } else { None }
 				})
-				.collect::<ClientMap<F, P, T>>(),
+				.collect::<ClientMap<F, P>>(),
 		);
 
 		Self {
@@ -257,7 +249,7 @@ where
 	/// Build `round_control_relay` method call transaction.
 	fn build_transaction_request(
 		&self,
-		target_socket: &SocketInstance<F, P, T>,
+		target_socket: &SocketInstance<F, P>,
 		roundup_submit: &Round_Up_Submit,
 	) -> TransactionRequest {
 		TransactionRequest::default()
@@ -349,11 +341,10 @@ where
 }
 
 #[async_trait]
-impl<F, P, T> BootstrapHandler for RoundupRelayHandler<F, P, T>
+impl<F, P> BootstrapHandler for RoundupRelayHandler<F, P>
 where
 	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork> + 'static,
-	P: Provider<T, AnyNetwork> + 'static,
-	T: Transport + Clone,
+	P: Provider<AnyNetwork> + 'static,
 {
 	fn bootstrap_shared_data(&self) -> Arc<BootstrapSharedData> {
 		self.bootstrap_shared_data.clone()

@@ -1,24 +1,22 @@
 use super::*;
 
-pub struct SubstrateDeps<F, P, T>
+pub struct SubstrateDeps<F, P>
 where
 	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
-	P: Provider<T, AnyNetwork>,
-	T: Transport + Clone,
+	P: Provider<AnyNetwork>,
 {
 	/// The `UnsignedTransactionManager` for Bifrost.
-	pub unsigned_tx_manager: UnsignedTransactionManager<F, P, T>,
+	pub unsigned_tx_manager: UnsignedTransactionManager<F, P>,
 	/// The `XtRequestSender` for Bifrost.
 	pub xt_request_sender: Arc<XtRequestSender>,
 }
 
-impl<F, P, T> SubstrateDeps<F, P, T>
+impl<F, P> SubstrateDeps<F, P>
 where
 	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork> + 'static,
-	P: Provider<T, AnyNetwork> + 'static,
-	T: Transport + Clone,
+	P: Provider<AnyNetwork> + 'static,
 {
-	pub fn new(bfc_client: Arc<EthClient<F, P, T>>, task_manager: &TaskManager) -> Self {
+	pub fn new(bfc_client: Arc<EthClient<F, P>>, task_manager: &TaskManager) -> Self {
 		let (unsigned_tx_manager, sender) =
 			UnsignedTransactionManager::new(bfc_client.clone(), task_manager.spawn_handle());
 

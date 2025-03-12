@@ -2,7 +2,6 @@ use crate::traits::PeriodicWorker;
 use alloy::{
 	network::AnyNetwork,
 	providers::{Provider, WalletProvider, fillers::TxFiller},
-	transports::Transport,
 };
 use bitcoincore_rpc::bitcoin::PublicKey;
 use br_client::{
@@ -33,13 +32,12 @@ use tokio::sync::RwLock;
 
 const SUB_LOG_TARGET: &str = "pubkey-presubmitter";
 
-pub struct PubKeyPreSubmitter<F, P, T>
+pub struct PubKeyPreSubmitter<F, P>
 where
 	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
-	P: Provider<T, AnyNetwork>,
-	T: Transport + Clone,
+	P: Provider<AnyNetwork>,
 {
-	pub bfc_client: Arc<EthClient<F, P, T>>,
+	pub bfc_client: Arc<EthClient<F, P>>,
 	/// The Bifrost client.
 	sub_client: Option<OnlineClient<CustomConfig>>,
 	/// The unsigned transaction message sender.
@@ -53,11 +51,10 @@ where
 }
 
 #[async_trait::async_trait]
-impl<F, P, T> PeriodicWorker for PubKeyPreSubmitter<F, P, T>
+impl<F, P> PeriodicWorker for PubKeyPreSubmitter<F, P>
 where
 	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
-	P: Provider<T, AnyNetwork>,
-	T: Transport + Clone,
+	P: Provider<AnyNetwork>,
 {
 	fn schedule(&self) -> Schedule {
 		self.schedule.clone()
@@ -91,15 +88,14 @@ where
 	}
 }
 
-impl<F, P, T> PubKeyPreSubmitter<F, P, T>
+impl<F, P> PubKeyPreSubmitter<F, P>
 where
 	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
-	P: Provider<T, AnyNetwork>,
-	T: Transport + Clone,
+	P: Provider<AnyNetwork>,
 {
 	/// Instantiates a new `PubKeyPreSubmitter` instance.
 	pub fn new(
-		bfc_client: Arc<EthClient<F, P, T>>,
+		bfc_client: Arc<EthClient<F, P>>,
 		xt_request_sender: Arc<XtRequestSender>,
 		keypair_storage: KeypairStorage,
 		migration_sequence: Arc<RwLock<MigrationSequence>>,

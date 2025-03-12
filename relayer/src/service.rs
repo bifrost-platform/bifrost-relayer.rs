@@ -9,16 +9,16 @@ use std::{
 use alloy::{
 	network::{AnyNetwork, EthereumWallet},
 	providers::{
-		fillers::{ChainIdFiller, GasFiller, TxFiller},
 		Provider, ProviderBuilder, WalletProvider,
+		fillers::{ChainIdFiller, GasFiller, TxFiller},
 	},
 	rpc::client::RpcClient,
-	signers::{aws::AwsSigner, local::PrivateKeySigner, Signer},
-	transports::{http::reqwest::Url, Transport},
+	signers::{Signer, aws::AwsSigner, local::PrivateKeySigner},
+	transports::http::reqwest::Url,
 };
 use futures::FutureExt;
 use miniscript::bitcoin::Network;
-use sc_service::{config::PrometheusConfig, Error as ServiceError, TaskManager};
+use sc_service::{Error as ServiceError, TaskManager, config::PrometheusConfig};
 use tokio::sync::RwLock;
 
 use br_client::{
@@ -26,7 +26,7 @@ use br_client::{
 		handlers::Handler as _,
 		storage::keypair::{KeypairStorage, KmsKeypairStorage, PasswordKeypairStorage},
 	},
-	eth::{retry::RetryBackoffLayer, traits::Handler as _, EthClient},
+	eth::{EthClient, retry::RetryBackoffLayer, traits::Handler as _},
 };
 use br_periodic::traits::PeriodicWorker;
 use br_primitives::{
@@ -96,6 +96,7 @@ pub async fn relay(config: Configuration) -> Result<TaskManager, ServiceError> {
 			.http(url.clone())
 			.with_poll_interval(Duration::from_millis(evm_provider.call_interval));
 		let provider_builder = ProviderBuilder::new()
+			.disable_recommended_fillers()
 			.with_cached_nonce_management()
 			.filler(GasFiller)
 			.filler(ChainIdFiller::new(evm_provider.id.into()))
@@ -240,15 +241,14 @@ pub async fn relay(config: Configuration) -> Result<TaskManager, ServiceError> {
 }
 
 /// Spawn relayer service tasks by the `TaskManager`.
-fn spawn_relayer_tasks<F, P, T>(
+fn spawn_relayer_tasks<F, P>(
 	task_manager: TaskManager,
-	deps: FullDeps<F, P, T>,
+	deps: FullDeps<F, P>,
 	config: &Configuration,
 ) -> TaskManager
 where
 	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork> + 'static,
-	P: Provider<T, AnyNetwork> + 'static,
-	T: Transport + Clone,
+	P: Provider<AnyNetwork> + 'static,
 {
 	let prometheus_config = &config.relayer_config.prometheus_config;
 
@@ -596,11 +596,10 @@ where
 }
 
 /// Log the configured relay targets.
-fn print_relay_targets<F, P, T>(manager_deps: &ManagerDeps<F, P, T>)
+fn print_relay_targets<F, P>(manager_deps: &ManagerDeps<F, P>)
 where
 	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
-	P: Provider<T, AnyNetwork>,
-	T: Transport + Clone,
+	P: Provider<AnyNetwork>,
 {
 	log::info!(
 		target: LOG_TARGET,

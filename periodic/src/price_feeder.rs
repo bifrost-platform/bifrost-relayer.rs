@@ -5,7 +5,6 @@ use alloy::{
 	primitives::{B256, FixedBytes, U256, utils::parse_ether},
 	providers::{Provider, WalletProvider, fillers::TxFiller},
 	rpc::types::{TransactionInput, TransactionRequest},
-	transports::Transport,
 };
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
@@ -33,24 +32,23 @@ use crate::{
 const SUB_LOG_TARGET: &str = "price-feeder";
 
 /// The essential task that handles oracle price feedings.
-pub struct OraclePriceFeeder<F, P, T>
+pub struct OraclePriceFeeder<F, P>
 where
 	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
-	P: Provider<T, AnyNetwork>,
-	T: Transport + Clone,
+	P: Provider<AnyNetwork>,
 {
 	/// The `EthClient` to interact with the bifrost network.
-	pub client: Arc<EthClient<F, P, T>>,
+	pub client: Arc<EthClient<F, P>>,
 	/// The time schedule that represents when to send price feeds.
 	schedule: Schedule,
 	/// The primary source for fetching prices. (Coingecko)
-	primary_source: Vec<PriceFetchers<F, P, T>>,
+	primary_source: Vec<PriceFetchers<F, P>>,
 	/// The secondary source for fetching prices. (aggregated from external sources)
-	secondary_sources: Vec<PriceFetchers<F, P, T>>,
+	secondary_sources: Vec<PriceFetchers<F, P>>,
 	/// The pre-defined oracle ID's for each asset.
 	asset_oid: BTreeMap<&'static str, B256>,
 	/// The vector that contains each `EthClient`.
-	clients: Arc<ClientMap<F, P, T>>,
+	clients: Arc<ClientMap<F, P>>,
 	/// The handle to spawn tasks.
 	handle: SpawnTaskHandle,
 	/// Whether to enable debug mode.
@@ -58,11 +56,10 @@ where
 }
 
 #[async_trait]
-impl<F, P, T> PeriodicWorker for OraclePriceFeeder<F, P, T>
+impl<F, P> PeriodicWorker for OraclePriceFeeder<F, P>
 where
 	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork> + 'static,
-	P: Provider<T, AnyNetwork> + 'static,
-	T: Transport + Clone,
+	P: Provider<AnyNetwork> + 'static,
 {
 	fn schedule(&self) -> Schedule {
 		self.schedule.clone()
@@ -93,15 +90,14 @@ where
 	}
 }
 
-impl<F, P, T> OraclePriceFeeder<F, P, T>
+impl<F, P> OraclePriceFeeder<F, P>
 where
 	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork> + 'static,
-	P: Provider<T, AnyNetwork> + 'static,
-	T: Transport + Clone,
+	P: Provider<AnyNetwork> + 'static,
 {
 	pub fn new(
-		client: Arc<EthClient<F, P, T>>,
-		clients: Arc<ClientMap<F, P, T>>,
+		client: Arc<EthClient<F, P>>,
+		clients: Arc<ClientMap<F, P>>,
 		handle: SpawnTaskHandle,
 		debug_mode: bool,
 	) -> Self {
@@ -259,7 +255,7 @@ where
 		}
 	}
 
-	fn has_any_chainlink_feeds(contracts: &AggregatorContracts<F, P, T>) -> bool {
+	fn has_any_chainlink_feeds(contracts: &AggregatorContracts<F, P>) -> bool {
 		[
 			&contracts.chainlink_usdc_usd,
 			&contracts.chainlink_usdt_usd,

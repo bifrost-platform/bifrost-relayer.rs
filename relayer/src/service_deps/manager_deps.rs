@@ -2,30 +2,28 @@ use br_client::eth::ClientMap;
 
 use super::*;
 
-pub struct ManagerDeps<F, P, T>
+pub struct ManagerDeps<F, P>
 where
 	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
-	P: Provider<T, AnyNetwork>,
-	T: Transport + Clone,
+	P: Provider<AnyNetwork>,
 {
 	/// Bifrost client
-	pub bifrost_client: Arc<EthClient<F, P, T>>,
+	pub bifrost_client: Arc<EthClient<F, P>>,
 	/// The `EthClient`'s for each specified chain.
-	pub clients: Arc<ClientMap<F, P, T>>,
+	pub clients: Arc<ClientMap<F, P>>,
 	/// The `EventManager`'s for each specified chain.
-	pub event_managers: BTreeMap<ChainId, EventManager<F, P, T>>,
+	pub event_managers: BTreeMap<ChainId, EventManager<F, P>>,
 }
 
-impl<F, P, T> ManagerDeps<F, P, T>
+impl<F, P> ManagerDeps<F, P>
 where
 	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
-	P: Provider<T, AnyNetwork>,
-	T: Transport + Clone,
+	P: Provider<AnyNetwork>,
 {
 	/// Initializes the `EthClient`'s and `EventManager`'s for each chain.
 	pub fn new(
 		config: &Configuration,
-		clients: Arc<ClientMap<F, P, T>>,
+		clients: Arc<ClientMap<F, P>>,
 		bootstrap_shared_data: BootstrapSharedData,
 	) -> Self {
 		let prometheus_config = &config.relayer_config.prometheus_config;

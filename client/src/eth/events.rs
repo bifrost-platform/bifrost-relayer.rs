@@ -1,23 +1,22 @@
 use alloy::{
 	network::AnyNetwork,
 	primitives::{BlockNumber, ChainId},
-	providers::{fillers::TxFiller, Provider, WalletProvider},
+	providers::{Provider, WalletProvider, fillers::TxFiller},
 	rpc::types::{Filter, Log, SyncStatus},
-	transports::Transport,
 };
 use eyre::Result;
 use std::sync::Arc;
 use tokio::{
 	sync::broadcast::{self, Receiver, Sender},
-	time::{interval, sleep, Duration},
+	time::{Duration, interval, sleep},
 };
-use tokio_stream::{wrappers::IntervalStream, StreamExt};
+use tokio_stream::{StreamExt, wrappers::IntervalStream};
 
 use br_primitives::{
 	bootstrap::BootstrapSharedData, eth::BootstrapState, utils::sub_display_format,
 };
 
-use super::{traits::BootstrapHandler, EthClient};
+use super::{EthClient, traits::BootstrapHandler};
 
 #[derive(Clone, Debug)]
 /// The message format passed through the block channel.
@@ -51,14 +50,13 @@ impl EventReceiver {
 const SUB_LOG_TARGET: &str = "event-manager";
 
 /// The essential task that listens and handle new events.
-pub struct EventManager<F, P, T>
+pub struct EventManager<F, P>
 where
 	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
-	P: Provider<T, AnyNetwork>,
-	T: Transport + Clone,
+	P: Provider<AnyNetwork>,
 {
 	/// The ethereum client for the connected chain.
-	pub client: Arc<EthClient<F, P, T>>,
+	pub client: Arc<EthClient<F, P>>,
 	/// The channel sending event messages.
 	pub sender: Sender<EventMessage>,
 	/// The block waiting for enough confirmations.
@@ -70,15 +68,14 @@ where
 	is_balance_sync_enabled: bool,
 }
 
-impl<F, P, T> EventManager<F, P, T>
+impl<F, P> EventManager<F, P>
 where
 	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
-	P: Provider<T, AnyNetwork>,
-	T: Transport + Clone,
+	P: Provider<AnyNetwork>,
 {
 	/// Instantiates a new `EventManager` instance.
 	pub fn new(
-		client: Arc<EthClient<F, P, T>>,
+		client: Arc<EthClient<F, P>>,
 		bootstrap_shared_data: Arc<BootstrapSharedData>,
 		is_balance_sync_enabled: bool,
 	) -> Self {
@@ -241,11 +238,10 @@ where
 }
 
 #[async_trait::async_trait]
-impl<F, P, T> BootstrapHandler for EventManager<F, P, T>
+impl<F, P> BootstrapHandler for EventManager<F, P>
 where
 	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
-	P: Provider<T, AnyNetwork>,
-	T: Transport + Clone,
+	P: Provider<AnyNetwork>,
 {
 	fn bootstrap_shared_data(&self) -> Arc<BootstrapSharedData> {
 		self.bootstrap_shared_data.clone()

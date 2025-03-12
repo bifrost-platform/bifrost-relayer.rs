@@ -70,5 +70,5 @@ impl From<Signatures> for Vec<PrimitiveSignature> {
 
 use SocketContract::SocketContractInstance;
 
-pub type SocketInstance<F, P, T> =
-	SocketContractInstance<T, Arc<FillProvider<F, P, T, AnyNetwork>>, AnyNetwork>;
+pub type SocketInstance<F, P> =
+	SocketContractInstance<(), Arc<FillProvider<F, P, AnyNetwork>>, AnyNetwork>;

@@ -1,10 +1,9 @@
 use alloy::{
 	network::AnyNetwork,
-	providers::{fillers::TxFiller, Provider, WalletProvider},
+	providers::{Provider, WalletProvider, fillers::TxFiller},
 	rpc::types::TransactionRequest,
-	transports::Transport,
 };
-use br_client::eth::{send_transaction, EthClient};
+use br_client::eth::{EthClient, send_transaction};
 use br_primitives::{
 	constants::{errors::INVALID_PERIODIC_SCHEDULE, schedule::HEARTBEAT_SCHEDULE},
 	tx::{HeartbeatMetadata, TxRequestMetadata},
@@ -19,16 +18,15 @@ use crate::traits::PeriodicWorker;
 const SUB_LOG_TARGET: &str = "heartbeat-sender";
 
 /// The essential task that sending heartbeat transaction.
-pub struct HeartbeatSender<F, P, T>
+pub struct HeartbeatSender<F, P>
 where
 	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
-	P: Provider<T, AnyNetwork>,
-	T: Transport + Clone,
+	P: Provider<AnyNetwork>,
 {
 	/// The time schedule that represents when to check heartbeat pulsed.
 	schedule: Schedule,
 	/// The `EthClient` to interact with the bifrost network.
-	pub client: Arc<EthClient<F, P, T>>,
+	pub client: Arc<EthClient<F, P>>,
 	/// The handle to spawn tasks.
 	handle: SpawnTaskHandle,
 	/// Whether to enable debug mode.
@@ -36,11 +34,10 @@ where
 }
 
 #[async_trait::async_trait]
-impl<F, P, T> PeriodicWorker for HeartbeatSender<F, P, T>
+impl<F, P> PeriodicWorker for HeartbeatSender<F, P>
 where
 	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork> + 'static,
-	P: Provider<T, AnyNetwork> + 'static,
-	T: Transport + Clone,
+	P: Provider<AnyNetwork> + 'static,
 {
 	fn schedule(&self) -> Schedule {
 		self.schedule.clone()
@@ -71,14 +68,13 @@ where
 	}
 }
 
-impl<F, P, T> HeartbeatSender<F, P, T>
+impl<F, P> HeartbeatSender<F, P>
 where
 	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork> + 'static,
-	P: Provider<T, AnyNetwork> + 'static,
-	T: Transport + Clone,
+	P: Provider<AnyNetwork> + 'static,
 {
 	/// Instantiates a new `HeartbeatSender` instance.
-	pub fn new(client: Arc<EthClient<F, P, T>>, handle: SpawnTaskHandle, debug_mode: bool) -> Self {
+	pub fn new(client: Arc<EthClient<F, P>>, handle: SpawnTaskHandle, debug_mode: bool) -> Self {
 		Self {
 			schedule: Schedule::from_str(HEARTBEAT_SCHEDULE).expect(INVALID_PERIODIC_SCHEDULE),
 			client,

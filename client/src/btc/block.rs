@@ -2,8 +2,7 @@ use crate::{btc::LOG_TARGET, eth::EthClient};
 
 use alloy::{
 	network::AnyNetwork,
-	providers::{fillers::TxFiller, Provider, WalletProvider},
-	transports::Transport,
+	providers::{Provider, WalletProvider, fillers::TxFiller},
 };
 use br_primitives::{
 	bootstrap::BootstrapSharedData,
@@ -18,17 +17,17 @@ use br_primitives::{
 use eyre::Result;
 
 use bitcoincore_rpc::{
-	bitcoincore_rpc_json::GetRawTransactionResultVout, Client as BtcClient, RpcApi,
+	Client as BtcClient, RpcApi, bitcoincore_rpc_json::GetRawTransactionResultVout,
 };
-use miniscript::bitcoin::{address::NetworkUnchecked, Address, Amount, Txid};
+use miniscript::bitcoin::{Address, Amount, Txid, address::NetworkUnchecked};
 use serde::Deserialize;
 use serde_json::Value;
 use std::{collections::BTreeSet, str::FromStr, sync::Arc};
 use tokio::{
 	sync::broadcast::{self, Receiver, Sender},
-	time::{interval, sleep, Duration},
+	time::{Duration, interval, sleep},
 };
-use tokio_stream::{wrappers::IntervalStream, StreamExt};
+use tokio_stream::{StreamExt, wrappers::IntervalStream};
 
 use super::handlers::BootstrapHandler;
 
@@ -85,16 +84,15 @@ impl EventMessage {
 }
 
 /// A module that reads every new Bitcoin block and filters `Inbound`, `Outbound` events.
-pub struct BlockManager<F, P, T>
+pub struct BlockManager<F, P>
 where
 	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
-	P: Provider<T, AnyNetwork>,
-	T: Transport + Clone,
+	P: Provider<AnyNetwork>,
 {
 	/// The Bitcoin client.
 	btc_client: BtcClient,
 	/// The Bifrost client.
-	pub bfc_client: Arc<EthClient<F, P, T>>,
+	pub bfc_client: Arc<EthClient<F, P>>,
 	/// The event message sender.
 	sender: Sender<EventMessage>,
 	/// The configured minimum block confirmations required to process a block.
@@ -110,11 +108,10 @@ where
 }
 
 #[async_trait::async_trait]
-impl<F, P, TR> RpcApi for BlockManager<F, P, TR>
+impl<F, P> RpcApi for BlockManager<F, P>
 where
 	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
-	P: Provider<TR, AnyNetwork>,
-	TR: Transport + Clone,
+	P: Provider<AnyNetwork>,
 {
 	async fn call<T: for<'a> Deserialize<'a> + Send>(
 		&self,
@@ -142,16 +139,15 @@ where
 	}
 }
 
-impl<F, P, T> BlockManager<F, P, T>
+impl<F, P> BlockManager<F, P>
 where
 	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
-	P: Provider<T, AnyNetwork>,
-	T: Transport + Clone,
+	P: Provider<AnyNetwork>,
 {
 	/// Instantiates a new `BlockManager` instance.
 	pub fn new(
 		btc_client: BtcClient,
-		bfc_client: Arc<EthClient<F, P, T>>,
+		bfc_client: Arc<EthClient<F, P>>,
 		bootstrap_shared_data: Arc<BootstrapSharedData>,
 		call_interval: u64,
 		block_confirmations: u64,
@@ -367,11 +363,10 @@ where
 }
 
 #[async_trait::async_trait]
-impl<F, P, T> BootstrapHandler for BlockManager<F, P, T>
+impl<F, P> BootstrapHandler for BlockManager<F, P>
 where
 	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
-	P: Provider<T, AnyNetwork>,
-	T: Transport + Clone,
+	P: Provider<AnyNetwork>,
 {
 	fn bootstrap_shared_data(&self) -> Arc<BootstrapSharedData> {
 		self.bootstrap_shared_data.clone()

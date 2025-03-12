@@ -4,11 +4,10 @@ use alloy::{
 	network::AnyNetwork,
 	primitives::{Address, ChainId},
 	providers::{
-		fillers::{FillProvider, TxFiller},
 		Provider, WalletProvider,
+		fillers::{FillProvider, TxFiller},
 	},
 	rpc::types::TransactionRequest,
-	transports::Transport,
 };
 use url::Url;
 
@@ -89,34 +88,32 @@ impl ProviderMetadata {
 }
 
 #[derive(Clone)]
-pub struct AggregatorContracts<F, P, T>
+pub struct AggregatorContracts<F, P>
 where
 	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
-	P: Provider<T, AnyNetwork>,
-	T: Transport + Clone,
+	P: Provider<AnyNetwork>,
 {
 	/// Chainlink usdc/usd aggregator
-	pub chainlink_usdc_usd: Option<ChainlinkInstance<F, P, T>>,
+	pub chainlink_usdc_usd: Option<ChainlinkInstance<F, P>>,
 	/// Chainlink usdt/usd aggregator
-	pub chainlink_usdt_usd: Option<ChainlinkInstance<F, P, T>>,
+	pub chainlink_usdt_usd: Option<ChainlinkInstance<F, P>>,
 	/// Chainlink dai/usd aggregator
-	pub chainlink_dai_usd: Option<ChainlinkInstance<F, P, T>>,
+	pub chainlink_dai_usd: Option<ChainlinkInstance<F, P>>,
 	/// Chainlink btc/usd aggregator
-	pub chainlink_btc_usd: Option<ChainlinkInstance<F, P, T>>,
+	pub chainlink_btc_usd: Option<ChainlinkInstance<F, P>>,
 	/// Chainlink wbtc/usd aggregator
-	pub chainlink_wbtc_usd: Option<ChainlinkInstance<F, P, T>>,
+	pub chainlink_wbtc_usd: Option<ChainlinkInstance<F, P>>,
 	/// Chainlink cbbtc/usd aggregator
-	pub chainlink_cbbtc_usd: Option<ChainlinkInstance<F, P, T>>,
+	pub chainlink_cbbtc_usd: Option<ChainlinkInstance<F, P>>,
 }
 
-impl<F, P, T> AggregatorContracts<F, P, T>
+impl<F, P> AggregatorContracts<F, P>
 where
 	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
-	P: Provider<T, AnyNetwork>,
-	T: Transport + Clone,
+	P: Provider<AnyNetwork>,
 {
 	pub fn new(
-		provider: Arc<FillProvider<F, P, T, AnyNetwork>>,
+		provider: Arc<FillProvider<F, P, AnyNetwork>>,
 		chainlink_usdc_usd_address: Option<String>,
 		chainlink_usdt_usd_address: Option<String>,
 		chainlink_dai_usd_address: Option<String>,
@@ -142,11 +139,10 @@ where
 	}
 }
 
-impl<F, P, T> Default for AggregatorContracts<F, P, T>
+impl<F, P> Default for AggregatorContracts<F, P>
 where
 	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
-	P: Provider<T, AnyNetwork>,
-	T: Transport + Clone,
+	P: Provider<AnyNetwork>,
 {
 	fn default() -> Self {
 		Self {
@@ -162,37 +158,35 @@ where
 
 #[derive(Clone)]
 /// The protocol contract instances of the EVM provider.
-pub struct ProtocolContracts<F, P, T>
+pub struct ProtocolContracts<F, P>
 where
 	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
-	P: Provider<T, AnyNetwork>,
-	T: Transport + Clone,
+	P: Provider<AnyNetwork>,
 {
 	/// SocketContract
-	pub socket: SocketInstance<F, P, T>,
+	pub socket: SocketInstance<F, P>,
 	/// AuthorityContract
-	pub authority: AuthorityInstance<F, P, T>,
+	pub authority: AuthorityInstance<F, P>,
 	/// RelayerManagerContract (Bifrost only)
-	pub relayer_manager: Option<RelayerManagerInstance<F, P, T>>,
+	pub relayer_manager: Option<RelayerManagerInstance<F, P>>,
 	/// BitcoinSocketContract (Bifrost only)
-	pub bitcoin_socket: Option<BitcoinSocketInstance<F, P, T>>,
+	pub bitcoin_socket: Option<BitcoinSocketInstance<F, P>>,
 	/// SocketQueueContract (Bifrost only)
-	pub socket_queue: Option<SocketQueueInstance<F, P, T>>,
+	pub socket_queue: Option<SocketQueueInstance<F, P>>,
 	/// RegistrationPoolContract (Bifrost only)
-	pub registration_pool: Option<RegistrationPoolInstance<F, P, T>>,
+	pub registration_pool: Option<RegistrationPoolInstance<F, P>>,
 	/// RelayExecutiveContract (Bifrost only)
-	pub relay_executive: Option<RelayExecutiveInstance<F, P, T>>,
+	pub relay_executive: Option<RelayExecutiveInstance<F, P>>,
 }
 
-impl<F, P, T> ProtocolContracts<F, P, T>
+impl<F, P> ProtocolContracts<F, P>
 where
 	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
-	P: Provider<T, AnyNetwork>,
-	T: Transport + Clone,
+	P: Provider<AnyNetwork>,
 {
 	pub fn new(
 		is_native: bool,
-		provider: Arc<FillProvider<F, P, T, AnyNetwork>>,
+		provider: Arc<FillProvider<F, P, AnyNetwork>>,
 		evm_provider: EVMProvider,
 	) -> Self {
 		let mut contracts = Self {
@@ -264,11 +258,7 @@ pub enum GasCoefficient {
 
 impl From<bool> for GasCoefficient {
 	fn from(is_native: bool) -> Self {
-		if is_native {
-			GasCoefficient::Mid
-		} else {
-			GasCoefficient::Low
-		}
+		if is_native { GasCoefficient::Mid } else { GasCoefficient::Low }
 	}
 }
 

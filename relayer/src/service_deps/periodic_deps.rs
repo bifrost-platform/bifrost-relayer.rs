@@ -1,40 +1,38 @@
 use super::*;
 
-pub struct PeriodicDeps<F, P, T>
+pub struct PeriodicDeps<F, P>
 where
 	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
-	P: Provider<T, AnyNetwork>,
-	T: Transport + Clone,
+	P: Provider<AnyNetwork>,
 {
 	/// The `HeartbeatSender` used for system health checks.
-	pub heartbeat_sender: HeartbeatSender<F, P, T>,
+	pub heartbeat_sender: HeartbeatSender<F, P>,
 	/// The `OraclePriceFeeder` used for price feeding.
-	pub oracle_price_feeder: OraclePriceFeeder<F, P, T>,
+	pub oracle_price_feeder: OraclePriceFeeder<F, P>,
 	/// The `RoundupEmitter` used for detecting and emitting new round updates.
-	pub roundup_emitter: RoundupEmitter<F, P, T>,
+	pub roundup_emitter: RoundupEmitter<F, P>,
 	/// The `SocketRollbackEmitter`'s for each specified chain.
-	pub rollback_emitters: Vec<SocketRollbackEmitter<F, P, T>>,
+	pub rollback_emitters: Vec<SocketRollbackEmitter<F, P>>,
 	/// The `RollbackSender`'s for each specified chain.
 	pub rollback_senders: Arc<BTreeMap<ChainId, Arc<UnboundedSender<Socket_Message>>>>,
 	/// The `KeypairMigrator` used for detecting migration sequences.
-	pub keypair_migrator: KeypairMigrator<F, P, T>,
+	pub keypair_migrator: KeypairMigrator<F, P>,
 	/// The `PubKeyPreSubmitter` used for presubmitting public keys.
-	pub presubmitter: PubKeyPreSubmitter<F, P, T>,
+	pub presubmitter: PubKeyPreSubmitter<F, P>,
 }
 
-impl<F, P, T> PeriodicDeps<F, P, T>
+impl<F, P> PeriodicDeps<F, P>
 where
 	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork> + 'static,
-	P: Provider<T, AnyNetwork> + 'static,
-	T: Transport + Clone,
+	P: Provider<AnyNetwork> + 'static,
 {
 	pub fn new(
 		bootstrap_shared_data: BootstrapSharedData,
 		migration_sequence: Arc<RwLock<MigrationSequence>>,
 		keypair_storage: KeypairStorage,
-		substrate_deps: &SubstrateDeps<F, P, T>,
-		clients: Arc<ClientMap<F, P, T>>,
-		bfc_client: Arc<EthClient<F, P, T>>,
+		substrate_deps: &SubstrateDeps<F, P>,
+		clients: Arc<ClientMap<F, P>>,
+		bfc_client: Arc<EthClient<F, P>>,
 		task_manager: &TaskManager,
 		debug_mode: bool,
 	) -> Self {

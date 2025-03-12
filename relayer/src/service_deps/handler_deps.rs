@@ -1,28 +1,26 @@
 use super::*;
 
-pub struct HandlerDeps<F, P, T>
+pub struct HandlerDeps<F, P>
 where
 	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork> + 'static,
-	P: Provider<T, AnyNetwork> + 'static,
-	T: Transport + Clone,
+	P: Provider<AnyNetwork> + 'static,
 {
 	/// The `SocketRelayHandler`'s for each specified chain.
-	pub socket_relay_handlers: Vec<SocketRelayHandler<F, P, T>>,
+	pub socket_relay_handlers: Vec<SocketRelayHandler<F, P>>,
 	/// The `RoundupRelayHandler`'s for each specified chain.
-	pub roundup_relay_handlers: Vec<RoundupRelayHandler<F, P, T>>,
+	pub roundup_relay_handlers: Vec<RoundupRelayHandler<F, P>>,
 }
 
-impl<F, P, T> HandlerDeps<F, P, T>
+impl<F, P> HandlerDeps<F, P>
 where
 	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
-	P: Provider<T, AnyNetwork>,
-	T: Transport + Clone,
+	P: Provider<AnyNetwork>,
 {
 	pub fn new(
 		config: &Configuration,
-		manager_deps: &ManagerDeps<F, P, T>,
+		manager_deps: &ManagerDeps<F, P>,
 		bootstrap_shared_data: BootstrapSharedData,
-		bfc_client: Arc<EthClient<F, P, T>>,
+		bfc_client: Arc<EthClient<F, P>>,
 		rollback_senders: Arc<BTreeMap<ChainId, Arc<UnboundedSender<Socket_Message>>>>,
 		task_manager: &TaskManager,
 		debug_mode: bool,

@@ -10,5 +10,5 @@ sol!(
 
 use ChainlinkContract::ChainlinkContractInstance;
 
-pub type ChainlinkInstance<F, P, T> =
-	ChainlinkContractInstance<T, Arc<FillProvider<F, P, T, AnyNetwork>>, AnyNetwork>;
+pub type ChainlinkInstance<F, P> =
+	ChainlinkContractInstance<(), Arc<FillProvider<F, P, AnyNetwork>>, AnyNetwork>;

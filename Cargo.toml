@@ -1,12 +1,12 @@
 [workspace]
 resolver = "3"
 members = [
-	"client",
-	"client/cli",
-	"metrics",
-	"periodic",
-	"primitives",
-	"relayer",
+    "client",
+    "client/cli",
+    "metrics",
+    "periodic",
+    "primitives",
+    "relayer",
 ]
 
 [profile.release]
@@ -24,15 +24,15 @@ repository = "https://github.com/bifrost-platform/bifrost-relayer.rs"
 log = "0.4.20"
 env_logger = "0.10.0"
 sentry = { version = "0.36.0", default-features = false, features = [
-	"reqwest",
-	"rustls",
-	"backtrace",
-	"contexts",
-	"panic",
+    "reqwest",
+    "rustls",
+    "backtrace",
+    "contexts",
+    "panic",
 ] }
 secrecy = { version = "0.8.0", default-features = false, features = [
-	"alloc",
-	"serde",
+    "alloc",
+    "serde",
 ] }
 
 async-trait = "0.1.73"
@@ -42,9 +42,9 @@ chrono = "0.4.31"
 thiserror = "2.0.11"
 futures = "0.3.28"
 reqwest = { version = "0.12.5", default-features = false, features = [
-	"rustls-tls",
-	"json",
-	"http2",
+    "rustls-tls",
+    "json",
+    "http2",
 ] }
 rand = "0.9.0"
 lazy_static = "1.4.0"
@@ -58,14 +58,12 @@ serde = "1.0.188"
 serde_json = "1.0.107"
 
 hex = "0.4.3"
-alloy = { version = "0.8", features = [
-	"full",
-	"reqwest-rustls-tls",
-	"provider-txpool-api",
-	"json-rpc",
-	"transports",
-	"k256",
-	"signer-aws",
+alloy = { version = "0.12", default-features = false, features = [
+    "full",
+    "reqwest-rustls-tls",
+    "json-rpc",
+    "transports",
+    "signer-aws",
 ] }
 k256 = "0.13.1"
 sha3 = "0.10.8"
