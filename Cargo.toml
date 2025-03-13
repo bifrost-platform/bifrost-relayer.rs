@@ -62,7 +62,6 @@ alloy = { version = "0.12", default-features = false, features = [
     "full",
     "reqwest-rustls-tls",
     "json-rpc",
-    "transports",
     "signer-aws",
 ] }
 k256 = "0.13.1"
