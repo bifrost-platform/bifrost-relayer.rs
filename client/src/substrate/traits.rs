@@ -57,7 +57,7 @@ where
 		let log_msg = format!(
 			"-[{}]-[{}] ♻️  Unknown error while requesting a transaction request: {}, Retries left: {:?}, Error: {}",
 			sub_display_format(sub_target),
-			self.get_bfc_client().address(),
+			self.get_bfc_client().address().await,
 			msg.metadata,
 			msg.retries_remaining - 1,
 			error_str,
@@ -79,7 +79,7 @@ where
 		let log_msg = format!(
 			"-[{}]-[{}] ♻️  Unknown error while creating a tx request: {}, Retries left: {:?}, Error: {}",
 			sub_display_format(sub_target),
-			self.get_bfc_client().address(),
+			self.get_bfc_client().address().await,
 			msg.metadata,
 			msg.retries_remaining - 1,
 			error,

@@ -45,7 +45,7 @@ where
 
 	async fn run(&mut self) -> Result<()> {
 		loop {
-			let address = self.client.address();
+			let address = self.client.address().await;
 
 			let relayer_manager = self.client.protocol_contracts.relayer_manager.as_ref().unwrap();
 			let is_selected = relayer_manager.is_selected_relayer(address, false).call().await?._0;

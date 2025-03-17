@@ -1,14 +1,14 @@
-use std::{str::FromStr, sync::Arc};
-
 use alloy::{
 	network::AnyNetwork,
-	primitives::{Address, ChainId},
+	primitives::{Address, ChainId, map::AddressHashMap},
 	providers::{
 		Provider, WalletProvider,
 		fillers::{FillProvider, TxFiller},
 	},
 	rpc::types::TransactionRequest,
+	signers::Signer,
 };
+use std::{str::FromStr, sync::Arc};
 use url::Url;
 
 use crate::{
@@ -28,6 +28,19 @@ use crate::{
 		socket_queue::{SocketQueueContract, SocketQueueInstance},
 	},
 };
+
+#[derive(Clone, Default)]
+pub struct Signers(AddressHashMap<Arc<dyn Signer + Send + Sync>>);
+
+impl Signers {
+	pub fn get_signer(&self, address: &Address) -> Option<Arc<dyn Signer + Send + Sync>> {
+		self.0.get(address).cloned()
+	}
+
+	pub fn register_signer(&mut self, signer: Arc<dyn Signer + Send + Sync>) {
+		self.0.insert(signer.address(), signer);
+	}
+}
 
 #[derive(Clone)]
 /// The metadata of the EVM provider.

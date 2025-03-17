@@ -83,11 +83,13 @@ where
 					latest_round,
 				);
 
+				let new_relayers = self.fetch_validator_list(latest_round).await?;
+				self.update_account(&new_relayers).await;
+
 				if !self.is_selected_relayer(latest_round).await? {
 					continue;
 				}
 
-				let new_relayers = self.fetch_validator_list(latest_round).await?;
 				self.request_send_transaction(
 					self.build_transaction(latest_round, new_relayers.clone()).await?,
 					VSPPhase1Metadata::new(latest_round, new_relayers),
@@ -122,11 +124,15 @@ where
 		}
 	}
 
+	async fn update_account(&self, new_relayers: &[Address]) {
+		// TODO: Implement this
+	}
+
 	/// Check relayer has selected in previous round
 	async fn is_selected_relayer(&self, round: U256) -> Result<bool> {
 		let relayer_manager = self.client.protocol_contracts.relayer_manager.as_ref().unwrap();
 		Ok(relayer_manager
-			.is_previous_selected_relayer(round - U256::from(1), self.client.address(), true)
+			.is_previous_selected_relayer(round - U256::from(1), self.client.address().await, true)
 			.call()
 			.await?
 			._0)
@@ -309,7 +315,7 @@ where
 					"[{}]-[{}]-[{}] ❗️ Failed to find the latest RoundUp event. Please use a higher bootstrap offset. Current offset: {:?}",
 					self.client.get_chain_name(),
 					SUB_LOG_TARGET,
-					self.client.address(),
+					self.client.address().await,
 					bootstrap_config.round_offset.unwrap_or(DEFAULT_BOOTSTRAP_ROUND_OFFSET)
 				);
 			}

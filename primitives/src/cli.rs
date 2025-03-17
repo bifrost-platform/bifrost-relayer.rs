@@ -40,7 +40,7 @@ pub struct RelayerConfig {
 	/// System config
 	pub system: Option<SystemConfig>,
 	/// Signer config
-	pub signer_config: SignerConfig,
+	pub signer_config: Vec<SignerConfig>,
 	/// Keystore config
 	pub keystore_config: Option<KeystoreConfig>,
 	/// EVM configs

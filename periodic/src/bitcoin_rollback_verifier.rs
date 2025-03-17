@@ -191,7 +191,7 @@ where
 					}
 
 					// check if already submitted
-					if let Some(vote) = request.votes.get(&self.bfc_client.address()) {
+					if let Some(vote) = request.votes.get(&self.bfc_client.address().await) {
 						if *vote == is_approved {
 							continue;
 						}
@@ -203,7 +203,8 @@ where
 						call,
 						XtRequestMetadata::SubmitRollbackPoll(metadata),
 						SUB_LOG_TARGET,
-					);
+					)
+					.await;
 				}
 			}
 		}
@@ -265,7 +266,7 @@ where
 		is_approved: bool,
 	) -> Result<(RollbackPollMessage<AccountId20>, EthereumSignature)> {
 		let msg = RollbackPollMessage {
-			authority_id: AccountId20(self.bfc_client.address().0.0),
+			authority_id: AccountId20(self.bfc_client.address().await.0.0),
 			txid: H256::from(txid.0),
 			is_approved,
 		};

@@ -80,7 +80,7 @@ where
 
 					let keys = self.create_pub_keys(n).await;
 					let (call, metadata) = self.build_unsigned_tx(keys).await?;
-					self.request_send_transaction(call, metadata);
+					self.request_send_transaction(call, metadata).await;
 				}
 			}
 			self.wait_until_next_time().await;
@@ -157,7 +157,7 @@ where
 
 		let pool_round = self.get_current_round().await;
 		let msg = VaultKeyPreSubmission {
-			authority_id: AccountId20(self.bfc_client.address().0.0),
+			authority_id: AccountId20(self.bfc_client.address().await.0.0),
 			pub_keys: converted_pub_keys.iter().map(|x| Public(*x)).collect(),
 			pool_round,
 		};
@@ -182,7 +182,11 @@ where
 	}
 
 	/// Send the transaction request message to the channel.
-	fn request_send_transaction(&self, call: XtRequest, metadata: VaultKeyPresubmissionMetadata) {
+	async fn request_send_transaction(
+		&self,
+		call: XtRequest,
+		metadata: VaultKeyPresubmissionMetadata,
+	) {
 		match self.xt_request_sender.send(XtRequestMessage::new(
 			call,
 			XtRequestMetadata::VaultKeyPresubmission(metadata.clone()),
@@ -197,7 +201,7 @@ where
 				let log_msg = format!(
 					"-[{}]-[{}] ❗️ Failed to send unsigned transaction: {}, Error: {}",
 					sub_display_format(SUB_LOG_TARGET),
-					self.bfc_client.address(),
+					self.bfc_client.address().await,
 					metadata,
 					error
 				);
@@ -223,7 +227,7 @@ where
 	/// Verify whether the current relayer is an executive.
 	async fn is_relay_executive(&self) -> Result<bool> {
 		let relay_exec = self.bfc_client.protocol_contracts.relay_executive.as_ref().unwrap();
-		Ok(relay_exec.is_member(self.bfc_client.address()).call().await?._0)
+		Ok(relay_exec.is_member(self.bfc_client.address().await).call().await?._0)
 	}
 
 	async fn get_latest_storage(&self) -> Storage<CustomConfig, OnlineClient<CustomConfig>> {
@@ -249,7 +253,7 @@ where
 			match storage
 				.fetch(&bifrost_runtime::storage().btc_registration_pool().pre_submitted_pub_keys(
 					self.get_current_round().await,
-					AccountId20(self.bfc_client.address().0.0),
+					AccountId20(self.bfc_client.address().await.0.0),
 				))
 				.await
 			{

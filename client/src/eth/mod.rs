@@ -23,9 +23,10 @@ use alloy::{
 		fillers::{FillProvider, TxFiller},
 	},
 	rpc::types::{TransactionRequest, serde_helpers::WithOtherFields, txpool::TxpoolContentFrom},
-	signers::{Signature, Signer},
+	signers::Signature,
 	transports::TransportResult,
 };
+use br_primitives::eth::Signers;
 use br_primitives::utils::sub_display_format;
 use eyre::{Result, eyre};
 use rand::Rng as _;
@@ -36,6 +37,7 @@ use std::{
 	sync::Arc,
 	time::Duration,
 };
+use tokio::sync::RwLock;
 use tokio::{sync::Mutex, time::sleep};
 use url::Url;
 
@@ -55,8 +57,9 @@ where
 {
 	/// The inner provider.
 	inner: Arc<FillProvider<F, P, AnyNetwork>>,
-	/// The signer.
-	pub signer: Arc<dyn Signer + Send + Sync>,
+	/// The signers.
+	signers: Signers,
+	default_address: Arc<RwLock<Address>>,
 	/// The provider metadata.
 	pub metadata: ProviderMetadata,
 	/// The protocol contracts.
@@ -75,14 +78,16 @@ where
 	/// Create a new EthClient
 	pub fn new(
 		inner: Arc<FillProvider<F, P, AnyNetwork>>,
-		signer: Arc<dyn Signer + Send + Sync>,
+		signers: Signers,
+		default_address: Arc<RwLock<Address>>,
 		metadata: ProviderMetadata,
 		protocol_contracts: ProtocolContracts<F, P>,
 		aggregator_contracts: AggregatorContracts<F, P>,
 	) -> Self {
 		Self {
 			inner,
-			signer,
+			signers,
+			default_address,
 			metadata,
 			protocol_contracts,
 			aggregator_contracts,
@@ -99,7 +104,7 @@ where
 	/// Verifies whether the relayer has enough balance to pay for the transaction fees.
 	pub async fn verify_minimum_balance(&self) -> Result<()> {
 		if self.metadata.is_native {
-			let balance = self.get_balance(self.address()).await?;
+			let balance = self.get_balance(self.address().await).await?;
 			if balance < parse_ether("1")? {
 				eyre::bail!(INSUFFICIENT_FUNDS)
 			}
@@ -108,8 +113,12 @@ where
 	}
 
 	/// Get the signer address.
-	pub fn address(&self) -> Address {
-		self.inner.default_signer_address()
+	pub async fn address(&self) -> Address {
+		self.default_address.read().await.clone()
+	}
+
+	pub async fn set_address(&self, address: Address) {
+		*self.default_address.write().await = address;
 	}
 
 	/// Get the chain name.
@@ -125,7 +134,7 @@ where
 	pub async fn sync_balance(&self) -> Result<()> {
 		br_metrics::set_native_balance(
 			&self.get_chain_name(),
-			format_units(self.get_balance(self.address()).await?, "ether")?.parse::<f64>()?,
+			format_units(self.get_balance(self.address().await).await?, "ether")?.parse::<f64>()?,
 		);
 		Ok(())
 	}
@@ -142,7 +151,8 @@ where
 
 	/// Signs the given message.
 	pub async fn sign_message(&self, message: &[u8]) -> Result<Signature> {
-		Ok(self.signer.sign_hash(&keccak256(message)).await?)
+		let signer = self.signers.get_signer(&self.address().await).unwrap();
+		Ok(signer.sign_hash(&keccak256(message)).await?)
 	}
 
 	/// Get the bootstrap offset height based on the block time.
@@ -179,7 +189,11 @@ where
 	/// Verifies whether the current relayer was selected at the current round
 	pub async fn is_selected_relayer(&self) -> Result<bool> {
 		let relayer_manager = self.protocol_contracts.relayer_manager.as_ref().unwrap();
-		Ok(relayer_manager.is_selected_relayer(self.address(), false).call().await?._0)
+		Ok(relayer_manager
+			.is_selected_relayer(self.address().await, false)
+			.call()
+			.await?
+			._0)
 	}
 
 	/// Flush stalled transactions from the txpool.
@@ -197,7 +211,7 @@ where
 		sleep(Duration::from_millis(self.metadata.call_interval * 2)).await;
 
 		let content: TxpoolContentFrom<AnyRpcTransaction> =
-			self.txpool_content().await?.remove_from(&self.address());
+			self.txpool_content().await?.remove_from(&self.address().await);
 		let mut pending = content.pending;
 		pending.extend(content.queued);
 
@@ -216,7 +230,7 @@ where
 		transactions.make_contiguous().sort_by_key(|a| a.nonce.unwrap());
 
 		// if the nonce of the first transaction is not equal to the current nonce, update the nonce
-		let mut count = self.get_transaction_count(self.address()).await?;
+		let mut count = self.get_transaction_count(self.address().await).await?;
 		if transactions.front().unwrap().nonce.unwrap() != count {
 			for tx in transactions.iter_mut() {
 				tx.nonce = Some(count);
@@ -273,7 +287,7 @@ where
 					let msg = format!(
 						" ❗️ Failed to send transaction ({} address:{}): Flush, Error: {}",
 						self.get_chain_name(),
-						self.address(),
+						self.address().await,
 						err
 					);
 					log::warn!(target: &self.get_chain_name(), "{msg}");
@@ -290,7 +304,7 @@ where
 	}
 
 	async fn fill_gas(&self, request: &mut TransactionRequest) -> Result<()> {
-		request.from = Some(self.address());
+		request.from = Some(self.address().await);
 
 		let gas = self.estimate_gas(WithOtherFields::new(request.clone())).await?;
 		let coefficient: f64 = GasCoefficient::from(self.metadata.is_native).into();
@@ -325,6 +339,7 @@ where
 		}
 
 		let mut this_request = request.clone();
+		this_request.from = Some(self.address().await);
 		self.fill_gas(&mut this_request).await?;
 
 		let pending = match self.send_transaction(WithOtherFields::new(this_request)).await {
@@ -333,7 +348,7 @@ where
 				let msg = format!(
 					" ❗️ Failed to send transaction ({} address:{}): {}, Error: {}",
 					self.get_chain_name(),
-					self.address(),
+					self.address().await,
 					metadata,
 					err
 				);
@@ -376,13 +391,6 @@ where
 		self.inner.root()
 	}
 
-	async fn send_transaction_internal(
-		&self,
-		tx: SendableTx<AnyNetwork>,
-	) -> TransportResult<PendingTransactionBuilder<AnyNetwork>> {
-		self.inner.send_transaction_internal(tx).await
-	}
-
 	fn estimate_gas(
 		&self,
 		tx: <AnyNetwork as alloy::providers::Network>::TransactionRequest,
@@ -394,6 +402,13 @@ where
 		} else {
 			call.block(BlockNumberOrTag::Pending.into()).map_resp(|r| r.to::<u64>())
 		}
+	}
+
+	async fn send_transaction_internal(
+		&self,
+		tx: SendableTx<AnyNetwork>,
+	) -> TransportResult<PendingTransactionBuilder<AnyNetwork>> {
+		self.inner.send_transaction_internal(tx).await
 	}
 }
 
@@ -419,7 +434,7 @@ pub fn send_transaction<F, P>(
 				let msg = format!(
 					" ❗️ Failed to estimate gas ({} address:{}): {}, Error: {}",
 					client.get_chain_name(),
-					client.address(),
+					client.address().await,
 					metadata,
 					err
 				);
@@ -429,6 +444,7 @@ pub fn send_transaction<F, P>(
 			return;
 		}
 
+		request.from = Some(client.address().await);
 		match client.send_transaction(WithOtherFields::new(request.clone())).await {
 			Ok(pending) => {
 				log::info!(
@@ -457,7 +473,7 @@ pub fn send_transaction<F, P>(
 						let msg = format!(
 							" ❗️ Transaction failed to register ({} address:{}): {}, Error: {}",
 							client.get_chain_name(),
-							client.address(),
+							client.address().await,
 							metadata,
 							err
 						);
@@ -472,7 +488,7 @@ pub fn send_transaction<F, P>(
 				let msg = format!(
 					" ❗️ Failed to send transaction ({} address:{}): {}, Error: {}",
 					client.get_chain_name(),
-					client.address(),
+					client.address().await,
 					metadata,
 					err
 				);

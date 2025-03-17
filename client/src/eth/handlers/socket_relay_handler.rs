@@ -127,7 +127,7 @@ where
 				"[{}]-[{}]-[{}] Unknown error while decoding socket event: {:?}",
 				&self.client.get_chain_name(),
 				SUB_LOG_TARGET,
-				self.client.address(),
+				self.client.address().await,
 				error,
 			),
 		}
@@ -214,7 +214,7 @@ where
 				"[{}]-[{}]-[{}] Unknown socket event status received: {:?}",
 				&self.client.get_chain_name(),
 				SUB_LOG_TARGET,
-				self.client.address(),
+				self.client.address().await,
 				status
 			),
 		};
@@ -241,7 +241,7 @@ where
 				"[{}]-[{}]-[{}] Unknown socket event status received: {:?}",
 				&self.client.get_chain_name(),
 				SUB_LOG_TARGET,
-				self.client.address(),
+				self.client.address().await,
 				status
 			),
 		};
@@ -414,7 +414,7 @@ where
 		let relayer_manager =
 			self.bifrost_client.protocol_contracts.relayer_manager.as_ref().unwrap();
 		let res = relayer_manager
-			.is_previous_selected_relayer(*round, self.client.address(), false)
+			.is_previous_selected_relayer(*round, self.client.address().await, false)
 			.call()
 			.await?
 			._0;
@@ -431,7 +431,7 @@ where
 	) {
 		if let Some(client) = self.system_clients.get(&chain_id) {
 			if self.is_executable(metadata.is_inbound, metadata.status) {
-				self.send_rollbackable_request(chain_id, metadata.clone(), socket_msg);
+				self.send_rollbackable_request(chain_id, metadata.clone(), socket_msg).await;
 			}
 
 			let metadata = TxRequestMetadata::SocketRelay(metadata);
@@ -448,7 +448,7 @@ where
 
 	/// Sends a rollbackable socket message to the rollback channel.
 	/// The received message will be handled when the interval has been reached.
-	fn send_rollbackable_request(
+	async fn send_rollbackable_request(
 		&self,
 		chain_id: ChainId,
 		metadata: SocketRelayMetadata,
@@ -466,7 +466,7 @@ where
 					let msg = format!(
 						"-[{}]-[{}] ❗️ Failed to store rollbackable socket message: {}, Error: {}",
 						sub_display_format(SUB_LOG_TARGET),
-						self.client.address(),
+						self.client.address().await,
 						metadata,
 						error
 					);

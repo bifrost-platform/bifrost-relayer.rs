@@ -102,13 +102,13 @@ where
 						continue;
 					}
 					// the relayer already submitted a public key.
-					if registration_info.3.contains(&self.client.address()) {
+					if registration_info.3.contains(&self.client.address().await) {
 						continue;
 					}
 
 					let pub_key = self.keypair_storage.create_new_keypair().await;
 					let (call, metadata) = self.build_unsigned_tx(who, pub_key).await?;
-					self.request_send_transaction(call, metadata);
+					self.request_send_transaction(call, metadata).await;
 				}
 			}
 		}
@@ -154,7 +154,7 @@ where
 		};
 
 		let msg = VaultKeySubmission {
-			authority_id: AccountId20(self.client.address().0.0),
+			authority_id: AccountId20(self.client.address().await.0.0),
 			who: AccountId20(who.0.0),
 			pub_key: Public(converted_pub_key),
 			pool_round,
@@ -200,7 +200,7 @@ where
 	}
 
 	/// Send the transaction request message to the channel.
-	fn request_send_transaction(&self, call: XtRequest, metadata: SubmitVaultKeyMetadata) {
+	async fn request_send_transaction(&self, call: XtRequest, metadata: SubmitVaultKeyMetadata) {
 		match self
 			.xt_request_sender
 			.send(XtRequestMessage::new(call, XtRequestMetadata::SubmitVaultKey(metadata.clone())))
@@ -215,7 +215,7 @@ where
 				let log_msg = format!(
 					"-[{}]-[{}] ❗️ Failed to send unsigned transaction: {}, Error: {}",
 					sub_display_format(SUB_LOG_TARGET),
-					self.client.address(),
+					self.client.address().await,
 					metadata,
 					error
 				);
@@ -249,7 +249,7 @@ where
 	/// Verify whether the current relayer is an executive.
 	async fn is_relay_executive(&self) -> Result<bool> {
 		let relay_exec = self.client.protocol_contracts.relay_executive.as_ref().unwrap();
-		Ok(relay_exec.is_member(self.client.address()).call().await?._0)
+		Ok(relay_exec.is_member(self.client.address().await).call().await?._0)
 	}
 
 	/// Verify whether the given address is a system vault.
