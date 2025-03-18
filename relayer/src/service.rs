@@ -596,12 +596,6 @@ where
 {
 	log::info!(
 		target: LOG_TARGET,
-		"-[{}] 👤 Relayer: {:?}",
-		sub_display_format(SUB_LOG_TARGET),
-		manager_deps.bifrost_client.address().await
-	);
-	log::info!(
-		target: LOG_TARGET,
 		"-[{}] 🔨 Relay Targets: {}",
 		sub_display_format(SUB_LOG_TARGET),
 		manager_deps

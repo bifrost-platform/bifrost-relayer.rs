@@ -134,14 +134,21 @@ where
 			},
 		};
 
-		match self.signers().iter().find(|s| relayers.contains(s)) {
-			Some(selected) => {
-				self.set_address(*selected).await;
-			},
-			None => {
-				self.set_address(Address::default()).await;
-			},
+		let matched = match self.signers().iter().find(|s| relayers.contains(s)) {
+			Some(selected) => *selected,
+			None => Address::default(),
 		};
+
+		let before_update = self.address().await;
+		if before_update != matched {
+			log::info!(
+				target: SUB_LOG_TARGET,
+				"👤 Relayer updated: {} -> {}",
+				before_update,
+				matched
+			);
+			self.set_address(matched).await;
+		}
 	}
 
 	/// Get the chain name.
