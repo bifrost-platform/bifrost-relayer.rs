@@ -84,7 +84,6 @@ where
 				);
 
 				let new_relayers = self.fetch_validator_list(latest_round).await?;
-				self.client.update_default_address(Some(&new_relayers)).await;
 
 				if !self.is_selected_relayer(latest_round).await? {
 					continue;
@@ -92,10 +91,11 @@ where
 
 				self.request_send_transaction(
 					self.build_transaction(latest_round, new_relayers.clone()).await?,
-					VSPPhase1Metadata::new(latest_round, new_relayers),
+					VSPPhase1Metadata::new(latest_round, new_relayers.clone()),
 				);
 
 				self.current_round = latest_round;
+				self.client.update_default_address(Some(&new_relayers)).await;
 			}
 		}
 	}
