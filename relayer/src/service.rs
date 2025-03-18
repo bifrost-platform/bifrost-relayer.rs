@@ -77,34 +77,34 @@ pub async fn relay(config: Configuration) -> Result<TaskManager, ServiceError> {
 		None
 	};
 
-	let mut wallet = EthereumWallet::default();
-	let mut signers = Signers::default();
-	for s in signer_config {
-		if let Some(key_id) = &s.kms_key_id {
-			let signer = Arc::new(
-				AwsSigner::new(
-					aws_client.as_ref().unwrap().clone(),
-					key_id.clone(),
-					btc_provider.id.into(),
-				)
-				.await
-				.expect(KMS_INITIALIZATION_ERROR),
-			);
-			wallet.register_signer(signer.clone());
-			signers.register_signer(signer);
-		} else {
-			let mut signer =
-				PrivateKeySigner::from_str(&s.private_key.clone().expect(INVALID_PRIVATE_KEY))
-					.expect(INVALID_PRIVATE_KEY);
-			signer.set_chain_id(Some(btc_provider.id));
-			let signer = Arc::new(signer);
-			wallet.register_signer(signer.clone());
-			signers.register_signer(signer);
-		}
-	}
-
 	let default_address = Arc::new(RwLock::new(Address::default()));
 	for evm_provider in evm_providers {
+		let mut wallet = EthereumWallet::default();
+		let mut signers = Signers::default();
+		for s in signer_config {
+			if let Some(key_id) = &s.kms_key_id {
+				let signer = Arc::new(
+					AwsSigner::new(
+						aws_client.as_ref().unwrap().clone(),
+						key_id.clone(),
+						evm_provider.id.into(),
+					)
+					.await
+					.expect(KMS_INITIALIZATION_ERROR),
+				);
+				wallet.register_signer(signer.clone());
+				signers.register_signer(signer);
+			} else {
+				let mut signer =
+					PrivateKeySigner::from_str(&s.private_key.clone().expect(INVALID_PRIVATE_KEY))
+						.expect(INVALID_PRIVATE_KEY);
+				signer.set_chain_id(evm_provider.id.into());
+				let signer = Arc::new(signer);
+				wallet.register_signer(signer.clone());
+				signers.register_signer(signer);
+			}
+		}
+
 		let url: Url = evm_provider.provider.clone().parse().expect(INVALID_PROVIDER_URL);
 		let is_native = evm_provider.is_native.unwrap_or(false);
 
