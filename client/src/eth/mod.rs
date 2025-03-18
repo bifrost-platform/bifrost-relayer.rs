@@ -376,7 +376,6 @@ where
 		}
 
 		let mut this_request = request.clone();
-		this_request.from = Some(self.address().await);
 		self.fill_gas(&mut this_request).await?;
 
 		let pending = match self.send_transaction(WithOtherFields::new(this_request)).await {
@@ -482,7 +481,6 @@ pub fn send_transaction<F, P>(
 			return;
 		}
 
-		request.from = Some(client.address().await);
 		match client.send_transaction(WithOtherFields::new(request.clone())).await {
 			Ok(pending) => {
 				log::info!(
