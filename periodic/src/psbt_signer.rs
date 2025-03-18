@@ -80,7 +80,7 @@ where
 	/// Verify whether the current relayer is an executive.
 	async fn is_relay_executive(&self) -> Result<bool> {
 		let relay_exec = self.client.protocol_contracts.relay_executive.as_ref().unwrap();
-		Ok(relay_exec.is_member(self.client.address()).call().await?._0)
+		Ok(relay_exec.is_member(self.client.address().await).call().await?._0)
 	}
 
 	/// Build the payload for the unsigned transaction. (`submit_signed_psbt()`)
@@ -132,7 +132,7 @@ where
 			}
 
 			let msg = SignedPsbtMessage {
-				authority_id: AccountId20(self.client.address().0.0),
+				authority_id: AccountId20(self.client.address().await.0.0),
 				unsigned_psbt: unsigned_psbt.serialize(),
 				signed_psbt: signed_psbt.clone(),
 			};
@@ -190,7 +190,7 @@ where
 	async fn is_signed_psbt_submitted(&self, txid: B256, psbt: Vec<u8>) -> Result<bool> {
 		let socket_queue = self.client.protocol_contracts.socket_queue.as_ref().unwrap();
 		let res = socket_queue
-			.is_signed_psbt_submitted(txid, Bytes::from(psbt), self.client.address())
+			.is_signed_psbt_submitted(txid, Bytes::from(psbt), self.client.address().await)
 			.call()
 			.await?
 			._0;
@@ -248,7 +248,8 @@ where
 							call,
 							XtRequestMetadata::SubmitSignedPsbt(metadata),
 							SUB_LOG_TARGET,
-						);
+						)
+						.await;
 					}
 				}
 			}

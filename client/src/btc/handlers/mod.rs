@@ -38,7 +38,7 @@ where
 
 	fn bfc_client(&self) -> Arc<EthClient<F, P>>;
 
-	fn request_send_transaction(
+	async fn request_send_transaction(
 		&self,
 		xt_request: XtRequest,
 		metadata: XtRequestMetadata,
@@ -79,7 +79,7 @@ where
 				let log_msg = format!(
 					"-[{}]-[{}] ❗️ Failed to send unsigned transaction: {}, Error: {}",
 					sub_display_format(sub_log_target),
-					self.bfc_client().address(),
+					self.bfc_client().address().await,
 					metadata,
 					error
 				);

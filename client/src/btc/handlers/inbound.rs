@@ -130,7 +130,7 @@ where
 
 		Ok(self
 			.bitcoin_socket()
-			.isRelayerVoted(hash_key, self.bfc_client.address())
+			.isRelayerVoted(hash_key, self.bfc_client.address().await)
 			.call()
 			.await?
 			._0)

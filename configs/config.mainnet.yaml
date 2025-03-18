@@ -4,8 +4,8 @@ system:
 signer_config:
   # Two parameters below are optional, but one of them must be provided.
   # `kms_key_id` has higher priority than `private_key`.
-  kms_key_id: "<YOUR_KMS_KEY_ID_FOR_SIGNER>"
-  private_key: "<YOUR_RELAYER_PRIVATE_KEY>"
+  - kms_key_id: "<YOUR_KMS_KEY_ID_FOR_SIGNER>"
+    private_key: "<YOUR_RELAYER_PRIVATE_KEY>"
 
 keystore_config:
   path: "<YOUR_KEYSTORE_PATH>"

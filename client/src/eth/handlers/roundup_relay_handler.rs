@@ -229,7 +229,7 @@ where
 	async fn is_selected_relayer(&self, round: U256) -> Result<bool> {
 		let relayer_manager = self.client.protocol_contracts.relayer_manager.as_ref().unwrap();
 		Ok(relayer_manager
-			.is_previous_selected_relayer(round, self.client.address(), true)
+			.is_previous_selected_relayer(round, self.client.address().await, true)
 			.call()
 			.await?
 			._0)

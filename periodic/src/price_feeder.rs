@@ -160,7 +160,7 @@ where
 				let log_msg = format!(
 					"-[{}]-[{}] ❗️ Failed to fetch price feed data from secondary sources. First off, skip this feeding.",
 					sub_display_format(SUB_LOG_TARGET),
-					self.client.address()
+					self.client.address().await
 				);
 				log::error!(target: &self.client.get_chain_name(), "{log_msg}");
 				sentry::capture_message(

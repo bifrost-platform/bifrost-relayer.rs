@@ -6,6 +6,7 @@ use std::{
 	time::Duration,
 };
 
+use alloy::primitives::Address;
 use alloy::{
 	network::{AnyNetwork, EthereumWallet},
 	providers::{
@@ -21,6 +22,11 @@ use miniscript::bitcoin::Network;
 use sc_service::{Error as ServiceError, TaskManager, config::PrometheusConfig};
 use tokio::sync::RwLock;
 
+use crate::{
+	cli::{LOG_TARGET, SUB_LOG_TARGET},
+	service_deps::{BtcDeps, FullDeps, HandlerDeps, ManagerDeps, PeriodicDeps, SubstrateDeps},
+	verification::assert_configuration_validity,
+};
 use br_client::{
 	btc::{
 		handlers::Handler as _,
@@ -29,6 +35,7 @@ use br_client::{
 	eth::{EthClient, retry::RetryBackoffLayer, traits::Handler as _},
 };
 use br_periodic::traits::PeriodicWorker;
+use br_primitives::eth::Signers;
 use br_primitives::{
 	bootstrap::BootstrapSharedData,
 	cli::{Configuration, HandlerType},
@@ -43,12 +50,6 @@ use br_primitives::{
 	eth::{AggregatorContracts, ProtocolContracts, ProviderMetadata},
 	substrate::MigrationSequence,
 	utils::sub_display_format,
-};
-
-use crate::{
-	cli::{LOG_TARGET, SUB_LOG_TARGET},
-	service_deps::{BtcDeps, FullDeps, HandlerDeps, ManagerDeps, PeriodicDeps, SubstrateDeps},
-	verification::assert_configuration_validity,
 };
 
 /// Starts the relayer service.
@@ -66,7 +67,7 @@ pub async fn relay(config: Configuration) -> Result<TaskManager, ServiceError> {
 	let mut clients = BTreeMap::new();
 
 	// Initialize AWS client once if needed
-	let aws_client = if signer_config.kms_key_id.is_some()
+	let aws_client = if signer_config.iter().any(|s| s.kms_key_id.is_some())
 		|| keystore_config.as_ref().and_then(|c| c.kms_key_id.as_ref()).is_some()
 	{
 		Some(aws_sdk_kms::Client::new(
@@ -76,6 +77,33 @@ pub async fn relay(config: Configuration) -> Result<TaskManager, ServiceError> {
 		None
 	};
 
+	let mut wallet = EthereumWallet::default();
+	let mut signers = Signers::default();
+	for s in signer_config {
+		if let Some(key_id) = &s.kms_key_id {
+			let signer = Arc::new(
+				AwsSigner::new(
+					aws_client.as_ref().unwrap().clone(),
+					key_id.clone(),
+					btc_provider.id.into(),
+				)
+				.await
+				.expect(KMS_INITIALIZATION_ERROR),
+			);
+			wallet.register_signer(signer.clone());
+			signers.register_signer(signer);
+		} else {
+			let mut signer =
+				PrivateKeySigner::from_str(&s.private_key.clone().expect(INVALID_PRIVATE_KEY))
+					.expect(INVALID_PRIVATE_KEY);
+			signer.set_chain_id(Some(btc_provider.id));
+			let signer = Arc::new(signer);
+			wallet.register_signer(signer.clone());
+			signers.register_signer(signer);
+		}
+	}
+
+	let default_address = Arc::new(RwLock::new(Address::default()));
 	for evm_provider in evm_providers {
 		let url: Url = evm_provider.provider.clone().parse().expect(INVALID_PROVIDER_URL);
 		let is_native = evm_provider.is_native.unwrap_or(false);
@@ -95,74 +123,39 @@ pub async fn relay(config: Configuration) -> Result<TaskManager, ServiceError> {
 			))
 			.http(url.clone())
 			.with_poll_interval(Duration::from_millis(evm_provider.call_interval));
-		let provider_builder = ProviderBuilder::new()
-			.disable_recommended_fillers()
-			.with_cached_nonce_management()
-			.filler(GasFiller)
-			.filler(ChainIdFiller::new(evm_provider.id.into()))
-			.network::<AnyNetwork>();
+		let provider = Arc::new(
+			ProviderBuilder::new()
+				.disable_recommended_fillers()
+				.with_cached_nonce_management()
+				.filler(GasFiller)
+				.filler(ChainIdFiller::new(evm_provider.id.into()))
+				.network::<AnyNetwork>()
+				.wallet(wallet.clone())
+				.on_client(retry_client.clone()),
+		);
+		let client = Arc::new(EthClient::new(
+			provider.clone(),
+			signers.clone(),
+			default_address.clone(),
+			metadata,
+			ProtocolContracts::new(is_native, provider.clone(), evm_provider.clone()),
+			AggregatorContracts::new(
+				provider.clone(),
+				evm_provider.chainlink_usdc_usd_address.clone(),
+				evm_provider.chainlink_usdt_usd_address.clone(),
+				evm_provider.chainlink_dai_usd_address.clone(),
+				evm_provider.chainlink_btc_usd_address.clone(),
+				evm_provider.chainlink_wbtc_usd_address.clone(),
+				evm_provider.chainlink_cbbtc_usd_address.clone(),
+			),
+		));
 
-		let (id, client) = if let Some(key_id) = &signer_config.kms_key_id {
-			let signer = Arc::new(
-				AwsSigner::new(
-					aws_client.as_ref().unwrap().clone(),
-					key_id.clone(),
-					evm_provider.id.into(),
-				)
-				.await
-				.expect(KMS_INITIALIZATION_ERROR),
-			);
-			let provider = Arc::new(
-				provider_builder
-					.wallet(EthereumWallet::from(signer.clone()))
-					.on_client(retry_client),
-			);
-			let client = Arc::new(EthClient::new(
-				provider.clone(),
-				signer.clone(),
-				metadata,
-				ProtocolContracts::new(is_native, provider.clone(), evm_provider.clone()),
-				AggregatorContracts::new(
-					provider.clone(),
-					evm_provider.chainlink_usdc_usd_address.clone(),
-					evm_provider.chainlink_usdt_usd_address.clone(),
-					evm_provider.chainlink_dai_usd_address.clone(),
-					evm_provider.chainlink_btc_usd_address.clone(),
-					evm_provider.chainlink_wbtc_usd_address.clone(),
-					evm_provider.chainlink_cbbtc_usd_address.clone(),
-				),
-			));
-			(evm_provider.id, client)
-		} else {
-			let mut signer = PrivateKeySigner::from_str(
-				&signer_config.private_key.clone().expect(INVALID_PRIVATE_KEY),
-			)
-			.expect(INVALID_PRIVATE_KEY);
-			signer.set_chain_id(Some(evm_provider.id));
-			let signer = Arc::new(signer);
-			let provider = Arc::new(
-				provider_builder
-					.wallet(EthereumWallet::from(signer.clone()))
-					.on_client(retry_client),
-			);
-			let client = Arc::new(EthClient::new(
-				provider.clone(),
-				signer.clone(),
-				metadata,
-				ProtocolContracts::new(is_native, provider.clone(), evm_provider.clone()),
-				AggregatorContracts::new(
-					provider.clone(),
-					evm_provider.chainlink_usdc_usd_address.clone(),
-					evm_provider.chainlink_usdt_usd_address.clone(),
-					evm_provider.chainlink_dai_usd_address.clone(),
-					evm_provider.chainlink_btc_usd_address.clone(),
-					evm_provider.chainlink_wbtc_usd_address.clone(),
-					evm_provider.chainlink_cbbtc_usd_address.clone(),
-				),
-			));
-			(evm_provider.id, client)
-		};
-		clients.insert(id, client);
+		// initialize default address to selected account
+		if is_native {
+			client.update_default_address(None).await;
+		}
+
+		clients.insert(evm_provider.id, client);
 	}
 
 	let bootstrap_shared_data = BootstrapSharedData::new(&config);
@@ -231,7 +224,7 @@ pub async fn relay(config: Configuration) -> Result<TaskManager, ServiceError> {
 		debug_mode,
 	);
 
-	print_relay_targets(&manager_deps);
+	print_relay_targets(&manager_deps).await;
 
 	Ok(spawn_relayer_tasks(
 		task_manager,
@@ -293,7 +286,7 @@ where
 				let report = presubmitter.run().await;
 				let log_msg = format!(
 					"public key presubmitter({}) stopped: {:?}\nRestarting in 12 seconds...",
-					presubmitter.bfc_client.address(),
+					presubmitter.bfc_client.address().await,
 					report
 				);
 				log::error!("{log_msg}");
@@ -320,7 +313,7 @@ where
 				let log_msg = format!(
 					"heartbeat sender({}:{}) stopped: {:?}\nRestarting in 12 seconds...",
 					heartbeat_sender.client.get_chain_name(),
-					heartbeat_sender.client.address(),
+					heartbeat_sender.client.address().await,
 					report
 				);
 				log::error!("{log_msg}");
@@ -343,7 +336,7 @@ where
 				let log_msg = format!(
 					"oracle price feeder({}:{}) stopped: {:?}\nRestarting in 12 seconds...",
 					oracle_price_feeder.client.get_chain_name(),
-					oracle_price_feeder.client.address(),
+					oracle_price_feeder.client.address().await,
 					report
 				);
 				log::error!("{log_msg}");
@@ -368,7 +361,7 @@ where
 					let log_msg = format!(
 						"rollback emitter({}:{}) stopped: {:?}\nRestarting in 12 seconds...",
 						emitter.client.get_chain_name(),
-						emitter.client.address(),
+						emitter.client.address().await,
 						report
 					);
 					log::error!("{log_msg}");
@@ -435,7 +428,7 @@ where
 				let report = roundup_emitter.run().await;
 				let log_msg = format!(
 					"roundup emitter({}) stopped: {:?}\nRestarting immediately...",
-					roundup_emitter.client.address(),
+					roundup_emitter.client.address().await,
 					report
 				);
 				log::error!("{log_msg}");
@@ -476,7 +469,7 @@ where
 				let report = inbound.run().await;
 				let log_msg = format!(
 					"bitcoin inbound handler({}) stopped: {:?}\nRestarting immediately...",
-					inbound.bfc_client.address(),
+					inbound.bfc_client.address().await,
 					report
 				);
 				log::error!("{log_msg}");
@@ -492,7 +485,7 @@ where
 				let report = outbound.run().await;
 				let log_msg = format!(
 					"bitcoin outbound handler({}) stopped: {:?}\nRestarting immediately...",
-					outbound.bfc_client.address(),
+					outbound.bfc_client.address().await,
 					report
 				);
 				log::error!("{log_msg}");
@@ -508,7 +501,7 @@ where
 				let report = psbt_signer.run().await;
 				let log_msg = format!(
 					"bitcoin psbt signer({}) stopped: {:?}\nRestarting immediately...",
-					psbt_signer.client.address(),
+					psbt_signer.client.address().await,
 					report
 				);
 				log::error!("{log_msg}");
@@ -524,7 +517,7 @@ where
 				let report = pub_key_submitter.run().await;
 				let log_msg = format!(
 					"bitcoin public key submitter({}) stopped: {:?}\nRestarting immediately...",
-					pub_key_submitter.client.address(),
+					pub_key_submitter.client.address().await,
 					report
 				);
 				log::error!("{log_msg}");
@@ -540,7 +533,7 @@ where
 				let report = rollback_verifier.run().await;
 				let log_msg = format!(
 					"bitcoin rollback verifier({}) stopped: {:?}\nRestarting immediately...",
-					rollback_verifier.bfc_client.address(),
+					rollback_verifier.bfc_client.address().await,
 					report
 				);
 				log::error!("{log_msg}");
@@ -556,7 +549,7 @@ where
 				let report = block_manager.run().await;
 				let log_msg = format!(
 					"bitcoin block manager({}) stopped: {:?}\nRestarting immediately...",
-					block_manager.bfc_client.address(),
+					block_manager.bfc_client.address().await,
 					report
 				);
 				log::error!("{log_msg}");
@@ -596,16 +589,16 @@ where
 }
 
 /// Log the configured relay targets.
-fn print_relay_targets<F, P>(manager_deps: &ManagerDeps<F, P>)
+async fn print_relay_targets<F, P>(manager_deps: &ManagerDeps<F, P>)
 where
 	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
 	P: Provider<AnyNetwork>,
 {
 	log::info!(
 		target: LOG_TARGET,
-		"-[{}] 👤 Relayer: {:?}",
+		"-[{}] 👤 Provided signers: {:?}",
 		sub_display_format(SUB_LOG_TARGET),
-		manager_deps.bifrost_client.address()
+		manager_deps.bifrost_client.signers()
 	);
 	log::info!(
 		target: LOG_TARGET,
