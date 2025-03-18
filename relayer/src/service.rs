@@ -153,6 +153,13 @@ pub async fn relay(config: Configuration) -> Result<TaskManager, ServiceError> {
 		// initialize default address to selected account
 		if is_native {
 			client.update_default_address(None).await;
+
+			log::info!(
+				target: LOG_TARGET,
+				"-[{}] 👤 Provided signers: {:?}",
+				sub_display_format(SUB_LOG_TARGET),
+				client.signers()
+			);
 		}
 
 		clients.insert(evm_provider.id, client);

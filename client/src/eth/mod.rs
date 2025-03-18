@@ -59,6 +59,7 @@ where
 	inner: Arc<FillProvider<F, P, AnyNetwork>>,
 	/// The signers.
 	signers: Signers,
+	/// The default signer address.
 	default_address: Arc<RwLock<Address>>,
 	/// The provider metadata.
 	pub metadata: ProviderMetadata,
@@ -112,19 +113,22 @@ where
 		Ok(())
 	}
 
-	/// Get the signer address.
+	/// Get the default signer address.
 	pub async fn address(&self) -> Address {
 		self.default_address.read().await.clone()
 	}
 
+	/// Get the signer addresses.
 	pub fn signers(&self) -> Vec<Address> {
 		self.signers.signers_address()
 	}
 
+	/// Set the default signer address.
 	pub async fn set_address(&self, address: Address) {
 		*self.default_address.write().await = address;
 	}
 
+	/// Update the default signer address.
 	pub async fn update_default_address(&self, new_relayers: Option<&[Address]>) {
 		let relayers = match new_relayers {
 			Some(relayers) => relayers.to_vec(),
@@ -142,8 +146,9 @@ where
 		let before_update = self.address().await;
 		if before_update != matched {
 			log::info!(
-				target: SUB_LOG_TARGET,
-				"👤 Relayer updated: {} -> {}",
+				target: &self.get_chain_name(),
+				"-[{}] 👤 Relayer updated: {} -> {}",
+				sub_display_format(SUB_LOG_TARGET),
 				before_update,
 				matched
 			);
@@ -333,6 +338,7 @@ where
 		Ok(())
 	}
 
+	/// Fill the gas-related fields for the given transaction.
 	async fn fill_gas(&self, request: &mut TransactionRequest) -> Result<()> {
 		request.from = Some(self.address().await);
 
@@ -358,6 +364,7 @@ where
 		Ok(())
 	}
 
+	/// Send a transaction synchronously.
 	async fn sync_send_transaction(
 		&self,
 		request: TransactionRequest,
@@ -442,6 +449,7 @@ where
 	}
 }
 
+/// Send a transaction asynchronously.
 pub fn send_transaction<F, P>(
 	client: Arc<EthClient<F, P>>,
 	mut request: TransactionRequest,
