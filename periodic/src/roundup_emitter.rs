@@ -84,7 +84,7 @@ where
 				);
 
 				let new_relayers = self.fetch_validator_list(latest_round).await?;
-				self.update_account(&new_relayers).await;
+				self.client.update_default_address(Some(&new_relayers)).await;
 
 				if !self.is_selected_relayer(latest_round).await? {
 					continue;
@@ -122,10 +122,6 @@ where
 			handle,
 			debug_mode,
 		}
-	}
-
-	async fn update_account(&self, new_relayers: &[Address]) {
-		// TODO: Implement this
 	}
 
 	/// Check relayer has selected in previous round

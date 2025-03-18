@@ -150,9 +150,13 @@ pub async fn relay(config: Configuration) -> Result<TaskManager, ServiceError> {
 			),
 		));
 
+		// initialize default address to selected account
+		if is_native {
+			client.update_default_address(None).await;
+		}
+
 		clients.insert(evm_provider.id, client);
 	}
-	// TODO: initialize default address
 
 	let bootstrap_shared_data = BootstrapSharedData::new(&config);
 

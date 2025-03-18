@@ -117,8 +117,31 @@ where
 		self.default_address.read().await.clone()
 	}
 
+	pub fn signers(&self) -> Vec<Address> {
+		self.signers.signers_address()
+	}
+
 	pub async fn set_address(&self, address: Address) {
 		*self.default_address.write().await = address;
+	}
+
+	pub async fn update_default_address(&self, new_relayers: Option<&[Address]>) {
+		let relayers = match new_relayers {
+			Some(relayers) => relayers.to_vec(),
+			None => {
+				let relayer_manager = self.protocol_contracts.relayer_manager.as_ref().unwrap();
+				relayer_manager.selected_relayers(true).call().await.unwrap()._0
+			},
+		};
+
+		match self.signers().iter().find(|s| relayers.contains(s)) {
+			Some(selected) => {
+				self.set_address(*selected).await;
+			},
+			None => {
+				self.set_address(Address::default()).await;
+			},
+		};
 	}
 
 	/// Get the chain name.

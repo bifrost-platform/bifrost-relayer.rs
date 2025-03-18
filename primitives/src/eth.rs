@@ -40,6 +40,10 @@ impl Signers {
 	pub fn register_signer(&mut self, signer: Arc<dyn Signer + Send + Sync>) {
 		self.0.insert(signer.address(), signer);
 	}
+
+	pub fn signers_address(&self) -> Vec<Address> {
+		self.0.keys().cloned().collect()
+	}
 }
 
 #[derive(Clone)]
