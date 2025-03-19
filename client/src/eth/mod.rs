@@ -102,17 +102,6 @@ where
 		if chain_id != self.metadata.id { Err(eyre!(INVALID_CHAIN_ID)) } else { Ok(()) }
 	}
 
-	/// Verifies whether the relayer has enough balance to pay for the transaction fees.
-	pub async fn verify_minimum_balance(&self) -> Result<()> {
-		if self.metadata.is_native {
-			let balance = self.get_balance(self.address().await).await?;
-			if balance < parse_ether("1")? {
-				eyre::bail!(INSUFFICIENT_FUNDS)
-			}
-		}
-		Ok(())
-	}
-
 	/// Get the default signer address.
 	pub async fn address(&self) -> Address {
 		self.default_address.read().await.clone()
