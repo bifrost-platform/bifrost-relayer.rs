@@ -1,7 +1,7 @@
 use br_primitives::{
 	constants::{
 		config::{BOOTSTRAP_BLOCK_OFFSET, NATIVE_BLOCK_TIME},
-		errors::{INSUFFICIENT_FUNDS, INVALID_CHAIN_ID, PROVIDER_INTERNAL_ERROR},
+		errors::{INVALID_CHAIN_ID, PROVIDER_INTERNAL_ERROR},
 		tx::DEFAULT_TX_TIMEOUT_MS,
 	},
 	contracts::authority::BfcStaking::round_meta_data,
@@ -15,7 +15,7 @@ use alloy::{
 	network::{AnyNetwork, AnyRpcTransaction, AnyTypedTransaction},
 	primitives::{
 		Address, ChainId, U64, keccak256,
-		utils::{Unit, format_units, parse_ether},
+		utils::{Unit, format_units},
 	},
 	providers::{
 		EthCall, PendingTransactionBuilder, Provider, RootProvider, SendableTx, WalletProvider,

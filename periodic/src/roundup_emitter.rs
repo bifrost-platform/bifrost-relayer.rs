@@ -90,7 +90,12 @@ where
 				}
 
 				self.request_send_transaction(
-					self.build_transaction(latest_round, new_relayers.clone()).await?,
+					self.build_transaction(
+						latest_round,
+						new_relayers.clone(),
+						self.client.address().await,
+					)
+					.await?,
 					VSPPhase1Metadata::new(latest_round, new_relayers.clone()),
 				);
 
@@ -148,6 +153,7 @@ where
 		&self,
 		round: U256,
 		new_relayers: Vec<Address>,
+		from: Address,
 	) -> Result<TransactionRequest> {
 		let encoded_msg = encode_roundup_param(round, &new_relayers);
 
@@ -164,6 +170,7 @@ where
 
 		Ok(TransactionRequest::default()
 			.to(*self.client.protocol_contracts.socket.address())
+			.from(from)
 			.input(TransactionInput::new(input)))
 	}
 
@@ -186,6 +193,15 @@ where
 	/// Get the latest round index.
 	async fn get_latest_round(&self) -> Result<U256> {
 		Ok(self.client.protocol_contracts.authority.latest_round().call().await?._0)
+	}
+
+	async fn relay_as(&self, round: U256) -> Address {
+		let relayer_manager = self.client.protocol_contracts.relayer_manager.as_ref().unwrap();
+		let prev_relayers =
+			relayer_manager.previous_selected_relayers(round, true).call().await.unwrap()._0;
+		let signers = self.client.signers();
+
+		signers.into_iter().find(|s| prev_relayers.contains(s)).unwrap_or_default()
 	}
 }
 
@@ -235,11 +251,14 @@ where
 				// If RoundUp reached to latest round, escape loop
 				break;
 			} else if next_poll_round <= self.current_round {
+				let relay_as = self.relay_as(next_poll_round - U256::from(1)).await;
+
 				// If RoundUp not reached to latest round, process round_control_poll
 				if self.is_selected_relayer(next_poll_round).await? {
 					let new_relayers = self.fetch_validator_list(next_poll_round).await?;
 					self.request_send_transaction(
-						self.build_transaction(next_poll_round, new_relayers.clone()).await?,
+						self.build_transaction(next_poll_round, new_relayers.clone(), relay_as)
+							.await?,
 						VSPPhase1Metadata::new(next_poll_round, new_relayers),
 					);
 				}
