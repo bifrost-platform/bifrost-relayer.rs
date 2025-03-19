@@ -324,12 +324,16 @@ where
 			let this_roundup_barrier = self.bootstrap_shared_data.roundup_barrier.clone();
 			let bifrost_authority = self.client.protocol_contracts.authority.clone();
 			let target_authority = target_client.protocol_contracts.authority.clone();
+			let is_relay_target = target_client.metadata.is_relay_target;
 
 			tokio::spawn(async move {
-				while target_authority.latest_round().call().await.unwrap()._0
-					< bifrost_authority.latest_round().call().await.unwrap()._0
-				{
-					tokio::time::sleep(Duration::from_millis(DEFAULT_CALL_RETRY_INTERVAL_MS)).await;
+				if is_relay_target {
+					while target_authority.latest_round().call().await.unwrap()._0
+						< bifrost_authority.latest_round().call().await.unwrap()._0
+					{
+						tokio::time::sleep(Duration::from_millis(DEFAULT_CALL_RETRY_INTERVAL_MS))
+							.await;
+					}
 				}
 
 				this_roundup_barrier.wait().await;
