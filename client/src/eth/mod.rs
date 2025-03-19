@@ -340,7 +340,9 @@ where
 
 	/// Fill the gas-related fields for the given transaction.
 	async fn fill_gas(&self, request: &mut TransactionRequest) -> Result<()> {
-		request.from = Some(self.address().await);
+		if request.from == None {
+			request.from = Some(self.address().await);
+		}
 
 		let gas = self.estimate_gas(WithOtherFields::new(request.clone())).await?;
 		let coefficient: f64 = GasCoefficient::from(self.metadata.is_native).into();
