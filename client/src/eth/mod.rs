@@ -1,7 +1,7 @@
 use br_primitives::{
 	constants::{
 		config::{BOOTSTRAP_BLOCK_OFFSET, NATIVE_BLOCK_TIME},
-		errors::{INSUFFICIENT_FUNDS, INVALID_CHAIN_ID, PROVIDER_INTERNAL_ERROR},
+		errors::{INVALID_CHAIN_ID, PROVIDER_INTERNAL_ERROR},
 		tx::DEFAULT_TX_TIMEOUT_MS,
 	},
 	contracts::authority::BfcStaking::round_meta_data,
@@ -15,7 +15,7 @@ use alloy::{
 	network::{AnyNetwork, AnyRpcTransaction, AnyTypedTransaction},
 	primitives::{
 		Address, ChainId, U64, keccak256,
-		utils::{Unit, format_units, parse_ether},
+		utils::{Unit, format_units},
 	},
 	providers::{
 		EthCall, PendingTransactionBuilder, Provider, RootProvider, SendableTx, WalletProvider,
@@ -100,17 +100,6 @@ where
 	pub async fn verify_chain_id(&self) -> Result<()> {
 		let chain_id = self.get_chain_id().await?;
 		if chain_id != self.metadata.id { Err(eyre!(INVALID_CHAIN_ID)) } else { Ok(()) }
-	}
-
-	/// Verifies whether the relayer has enough balance to pay for the transaction fees.
-	pub async fn verify_minimum_balance(&self) -> Result<()> {
-		if self.metadata.is_native {
-			let balance = self.get_balance(self.address().await).await?;
-			if balance < parse_ether("1")? {
-				eyre::bail!(INSUFFICIENT_FUNDS)
-			}
-		}
-		Ok(())
 	}
 
 	/// Get the default signer address.
@@ -340,7 +329,9 @@ where
 
 	/// Fill the gas-related fields for the given transaction.
 	async fn fill_gas(&self, request: &mut TransactionRequest) -> Result<()> {
-		request.from = Some(self.address().await);
+		if request.from == None {
+			request.from = Some(self.address().await);
+		}
 
 		let gas = self.estimate_gas(WithOtherFields::new(request.clone())).await?;
 		let coefficient: f64 = GasCoefficient::from(self.metadata.is_native).into();

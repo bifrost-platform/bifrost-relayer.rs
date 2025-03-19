@@ -86,7 +86,6 @@ where
 	/// Initialize event manager.
 	async fn initialize(&mut self) -> Result<()> {
 		self.client.verify_chain_id().await?;
-		self.client.verify_minimum_balance().await?;
 
 		// initialize waiting block to the latest block + 1
 		let latest_block = self.client.get_block_number().await?;

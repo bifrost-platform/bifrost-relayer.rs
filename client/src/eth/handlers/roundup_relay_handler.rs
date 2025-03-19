@@ -101,10 +101,9 @@ where
 			}
 			match self.decode_log(log.clone()).await {
 				Ok(serialized_log) => {
-					if !self
-						.is_selected_relayer(serialized_log.roundup.round - U256::from(1))
-						.await?
-					{
+					let prev_round = serialized_log.roundup.round - U256::from(1);
+					let relay_as = self.relay_as(prev_round).await;
+					if !self.is_selected_relayer(prev_round, relay_as).await? {
 						// do nothing if not selected
 						return Ok(());
 					}
@@ -128,6 +127,7 @@ where
 										serialized_log.roundup.new_relayers,
 									)
 									.await?,
+								relay_as,
 								is_bootstrap,
 							)
 							.await?;
@@ -226,13 +226,22 @@ where
 	}
 
 	/// Verifies whether the current relayer was selected at the given round.
-	async fn is_selected_relayer(&self, round: U256) -> Result<bool> {
+	async fn is_selected_relayer(&self, round: U256, relayer: Address) -> Result<bool> {
 		let relayer_manager = self.client.protocol_contracts.relayer_manager.as_ref().unwrap();
 		Ok(relayer_manager
-			.is_previous_selected_relayer(round, self.client.address().await, true)
+			.is_previous_selected_relayer(round, relayer, true)
 			.call()
 			.await?
 			._0)
+	}
+
+	async fn relay_as(&self, round: U256) -> Address {
+		let relayer_manager = self.client.protocol_contracts.relayer_manager.as_ref().unwrap();
+		let prev_relayers =
+			relayer_manager.previous_selected_relayers(round, true).call().await.unwrap()._0;
+		let signers = self.client.signers();
+
+		signers.into_iter().find(|s| prev_relayers.contains(s)).unwrap_or_default()
 	}
 
 	/// Build `round_control_relay` method call param.
@@ -251,18 +260,20 @@ where
 		&self,
 		target_socket: &SocketInstance<F, P>,
 		roundup_submit: &Round_Up_Submit,
+		from: Address,
 	) -> TransactionRequest {
-		TransactionRequest::default()
-			.to(*target_socket.address())
-			.input(TransactionInput::new(
+		TransactionRequest::default().to(*target_socket.address()).from(from).input(
+			TransactionInput::new(
 				target_socket.round_control_relay(roundup_submit.clone()).calldata().clone(),
-			))
+			),
+		)
 	}
 
 	/// Check roundup submitted before. If not, call `round_control_relay`.
 	async fn broadcast_roundup(
 		&self,
 		roundup_submit: &Round_Up_Submit,
+		from: Address,
 		is_bootstrap: bool,
 	) -> Result<()> {
 		if self.external_clients.is_empty() {
@@ -278,6 +289,7 @@ where
 				let transaction_request = self.build_transaction_request(
 					&target_client.protocol_contracts.socket,
 					roundup_submit,
+					from,
 				);
 				let metadata = TxRequestMetadata::VSPPhase2(VSPPhase2Metadata::new(
 					roundup_submit.round,
