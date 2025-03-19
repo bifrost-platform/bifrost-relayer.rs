@@ -85,7 +85,7 @@ where
 
 				let new_relayers = self.fetch_validator_list(latest_round).await?;
 
-				if !self.is_selected_relayer(latest_round).await? {
+				if !self.is_selected_relayer(latest_round - U256::from(1)).await? {
 					continue;
 				}
 
@@ -133,7 +133,7 @@ where
 	async fn is_selected_relayer(&self, round: U256) -> Result<bool> {
 		let relayer_manager = self.client.protocol_contracts.relayer_manager.as_ref().unwrap();
 		Ok(relayer_manager
-			.is_previous_selected_relayer(round - U256::from(1), self.client.address().await, true)
+			.is_previous_selected_relayer(round, self.client.address().await, true)
 			.call()
 			.await?
 			._0)
@@ -254,7 +254,7 @@ where
 				let relay_as = self.relay_as(next_poll_round - U256::from(1)).await;
 
 				// If RoundUp not reached to latest round, process round_control_poll
-				if self.is_selected_relayer(next_poll_round).await? {
+				if self.is_selected_relayer(next_poll_round - U256::from(1)).await? {
 					let new_relayers = self.fetch_validator_list(next_poll_round).await?;
 					self.request_send_transaction(
 						self.build_transaction(next_poll_round, new_relayers.clone(), relay_as)
