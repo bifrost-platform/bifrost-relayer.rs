@@ -43,16 +43,28 @@ where
 	{
 		let error_str = error.to_string();
 
-		// If the transaction is a SubmitSignedPsbt, and the error is RequestDNE, then we don't need to retry
-		if let XtRequestMetadata::SubmitSignedPsbt(_) = msg.metadata {
-			if error_str.contains("BtcSocketQueue::RequestDNE") {
-				log::info!(
-					target: &self.get_bfc_client().get_chain_name(),
-					"M-of-N signature has been collected, so not retrying"
-				);
-				return;
-			}
-		}
+		// Some ~DNE errors are not retryable
+		match msg.metadata {
+			XtRequestMetadata::SubmitSignedPsbt(_) => {
+				if error_str.contains("BtcSocketQueue::RequestDNE") {
+					log::info!(
+						target: &self.get_bfc_client().get_chain_name(),
+						"M-of-N signature has been collected, so not retrying"
+					);
+					return;
+				}
+			},
+			XtRequestMetadata::SubmitExecutedRequest(_) => {
+				if error_str.contains("BtcSocketQueue::RequestDNE") {
+					log::info!(
+						target: &self.get_bfc_client().get_chain_name(),
+						"Executed notification has been collected, no need to retry"
+					);
+					return;
+				}
+			},
+			_ => {},
+		};
 
 		let log_msg = format!(
 			"-[{}]-[{}] ♻️  Unknown error while requesting a transaction request: {}, Retries left: {:?}, Error: {}",
