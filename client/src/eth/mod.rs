@@ -459,6 +459,10 @@ pub fn send_transaction<F, P>(
 	this_handle.spawn("send_transaction", None, async move {
 		if let Err(err) = client.fill_gas(&mut request).await {
 			if debug_mode {
+				if err.to_string().contains("revert tx already executed") {
+					return;
+				}
+
 				let msg = format!(
 					" ❗️ Failed to estimate gas ({} address:{}): {}, Error: {}",
 					client.get_chain_name(),
