@@ -114,8 +114,8 @@ where
 			.to(*self.bitcoin_socket().address())
 	}
 
-	/// Checks if the relayer has already voted on the event.
-	async fn is_relayer_voted(&self, event: &Event, user_bfc_address: EthAddress) -> Result<bool> {
+	/// Checks if the event is processable.
+	async fn is_processable(&self, event: &Event, user_bfc_address: EthAddress) -> Result<bool> {
 		let hash_key = self
 			.bitcoin_socket()
 			.getHashKey(
@@ -128,6 +128,15 @@ where
 			.await?
 			._0;
 
+		let tx_info = self.bitcoin_socket().txs(hash_key).call().await?;
+		if tx_info.voteCount
+			>= self.bfc_client.protocol_contracts.authority.majority_0().call().await?._0
+		{
+			// a vote for a request has already finished
+			return Ok(false);
+		}
+
+		// check if the relayer has voted for this request
 		Ok(self
 			.bitcoin_socket()
 			.isRelayerVoted(hash_key, self.bfc_client.address().await)
@@ -193,7 +202,8 @@ where
 			if self.is_rollback_output(event.txid, event.index).await? {
 				return Ok(());
 			}
-			if self.is_relayer_voted(&event, user_bfc_address).await? {
+			// check if transaction is processable (has not been voted for)
+			if self.is_processable(&event, user_bfc_address).await? {
 				return Ok(());
 			}
 
