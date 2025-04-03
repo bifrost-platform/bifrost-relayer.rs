@@ -114,8 +114,8 @@ where
 			.to(*self.bitcoin_socket().address())
 	}
 
-	/// Checks if the event is processable.
-	async fn is_processable(&self, event: &Event, user_bfc_address: EthAddress) -> Result<bool> {
+	/// Checks if the vote for a request has already finished.
+	async fn is_vote_finished(&self, event: &Event, user_bfc_address: EthAddress) -> Result<bool> {
 		let hash_key = self
 			.bitcoin_socket()
 			.getHashKey(
@@ -133,7 +133,7 @@ where
 			>= self.bfc_client.protocol_contracts.authority.majority_0().call().await?._0
 		{
 			// a vote for a request has already finished
-			return Ok(false);
+			return Ok(true);
 		}
 
 		// check if the relayer has voted for this request
@@ -202,8 +202,8 @@ where
 			if self.is_rollback_output(event.txid, event.index).await? {
 				return Ok(());
 			}
-			// check if transaction is processable (has not been voted for)
-			if self.is_processable(&event, user_bfc_address).await? {
+			// check if vote for this request has already finished or if the relayer has voted for this request
+			if self.is_vote_finished(&event, user_bfc_address).await? {
 				return Ok(());
 			}
 
