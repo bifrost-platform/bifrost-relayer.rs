@@ -149,6 +149,10 @@ where
 	fn bitcoin_socket(&self) -> &BitcoinSocketInstance<F, P, N> {
 		self.bfc_client.protocol_contracts.bitcoin_socket.as_ref().unwrap()
 	}
+
+	async fn submit_utxo(&self) -> Result<()> {
+		todo!("implement this")
+	}
 }
 
 #[async_trait::async_trait]
@@ -213,6 +217,10 @@ where
 				self.debug_mode,
 				self.handle.clone(),
 			);
+
+			if self.bfc_client.blaze_activation().await? {
+				self.submit_utxo().await?;
+			}
 		}
 
 		Ok(())

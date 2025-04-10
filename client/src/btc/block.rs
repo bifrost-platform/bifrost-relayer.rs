@@ -41,6 +41,8 @@ pub enum EventType {
 	Inbound,
 	/// An outbound action.
 	Outbound,
+	/// A new block has been created.
+	NewBlock,
 }
 
 #[derive(Debug, Clone)]

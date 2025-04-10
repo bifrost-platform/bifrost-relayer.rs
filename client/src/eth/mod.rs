@@ -216,6 +216,11 @@ where
 		Ok(relayer_manager.is_selected_relayer(self.address().await, false).call().await?)
 	}
 
+	/// Check the blaze activation state
+	pub async fn blaze_activation(&self) -> Result<bool> {
+		todo!("implement this")
+	}
+
 	/// Flush stalled transactions from the txpool.
 	pub async fn flush_stalled_transactions(&self) -> Result<()> {
 		let _lock = self.martial_law.lock().await;
