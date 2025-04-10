@@ -5,7 +5,7 @@
 		path = "bounded_collections::bounded_vec::BoundedVec",
 		derive = "Ord, PartialOrd, Eq, PartialEq"
 	),
-	derive_for_type(path = "bp_multi_sig::MigrationSequence", derive = "Eq, PartialEq")
+	derive_for_type(path = "bp_btc_relay::MigrationSequence", derive = "Eq, PartialEq")
 )]
 pub mod bifrost_runtime {}
 
@@ -13,7 +13,7 @@ use bifrost_runtime::runtime_types;
 
 pub use runtime_types::{
 	bounded_collections::bounded_vec::BoundedVec,
-	bp_multi_sig::{MigrationSequence, Public},
+	bp_btc_relay::{MigrationSequence, Public},
 	fp_account::EthereumSignature,
 	pallet_btc_registration_pool::{
 		VaultKeyPreSubmission, VaultKeySubmission,
@@ -24,7 +24,6 @@ pub use runtime_types::{
 	pallet_btc_socket_queue::{
 		RollbackPollMessage, SignedPsbtMessage, pallet::pallet::Call::submit_unsigned_psbt,
 	},
-	sp_core::ecdsa::Signature,
 };
 
 pub use bifrost_runtime::{
