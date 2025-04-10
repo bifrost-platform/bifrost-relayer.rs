@@ -1,9 +1,10 @@
+mod feerate_feeder;
 mod inbound;
 mod outbound;
 
+pub use feerate_feeder::*;
 pub use inbound::*;
 pub use outbound::*;
-use tokio::time::sleep;
 
 use crate::{
 	btc::{
@@ -26,6 +27,7 @@ use br_primitives::{
 };
 use eyre::Result;
 use std::{sync::Arc, time::Duration};
+use tokio::time::sleep;
 
 use super::block::EventMessage;
 
