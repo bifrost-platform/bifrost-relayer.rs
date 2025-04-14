@@ -84,6 +84,10 @@ impl EventMessage {
 	pub fn outbound(block_number: u64) -> Self {
 		Self::new(block_number, EventType::Outbound, vec![])
 	}
+
+	pub fn new_block(block_number: u64) -> Self {
+		Self::new(block_number, EventType::NewBlock, vec![])
+	}
 }
 
 /// A module that reads every new Bitcoin block and filters `Inbound`, `Outbound` events.
@@ -412,6 +416,7 @@ where
 				outbound.events.len()
 			);
 
+			self.sender.send(EventMessage::new_block(num)).unwrap();
 			self.sender.send(inbound).unwrap();
 			self.sender.send(outbound).unwrap();
 		}
