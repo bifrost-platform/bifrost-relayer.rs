@@ -30,7 +30,12 @@ pub use bifrost_runtime::{
 	btc_registration_pool::calls::types::*, btc_socket_queue::calls::types::*,
 };
 
-use subxt::config::{Config, DefaultExtrinsicParams, SubstrateConfig};
+use super::constants::errors::INVALID_PROVIDER_URL;
+use subxt::{
+	OnlineClient,
+	config::{Config, DefaultExtrinsicParams, SubstrateConfig},
+};
+use url::Url;
 
 #[derive(Debug, Clone)]
 pub enum CustomConfig {}
@@ -44,4 +49,16 @@ impl Config for CustomConfig {
 	type Header = <SubstrateConfig as Config>::Header;
 	type ExtrinsicParams = DefaultExtrinsicParams<CustomConfig>;
 	type AssetId = u32;
+}
+
+pub async fn initialize_sub_client(mut url: Url) -> OnlineClient<CustomConfig> {
+	if url.scheme() == "https" {
+		url.set_scheme("wss").expect(INVALID_PROVIDER_URL);
+	} else {
+		url.set_scheme("ws").expect(INVALID_PROVIDER_URL);
+	};
+
+	OnlineClient::<CustomConfig>::from_insecure_url(url.as_str())
+		.await
+		.expect(INVALID_PROVIDER_URL)
 }
