@@ -1,4 +1,4 @@
-use super::{Event, EventMessage, EventType, Handler, LOG_TARGET};
+use super::{Event, EventMessage, EventType, Handler, LOG_TARGET, XtRequester};
 use crate::eth::EthClient;
 use alloy::{
 	network::AnyNetwork,
@@ -7,6 +7,7 @@ use alloy::{
 use br_primitives::{
 	btc::FeeRateResponse,
 	substrate::{CustomConfig, initialize_sub_client},
+	tx::XtRequestSender,
 	utils::sub_display_format,
 };
 use eyre::Result;
@@ -28,6 +29,8 @@ where
 {
 	bfc_client: Arc<EthClient<F, P>>,
 	sub_client: Option<OnlineClient<CustomConfig>>,
+	/// The unsigned transaction message sender.
+	xt_request_sender: Arc<XtRequestSender>,
 	event_stream: BroadcastStream<EventMessage>,
 	handle: SpawnTaskHandle,
 	feerate_api: &'static str,
@@ -41,6 +44,7 @@ where
 {
 	pub fn new(
 		bfc_client: Arc<EthClient<F, P>>,
+		xt_request_sender: Arc<XtRequestSender>,
 		event_receiver: Receiver<EventMessage>,
 		handle: SpawnTaskHandle,
 		feerate_api: &'static str,
@@ -49,6 +53,7 @@ where
 		Self {
 			bfc_client,
 			sub_client: None,
+			xt_request_sender,
 			event_stream: BroadcastStream::new(event_receiver),
 			handle,
 			feerate_api,
@@ -130,5 +135,20 @@ where
 	#[inline]
 	fn is_target_event(&self, event_type: EventType) -> bool {
 		matches!(event_type, EventType::NewBlock)
+	}
+}
+
+#[async_trait::async_trait]
+impl<F, P> XtRequester<F, P> for FeeRateFeeder<F, P>
+where
+	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
+	P: Provider<AnyNetwork>,
+{
+	fn xt_request_sender(&self) -> Arc<XtRequestSender> {
+		self.xt_request_sender.clone()
+	}
+
+	fn bfc_client(&self) -> Arc<EthClient<F, P>> {
+		self.bfc_client.clone()
 	}
 }

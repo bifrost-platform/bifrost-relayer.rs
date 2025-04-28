@@ -18,8 +18,8 @@ use br_primitives::{
 		socket::{Socket_Struct::Socket_Message, SocketContract::Socket},
 		socket_queue::SocketQueueInstance,
 	},
-	eth::{BuiltRelayTransaction, SocketEventStatus},
-	tx::{SocketRelayMetadata, TxRequestMetadata},
+	eth::{BootstrapState, BuiltRelayTransaction, SocketEventStatus},
+	tx::{SocketRelayMetadata, TxRequestMetadata, XtRequestSender},
 	utils::sub_display_format,
 };
 use eyre::Result;
@@ -29,7 +29,7 @@ use std::sync::Arc;
 use tokio::sync::broadcast::Receiver;
 use tokio_stream::{StreamExt, wrappers::BroadcastStream};
 
-use super::{BootstrapHandler, EventMessage};
+use super::{BootstrapHandler, EventMessage, XtRequester};
 
 const SUB_LOG_TARGET: &str = "outbound-handler";
 
@@ -38,8 +38,13 @@ where
 	F: TxFiller<N> + WalletProvider<N>,
 	P: Provider<N>,
 {
+	/// `EthClient` for interact with Bifrost network.
 	pub bfc_client: Arc<EthClient<F, P, N>>,
+	/// The unsigned transaction message sender.
+	xt_request_sender: Arc<XtRequestSender>,
+	/// The receiver that consumes new events from the block channel.
 	event_stream: BroadcastStream<BTCEventMessage>,
+	/// Event type which this handler should handle.
 	target_event: EventType,
 	/// The bootstrap shared data.
 	bootstrap_shared_data: Arc<BootstrapSharedData>,
@@ -56,6 +61,7 @@ where
 {
 	pub fn new(
 		bfc_client: Arc<EthClient<F, P, N>>,
+		xt_request_sender: Arc<XtRequestSender>,
 		event_receiver: Receiver<BTCEventMessage>,
 		bootstrap_shared_data: Arc<BootstrapSharedData>,
 		handle: SpawnTaskHandle,
@@ -63,6 +69,7 @@ where
 	) -> Self {
 		Self {
 			bfc_client,
+			xt_request_sender,
 			event_stream: BroadcastStream::new(event_receiver),
 			target_event: EventType::Outbound,
 			bootstrap_shared_data,
@@ -201,5 +208,20 @@ where
 
 	async fn get_bootstrap_events(&self) -> Result<(EventMessage, EventMessage)> {
 		unreachable!("unimplemented")
+	}
+}
+
+#[async_trait::async_trait]
+impl<F, P, N: Network> XtRequester<F, P> for OutboundHandler<F, P, N>
+where
+	F: TxFiller<N> + WalletProvider<N>,
+	P: Provider<N>,
+{
+	fn xt_request_sender(&self) -> Arc<XtRequestSender> {
+		self.xt_request_sender.clone()
+	}
+
+	fn bfc_client(&self) -> Arc<EthClient<F, P, N>> {
+		self.bfc_client.clone()
 	}
 }

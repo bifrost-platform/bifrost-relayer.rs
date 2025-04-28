@@ -206,6 +206,7 @@ pub async fn relay(config: Configuration) -> Result<TaskManager, ServiceError> {
 	let handler_deps = HandlerDeps::new(
 		&config,
 		&manager_deps,
+		&substrate_deps,
 		bootstrap_shared_data.clone(),
 		bfc_client.clone(),
 		periodic_deps.rollback_senders.clone(),

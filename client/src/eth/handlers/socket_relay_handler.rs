@@ -24,15 +24,18 @@ use br_primitives::{
 		SocketContract::Socket,
 	},
 	eth::{BootstrapState, BuiltRelayTransaction, RelayDirection, SocketEventStatus},
-	tx::{SocketRelayMetadata, TxRequestMetadata},
+	tx::{SocketRelayMetadata, TxRequestMetadata, XtRequestSender},
 	utils::sub_display_format,
 };
 
-use crate::eth::{
-	ClientMap, EthClient,
-	events::EventMessage,
-	send_transaction,
-	traits::{BootstrapHandler, Handler, SocketRelayBuilder},
+use crate::{
+	btc::handlers::XtRequester,
+	eth::{
+		ClientMap, EthClient,
+		events::EventMessage,
+		send_transaction,
+		traits::{BootstrapHandler, Handler, SocketRelayBuilder},
+	},
 };
 
 const SUB_LOG_TARGET: &str = "socket-handler";
@@ -45,6 +48,8 @@ where
 {
 	/// The `EthClient` to interact with the connected blockchain.
 	pub client: Arc<EthClient<F, P, N>>,
+	/// The unsigned transaction message sender.
+	xt_request_sender: Arc<XtRequestSender>,
 	/// The receiver that consumes new events from the block channel.
 	event_stream: BroadcastStream<EventMessage>,
 	/// The entire clients instantiated in the system. <chain_id, Arc<EthClient>>
@@ -257,6 +262,7 @@ where
 		event_receiver: Receiver<EventMessage>,
 		system_clients: Arc<ClientMap<F, P, N>>,
 		bifrost_client: Arc<EthClient<F, P, N>>,
+		xt_request_sender: Arc<XtRequestSender>,
 		rollback_senders: Arc<BTreeMap<ChainId, Arc<UnboundedSender<Socket_Message>>>>,
 		handle: SpawnTaskHandle,
 		bootstrap_shared_data: Arc<BootstrapSharedData>,
@@ -269,6 +275,7 @@ where
 			client,
 			system_clients,
 			bifrost_client,
+			xt_request_sender,
 			rollback_senders,
 			handle,
 			bootstrap_shared_data,
@@ -567,6 +574,21 @@ where
 		}
 
 		Ok(logs)
+	}
+}
+
+#[async_trait::async_trait]
+impl<F, P, N: Network> XtRequester<F, P> for SocketRelayHandler<F, P, N>
+where
+	F: TxFiller<N> + WalletProvider<N>,
+	P: Provider<N>,
+{
+	fn xt_request_sender(&self) -> Arc<XtRequestSender> {
+		self.xt_request_sender.clone()
+	}
+
+	fn bfc_client(&self) -> Arc<EthClient<F, P, N>> {
+		self.client.clone()
 	}
 }
 
