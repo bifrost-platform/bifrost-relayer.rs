@@ -8,23 +8,31 @@ use crate::{
 
 use alloy::{
 	network::AnyNetwork,
-	primitives::{Address as EthAddress, B256, ChainId, U256},
+	primitives::{Address as EthAddress, B256, ChainId, U256, keccak256},
 	providers::{Provider, WalletProvider, fillers::TxFiller},
 	rpc::types::{TransactionInput, TransactionRequest},
 };
 use bitcoincore_rpc::bitcoin::Txid;
 use br_primitives::{
 	bootstrap::BootstrapSharedData,
-	contracts::bitcoin_socket::BitcoinSocketInstance,
+	contracts::{bitcoin_socket::BitcoinSocketInstance, blaze::BlazeInstance},
 	eth::BootstrapState,
-	tx::{BitcoinRelayMetadata, TxRequestMetadata, XtRequestSender},
+	substrate::{
+		EthereumSignature, UtxoSubmission,
+		bifrost_runtime::{self, runtime_types::pallet_blaze::UtxoInfo},
+	},
+	tx::{
+		BitcoinRelayMetadata, SubmitUtxoMetadata, TxRequestMetadata, XtRequest, XtRequestMessage,
+		XtRequestMetadata, XtRequestSender,
+	},
 	utils::sub_display_format,
 };
 use eyre::Result;
-
-use miniscript::bitcoin::{Address as BtcAddress, address::NetworkUnchecked, hashes::Hash};
+use miniscript::bitcoin::{Address as BtcAddress, Amount, address::NetworkUnchecked, hashes::Hash};
+use parity_scale_codec::Encode;
 use sc_service::SpawnTaskHandle;
 use std::sync::Arc;
+use subxt::ext::subxt_core::utils::AccountId20;
 use tokio::sync::broadcast::Receiver;
 use tokio_stream::{StreamExt, wrappers::BroadcastStream};
 
@@ -118,6 +126,73 @@ where
 			.to(*self.bitcoin_socket().address())
 	}
 
+	/// Build the payload for the unsigned transaction. (`submit_utxos()`)
+	async fn build_payload(
+		&self,
+		txid: Txid,
+		vout: u32,
+		amount: Amount,
+	) -> Result<(UtxoSubmission<AccountId20>, EthereumSignature)> {
+		let msg = UtxoSubmission {
+			authority_id: AccountId20(self.bfc_client.address().await.0.0),
+			utxos: vec![UtxoInfo {
+				txid: txid.to_byte_array().into(),
+				vout,
+				amount: amount.to_sat(),
+			}],
+		};
+		let utxo_hash = keccak256(&Encode::encode(&(txid.to_byte_array(), vout, amount.to_sat())));
+
+		let signature = self
+			.bfc_client
+			.sign_message(&[keccak256("UtxosSubmission").as_slice(), utxo_hash.as_ref()].concat())
+			.await?
+			.into();
+
+		Ok((msg, signature))
+	}
+
+	/// Build the calldata for the unsigned transaction. (`submit_utxos()`)
+	async fn build_unsigned_tx(
+		&self,
+		txid: Txid,
+		vout: u32,
+		amount: Amount,
+	) -> Result<(XtRequest, SubmitUtxoMetadata)> {
+		let (msg, signature) = self.build_payload(txid, vout, amount).await?;
+		let metadata = SubmitUtxoMetadata::new(txid, vout, amount);
+		Ok((XtRequest::from(bifrost_runtime::tx().blaze().submit_utxos(msg, signature)), metadata))
+	}
+
+	/// Send the transaction request message to the channel.
+	async fn request_send_transaction(&self, call: XtRequest, metadata: SubmitUtxoMetadata) {
+		match self
+			.xt_request_sender
+			.send(XtRequestMessage::new(call, XtRequestMetadata::SubmitUtxos(metadata.clone())))
+		{
+			Ok(_) => log::info!(
+				target: &self.bfc_client.get_chain_name(),
+				"-[{}] 🔖 Request unsigned transaction: {}",
+				sub_display_format(SUB_LOG_TARGET),
+				metadata
+			),
+			Err(error) => {
+				let log_msg = format!(
+					"-[{}]-[{}] ❗️ Failed to send unsigned transaction: {}, Error: {}",
+					sub_display_format(SUB_LOG_TARGET),
+					self.bfc_client.address().await,
+					metadata,
+					error
+				);
+				log::error!(target: &self.bfc_client.get_chain_name(), "{log_msg}");
+				sentry::capture_message(
+					&format!("[{}]{log_msg}", &self.bfc_client.get_chain_name()),
+					sentry::Level::Error,
+				);
+			},
+		}
+	}
+
 	/// Checks if the vote for a request has already finished.
 	async fn is_vote_finished(&self, event: &Event, user_bfc_address: EthAddress) -> Result<bool> {
 		let hash_key = self
@@ -160,8 +235,28 @@ where
 		self.bfc_client.protocol_contracts.bitcoin_socket.as_ref().unwrap()
 	}
 
-	async fn submit_utxo(&self) -> Result<()> {
-		todo!("implement this")
+	#[inline]
+	fn blaze(&self) -> &BlazeInstance<F, P> {
+		self.bfc_client.protocol_contracts.blaze.as_ref().unwrap()
+	}
+
+	async fn submit_utxo(&self, txid: Txid, vout: u32, amount: Amount) -> Result<()> {
+		if self
+			.blaze()
+			.is_submittable_utxo(
+				txid.to_byte_array().into(),
+				U256::from(vout),
+				U256::from(amount.to_sat()),
+				self.bfc_client().address().await,
+			)
+			.call()
+			.await?
+			._0
+		{
+			let (call, metadata) = self.build_unsigned_tx(txid, vout, amount).await?;
+			self.request_send_transaction(call, metadata).await;
+		}
+		Ok(())
 	}
 }
 
@@ -197,17 +292,23 @@ where
 		Ok(())
 	}
 
-	async fn process_event(&self, mut event: Event) -> Result<()> {
-		if let Some(user_bfc_address) = self.get_user_bfc_address(&event.address).await? {
+	async fn process_event(&self, event: Event) -> Result<()> {
+		let Event { mut txid, index, amount, ref address } = event;
+		if let Some(user_bfc_address) = self.get_user_bfc_address(&address).await? {
 			// txid from event is in little endian, convert it to big endian
-			event.txid = {
-				let mut slice: [u8; 32] = event.txid.to_byte_array();
+			txid = {
+				let mut slice: [u8; 32] = txid.to_byte_array();
 				slice.reverse();
 				Txid::from_slice(&slice).unwrap()
 			};
 
+			// submit utxo if blaze is activated
+			if self.bfc_client.blaze_activation().await? {
+				self.submit_utxo(txid, index, amount).await?;
+			}
+
 			// check if transaction has been submitted to be rollbacked
-			if self.is_rollback_output(event.txid, event.index).await? {
+			if self.is_rollback_output(txid, index).await? {
 				return Ok(());
 			}
 			// check if vote for this request has already finished or if the relayer has voted for this request
@@ -217,7 +318,7 @@ where
 
 			let tx_request = self.build_transaction(&event, user_bfc_address);
 			let metadata =
-				BitcoinRelayMetadata::new(event.address, user_bfc_address, event.txid, event.index);
+				BitcoinRelayMetadata::new(address.clone(), user_bfc_address, txid, index);
 
 			send_transaction(
 				self.bfc_client.clone(),
@@ -227,10 +328,6 @@ where
 				self.debug_mode,
 				self.handle.clone(),
 			);
-
-			if self.bfc_client.blaze_activation().await? {
-				self.submit_utxo().await?;
-			}
 		}
 
 		Ok(())

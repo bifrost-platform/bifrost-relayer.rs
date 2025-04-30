@@ -15,6 +15,7 @@ pub use runtime_types::{
 	bounded_collections::bounded_vec::BoundedVec,
 	bp_btc_relay::{MigrationSequence, Public},
 	fp_account::EthereumSignature,
+	pallet_blaze::{UtxoSubmission, pallet::pallet::Call::submit_utxos},
 	pallet_btc_registration_pool::{
 		VaultKeyPreSubmission, VaultKeySubmission,
 		pallet::pallet::Call::{
@@ -27,7 +28,8 @@ pub use runtime_types::{
 };
 
 pub use bifrost_runtime::{
-	btc_registration_pool::calls::types::*, btc_socket_queue::calls::types::*,
+	blaze::calls::types::*, btc_registration_pool::calls::types::*,
+	btc_socket_queue::calls::types::*,
 };
 
 use super::constants::errors::INVALID_PROVIDER_URL;
