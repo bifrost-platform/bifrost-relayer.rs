@@ -4,17 +4,17 @@ use std::{
 };
 
 use alloy::{
-	primitives::{Address, ChainId, B256, U256},
+	primitives::{Address, B256, ChainId, U256},
 	rpc::types::TransactionRequest,
 };
 use bitcoincore_rpc::bitcoin::PublicKey;
-use miniscript::bitcoin::{address::NetworkUnchecked, Address as BtcAddress, Txid};
+use miniscript::bitcoin::{Address as BtcAddress, Amount, Txid, address::NetworkUnchecked};
 use subxt::{
+	Metadata,
 	ext::subxt_core::Error,
 	tx::{DefaultPayload, Payload},
-	Metadata,
 };
-use tokio::sync::mpsc::{error::SendError, UnboundedSender};
+use tokio::sync::mpsc::{UnboundedSender, error::SendError};
 
 use crate::{
 	constants::tx::{DEFAULT_TX_RETRIES, DEFAULT_TX_RETRY_INTERVAL_MS},
@@ -22,7 +22,8 @@ use crate::{
 	periodic::PriceResponse,
 	substrate::{
 		ApproveSetRefunds, SubmitExecutedRequest, SubmitRollbackPoll, SubmitSignedPsbt,
-		SubmitSystemVaultKey, SubmitUnsignedPsbt, SubmitVaultKey, VaultKeyPresubmission,
+		SubmitSystemVaultKey, SubmitUnsignedPsbt, SubmitUtxos, SubmitVaultKey,
+		VaultKeyPresubmission,
 	},
 };
 
@@ -408,6 +409,25 @@ impl Display for ApproveSetRefundsMetadata {
 	}
 }
 
+#[derive(Clone, Debug)]
+pub struct SubmitUtxoMetadata {
+	pub txid: Txid,
+	pub vout: u32,
+	pub amount: Amount,
+}
+
+impl SubmitUtxoMetadata {
+	pub fn new(txid: Txid, vout: u32, amount: Amount) -> Self {
+		Self { txid, vout, amount }
+	}
+}
+
+impl Display for SubmitUtxoMetadata {
+	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		write!(f, "SubmitUtxo({}:{}:{})", self.txid, self.vout, self.amount)
+	}
+}
+
 #[derive(Clone)]
 pub enum XtRequestMetadata {
 	SubmitVaultKey(SubmitVaultKeyMetadata),
@@ -417,6 +437,7 @@ pub enum XtRequestMetadata {
 	SubmitRollbackPoll(SubmitRollbackPollMetadata),
 	VaultKeyPresubmission(VaultKeyPresubmissionMetadata),
 	ApproveSetRefunds(ApproveSetRefundsMetadata),
+	SubmitUtxos(SubmitUtxoMetadata),
 }
 
 impl Display for XtRequestMetadata {
@@ -432,6 +453,7 @@ impl Display for XtRequestMetadata {
 				XtRequestMetadata::SubmitRollbackPoll(metadata) => metadata.to_string(),
 				XtRequestMetadata::VaultKeyPresubmission(metadata) => metadata.to_string(),
 				XtRequestMetadata::ApproveSetRefunds(metadata) => metadata.to_string(),
+				XtRequestMetadata::SubmitUtxos(metadata) => metadata.to_string(),
 			}
 		)
 	}
@@ -447,6 +469,7 @@ pub enum XtRequest {
 	SubmitRollbackPoll(DefaultPayload<SubmitRollbackPoll>),
 	VaultKeyPresubmission(DefaultPayload<VaultKeyPresubmission>),
 	ApproveSetRefunds(DefaultPayload<ApproveSetRefunds>),
+	SubmitUtxos(DefaultPayload<SubmitUtxos>),
 }
 
 impl Payload for XtRequest {
@@ -460,6 +483,7 @@ impl Payload for XtRequest {
 			XtRequest::SubmitRollbackPoll(call) => call.encode_call_data_to(metadata, out),
 			XtRequest::VaultKeyPresubmission(call) => call.encode_call_data_to(metadata, out),
 			XtRequest::ApproveSetRefunds(call) => call.encode_call_data_to(metadata, out),
+			XtRequest::SubmitUtxos(call) => call.encode_call_data_to(metadata, out),
 		}
 	}
 }
@@ -477,6 +501,7 @@ impl TryFrom<XtRequest> for DefaultPayload<SubmitSignedPsbt> {
 			XtRequest::SubmitRollbackPoll(_) => Err(()),
 			XtRequest::VaultKeyPresubmission(_) => Err(()),
 			XtRequest::ApproveSetRefunds(_) => Err(()),
+			XtRequest::SubmitUtxos(_) => Err(()),
 		}
 	}
 }
@@ -494,6 +519,7 @@ impl TryFrom<XtRequest> for DefaultPayload<SubmitVaultKey> {
 			XtRequest::SubmitRollbackPoll(_) => Err(()),
 			XtRequest::VaultKeyPresubmission(_) => Err(()),
 			XtRequest::ApproveSetRefunds(_) => Err(()),
+			XtRequest::SubmitUtxos(_) => Err(()),
 		}
 	}
 }
@@ -511,6 +537,7 @@ impl TryFrom<XtRequest> for DefaultPayload<SubmitUnsignedPsbt> {
 			XtRequest::SubmitRollbackPoll(_) => Err(()),
 			XtRequest::VaultKeyPresubmission(_) => Err(()),
 			XtRequest::ApproveSetRefunds(_) => Err(()),
+			XtRequest::SubmitUtxos(_) => Err(()),
 		}
 	}
 }
@@ -528,6 +555,7 @@ impl TryFrom<XtRequest> for DefaultPayload<SubmitExecutedRequest> {
 			XtRequest::SubmitRollbackPoll(_) => Err(()),
 			XtRequest::VaultKeyPresubmission(_) => Err(()),
 			XtRequest::ApproveSetRefunds(_) => Err(()),
+			XtRequest::SubmitUtxos(_) => Err(()),
 		}
 	}
 }
@@ -544,6 +572,7 @@ impl TryFrom<XtRequest> for DefaultPayload<SubmitSystemVaultKey> {
 			XtRequest::SubmitRollbackPoll(_) => Err(()),
 			XtRequest::VaultKeyPresubmission(_) => Err(()),
 			XtRequest::ApproveSetRefunds(_) => Err(()),
+			XtRequest::SubmitUtxos(_) => Err(()),
 		}
 	}
 }
@@ -560,6 +589,7 @@ impl TryFrom<XtRequest> for DefaultPayload<SubmitRollbackPoll> {
 			XtRequest::SubmitRollbackPoll(call) => Ok(call),
 			XtRequest::VaultKeyPresubmission(_) => Err(()),
 			XtRequest::ApproveSetRefunds(_) => Err(()),
+			XtRequest::SubmitUtxos(_) => Err(()),
 		}
 	}
 }
@@ -577,6 +607,7 @@ impl TryFrom<XtRequest> for DefaultPayload<VaultKeyPresubmission> {
 			XtRequest::SubmitRollbackPoll(_) => Err(()),
 			XtRequest::VaultKeyPresubmission(call) => Ok(call),
 			XtRequest::ApproveSetRefunds(_) => Err(()),
+			XtRequest::SubmitUtxos(_) => Err(()),
 		}
 	}
 }
@@ -594,6 +625,25 @@ impl TryFrom<XtRequest> for DefaultPayload<ApproveSetRefunds> {
 			XtRequest::SubmitRollbackPoll(_) => Err(()),
 			XtRequest::VaultKeyPresubmission(_) => Err(()),
 			XtRequest::ApproveSetRefunds(call) => Ok(call),
+			XtRequest::SubmitUtxos(_) => Err(()),
+		}
+	}
+}
+
+impl TryFrom<XtRequest> for DefaultPayload<SubmitUtxos> {
+	type Error = ();
+
+	fn try_from(value: XtRequest) -> Result<Self, Self::Error> {
+		match value {
+			XtRequest::SubmitSignedPsbt(_) => Err(()),
+			XtRequest::SubmitVaultKey(_) => Err(()),
+			XtRequest::SubmitUnsignedPsbt(_) => Err(()),
+			XtRequest::SubmitExecutedRequest(_) => Err(()),
+			XtRequest::SubmitSystemVaultKey(_) => Err(()),
+			XtRequest::SubmitRollbackPoll(_) => Err(()),
+			XtRequest::VaultKeyPresubmission(_) => Err(()),
+			XtRequest::ApproveSetRefunds(_) => Err(()),
+			XtRequest::SubmitUtxos(call) => Ok(call),
 		}
 	}
 }
@@ -636,6 +686,11 @@ impl From<DefaultPayload<VaultKeyPresubmission>> for XtRequest {
 impl From<DefaultPayload<ApproveSetRefunds>> for XtRequest {
 	fn from(value: DefaultPayload<ApproveSetRefunds>) -> Self {
 		Self::ApproveSetRefunds(value)
+	}
+}
+impl From<DefaultPayload<SubmitUtxos>> for XtRequest {
+	fn from(value: DefaultPayload<SubmitUtxos>) -> Self {
+		Self::SubmitUtxos(value)
 	}
 }
 

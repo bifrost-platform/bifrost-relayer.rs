@@ -218,7 +218,11 @@ where
 
 	/// Check the blaze activation state
 	pub async fn blaze_activation(&self) -> Result<bool> {
-		todo!("implement this")
+		if let Some(blaze) = self.protocol_contracts.blaze.as_ref() {
+			Ok(blaze.is_activated().call().await?._0)
+		} else {
+			Ok(false)
+		}
 	}
 
 	/// Flush stalled transactions from the txpool.
