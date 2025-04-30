@@ -1,0 +1,49 @@
+[
+	{
+		"inputs": [],
+		"name": "is_activated",
+		"outputs": [
+			{
+				"internalType": "bool",
+				"name": "",
+				"type": "bool"
+			}
+		],
+		"stateMutability": "view",
+		"type": "function"
+	},
+	{
+		"inputs": [
+			{
+				"internalType": "bytes32",
+				"name": "txid",
+				"type": "bytes32"
+			},
+			{
+				"internalType": "uint256",
+				"name": "vout",
+				"type": "uint256"
+			},
+			{
+				"internalType": "uint256",
+				"name": "amount",
+				"type": "uint256"
+			},
+			{
+				"internalType": "address",
+				"name": "authority_id",
+				"type": "address"
+			}
+		],
+		"name": "is_submittable_utxo",
+		"outputs": [
+			{
+				"internalType": "bool",
+				"name": "",
+				"type": "bool"
+			}
+		],
+		"stateMutability": "view",
+		"type": "function"
+	}
+]

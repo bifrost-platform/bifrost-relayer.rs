@@ -1,5 +1,6 @@
 pub mod authority;
 pub mod bitcoin_socket;
+pub mod blaze;
 pub mod chainlink_aggregator;
 pub mod registration_pool;
 pub mod relay_executive;
@@ -9,7 +10,7 @@ pub mod socket_queue;
 
 use alloy::{
 	network::AnyNetwork,
-	primitives::{b256, Bytes, PrimitiveSignature, B256},
+	primitives::{B256, Bytes, PrimitiveSignature, b256},
 	providers::fillers::FillProvider,
 	sol,
 };
