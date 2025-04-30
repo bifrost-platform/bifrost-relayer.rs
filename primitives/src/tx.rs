@@ -21,9 +21,9 @@ use crate::{
 	eth::{GasCoefficient, SocketEventStatus},
 	periodic::PriceResponse,
 	substrate::{
-		ApproveSetRefunds, BroadcastPoll, SubmitExecutedRequest, SubmitRollbackPoll,
-		SubmitSignedPsbt, SubmitSystemVaultKey, SubmitUnsignedPsbt, SubmitUtxos, SubmitVaultKey,
-		VaultKeyPresubmission,
+		ApproveSetRefunds, BroadcastPoll, SubmitExecutedRequest, SubmitOutboundRequests,
+		SubmitRollbackPoll, SubmitSignedPsbt, SubmitSystemVaultKey, SubmitUnsignedPsbt,
+		SubmitUtxos, SubmitVaultKey, VaultKeyPresubmission,
 	},
 };
 
@@ -456,6 +456,7 @@ pub enum XtRequestMetadata {
 	ApproveSetRefunds(ApproveSetRefundsMetadata),
 	SubmitUtxos(SubmitUtxoMetadata),
 	BroadcastPoll(BroadcastPollMetadata),
+	SubmitOutboundRequests(SocketRelayMetadata),
 }
 
 impl Display for XtRequestMetadata {
@@ -473,6 +474,7 @@ impl Display for XtRequestMetadata {
 				XtRequestMetadata::ApproveSetRefunds(metadata) => metadata.to_string(),
 				XtRequestMetadata::SubmitUtxos(metadata) => metadata.to_string(),
 				XtRequestMetadata::BroadcastPoll(metadata) => metadata.to_string(),
+				XtRequestMetadata::SubmitOutboundRequests(metadata) => metadata.to_string(),
 			}
 		)
 	}
@@ -490,6 +492,7 @@ pub enum XtRequest {
 	ApproveSetRefunds(DefaultPayload<ApproveSetRefunds>),
 	SubmitUtxos(DefaultPayload<SubmitUtxos>),
 	BroadcastPoll(DefaultPayload<BroadcastPoll>),
+	SubmitOutboundRequests(DefaultPayload<SubmitOutboundRequests>),
 }
 
 impl Payload for XtRequest {
@@ -505,6 +508,7 @@ impl Payload for XtRequest {
 			XtRequest::ApproveSetRefunds(call) => call.encode_call_data_to(metadata, out),
 			XtRequest::SubmitUtxos(call) => call.encode_call_data_to(metadata, out),
 			XtRequest::BroadcastPoll(call) => call.encode_call_data_to(metadata, out),
+			XtRequest::SubmitOutboundRequests(call) => call.encode_call_data_to(metadata, out),
 		}
 	}
 }
@@ -524,6 +528,7 @@ impl TryFrom<XtRequest> for DefaultPayload<SubmitSignedPsbt> {
 			XtRequest::ApproveSetRefunds(_) => Err(()),
 			XtRequest::SubmitUtxos(_) => Err(()),
 			XtRequest::BroadcastPoll(_) => Err(()),
+			XtRequest::SubmitOutboundRequests(_) => Err(()),
 		}
 	}
 }
@@ -543,6 +548,7 @@ impl TryFrom<XtRequest> for DefaultPayload<SubmitVaultKey> {
 			XtRequest::ApproveSetRefunds(_) => Err(()),
 			XtRequest::SubmitUtxos(_) => Err(()),
 			XtRequest::BroadcastPoll(_) => Err(()),
+			XtRequest::SubmitOutboundRequests(_) => Err(()),
 		}
 	}
 }
@@ -562,6 +568,7 @@ impl TryFrom<XtRequest> for DefaultPayload<SubmitUnsignedPsbt> {
 			XtRequest::ApproveSetRefunds(_) => Err(()),
 			XtRequest::SubmitUtxos(_) => Err(()),
 			XtRequest::BroadcastPoll(_) => Err(()),
+			XtRequest::SubmitOutboundRequests(_) => Err(()),
 		}
 	}
 }
@@ -581,6 +588,7 @@ impl TryFrom<XtRequest> for DefaultPayload<SubmitExecutedRequest> {
 			XtRequest::ApproveSetRefunds(_) => Err(()),
 			XtRequest::SubmitUtxos(_) => Err(()),
 			XtRequest::BroadcastPoll(_) => Err(()),
+			XtRequest::SubmitOutboundRequests(_) => Err(()),
 		}
 	}
 }
@@ -599,6 +607,7 @@ impl TryFrom<XtRequest> for DefaultPayload<SubmitSystemVaultKey> {
 			XtRequest::ApproveSetRefunds(_) => Err(()),
 			XtRequest::SubmitUtxos(_) => Err(()),
 			XtRequest::BroadcastPoll(_) => Err(()),
+			XtRequest::SubmitOutboundRequests(_) => Err(()),
 		}
 	}
 }
@@ -617,6 +626,7 @@ impl TryFrom<XtRequest> for DefaultPayload<SubmitRollbackPoll> {
 			XtRequest::ApproveSetRefunds(_) => Err(()),
 			XtRequest::SubmitUtxos(_) => Err(()),
 			XtRequest::BroadcastPoll(_) => Err(()),
+			XtRequest::SubmitOutboundRequests(_) => Err(()),
 		}
 	}
 }
@@ -636,6 +646,7 @@ impl TryFrom<XtRequest> for DefaultPayload<VaultKeyPresubmission> {
 			XtRequest::ApproveSetRefunds(_) => Err(()),
 			XtRequest::SubmitUtxos(_) => Err(()),
 			XtRequest::BroadcastPoll(_) => Err(()),
+			XtRequest::SubmitOutboundRequests(_) => Err(()),
 		}
 	}
 }
@@ -655,6 +666,7 @@ impl TryFrom<XtRequest> for DefaultPayload<ApproveSetRefunds> {
 			XtRequest::ApproveSetRefunds(call) => Ok(call),
 			XtRequest::SubmitUtxos(_) => Err(()),
 			XtRequest::BroadcastPoll(_) => Err(()),
+			XtRequest::SubmitOutboundRequests(_) => Err(()),
 		}
 	}
 }
@@ -674,6 +686,27 @@ impl TryFrom<XtRequest> for DefaultPayload<SubmitUtxos> {
 			XtRequest::ApproveSetRefunds(_) => Err(()),
 			XtRequest::SubmitUtxos(call) => Ok(call),
 			XtRequest::BroadcastPoll(_) => Err(()),
+			XtRequest::SubmitOutboundRequests(_) => Err(()),
+		}
+	}
+}
+
+impl TryFrom<XtRequest> for DefaultPayload<SubmitOutboundRequests> {
+	type Error = ();
+
+	fn try_from(value: XtRequest) -> Result<Self, Self::Error> {
+		match value {
+			XtRequest::SubmitSignedPsbt(_) => Err(()),
+			XtRequest::SubmitVaultKey(_) => Err(()),
+			XtRequest::SubmitUnsignedPsbt(_) => Err(()),
+			XtRequest::SubmitExecutedRequest(_) => Err(()),
+			XtRequest::SubmitSystemVaultKey(_) => Err(()),
+			XtRequest::SubmitRollbackPoll(_) => Err(()),
+			XtRequest::VaultKeyPresubmission(_) => Err(()),
+			XtRequest::ApproveSetRefunds(_) => Err(()),
+			XtRequest::SubmitUtxos(_) => Err(()),
+			XtRequest::BroadcastPoll(_) => Err(()),
+			XtRequest::SubmitOutboundRequests(call) => Ok(call),
 		}
 	}
 }
@@ -726,6 +759,11 @@ impl From<DefaultPayload<SubmitUtxos>> for XtRequest {
 impl From<DefaultPayload<BroadcastPoll>> for XtRequest {
 	fn from(value: DefaultPayload<BroadcastPoll>) -> Self {
 		Self::BroadcastPoll(value)
+	}
+}
+impl From<DefaultPayload<SubmitOutboundRequests>> for XtRequest {
+	fn from(value: DefaultPayload<SubmitOutboundRequests>) -> Self {
+		Self::SubmitOutboundRequests(value)
 	}
 }
 

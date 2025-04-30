@@ -16,8 +16,8 @@ pub use runtime_types::{
 	bp_btc_relay::{MigrationSequence, Public},
 	fp_account::EthereumSignature,
 	pallet_blaze::{
-		BroadcastSubmission, UtxoSubmission,
-		pallet::pallet::Call::{broadcast_poll, submit_utxos},
+		BroadcastSubmission, OutboundRequestSubmission, UtxoSubmission,
+		pallet::pallet::Call::{broadcast_poll, submit_outbound_requests, submit_utxos},
 	},
 	pallet_btc_registration_pool::{
 		VaultKeyPreSubmission, VaultKeySubmission,
