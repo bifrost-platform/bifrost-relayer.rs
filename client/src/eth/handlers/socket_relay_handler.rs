@@ -9,6 +9,7 @@ use alloy::{
 };
 use eyre::Result;
 use sc_service::SpawnTaskHandle;
+use subxt::ext::subxt_core::utils::AccountId20;
 use tokio::sync::{broadcast::Receiver, mpsc::UnboundedSender};
 use tokio_stream::{StreamExt, wrappers::BroadcastStream};
 
@@ -24,7 +25,11 @@ use br_primitives::{
 		SocketContract::Socket,
 	},
 	eth::{BootstrapState, BuiltRelayTransaction, RelayDirection, SocketEventStatus},
-	tx::{SocketRelayMetadata, TxRequestMetadata, XtRequestSender},
+	substrate::{OutboundRequestSubmission, bifrost_runtime},
+	tx::{
+		SocketRelayMetadata, TxRequestMetadata, XtRequest, XtRequestMessage, XtRequestMetadata,
+		XtRequestSender,
+	},
 	utils::sub_display_format,
 };
 
@@ -122,6 +127,9 @@ where
 				if self.is_sequence_ended(&msg.req_id, &msg.ins_code, metadata.status).await? {
 					// do nothing if protocol sequence ended
 					return Ok(());
+				}
+				if self.client.blaze_activation().await? {
+					self.submit_brp_outbound_request(msg.clone(), metadata.clone()).await?;
 				}
 
 				self.send_socket_message(msg.clone(), metadata.clone(), metadata.is_inbound)
@@ -476,6 +484,65 @@ where
 				},
 			}
 		}
+	}
+
+	async fn submit_brp_outbound_request(
+		&self,
+		msg: Socket_Message,
+		metadata: SocketRelayMetadata,
+	) -> Result<()> {
+		let dst = Into::<u32>::into(msg.ins_code.ChainIndex) as ChainId;
+		let status = SocketEventStatus::from(msg.status);
+
+		if let Some(bitcoin_chain_id) = self.client.get_bitcoin_chain_id() {
+			// it should be a BRP outbound request (bifrost to bitcoin)
+			if self.is_inbound_sequence(dst) || dst != bitcoin_chain_id {
+				return Ok(());
+			}
+			// we only submit the request if the status is accepted
+			if status != SocketEventStatus::Accepted {
+				return Ok(());
+			}
+			let encoded_msg = self.encode_socket_message(msg);
+			let signature = self
+				.client
+				.sign_message(array_bytes::bytes2hex("0x", encoded_msg.clone()).as_bytes())
+				.await?
+				.into();
+			let call = XtRequest::from(bifrost_runtime::tx().blaze().submit_outbound_requests(
+				OutboundRequestSubmission {
+					authority_id: AccountId20(self.client.address().await.0.0),
+					messages: vec![encoded_msg],
+				},
+				signature,
+			));
+			match self.xt_request_sender.send(XtRequestMessage::new(
+				call,
+				XtRequestMetadata::SubmitOutboundRequests(metadata.clone()),
+			)) {
+				Ok(_) => log::info!(
+					target: &self.client.get_chain_name(),
+					"-[{}] 🔖 Request unsigned transaction: {}",
+					sub_display_format(SUB_LOG_TARGET),
+					metadata
+				),
+				Err(error) => {
+					let log_msg = format!(
+						"-[{}]-[{}] ❗️ Failed to send unsigned transaction: {}, Error: {}",
+						sub_display_format(SUB_LOG_TARGET),
+						self.client.address().await,
+						metadata,
+						error
+					);
+					log::error!(target: &self.client.get_chain_name(), "{log_msg}");
+					sentry::capture_message(
+						&format!("[{}]{log_msg}", &self.client.get_chain_name()),
+						sentry::Level::Error,
+					);
+				},
+			}
+		}
+		Ok(())
 	}
 }
 
