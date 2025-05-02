@@ -183,7 +183,10 @@ where
 			{
 				continue;
 			}
-			self.submit_fee_rate(self.fetch_fee_rate().await).await?;
+			// submit fee rate if blaze is activated
+			if self.bfc_client.blaze_activation().await? {
+				self.submit_fee_rate(self.fetch_fee_rate().await).await?;
+			}
 		}
 		Ok(())
 	}
