@@ -75,7 +75,7 @@ where
 					Ok(fee_rate) => {
 						let final_fee_rate = (fee_rate.fastest_fee as f64
 							* MEMPOOL_SPACE_FEE_RATE_MULTIPLIER)
-							.round() as u64 * 1000;
+							.round() as u64;
 						if self.debug_mode {
 							log::info!(
 								target: LOG_TARGET,
