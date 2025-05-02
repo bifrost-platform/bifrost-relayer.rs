@@ -267,6 +267,7 @@ where
 		mut psbt_signer,
 		mut pub_key_submitter,
 		mut rollback_verifier,
+		mut fee_rate_feeder,
 	} = btc_deps;
 
 	// spawn migration detector
@@ -535,6 +536,22 @@ where
 				let log_msg = format!(
 					"bitcoin rollback verifier({}) stopped: {:?}\nRestarting immediately...",
 					rollback_verifier.bfc_client.address().await,
+					report
+				);
+				log::error!("{log_msg}");
+				sentry::capture_message(&log_msg, sentry::Level::Error);
+			}
+		},
+	);
+	task_manager.spawn_essential_handle().spawn(
+		"bitcoin-fee-rate-feeder",
+		Some("fee-rate-feeder"),
+		async move {
+			loop {
+				let report = fee_rate_feeder.run().await;
+				let log_msg = format!(
+					"bitcoin fee rate feeder({}) stopped: {:?}\nRestarting immediately...",
+					fee_rate_feeder.bfc_client.address().await,
 					report
 				);
 				log::error!("{log_msg}");

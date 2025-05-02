@@ -5,15 +5,16 @@ use alloy::{
 	providers::{Provider, WalletProvider, fillers::TxFiller},
 };
 use br_primitives::{
-	btc::FeeRateResponse,
-	substrate::{CustomConfig, initialize_sub_client},
-	tx::XtRequestSender,
+	btc::{FeeRateResponse, MEMPOOL_SPACE_FEE_RATE_MULTIPLIER},
+	substrate::{
+		CustomConfig, EthereumSignature, FeeRateSubmission, bifrost_runtime, initialize_sub_client,
+	},
+	tx::{SubmitFeeRateMetadata, XtRequest, XtRequestMessage, XtRequestMetadata, XtRequestSender},
 	utils::sub_display_format,
 };
 use eyre::Result;
-use sc_service::SpawnTaskHandle;
 use std::sync::Arc;
-use subxt::OnlineClient;
+use subxt::{OnlineClient, ext::subxt_core::utils::AccountId20};
 use tokio::{
 	sync::broadcast::Receiver,
 	time::{Duration, sleep},
@@ -27,13 +28,17 @@ where
 	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
 	P: Provider<AnyNetwork>,
 {
-	bfc_client: Arc<EthClient<F, P>>,
+	/// `EthClient` to interact with Bifrost network.
+	pub bfc_client: Arc<EthClient<F, P>>,
+	/// The substrate client.
 	sub_client: Option<OnlineClient<CustomConfig>>,
 	/// The unsigned transaction message sender.
 	xt_request_sender: Arc<XtRequestSender>,
+	/// The receiver that consumes new events from the block channel.
 	event_stream: BroadcastStream<EventMessage>,
-	handle: SpawnTaskHandle,
-	feerate_api: &'static str,
+	/// The API endpoint for fetching Bitcoin fee rate.
+	fee_rate_api: &'static str,
+	/// Whether to enable debug mode.
 	debug_mode: bool,
 }
 
@@ -46,8 +51,7 @@ where
 		bfc_client: Arc<EthClient<F, P>>,
 		xt_request_sender: Arc<XtRequestSender>,
 		event_receiver: Receiver<EventMessage>,
-		handle: SpawnTaskHandle,
-		feerate_api: &'static str,
+		fee_rate_api: &'static str,
 		debug_mode: bool,
 	) -> Self {
 		Self {
@@ -55,8 +59,7 @@ where
 			sub_client: None,
 			xt_request_sender,
 			event_stream: BroadcastStream::new(event_receiver),
-			handle,
-			feerate_api,
+			fee_rate_api,
 			debug_mode,
 		}
 	}
@@ -65,21 +68,23 @@ where
 		self.sub_client = Some(initialize_sub_client(self.bfc_client.get_url()).await);
 	}
 
-	async fn fetch_feerate(&self) -> u64 {
+	async fn fetch_fee_rate(&self) -> u64 {
 		loop {
-			match reqwest::get(self.feerate_api).await {
+			match reqwest::get(self.fee_rate_api).await {
 				Ok(response) => match response.json::<FeeRateResponse>().await {
 					Ok(fee_rate) => {
-						let fastest = fee_rate.fastest_fee;
+						let final_fee_rate = (fee_rate.fastest_fee as f64
+							* MEMPOOL_SPACE_FEE_RATE_MULTIPLIER)
+							.round() as u64 * 1000;
 						if self.debug_mode {
 							log::info!(
 								target: LOG_TARGET,
 								"-[{}] Fetched fee rate: {:?}",
 								sub_display_format(SUB_LOG_TARGET),
-								fastest
+								final_fee_rate
 							);
 						}
-						break fastest;
+						break final_fee_rate;
 					},
 					Err(e) => {
 						log::warn!(
@@ -104,8 +109,63 @@ where
 		}
 	}
 
-	async fn submit_feerate(&self, feerate: u64) -> Result<()> {
-		todo!("implement this")
+	async fn build_payload(
+		&self,
+		fee_rate: u64,
+	) -> Result<(FeeRateSubmission<AccountId20, u32>, EthereumSignature)> {
+		let deadline = self.bfc_client.get_block_number().await? as u32 + 2;
+		let msg = FeeRateSubmission {
+			authority_id: AccountId20(self.bfc_client.address().await.0.0),
+			fee_rate,
+			deadline,
+		};
+		let signature_msg = format!("{}:{}", deadline, fee_rate);
+		let signature = self.bfc_client.sign_message(signature_msg.as_bytes()).await?.into();
+		Ok((msg, signature))
+	}
+
+	async fn build_unsigned_tx(&self, fee_rate: u64) -> Result<(XtRequest, SubmitFeeRateMetadata)> {
+		let (msg, signature) = self.build_payload(fee_rate).await?;
+		let metadata = SubmitFeeRateMetadata::new(fee_rate);
+		Ok((
+			XtRequest::from(bifrost_runtime::tx().blaze().submit_fee_rate(msg, signature)),
+			metadata,
+		))
+	}
+
+	async fn submit_fee_rate(&self, fee_rate: u64) -> Result<()> {
+		let (call, metadata) = self.build_unsigned_tx(fee_rate).await?;
+		self.request_send_transaction(call, metadata).await;
+		Ok(())
+	}
+
+	/// Send the transaction request message to the channel.
+	async fn request_send_transaction(&self, call: XtRequest, metadata: SubmitFeeRateMetadata) {
+		match self
+			.xt_request_sender
+			.send(XtRequestMessage::new(call, XtRequestMetadata::SubmitFeeRate(metadata.clone())))
+		{
+			Ok(_) => log::info!(
+				target: &self.bfc_client.get_chain_name(),
+				"-[{}] 🔖 Request unsigned transaction: {}",
+				sub_display_format(SUB_LOG_TARGET),
+				metadata
+			),
+			Err(error) => {
+				let log_msg = format!(
+					"-[{}]-[{}] ❗️ Failed to send unsigned transaction: {}, Error: {}",
+					sub_display_format(SUB_LOG_TARGET),
+					self.bfc_client.address().await,
+					metadata,
+					error
+				);
+				log::error!(target: &self.bfc_client.get_chain_name(), "{log_msg}");
+				sentry::capture_message(
+					&format!("[{}]{log_msg}", &self.bfc_client.get_chain_name()),
+					sentry::Level::Error,
+				);
+			},
+		}
 	}
 }
 
@@ -123,7 +183,7 @@ where
 			{
 				continue;
 			}
-			self.submit_feerate(self.fetch_feerate().await).await?;
+			self.submit_fee_rate(self.fetch_fee_rate().await).await?;
 		}
 		Ok(())
 	}
