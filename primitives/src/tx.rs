@@ -515,9 +515,10 @@ pub enum XtRequest {
 	SubmitFeeRate(DefaultPayload<SubmitFeeRate>),
 }
 
-// Macro to generate Payload implementation for XtRequest
-macro_rules! impl_xt_request_payload {
+// Macro to generate all implementations for XtRequest
+macro_rules! impl_xt_request {
 	($($variant:ident($payload:ty)),*) => {
+		// Generate Payload implementation
 		impl Payload for XtRequest {
 			fn encode_call_data_to(&self, metadata: &Metadata, out: &mut Vec<u8>) -> Result<(), Error> {
 				match self {
@@ -525,12 +526,8 @@ macro_rules! impl_xt_request_payload {
 				}
 			}
 		}
-	};
-}
 
-// Macro to generate TryFrom and From implementations for XtRequest
-macro_rules! impl_xt_request_conversions {
-	($($variant:ident($payload:ty)),*) => {
+		// Generate TryFrom and From implementations for each variant
 		$(
 			impl TryFrom<XtRequest> for DefaultPayload<$payload> {
 				type Error = ();
@@ -553,24 +550,8 @@ macro_rules! impl_xt_request_conversions {
 	};
 }
 
-// Generate Payload implementation for all variants
-impl_xt_request_payload! {
-	SubmitSignedPsbt(SubmitSignedPsbt),
-	SubmitVaultKey(SubmitVaultKey),
-	SubmitUnsignedPsbt(SubmitUnsignedPsbt),
-	SubmitExecutedRequest(SubmitExecutedRequest),
-	SubmitSystemVaultKey(SubmitSystemVaultKey),
-	SubmitRollbackPoll(SubmitRollbackPoll),
-	VaultKeyPresubmission(VaultKeyPresubmission),
-	ApproveSetRefunds(ApproveSetRefunds),
-	SubmitUtxos(SubmitUtxos),
-	BroadcastPoll(BroadcastPoll),
-	SubmitOutboundRequests(SubmitOutboundRequests),
-	SubmitFeeRate(SubmitFeeRate)
-}
-
-// Generate TryFrom/From implementations for all variants
-impl_xt_request_conversions! {
+// Generate all implementations for all variants
+impl_xt_request! {
 	SubmitSignedPsbt(SubmitSignedPsbt),
 	SubmitVaultKey(SubmitVaultKey),
 	SubmitUnsignedPsbt(SubmitUnsignedPsbt),
