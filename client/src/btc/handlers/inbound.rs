@@ -44,7 +44,7 @@ where
 	F: TxFiller<N> + WalletProvider<N>,
 	P: Provider<N>,
 {
-	/// `EthClient` for interact with Bifrost network.
+	/// `EthClient` to interact with Bifrost network.
     pub bfc_client: Arc<EthClient<F, P, N>>,
 	/// The unsigned transaction message sender.
 	xt_request_sender: Arc<XtRequestSender>,

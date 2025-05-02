@@ -21,9 +21,9 @@ use crate::{
 	eth::{GasCoefficient, SocketEventStatus},
 	periodic::PriceResponse,
 	substrate::{
-		ApproveSetRefunds, BroadcastPoll, SubmitExecutedRequest, SubmitOutboundRequests,
-		SubmitRollbackPoll, SubmitSignedPsbt, SubmitSystemVaultKey, SubmitUnsignedPsbt,
-		SubmitUtxos, SubmitVaultKey, VaultKeyPresubmission,
+		ApproveSetRefunds, BroadcastPoll, SubmitExecutedRequest, SubmitFeeRate,
+		SubmitOutboundRequests, SubmitRollbackPoll, SubmitSignedPsbt, SubmitSystemVaultKey,
+		SubmitUnsignedPsbt, SubmitUtxos, SubmitVaultKey, VaultKeyPresubmission,
 	},
 };
 
@@ -445,6 +445,23 @@ impl Display for BroadcastPollMetadata {
 	}
 }
 
+#[derive(Clone, Debug)]
+pub struct SubmitFeeRateMetadata {
+	pub fee_rate: u64,
+}
+
+impl SubmitFeeRateMetadata {
+	pub fn new(fee_rate: u64) -> Self {
+		Self { fee_rate }
+	}
+}
+
+impl Display for SubmitFeeRateMetadata {
+	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		write!(f, "SubmitFeeRate({})", self.fee_rate)
+	}
+}
+
 #[derive(Clone)]
 pub enum XtRequestMetadata {
 	SubmitVaultKey(SubmitVaultKeyMetadata),
@@ -457,6 +474,7 @@ pub enum XtRequestMetadata {
 	SubmitUtxos(SubmitUtxoMetadata),
 	BroadcastPoll(BroadcastPollMetadata),
 	SubmitOutboundRequests(SocketRelayMetadata),
+	SubmitFeeRate(SubmitFeeRateMetadata),
 }
 
 impl Display for XtRequestMetadata {
@@ -475,6 +493,7 @@ impl Display for XtRequestMetadata {
 				XtRequestMetadata::SubmitUtxos(metadata) => metadata.to_string(),
 				XtRequestMetadata::BroadcastPoll(metadata) => metadata.to_string(),
 				XtRequestMetadata::SubmitOutboundRequests(metadata) => metadata.to_string(),
+				XtRequestMetadata::SubmitFeeRate(metadata) => metadata.to_string(),
 			}
 		)
 	}
@@ -493,6 +512,7 @@ pub enum XtRequest {
 	SubmitUtxos(DefaultPayload<SubmitUtxos>),
 	BroadcastPoll(DefaultPayload<BroadcastPoll>),
 	SubmitOutboundRequests(DefaultPayload<SubmitOutboundRequests>),
+	SubmitFeeRate(DefaultPayload<SubmitFeeRate>),
 }
 
 impl Payload for XtRequest {
@@ -509,6 +529,7 @@ impl Payload for XtRequest {
 			XtRequest::SubmitUtxos(call) => call.encode_call_data_to(metadata, out),
 			XtRequest::BroadcastPoll(call) => call.encode_call_data_to(metadata, out),
 			XtRequest::SubmitOutboundRequests(call) => call.encode_call_data_to(metadata, out),
+			XtRequest::SubmitFeeRate(call) => call.encode_call_data_to(metadata, out),
 		}
 	}
 }
@@ -529,6 +550,7 @@ impl TryFrom<XtRequest> for DefaultPayload<SubmitSignedPsbt> {
 			XtRequest::SubmitUtxos(_) => Err(()),
 			XtRequest::BroadcastPoll(_) => Err(()),
 			XtRequest::SubmitOutboundRequests(_) => Err(()),
+			XtRequest::SubmitFeeRate(_) => Err(()),
 		}
 	}
 }
@@ -549,6 +571,7 @@ impl TryFrom<XtRequest> for DefaultPayload<SubmitVaultKey> {
 			XtRequest::SubmitUtxos(_) => Err(()),
 			XtRequest::BroadcastPoll(_) => Err(()),
 			XtRequest::SubmitOutboundRequests(_) => Err(()),
+			XtRequest::SubmitFeeRate(_) => Err(()),
 		}
 	}
 }
@@ -569,6 +592,7 @@ impl TryFrom<XtRequest> for DefaultPayload<SubmitUnsignedPsbt> {
 			XtRequest::SubmitUtxos(_) => Err(()),
 			XtRequest::BroadcastPoll(_) => Err(()),
 			XtRequest::SubmitOutboundRequests(_) => Err(()),
+			XtRequest::SubmitFeeRate(_) => Err(()),
 		}
 	}
 }
@@ -589,6 +613,7 @@ impl TryFrom<XtRequest> for DefaultPayload<SubmitExecutedRequest> {
 			XtRequest::SubmitUtxos(_) => Err(()),
 			XtRequest::BroadcastPoll(_) => Err(()),
 			XtRequest::SubmitOutboundRequests(_) => Err(()),
+			XtRequest::SubmitFeeRate(_) => Err(()),
 		}
 	}
 }
@@ -608,6 +633,7 @@ impl TryFrom<XtRequest> for DefaultPayload<SubmitSystemVaultKey> {
 			XtRequest::SubmitUtxos(_) => Err(()),
 			XtRequest::BroadcastPoll(_) => Err(()),
 			XtRequest::SubmitOutboundRequests(_) => Err(()),
+			XtRequest::SubmitFeeRate(_) => Err(()),
 		}
 	}
 }
@@ -627,6 +653,7 @@ impl TryFrom<XtRequest> for DefaultPayload<SubmitRollbackPoll> {
 			XtRequest::SubmitUtxos(_) => Err(()),
 			XtRequest::BroadcastPoll(_) => Err(()),
 			XtRequest::SubmitOutboundRequests(_) => Err(()),
+			XtRequest::SubmitFeeRate(_) => Err(()),
 		}
 	}
 }
@@ -647,6 +674,7 @@ impl TryFrom<XtRequest> for DefaultPayload<VaultKeyPresubmission> {
 			XtRequest::SubmitUtxos(_) => Err(()),
 			XtRequest::BroadcastPoll(_) => Err(()),
 			XtRequest::SubmitOutboundRequests(_) => Err(()),
+			XtRequest::SubmitFeeRate(_) => Err(()),
 		}
 	}
 }
@@ -667,6 +695,7 @@ impl TryFrom<XtRequest> for DefaultPayload<ApproveSetRefunds> {
 			XtRequest::SubmitUtxos(_) => Err(()),
 			XtRequest::BroadcastPoll(_) => Err(()),
 			XtRequest::SubmitOutboundRequests(_) => Err(()),
+			XtRequest::SubmitFeeRate(_) => Err(()),
 		}
 	}
 }
@@ -687,6 +716,7 @@ impl TryFrom<XtRequest> for DefaultPayload<SubmitUtxos> {
 			XtRequest::SubmitUtxos(call) => Ok(call),
 			XtRequest::BroadcastPoll(_) => Err(()),
 			XtRequest::SubmitOutboundRequests(_) => Err(()),
+			XtRequest::SubmitFeeRate(_) => Err(()),
 		}
 	}
 }
@@ -707,6 +737,28 @@ impl TryFrom<XtRequest> for DefaultPayload<SubmitOutboundRequests> {
 			XtRequest::SubmitUtxos(_) => Err(()),
 			XtRequest::BroadcastPoll(_) => Err(()),
 			XtRequest::SubmitOutboundRequests(call) => Ok(call),
+			XtRequest::SubmitFeeRate(_) => Err(()),
+		}
+	}
+}
+
+impl TryFrom<XtRequest> for DefaultPayload<SubmitFeeRate> {
+	type Error = ();
+
+	fn try_from(value: XtRequest) -> Result<Self, Self::Error> {
+		match value {
+			XtRequest::SubmitSignedPsbt(_) => Err(()),
+			XtRequest::SubmitVaultKey(_) => Err(()),
+			XtRequest::SubmitUnsignedPsbt(_) => Err(()),
+			XtRequest::SubmitExecutedRequest(_) => Err(()),
+			XtRequest::SubmitSystemVaultKey(_) => Err(()),
+			XtRequest::SubmitRollbackPoll(_) => Err(()),
+			XtRequest::VaultKeyPresubmission(_) => Err(()),
+			XtRequest::ApproveSetRefunds(_) => Err(()),
+			XtRequest::SubmitUtxos(_) => Err(()),
+			XtRequest::BroadcastPoll(_) => Err(()),
+			XtRequest::SubmitOutboundRequests(_) => Err(()),
+			XtRequest::SubmitFeeRate(call) => Ok(call),
 		}
 	}
 }
@@ -766,8 +818,12 @@ impl From<DefaultPayload<SubmitOutboundRequests>> for XtRequest {
 		Self::SubmitOutboundRequests(value)
 	}
 }
+impl From<DefaultPayload<SubmitFeeRate>> for XtRequest {
+	fn from(value: DefaultPayload<SubmitFeeRate>) -> Self {
+		Self::SubmitFeeRate(value)
+	}
+}
 
-#[derive(Clone, Debug)]
 /// The message format passed through the event channel.
 pub struct TxRequestMessage {
 	/// The remaining retries of the transaction request.

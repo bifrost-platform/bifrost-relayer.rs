@@ -1,5 +1,7 @@
+use br_client::btc::handlers::FeeRateFeeder;
 use br_primitives::btc::{
-	MEMPOOL_SPACE_BLOCK_HEIGHT_ENDPOINT, MEMPOOL_SPACE_TESTNET_BLOCK_HEIGHT_ENDPOINT,
+	MEMPOOL_SPACE_BLOCK_HEIGHT_ENDPOINT, MEMPOOL_SPACE_FEE_RATE_ENDPOINT,
+	MEMPOOL_SPACE_TESTNET_BLOCK_HEIGHT_ENDPOINT, MEMPOOL_SPACE_TESTNET_FEE_RATE_ENDPOINT,
 };
 
 use super::*;
@@ -21,6 +23,8 @@ where
 	pub pub_key_submitter: PubKeySubmitter<F, P, N>,
 	/// The Bitcoin rollback verifier.
 	pub rollback_verifier: BitcoinRollbackVerifier<F, P, N>,
+	/// The Bitcoin fee rate feeder.
+	pub fee_rate_feeder: FeeRateFeeder<F, P, N>,
 }
 
 impl<F, P, N: AlloyNetwork> BtcDeps<F, P, N>
@@ -97,7 +101,26 @@ where
 			bfc_client.clone(),
 			substrate_deps.xt_request_sender.clone(),
 		);
+		let fee_rate_feeder = FeeRateFeeder::new(
+			bfc_client.clone(),
+			substrate_deps.xt_request_sender.clone(),
+			block_manager.subscribe(),
+			if network == Network::Bitcoin {
+				MEMPOOL_SPACE_FEE_RATE_ENDPOINT
+			} else {
+				MEMPOOL_SPACE_TESTNET_FEE_RATE_ENDPOINT
+			},
+			debug_mode,
+		);
 
-		Self { outbound, inbound, block_manager, psbt_signer, pub_key_submitter, rollback_verifier }
+		Self {
+			outbound,
+			inbound,
+			block_manager,
+			psbt_signer,
+			pub_key_submitter,
+			rollback_verifier,
+			fee_rate_feeder,
+		}
 	}
 }
