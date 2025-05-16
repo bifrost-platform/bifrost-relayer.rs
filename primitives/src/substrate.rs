@@ -13,7 +13,7 @@ use bifrost_runtime::runtime_types;
 
 pub use runtime_types::{
 	bounded_collections::bounded_vec::BoundedVec,
-	bp_btc_relay::{MigrationSequence, Public},
+	bp_btc_relay::{MigrationSequence, Public, blaze::UtxoInfo},
 	fp_account::EthereumSignature,
 	pallet_blaze::{
 		BroadcastSubmission, FeeRateSubmission, OutboundRequestSubmission, UtxoSubmission,

@@ -16,10 +16,7 @@ use br_primitives::{
 	bootstrap::BootstrapSharedData,
 	contracts::{bitcoin_socket::BitcoinSocketInstance, blaze::BlazeInstance},
 	eth::BootstrapState,
-	substrate::{
-		EthereumSignature, UtxoSubmission,
-		bifrost_runtime::{self, runtime_types::pallet_blaze::UtxoInfo},
-	},
+	substrate::{BoundedVec, EthereumSignature, UtxoInfo, UtxoSubmission, bifrost_runtime},
 	tx::{
 		BitcoinRelayMetadata, SubmitUtxoMetadata, TxRequestMetadata, XtRequest, XtRequestMessage,
 		XtRequestMetadata, XtRequestSender,
@@ -129,6 +126,7 @@ where
 		txid: Txid,
 		vout: u32,
 		amount: Amount,
+		address: BtcAddress<NetworkUnchecked>,
 	) -> Result<(UtxoSubmission<AccountId20>, EthereumSignature)> {
 		let msg = UtxoSubmission {
 			authority_id: AccountId20(self.bfc_client.address().await.0.0),
@@ -136,6 +134,7 @@ where
 				txid: txid.to_byte_array().into(),
 				vout,
 				amount: amount.to_sat(),
+				address: BoundedVec(address.assume_checked_ref().to_string().into_bytes()),
 			}],
 		};
 		let utxo_hash = keccak256(&Encode::encode(&(txid.to_byte_array(), vout, amount.to_sat())));
@@ -155,8 +154,9 @@ where
 		txid: Txid,
 		vout: u32,
 		amount: Amount,
+		address: BtcAddress<NetworkUnchecked>,
 	) -> Result<(XtRequest, SubmitUtxoMetadata)> {
-		let (msg, signature) = self.build_payload(txid, vout, amount).await?;
+		let (msg, signature) = self.build_payload(txid, vout, amount, address).await?;
 		let metadata = SubmitUtxoMetadata::new(txid, vout, amount);
 		Ok((XtRequest::from(bifrost_runtime::tx().blaze().submit_utxos(msg, signature)), metadata))
 	}
@@ -235,7 +235,13 @@ where
 		self.bfc_client.protocol_contracts.blaze.as_ref().unwrap()
 	}
 
-	async fn submit_utxo(&self, txid: Txid, vout: u32, amount: Amount) -> Result<()> {
+	async fn submit_utxo(
+		&self,
+		txid: Txid,
+		vout: u32,
+		amount: Amount,
+		address: BtcAddress<NetworkUnchecked>,
+	) -> Result<()> {
 		if self
 			.blaze()
 			.is_submittable_utxo(
@@ -248,7 +254,7 @@ where
 			.await?
 			._0
 		{
-			let (call, metadata) = self.build_unsigned_tx(txid, vout, amount).await?;
+			let (call, metadata) = self.build_unsigned_tx(txid, vout, amount, address).await?;
 			self.request_send_transaction(call, metadata).await;
 		}
 		Ok(())
@@ -299,7 +305,7 @@ where
 
 			// submit utxo if blaze is activated
 			if self.bfc_client.blaze_activation().await? {
-				self.submit_utxo(txid, index, amount).await?;
+				self.submit_utxo(txid, index, amount, address.clone()).await?;
 			}
 
 			// check if transaction has been submitted to be rollbacked
