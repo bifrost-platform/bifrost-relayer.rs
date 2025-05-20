@@ -68,23 +68,25 @@ where
 		self.sub_client = Some(initialize_sub_client(self.bfc_client.get_url()).await);
 	}
 
-	async fn fetch_fee_rate(&self) -> u64 {
+	async fn fetch_fee_rate(&self) -> (u64, u64) {
 		loop {
 			match reqwest::get(self.fee_rate_api).await {
 				Ok(response) => match response.json::<FeeRateResponse>().await {
 					Ok(fee_rate) => {
+						let lt_fee_rate = fee_rate.economy_fee;
 						let final_fee_rate = (fee_rate.fastest_fee as f64
 							* MEMPOOL_SPACE_FEE_RATE_MULTIPLIER)
 							.round() as u64;
 						if self.debug_mode {
 							log::info!(
 								target: LOG_TARGET,
-								"-[{}] Fetched fee rate: {:?}",
+								"-[{}] Fetched fee rate: ({:?}, {:?})",
 								sub_display_format(SUB_LOG_TARGET),
+								lt_fee_rate,
 								final_fee_rate
 							);
 						}
-						break final_fee_rate;
+						break (lt_fee_rate, final_fee_rate);
 					},
 					Err(e) => {
 						log::warn!(
@@ -111,30 +113,36 @@ where
 
 	async fn build_payload(
 		&self,
+		lt_fee_rate: u64,
 		fee_rate: u64,
 	) -> Result<(FeeRateSubmission<AccountId20, u32>, EthereumSignature)> {
 		let deadline = self.bfc_client.get_block_number().await? as u32 + 2;
 		let msg = FeeRateSubmission {
 			authority_id: AccountId20(self.bfc_client.address().await.0.0),
+			lt_fee_rate,
 			fee_rate,
 			deadline,
 		};
-		let signature_msg = format!("{}:{}", deadline, fee_rate);
+		let signature_msg = format!("{}:{}:{}", deadline, lt_fee_rate, fee_rate);
 		let signature = self.bfc_client.sign_message(signature_msg.as_bytes()).await?.into();
 		Ok((msg, signature))
 	}
 
-	async fn build_unsigned_tx(&self, fee_rate: u64) -> Result<(XtRequest, SubmitFeeRateMetadata)> {
-		let (msg, signature) = self.build_payload(fee_rate).await?;
-		let metadata = SubmitFeeRateMetadata::new(fee_rate);
+	async fn build_unsigned_tx(
+		&self,
+		lt_fee_rate: u64,
+		fee_rate: u64,
+	) -> Result<(XtRequest, SubmitFeeRateMetadata)> {
+		let (msg, signature) = self.build_payload(lt_fee_rate, fee_rate).await?;
+		let metadata = SubmitFeeRateMetadata::new(lt_fee_rate, fee_rate);
 		Ok((
 			XtRequest::from(bifrost_runtime::tx().blaze().submit_fee_rate(msg, signature)),
 			metadata,
 		))
 	}
 
-	async fn submit_fee_rate(&self, fee_rate: u64) -> Result<()> {
-		let (call, metadata) = self.build_unsigned_tx(fee_rate).await?;
+	async fn submit_fee_rate(&self, lt_fee_rate: u64, fee_rate: u64) -> Result<()> {
+		let (call, metadata) = self.build_unsigned_tx(lt_fee_rate, fee_rate).await?;
 		self.request_send_transaction(call, metadata).await;
 		Ok(())
 	}
@@ -184,8 +192,9 @@ where
 				continue;
 			}
 			// submit fee rate if blaze is activated
+			let (lt_fee_rate, fee_rate) = self.fetch_fee_rate().await;
 			if self.bfc_client.blaze_activation().await? {
-				self.submit_fee_rate(self.fetch_fee_rate().await).await?;
+				self.submit_fee_rate(lt_fee_rate, fee_rate).await?;
 			}
 		}
 		Ok(())

@@ -415,7 +415,7 @@ where
 		)
 	}
 
-	/// Verifies whether the socket event is on a executable(=rollbackable) state.
+	/// Verifies whether the socket event is on an executable(=rollbackable) state.
 	fn is_executable(&self, is_inbound: bool, status: SocketEventStatus) -> bool {
 		matches!(
 			(is_inbound, status),
