@@ -447,18 +447,19 @@ impl Display for BroadcastPollMetadata {
 
 #[derive(Clone, Debug)]
 pub struct SubmitFeeRateMetadata {
+	pub lt_fee_rate: u64,
 	pub fee_rate: u64,
 }
 
 impl SubmitFeeRateMetadata {
-	pub fn new(fee_rate: u64) -> Self {
-		Self { fee_rate }
+	pub fn new(lt_fee_rate: u64, fee_rate: u64) -> Self {
+		Self { lt_fee_rate, fee_rate }
 	}
 }
 
 impl Display for SubmitFeeRateMetadata {
 	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-		write!(f, "SubmitFeeRate({})", self.fee_rate)
+		write!(f, "SubmitFeeRate({},{})", self.lt_fee_rate, self.fee_rate)
 	}
 }
 
