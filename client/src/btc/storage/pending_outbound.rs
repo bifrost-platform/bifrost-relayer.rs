@@ -1,6 +1,6 @@
 use alloy::sol_types::SolValue;
 use br_primitives::{contracts::socket::Socket_Struct::Socket_Message, substrate::BoundedVec};
-use miniscript::bitcoin::{address::NetworkUnchecked, Address, Amount};
+use miniscript::bitcoin::{Address, Amount, address::NetworkUnchecked};
 use std::{
 	collections::{BTreeMap, HashMap},
 	sync::Arc,
@@ -70,6 +70,10 @@ impl PendingOutboundPool {
 		}
 
 		(outputs, socket_messages)
+	}
+
+	pub async fn clear(&self) {
+		self.0.write().await.clear();
 	}
 
 	fn encode_socket_messages(&self, messages: Vec<Socket_Message>) -> Vec<Vec<u8>> {
