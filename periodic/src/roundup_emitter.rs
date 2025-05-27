@@ -63,9 +63,7 @@ where
 	async fn run(&mut self) -> Result<()> {
 		self.current_round = self.get_latest_round().await?;
 
-		if *self.bootstrap_shared_data.bootstrap_state.read().await
-			<= BootstrapState::BootstrapRoundUpPhase1
-		{
+		if self.is_before_bootstrap_state(BootstrapState::BootstrapRoundUpPhase1).await {
 			self.bootstrap().await?;
 		}
 
@@ -211,12 +209,33 @@ where
 	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork> + 'static,
 	P: Provider<AnyNetwork> + 'static,
 {
+	fn get_chain_id(&self) -> u64 {
+		self.client.metadata.id
+	}
+
 	fn bootstrap_shared_data(&self) -> Arc<BootstrapSharedData> {
 		self.bootstrap_shared_data.clone()
 	}
 
 	async fn bootstrap(&self) -> Result<()> {
-		self.wait_for_bootstrap_state(BootstrapState::BootstrapRoundUpPhase1).await?;
+		// Wait for all chains to reach BootstrapRoundUpPhase1 (except bitcoin)
+		loop {
+			let is_ready = {
+				let shared_data = self.bootstrap_shared_data();
+				let bootstrap_states = shared_data.bootstrap_states.read().await;
+				bootstrap_states.iter().all(|(chain_id, state)| {
+					if *chain_id != self.client.get_bitcoin_chain_id().unwrap() {
+						*state == BootstrapState::BootstrapRoundUpPhase1
+					} else {
+						true
+					}
+				})
+			};
+			if is_ready {
+				break;
+			}
+			sleep(Duration::from_millis(100)).await;
+		}
 
 		let get_next_poll_round = || async move {
 			let logs = self.get_bootstrap_events().await.unwrap();
@@ -282,12 +301,27 @@ where
 			}
 		}
 
-		let mut lock = self.bootstrap_shared_data.bootstrap_state.write().await;
-		if *lock == BootstrapState::BootstrapRoundUpPhase1 {
-			*lock = BootstrapState::BootstrapRoundUpPhase2;
+		// set all chains except bitcoin to BootstrapRoundUpPhase2
+		let chain_ids: Vec<_> = {
+			let bootstrap_states = self.bootstrap_shared_data.bootstrap_states.read().await;
+			bootstrap_states
+				.keys()
+				.filter(|chain_id| **chain_id != self.client.get_bitcoin_chain_id().unwrap())
+				.cloned()
+				.collect()
+		};
+		if !chain_ids.is_empty() {
+			let mut bootstrap_states = self.bootstrap_shared_data.bootstrap_states.write().await;
+			for chain_id in chain_ids {
+				*bootstrap_states.get_mut(&chain_id).unwrap() =
+					BootstrapState::BootstrapRoundUpPhase2;
+			}
 		}
-		drop(lock);
-
+		log::info!(
+			target: &self.client.get_chain_name(),
+			"-[{}] ⚙️  [Bootstrap mode] BootstrapRoundUpPhase1 → BootstrapRoundUpPhase2",
+			sub_display_format(SUB_LOG_TARGET),
+		);
 		Ok(())
 	}
 

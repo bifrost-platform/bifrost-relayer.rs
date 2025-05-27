@@ -106,9 +106,8 @@ where
 	/// Starts the event manager. Reads every new mined block of the connected chain and starts to
 	/// publish to the event channel.
 	pub async fn run(&mut self) -> Result<()> {
+		self.wait_for_all_chains_bootstrapped().await?;
 		self.initialize().await?;
-
-		self.wait_for_bootstrap_state(BootstrapState::NormalStart).await?;
 
 		let mut stream = IntervalStream::new(interval(Duration::from_millis(
 			self.client.metadata.call_interval,
@@ -196,13 +195,7 @@ where
 		loop {
 			match self.client.syncing().await? {
 				SyncStatus::None => {
-					let mut bootstrap_state =
-						self.bootstrap_shared_data.bootstrap_state.write().await;
-					if *bootstrap_state == BootstrapState::NodeSyncing {
-						*bootstrap_state = BootstrapState::FlushingStalledTransactions;
-					}
-
-					return Ok(());
+					break;
 				},
 				SyncStatus::Info(status) => {
 					if is_first_check {
@@ -225,16 +218,39 @@ where
 					);
 				},
 			}
-			sleep(Duration::from_millis(self.client.metadata.call_interval)).await;
+			sleep(Duration::from_millis(3000)).await;
 		}
+		let should_update = {
+			let bootstrap_states = self.bootstrap_shared_data.bootstrap_states.read().await;
+			*bootstrap_states.get(&self.get_chain_id()).unwrap() == BootstrapState::NodeSyncing
+		};
+		if should_update {
+			self.set_bootstrap_state(BootstrapState::FlushingStalledTransactions).await;
+			log::info!(
+				target: &self.client.get_chain_name(),
+				"-[{}] ⚙️  [Bootstrap mode] NodeSyncing → FlushingStalledTransactions",
+				sub_display_format(SUB_LOG_TARGET),
+			);
+		}
+		Ok(())
 	}
 
 	/// Bootstrap phase 0-2.
 	async fn initial_flushing(&self) -> Result<()> {
-		let mut bootstrap_state = self.bootstrap_shared_data.bootstrap_state.write().await;
-		if *bootstrap_state == BootstrapState::FlushingStalledTransactions {
+		let should_update = {
+			let bootstrap_states = self.bootstrap_shared_data.bootstrap_states.read().await;
+			*bootstrap_states.get(&self.get_chain_id()).unwrap()
+				== BootstrapState::FlushingStalledTransactions
+		};
+		if should_update {
 			self.client.flush_stalled_transactions().await?;
-			*bootstrap_state = BootstrapState::BootstrapRoundUpPhase1;
+			self.set_bootstrap_state(BootstrapState::BootstrapRoundUpPhase1).await;
+
+			log::info!(
+				target: &self.client.get_chain_name(),
+				"-[{}] ⚙️  [Bootstrap mode] FlushingStalledTransactions → BootstrapRoundUpPhase1",
+				sub_display_format(SUB_LOG_TARGET),
+			);
 		}
 		Ok(())
 	}
@@ -253,6 +269,10 @@ where
 	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
 	P: Provider<AnyNetwork>,
 {
+	fn get_chain_id(&self) -> ChainId {
+		self.client.metadata.id
+	}
+
 	fn bootstrap_shared_data(&self) -> Arc<BootstrapSharedData> {
 		self.bootstrap_shared_data.clone()
 	}

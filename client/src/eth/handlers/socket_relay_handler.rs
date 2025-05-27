@@ -68,13 +68,11 @@ where
 	P: Provider<AnyNetwork>,
 {
 	async fn run(&mut self) -> Result<()> {
-		if *self.bootstrap_shared_data.bootstrap_state.read().await
-			<= BootstrapState::BootstrapSocketRelay
-		{
+		if self.is_before_bootstrap_state(BootstrapState::BootstrapSocketRelay).await {
 			self.bootstrap().await?;
 		}
 
-		self.wait_for_bootstrap_state(BootstrapState::NormalStart).await?;
+		self.wait_for_all_chains_bootstrapped().await?;
 		while let Some(Ok(msg)) = self.event_stream.next().await {
 			log::info!(
 				target: &self.client.get_chain_name(),
@@ -487,18 +485,16 @@ where
 	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
 	P: Provider<AnyNetwork>,
 {
+	fn get_chain_id(&self) -> ChainId {
+		self.client.metadata.id
+	}
+
 	fn bootstrap_shared_data(&self) -> Arc<BootstrapSharedData> {
 		self.bootstrap_shared_data.clone()
 	}
 
 	async fn bootstrap(&self) -> Result<()> {
 		self.wait_for_bootstrap_state(BootstrapState::BootstrapSocketRelay).await?;
-
-		log::info!(
-			target: &self.client.get_chain_name(),
-			"-[{}] ⚙️  [Bootstrap mode] Bootstrapping Socket events.",
-			sub_display_format(SUB_LOG_TARGET),
-		);
 
 		let logs = self.get_bootstrap_events().await?;
 
@@ -507,20 +503,19 @@ where
 			self.process_confirmed_log(&log, true).await?;
 		}
 
-		let mut bootstrap_count = self.bootstrap_shared_data.socket_bootstrap_count.lock().await;
-		*bootstrap_count += 1;
-
-		// If All thread complete the task, starts the blockManager
-		if *bootstrap_count == self.bootstrap_shared_data.system_providers_len as u8 {
-			*self.bootstrap_shared_data.bootstrap_state.write().await = BootstrapState::NormalStart;
-
+		let should_update = {
+			let bootstrap_states = self.bootstrap_shared_data.bootstrap_states.read().await;
+			*bootstrap_states.get(&self.get_chain_id()).unwrap()
+				== BootstrapState::BootstrapSocketRelay
+		};
+		if should_update {
+			self.set_bootstrap_state(BootstrapState::NormalStart).await;
 			log::info!(
-				target: "bifrost-relayer",
-				"-[{}] ⚙️  [Bootstrap mode] Bootstrap process successfully ended.",
+				target: &self.client.get_chain_name(),
+				"-[{}] ⚙️  [Bootstrap mode] BootstrapSocketRelay → NormalStart",
 				sub_display_format(SUB_LOG_TARGET),
 			);
 		}
-
 		Ok(())
 	}
 

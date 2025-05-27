@@ -65,13 +65,11 @@ where
 	P: Provider<AnyNetwork> + 'static,
 {
 	async fn run(&mut self) -> Result<()> {
-		if *self.bootstrap_shared_data.bootstrap_state.read().await
-			<= BootstrapState::BootstrapRoundUpPhase2
-		{
+		if self.is_before_bootstrap_state(BootstrapState::BootstrapRoundUpPhase2).await {
 			self.bootstrap().await?;
 		}
 
-		self.wait_for_bootstrap_state(BootstrapState::NormalStart).await?;
+		self.wait_for_all_chains_bootstrapped().await?;
 		while let Some(Ok(msg)) = self.event_stream.next().await {
 			log::info!(
 				target: &self.client.get_chain_name(),
@@ -358,18 +356,16 @@ where
 	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork> + 'static,
 	P: Provider<AnyNetwork> + 'static,
 {
+	fn get_chain_id(&self) -> u64 {
+		self.client.metadata.id
+	}
+
 	fn bootstrap_shared_data(&self) -> Arc<BootstrapSharedData> {
 		self.bootstrap_shared_data.clone()
 	}
 
 	async fn bootstrap(&self) -> Result<()> {
 		self.wait_for_bootstrap_state(BootstrapState::BootstrapRoundUpPhase2).await?;
-
-		log::info!(
-			target: &self.client.get_chain_name(),
-			"-[{}] ⚙️  [Bootstrap mode] Bootstrapping RoundUp events.",
-			sub_display_format(SUB_LOG_TARGET),
-		);
 
 		// Fetch roundup events
 		let logs = self.get_bootstrap_events().await?;
@@ -384,10 +380,36 @@ where
 		// Wait to lock after checking if it is latest round
 		self.bootstrap_shared_data.roundup_barrier.clone().wait().await;
 
-		// set all of state to BootstrapSocketRelay
-		*self.bootstrap_shared_data.bootstrap_state.write().await =
-			BootstrapState::BootstrapSocketRelay;
+		// set all chains except bitcoin to BootstrapSocketRelay
+		let should_update = {
+			let bootstrap_states = self.bootstrap_shared_data.bootstrap_states.read().await;
+			*bootstrap_states.get(&self.get_chain_id()).unwrap()
+				== BootstrapState::BootstrapRoundUpPhase2
+		};
+		if should_update {
+			let chain_ids: Vec<_> = {
+				let bootstrap_states = self.bootstrap_shared_data.bootstrap_states.read().await;
+				bootstrap_states
+					.keys()
+					.filter(|chain_id| **chain_id != self.client.get_bitcoin_chain_id().unwrap())
+					.cloned()
+					.collect()
+			};
+			if !chain_ids.is_empty() {
+				let mut bootstrap_states =
+					self.bootstrap_shared_data.bootstrap_states.write().await;
+				for chain_id in chain_ids {
+					*bootstrap_states.get_mut(&chain_id).unwrap() =
+						BootstrapState::BootstrapSocketRelay;
+				}
+			}
 
+			log::info!(
+				target: &self.client.get_chain_name(),
+				"-[{}] ⚙️  [Bootstrap mode] BootstrapRoundUpPhase2 → BootstrapSocketRelay",
+				sub_display_format(SUB_LOG_TARGET),
+			);
+		}
 		Ok(())
 	}
 
