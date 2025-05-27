@@ -220,38 +220,25 @@ where
 			}
 			sleep(Duration::from_millis(3000)).await;
 		}
-		let should_update = {
-			let bootstrap_states = self.bootstrap_shared_data.bootstrap_states.read().await;
-			*bootstrap_states.get(&self.get_chain_id()).unwrap() == BootstrapState::NodeSyncing
-		};
-		if should_update {
-			self.set_bootstrap_state(BootstrapState::FlushingStalledTransactions).await;
-			log::info!(
-				target: &self.client.get_chain_name(),
-				"-[{}] ⚙️  [Bootstrap mode] NodeSyncing → FlushingStalledTransactions",
-				sub_display_format(SUB_LOG_TARGET),
-			);
-		}
+		self.set_bootstrap_state(BootstrapState::FlushingStalledTransactions).await;
+		log::info!(
+			target: &self.client.get_chain_name(),
+			"-[{}] ⚙️  [Bootstrap mode] NodeSyncing → FlushingStalledTransactions",
+			sub_display_format(SUB_LOG_TARGET),
+		);
 		Ok(())
 	}
 
 	/// Bootstrap phase 0-2.
 	async fn initial_flushing(&self) -> Result<()> {
-		let should_update = {
-			let bootstrap_states = self.bootstrap_shared_data.bootstrap_states.read().await;
-			*bootstrap_states.get(&self.get_chain_id()).unwrap()
-				== BootstrapState::FlushingStalledTransactions
-		};
-		if should_update {
-			self.client.flush_stalled_transactions().await?;
-			self.set_bootstrap_state(BootstrapState::BootstrapRoundUpPhase1).await;
+		self.client.flush_stalled_transactions().await?;
+		self.set_bootstrap_state(BootstrapState::BootstrapRoundUpPhase1).await;
 
-			log::info!(
-				target: &self.client.get_chain_name(),
-				"-[{}] ⚙️  [Bootstrap mode] FlushingStalledTransactions → BootstrapRoundUpPhase1",
-				sub_display_format(SUB_LOG_TARGET),
-			);
-		}
+		log::info!(
+			target: &self.client.get_chain_name(),
+			"-[{}] ⚙️  [Bootstrap mode] FlushingStalledTransactions → BootstrapRoundUpPhase1",
+			sub_display_format(SUB_LOG_TARGET),
+		);
 		Ok(())
 	}
 

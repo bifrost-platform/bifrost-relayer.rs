@@ -147,6 +147,13 @@ pub trait BootstrapHandler {
 	/// Fetch the historical events to bootstrap.
 	async fn get_bootstrap_events(&self) -> Result<Vec<Log>>;
 
+	/// Set the bootstrap state for a chain.
+	async fn set_bootstrap_state(&self, state: BootstrapState) {
+		let bootstrap_shared_data = self.bootstrap_shared_data();
+		let mut bootstrap_states = bootstrap_shared_data.bootstrap_states.write().await;
+		*bootstrap_states.get_mut(&self.get_chain_id()).unwrap() = state;
+	}
+
 	/// Verifies whether the given chain is before the given bootstrap state.
 	async fn is_before_bootstrap_state(&self, state: BootstrapState) -> bool {
 		*self
@@ -156,13 +163,6 @@ pub trait BootstrapHandler {
 			.await
 			.get(&self.get_chain_id())
 			.unwrap() <= state
-	}
-
-	/// Set the bootstrap state for a chain.
-	async fn set_bootstrap_state(&self, state: BootstrapState) {
-		let bootstrap_shared_data = self.bootstrap_shared_data();
-		let mut bootstrap_states = bootstrap_shared_data.bootstrap_states.write().await;
-		*bootstrap_states.get_mut(&self.get_chain_id()).unwrap() = state;
 	}
 
 	/// Waits for the given chain synced to the normal start state.

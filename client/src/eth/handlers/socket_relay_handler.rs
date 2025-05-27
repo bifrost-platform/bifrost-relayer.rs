@@ -503,19 +503,12 @@ where
 			self.process_confirmed_log(&log, true).await?;
 		}
 
-		let should_update = {
-			let bootstrap_states = self.bootstrap_shared_data.bootstrap_states.read().await;
-			*bootstrap_states.get(&self.get_chain_id()).unwrap()
-				== BootstrapState::BootstrapSocketRelay
-		};
-		if should_update {
-			self.set_bootstrap_state(BootstrapState::NormalStart).await;
-			log::info!(
-				target: &self.client.get_chain_name(),
-				"-[{}] ⚙️  [Bootstrap mode] BootstrapSocketRelay → NormalStart",
-				sub_display_format(SUB_LOG_TARGET),
-			);
-		}
+		self.set_bootstrap_state(BootstrapState::NormalStart).await;
+		log::info!(
+			target: &self.client.get_chain_name(),
+			"-[{}] ⚙️  [Bootstrap mode] BootstrapSocketRelay → NormalStart",
+			sub_display_format(SUB_LOG_TARGET),
+		);
 		Ok(())
 	}
 

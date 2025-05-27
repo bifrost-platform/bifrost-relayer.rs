@@ -216,18 +216,12 @@ where
 			}
 			sleep(Duration::from_millis(self.bfc_client.metadata.call_interval)).await;
 		}
-		let should_update = {
-			let bootstrap_states = self.bootstrap_shared_data.bootstrap_states.read().await;
-			*bootstrap_states.get(&self.get_chain_id()).unwrap() == BootstrapState::NodeSyncing
-		};
-		if should_update {
-			self.set_bootstrap_state(BootstrapState::BootstrapSocketRelay).await;
-			log::info!(
-				target: LOG_TARGET,
-				"-[{}] ⚙️  [Bootstrap mode] NodeSyncing → BootstrapSocketRelay",
-				sub_display_format(SUB_LOG_TARGET),
-			);
-		}
+		self.set_bootstrap_state(BootstrapState::BootstrapSocketRelay).await;
+		log::info!(
+			target: LOG_TARGET,
+			"-[{}] ⚙️  [Bootstrap mode] NodeSyncing → BootstrapSocketRelay",
+			sub_display_format(SUB_LOG_TARGET),
+		);
 		Ok(())
 	}
 
@@ -463,19 +457,12 @@ where
 		self.sender.send(inbound).unwrap();
 		self.sender.send(outbound).unwrap();
 
-		let should_update = {
-			let bootstrap_states = self.bootstrap_shared_data.bootstrap_states.read().await;
-			*bootstrap_states.get(&self.get_chain_id()).unwrap()
-				== BootstrapState::BootstrapSocketRelay
-		};
-		if should_update {
-			self.set_bootstrap_state(BootstrapState::NormalStart).await;
-			log::info!(
-				target: LOG_TARGET,
-				"-[{}] ⚙️  [Bootstrap mode] BootstrapSocketRelay → NormalStart",
-				sub_display_format(SUB_LOG_TARGET),
-			);
-		}
+		self.set_bootstrap_state(BootstrapState::NormalStart).await;
+		log::info!(
+			target: LOG_TARGET,
+			"-[{}] ⚙️  [Bootstrap mode] BootstrapSocketRelay → NormalStart",
+			sub_display_format(SUB_LOG_TARGET),
+		);
 		Ok(())
 	}
 
