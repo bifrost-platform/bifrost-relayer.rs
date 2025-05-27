@@ -105,6 +105,8 @@ where
 	bootstrap_shared_data: Arc<BootstrapSharedData>,
 	/// The bootstrap offset in blocks.
 	bootstrap_offset: u32,
+	/// The API endpoint for fetching Bitcoin block height.
+	block_height_api: &'static str,
 }
 
 #[async_trait::async_trait]
@@ -151,6 +153,7 @@ where
 		bootstrap_shared_data: Arc<BootstrapSharedData>,
 		call_interval: u64,
 		block_confirmations: u64,
+		block_height_api: &'static str,
 	) -> Self {
 		let (sender, _receiver) = broadcast::channel(512);
 
@@ -172,12 +175,75 @@ where
 			call_interval,
 			bootstrap_shared_data,
 			bootstrap_offset,
+			block_height_api,
 		}
 	}
 
 	/// Subscribe the event sender.
 	pub fn subscribe(&self) -> Receiver<EventMessage> {
 		self.sender.subscribe()
+	}
+
+	/// Wait for the provider to be synced.
+	pub async fn wait_provider_sync(&self) -> Result<()> {
+		let mut is_first_check = true;
+		loop {
+			let info = self.get_blockchain_info().await.unwrap();
+			match info.initial_block_download {
+				true => {
+					if is_first_check {
+						let msg = format!(
+							"⚙️  Syncing: #{:?}, Highest: #{:?} ({} relayer:{})",
+							info.blocks,
+							self.fetch_block_height().await,
+							LOG_TARGET,
+							self.bfc_client.address().await,
+						);
+						sentry::capture_message(&msg, sentry::Level::Warning);
+						is_first_check = false;
+					}
+					log::info!(
+						target: LOG_TARGET,
+						"-[{}] ⚙️  Syncing: #{:?}, Bitcoin is still in initial block download mode",
+						sub_display_format(SUB_LOG_TARGET),
+						info.blocks,
+					);
+				},
+				false => return Ok(()),
+			}
+			sleep(Duration::from_millis(self.bfc_client.metadata.call_interval)).await;
+		}
+	}
+
+	/// Fetch the block height from the offchain API.
+	async fn fetch_block_height(&self) -> u64 {
+		loop {
+			match reqwest::get(self.block_height_api).await {
+				Ok(response) => match response.json::<u64>().await {
+					Ok(block_height) => {
+						break block_height;
+					},
+					Err(e) => {
+						log::warn!(
+							target: LOG_TARGET,
+							"-[{}] Failed to decode block height: {:?}. Retrying...",
+							sub_display_format(SUB_LOG_TARGET),
+							e
+						);
+						sleep(Duration::from_secs(5)).await;
+					},
+				},
+				Err(e) => {
+					log::warn!(
+						target: LOG_TARGET,
+						"-[{}] Failed to fetch block height: {:?}. Retrying...",
+						sub_display_format(SUB_LOG_TARGET),
+						e
+					);
+					sleep(Duration::from_secs(5)).await;
+				},
+			}
+		}
 	}
 
 	/// Starts the block manager.

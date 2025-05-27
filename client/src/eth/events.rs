@@ -192,6 +192,7 @@ where
 
 	/// Bootstrap phase 0-1.
 	async fn wait_provider_sync(&self) -> Result<()> {
+		let mut is_first_check = true;
 		loop {
 			match self.client.syncing().await? {
 				SyncStatus::None => {
@@ -204,6 +205,17 @@ where
 					return Ok(());
 				},
 				SyncStatus::Info(status) => {
+					if is_first_check {
+						let msg = format!(
+							"⚙️  Syncing: #{:?}, Highest: #{:?} ({} relayer:{})",
+							status.current_block,
+							status.highest_block,
+							self.client.get_chain_name(),
+							self.client.address().await,
+						);
+						sentry::capture_message(&msg, sentry::Level::Warning);
+						is_first_check = false;
+					}
 					log::info!(
 						target: &self.client.get_chain_name(),
 						"-[{}] ⚙️  Syncing: #{:?}, Highest: #{:?}",
@@ -213,7 +225,6 @@ where
 					);
 				},
 			}
-
 			sleep(Duration::from_millis(self.client.metadata.call_interval)).await;
 		}
 	}

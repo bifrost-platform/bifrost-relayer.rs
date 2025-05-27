@@ -1,3 +1,7 @@
+use br_primitives::btc::{
+	MEMPOOL_SPACE_BLOCK_HEIGHT_ENDPOINT, MEMPOOL_SPACE_TESTNET_BLOCK_HEIGHT_ENDPOINT,
+};
+
 use super::*;
 
 pub struct BtcDeps<F, P>
@@ -52,6 +56,11 @@ where
 			bootstrap_shared_data.clone(),
 			btc_provider.call_interval,
 			btc_provider.block_confirmations.unwrap_or(DEFAULT_BITCOIN_BLOCK_CONFIRMATIONS),
+			if network == Network::Bitcoin {
+				MEMPOOL_SPACE_BLOCK_HEIGHT_ENDPOINT
+			} else {
+				MEMPOOL_SPACE_TESTNET_BLOCK_HEIGHT_ENDPOINT
+			},
 		);
 		let inbound = InboundHandler::new(
 			bfc_client.clone(),
