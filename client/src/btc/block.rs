@@ -186,13 +186,12 @@ where
 	}
 
 	/// Bootstrap phase 0-1.
-	pub async fn bootstrap_0(&mut self) -> Result<()> {
+	pub async fn bootstrap_0(&mut self) {
 		self.initialize().await;
 		let should_bootstrap = self.is_before_bootstrap_state(BootstrapState::NormalStart).await;
 		if should_bootstrap {
-			self.wait_provider_sync().await?;
+			self.wait_provider_sync().await.unwrap();
 		}
-		Ok(())
 	}
 
 	/// Initialize the block manager.

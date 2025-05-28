@@ -242,14 +242,13 @@ where
 	}
 
 	/// Bootstrap phase 0-1, 0-2.
-	pub async fn bootstrap_0(&mut self) -> Result<()> {
-		self.initialize().await?;
+	pub async fn bootstrap_0(&mut self) {
+		self.initialize().await.unwrap();
 		let should_bootstrap = self.is_before_bootstrap_state(BootstrapState::NormalStart).await;
 		if should_bootstrap {
-			self.wait_provider_sync().await?;
-			self.initial_flushing().await?;
+			self.wait_provider_sync().await.unwrap();
+			self.initial_flushing().await.unwrap();
 		}
-		Ok(())
 	}
 }
 

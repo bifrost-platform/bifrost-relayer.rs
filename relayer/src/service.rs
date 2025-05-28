@@ -445,7 +445,7 @@ where
 			),
 			Some("event-managers"),
 			async move {
-				let _ = event_manager.bootstrap_0().await;
+				event_manager.bootstrap_0().await;
 				loop {
 					let report = event_manager.run().await;
 					let log_msg = format!(
@@ -545,7 +545,7 @@ where
 		"bitcoin-block-manager",
 		Some("block-manager"),
 		async move {
-			let _ = block_manager.bootstrap_0().await;
+			block_manager.bootstrap_0().await;
 			loop {
 				let report = block_manager.run().await;
 				let log_msg = format!(
