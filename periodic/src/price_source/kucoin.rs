@@ -51,7 +51,7 @@ impl PriceFetcher for KucoinPriceFetcher {
 impl KucoinPriceFetcher {
 	pub async fn new() -> Result<Self, Error> {
 		let symbols: Vec<String> =
-			vec!["ETH".into(), "BFC".into(), "BNB".into(), "MATIC".into(), "BIFI".into()];
+			vec!["ETH".into(), "BFC".into(), "BNB".into(), "POL".into(), "BIFI".into()];
 
 		Ok(Self {
 			base_url: Url::parse("https://api.kucoin.com/api/v1/")

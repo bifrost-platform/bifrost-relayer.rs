@@ -1,6 +1,6 @@
 use std::{collections::BTreeMap, fmt::Error};
 
-use alloy::primitives::{utils::parse_ether, U256};
+use alloy::primitives::{U256, utils::parse_ether};
 use eyre::Result;
 use reqwest::Url;
 use serde::Deserialize;
@@ -58,7 +58,7 @@ impl PriceFetcher for UpbitPriceFetcher {
 
 impl UpbitPriceFetcher {
 	pub async fn new() -> Result<Self, Error> {
-		let symbols: Vec<String> = vec!["ETH".into(), "BFC".into(), "MATIC".into()];
+		let symbols: Vec<String> = vec!["ETH".into(), "BFC".into(), "POL".into()];
 
 		let formatted_symbols: Vec<String> = symbols
 			.into_iter()

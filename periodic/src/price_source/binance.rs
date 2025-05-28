@@ -74,8 +74,7 @@ impl PriceFetcher for BinancePriceFetcher {
 
 impl BinancePriceFetcher {
 	pub async fn new() -> Result<BinancePriceFetcher, Error> {
-		let mut symbols: Vec<String> =
-			vec!["ETH".into(), "BNB".into(), "MATIC".into(), "BTC".into()];
+		let mut symbols: Vec<String> = vec!["ETH".into(), "BNB".into(), "POL".into(), "BTC".into()];
 		symbols.iter_mut().for_each(|symbol| symbol.push_str("USDT"));
 
 		Ok(Self {

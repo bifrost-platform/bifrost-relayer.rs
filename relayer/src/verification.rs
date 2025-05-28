@@ -19,8 +19,8 @@ pub(super) fn assert_configuration_validity(config: &Configuration) {
 	if let Some(bootstrap_config) = bootstrap_config {
 		if let Some(round_offset) = bootstrap_config.round_offset {
 			assert!(
-				(0..=MAX_BOOTSTRAP_ROUND_OFFSET).contains(&round_offset),
-				"{} [parameter: {}, range: 0…{}, default: {}]",
+				(1..=MAX_BOOTSTRAP_ROUND_OFFSET).contains(&round_offset),
+				"{} [parameter: {}, range: 1…{}, default: {}]",
 				PARAMETER_OUT_OF_RANGE,
 				"bootstrap_config.round_offset",
 				MAX_BOOTSTRAP_ROUND_OFFSET,
