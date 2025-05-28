@@ -244,7 +244,8 @@ where
 	/// Bootstrap phase 0-1, 0-2.
 	pub async fn bootstrap_0(&mut self) -> Result<()> {
 		self.initialize().await?;
-		if self.is_before_bootstrap_state(BootstrapState::NormalStart).await {
+		let should_bootstrap = self.is_before_bootstrap_state(BootstrapState::NormalStart).await;
+		if should_bootstrap {
 			self.wait_provider_sync().await?;
 			self.initial_flushing().await?;
 		}
