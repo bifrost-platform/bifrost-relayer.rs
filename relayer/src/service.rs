@@ -545,6 +545,7 @@ where
 		"bitcoin-block-manager",
 		Some("block-manager"),
 		async move {
+			let _ = block_manager.bootstrap_0().await;
 			loop {
 				let report = block_manager.run().await;
 				let log_msg = format!(

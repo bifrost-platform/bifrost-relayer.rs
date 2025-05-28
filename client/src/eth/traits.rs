@@ -135,6 +135,9 @@ where
 
 #[async_trait::async_trait]
 pub trait BootstrapHandler {
+	/// Get the chain id.
+	fn get_chain_id(&self) -> ChainId;
+
 	/// Fetch the shared bootstrap data.
 	fn bootstrap_shared_data(&self) -> Arc<BootstrapSharedData>;
 
@@ -144,9 +147,53 @@ pub trait BootstrapHandler {
 	/// Fetch the historical events to bootstrap.
 	async fn get_bootstrap_events(&self) -> Result<Vec<Log>>;
 
-	/// Waits for the bootstrap state to be synced to the normal start state.
+	/// Set the bootstrap state for a chain.
+	async fn set_bootstrap_state(&self, state: BootstrapState) {
+		let bootstrap_shared_data = self.bootstrap_shared_data();
+		let mut bootstrap_states = bootstrap_shared_data.bootstrap_states.write().await;
+		*bootstrap_states.get_mut(&self.get_chain_id()).unwrap() = state;
+	}
+
+	/// Verifies whether the given chain is before the given bootstrap state.
+	async fn is_before_bootstrap_state(&self, state: BootstrapState) -> bool {
+		*self
+			.bootstrap_shared_data()
+			.bootstrap_states
+			.read()
+			.await
+			.get(&self.get_chain_id())
+			.unwrap() < state
+	}
+
+	/// Waits for the given chain synced to the normal start state.
 	async fn wait_for_bootstrap_state(&self, state: BootstrapState) -> Result<()> {
-		while *self.bootstrap_shared_data().bootstrap_state.read().await < state {
+		loop {
+			let current_state = {
+				let shared_data = self.bootstrap_shared_data();
+				let bootstrap_states = shared_data.bootstrap_states.read().await;
+				*bootstrap_states.get(&self.get_chain_id()).unwrap()
+			};
+
+			if current_state == state {
+				break;
+			}
+			sleep(Duration::from_millis(100)).await;
+		}
+		Ok(())
+	}
+
+	/// Waits for all chains to be bootstrapped.
+	async fn wait_for_all_chains_bootstrapped(&self) -> Result<()> {
+		loop {
+			let all_bootstrapped = {
+				let shared_data = self.bootstrap_shared_data();
+				let bootstrap_states = shared_data.bootstrap_states.read().await;
+				bootstrap_states.values().all(|state| *state == BootstrapState::NormalStart)
+			};
+
+			if all_bootstrapped {
+				break;
+			}
 			sleep(Duration::from_millis(100)).await;
 		}
 		Ok(())

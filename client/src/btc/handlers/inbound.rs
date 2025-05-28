@@ -8,7 +8,7 @@ use crate::{
 
 use alloy::{
 	network::AnyNetwork,
-	primitives::{Address as EthAddress, B256, U256},
+	primitives::{Address as EthAddress, B256, ChainId, U256},
 	providers::{Provider, WalletProvider, fillers::TxFiller},
 	rpc::types::{TransactionInput, TransactionRequest},
 };
@@ -16,7 +16,6 @@ use bitcoincore_rpc::bitcoin::Txid;
 use br_primitives::{
 	bootstrap::BootstrapSharedData,
 	contracts::bitcoin_socket::BitcoinSocketInstance,
-	eth::BootstrapState,
 	tx::{BitcoinRelayMetadata, TxRequestMetadata},
 	utils::sub_display_format,
 };
@@ -164,7 +163,7 @@ where
 	P: Provider<AnyNetwork> + 'static,
 {
 	async fn run(&mut self) -> Result<()> {
-		self.wait_for_bootstrap_state(BootstrapState::NormalStart).await?;
+		self.wait_for_all_chains_bootstrapped().await?;
 		while let Some(Ok(msg)) = self.event_stream.next().await {
 			if !self.bfc_client.is_selected_relayer().await?
 				|| !self.is_target_event(msg.event_type)
@@ -236,6 +235,10 @@ where
 	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
 	P: Provider<AnyNetwork>,
 {
+	fn get_chain_id(&self) -> ChainId {
+		self.bfc_client.get_bitcoin_chain_id().unwrap()
+	}
+
 	fn bootstrap_shared_data(&self) -> Arc<BootstrapSharedData> {
 		self.bootstrap_shared_data.clone()
 	}

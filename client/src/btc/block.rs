@@ -2,6 +2,7 @@ use crate::{btc::LOG_TARGET, eth::EthClient};
 
 use alloy::{
 	network::AnyNetwork,
+	primitives::ChainId,
 	providers::{Provider, WalletProvider, fillers::TxFiller},
 };
 use br_primitives::{
@@ -105,6 +106,8 @@ where
 	bootstrap_shared_data: Arc<BootstrapSharedData>,
 	/// The bootstrap offset in blocks.
 	bootstrap_offset: u32,
+	/// The API endpoint for fetching Bitcoin block height.
+	block_height_api: &'static str,
 }
 
 #[async_trait::async_trait]
@@ -151,6 +154,7 @@ where
 		bootstrap_shared_data: Arc<BootstrapSharedData>,
 		call_interval: u64,
 		block_confirmations: u64,
+		block_height_api: &'static str,
 	) -> Self {
 		let (sender, _receiver) = broadcast::channel(512);
 
@@ -172,6 +176,7 @@ where
 			call_interval,
 			bootstrap_shared_data,
 			bootstrap_offset,
+			block_height_api,
 		}
 	}
 
@@ -180,8 +185,17 @@ where
 		self.sender.subscribe()
 	}
 
-	/// Starts the block manager.
-	pub async fn run(&mut self) -> Result<()> {
+	/// Bootstrap phase 0-1.
+	pub async fn bootstrap_0(&mut self) -> Result<()> {
+		self.initialize().await;
+		if self.is_before_bootstrap_state(BootstrapState::NormalStart).await {
+			self.wait_provider_sync().await?;
+		}
+		Ok(())
+	}
+
+	/// Initialize the block manager.
+	pub async fn initialize(&mut self) {
 		let latest_block = self.get_block_count().await.unwrap();
 		self.waiting_block = latest_block.saturating_add(1);
 
@@ -191,14 +205,85 @@ where
 			sub_display_format(SUB_LOG_TARGET),
 			latest_block
 		);
+	}
 
-		if *self.bootstrap_shared_data.bootstrap_state.read().await
-			<= BootstrapState::BootstrapSocketRelay
-		{
+	/// Wait for the provider to be synced.
+	pub async fn wait_provider_sync(&self) -> Result<()> {
+		let mut is_first_check = true;
+		loop {
+			let info = self.get_blockchain_info().await.unwrap();
+			match info.initial_block_download {
+				true => {
+					if is_first_check {
+						let msg = format!(
+							"⚙️  Syncing: #{:?}, Highest: #{:?} ({} relayer:{})",
+							info.blocks,
+							self.fetch_block_height().await,
+							LOG_TARGET,
+							self.bfc_client.address().await,
+						);
+						sentry::capture_message(&msg, sentry::Level::Warning);
+						is_first_check = false;
+					}
+					log::info!(
+						target: LOG_TARGET,
+						"-[{}] ⚙️  Syncing: #{:?}, Bitcoin is still in initial block download mode",
+						sub_display_format(SUB_LOG_TARGET),
+						info.blocks,
+					);
+				},
+				false => {
+					break;
+				},
+			}
+			sleep(Duration::from_millis(self.bfc_client.metadata.call_interval)).await;
+		}
+		self.set_bootstrap_state(BootstrapState::BootstrapSocketRelay).await;
+		log::info!(
+			target: LOG_TARGET,
+			"-[{}] ⚙️  [Bootstrap mode] NodeSyncing → BootstrapSocketRelay",
+			sub_display_format(SUB_LOG_TARGET),
+		);
+		Ok(())
+	}
+
+	/// Fetch the block height from the offchain API.
+	async fn fetch_block_height(&self) -> u64 {
+		loop {
+			match reqwest::get(self.block_height_api).await {
+				Ok(response) => match response.json::<u64>().await {
+					Ok(block_height) => {
+						break block_height;
+					},
+					Err(e) => {
+						log::warn!(
+							target: LOG_TARGET,
+							"-[{}] Failed to decode block height: {:?}. Retrying...",
+							sub_display_format(SUB_LOG_TARGET),
+							e
+						);
+						sleep(Duration::from_secs(5)).await;
+					},
+				},
+				Err(e) => {
+					log::warn!(
+						target: LOG_TARGET,
+						"-[{}] Failed to fetch block height: {:?}. Retrying...",
+						sub_display_format(SUB_LOG_TARGET),
+						e
+					);
+					sleep(Duration::from_secs(5)).await;
+				},
+			}
+		}
+	}
+
+	/// Starts the block manager.
+	pub async fn run(&mut self) -> Result<()> {
+		if self.is_before_bootstrap_state(BootstrapState::NormalStart).await {
 			self.bootstrap().await?;
 		}
-
-		self.wait_for_bootstrap_state(BootstrapState::NormalStart).await?;
+		self.wait_for_all_chains_bootstrapped().await?;
 
 		let mut stream = IntervalStream::new(interval(Duration::from_millis(self.call_interval)));
 		while (stream.next().await).is_some() {
@@ -368,6 +453,10 @@ where
 	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
 	P: Provider<AnyNetwork>,
 {
+	fn get_chain_id(&self) -> ChainId {
+		self.bfc_client.get_bitcoin_chain_id().unwrap()
+	}
+
 	fn bootstrap_shared_data(&self) -> Arc<BootstrapSharedData> {
 		self.bootstrap_shared_data.clone()
 	}
@@ -375,30 +464,17 @@ where
 	async fn bootstrap(&self) -> Result<()> {
 		self.wait_for_bootstrap_state(BootstrapState::BootstrapSocketRelay).await?;
 
-		log::info!(
-			target: LOG_TARGET,
-			"-[{}] ⚙️  [Bootstrap mode] Bootstrapping Bitcoin events",
-			sub_display_format(SUB_LOG_TARGET),
-		);
-
 		let (inbound, outbound) = self.get_bootstrap_events().await?;
 
 		self.sender.send(inbound).unwrap();
 		self.sender.send(outbound).unwrap();
 
-		let mut bootstrap_count = self.bootstrap_shared_data.socket_bootstrap_count.lock().await;
-		*bootstrap_count += 1;
-
-		if *bootstrap_count == self.bootstrap_shared_data.system_providers_len as u8 {
-			*self.bootstrap_shared_data.bootstrap_state.write().await = BootstrapState::NormalStart;
-
-			log::info!(
-				target: "bifrost-relayer",
-				"-[{}] ⚙️  [Bootstrap mode] Bootstrap process successfully ended.",
-				sub_display_format(SUB_LOG_TARGET),
-			);
-		}
-
+		self.set_bootstrap_state(BootstrapState::NormalStart).await;
+		log::info!(
+			target: LOG_TARGET,
+			"-[{}] ⚙️  [Bootstrap mode] BootstrapSocketRelay → NormalStart",
+			sub_display_format(SUB_LOG_TARGET),
+		);
 		Ok(())
 	}
 

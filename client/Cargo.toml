@@ -33,6 +33,7 @@ eyre = { workspace = true }
 aws-sdk-kms = { workspace = true }
 aes-gcm = { workspace = true }
 rand = { workspace = true }
+reqwest = { workspace = true }
 
 # subs
 sc-keystore = { workspace = true }
