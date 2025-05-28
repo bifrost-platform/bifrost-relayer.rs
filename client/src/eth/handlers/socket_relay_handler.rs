@@ -68,11 +68,11 @@ where
 	P: Provider<AnyNetwork>,
 {
 	async fn run(&mut self) -> Result<()> {
-		if self.is_before_bootstrap_state(BootstrapState::BootstrapSocketRelay).await {
+		if self.is_before_bootstrap_state(BootstrapState::NormalStart).await {
 			self.bootstrap().await?;
 		}
-
 		self.wait_for_all_chains_bootstrapped().await?;
+
 		while let Some(Ok(msg)) = self.event_stream.next().await {
 			log::info!(
 				target: &self.client.get_chain_name(),

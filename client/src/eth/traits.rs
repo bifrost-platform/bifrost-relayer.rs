@@ -162,7 +162,7 @@ pub trait BootstrapHandler {
 			.read()
 			.await
 			.get(&self.get_chain_id())
-			.unwrap() <= state
+			.unwrap() < state
 	}
 
 	/// Waits for the given chain synced to the normal start state.

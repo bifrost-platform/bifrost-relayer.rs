@@ -107,7 +107,6 @@ where
 	/// publish to the event channel.
 	pub async fn run(&mut self) -> Result<()> {
 		self.wait_for_all_chains_bootstrapped().await?;
-		self.initialize().await?;
 
 		let mut stream = IntervalStream::new(interval(Duration::from_millis(
 			self.client.metadata.call_interval,
@@ -243,9 +242,12 @@ where
 	}
 
 	/// Bootstrap phase 0-1, 0-2.
-	pub async fn bootstrap_0(&self) -> Result<()> {
-		self.wait_provider_sync().await?;
-		self.initial_flushing().await?;
+	pub async fn bootstrap_0(&mut self) -> Result<()> {
+		self.initialize().await?;
+		if self.is_before_bootstrap_state(BootstrapState::NormalStart).await {
+			self.wait_provider_sync().await?;
+			self.initial_flushing().await?;
+		}
 		Ok(())
 	}
 }

@@ -63,7 +63,7 @@ where
 	async fn run(&mut self) -> Result<()> {
 		self.current_round = self.get_latest_round().await?;
 
-		if self.is_before_bootstrap_state(BootstrapState::BootstrapRoundUpPhase1).await {
+		if self.is_before_bootstrap_state(BootstrapState::NormalStart).await {
 			self.bootstrap().await?;
 		}
 

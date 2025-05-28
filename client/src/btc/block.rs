@@ -185,6 +185,28 @@ where
 		self.sender.subscribe()
 	}
 
+	/// Bootstrap phase 0-1.
+	pub async fn bootstrap_0(&mut self) -> Result<()> {
+		self.initialize().await;
+		if self.is_before_bootstrap_state(BootstrapState::NormalStart).await {
+			self.wait_provider_sync().await?;
+		}
+		Ok(())
+	}
+
+	/// Initialize the block manager.
+	pub async fn initialize(&mut self) {
+		let latest_block = self.get_block_count().await.unwrap();
+		self.waiting_block = latest_block.saturating_add(1);
+
+		log::info!(
+			target: LOG_TARGET,
+			"-[{}] 💤 Idle, best: #{:?}",
+			sub_display_format(SUB_LOG_TARGET),
+			latest_block
+		);
+	}
+
 	/// Wait for the provider to be synced.
 	pub async fn wait_provider_sync(&self) -> Result<()> {
 		let mut is_first_check = true;
@@ -258,20 +280,10 @@ where
 
 	/// Starts the block manager.
 	pub async fn run(&mut self) -> Result<()> {
-		let latest_block = self.get_block_count().await.unwrap();
-		self.waiting_block = latest_block.saturating_add(1);
-
-		if self.is_before_bootstrap_state(BootstrapState::BootstrapSocketRelay).await {
+		if self.is_before_bootstrap_state(BootstrapState::NormalStart).await {
 			self.bootstrap().await?;
 		}
 		self.wait_for_all_chains_bootstrapped().await?;
-
-		log::info!(
-			target: LOG_TARGET,
-			"-[{}] 💤 Idle, best: #{:?}",
-			sub_display_format(SUB_LOG_TARGET),
-			latest_block
-		);
 
 		let mut stream = IntervalStream::new(interval(Duration::from_millis(self.call_interval)));
 		while (stream.next().await).is_some() {

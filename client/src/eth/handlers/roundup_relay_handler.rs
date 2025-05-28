@@ -65,7 +65,7 @@ where
 	P: Provider<AnyNetwork> + 'static,
 {
 	async fn run(&mut self) -> Result<()> {
-		if self.is_before_bootstrap_state(BootstrapState::BootstrapRoundUpPhase2).await {
+		if self.is_before_bootstrap_state(BootstrapState::NormalStart).await {
 			self.bootstrap().await?;
 		}
 
