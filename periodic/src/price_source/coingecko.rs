@@ -4,7 +4,7 @@ use alloy::primitives::utils::parse_ether;
 use eyre::Result;
 use reqwest::{Response, Url};
 use serde::Deserialize;
-use tokio::time::{sleep, Duration};
+use tokio::time::{Duration, sleep};
 
 use br_primitives::{periodic::PriceResponse, utils::sub_display_format};
 
@@ -79,7 +79,7 @@ impl CoingeckoPriceFetcher {
 			"ethereum".into(),
 			"bifrost".into(),
 			"binancecoin".into(),
-			"matic-network".into(),
+			"polygon-ecosystem-token".into(),
 			"usd-coin".into(),
 			"bifi".into(),
 			"tether".into(),
@@ -125,7 +125,7 @@ impl CoingeckoPriceFetcher {
 							);
 							Err(Error)
 						},
-					}
+					};
 				},
 				Err(e) => {
 					log::warn!(
@@ -165,7 +165,7 @@ impl CoingeckoPriceFetcher {
 							);
 							Err(Error)
 						},
-					}
+					};
 				},
 				Err(e) => {
 					if retries_remaining == 0 {

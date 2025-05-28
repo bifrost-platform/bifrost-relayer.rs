@@ -180,17 +180,19 @@ where
 			match fetcher.get_tickers().await {
 				Ok(tickers) => {
 					tickers.iter().for_each(|(symbol, price_response)| {
-						if let Some(value) = volume_weighted.get_mut(symbol) {
-							value.0 += price_response.price * price_response.volume.unwrap();
-							value.1 += price_response.volume.unwrap();
-						} else {
-							volume_weighted.insert(
-								symbol.clone(),
-								(
-									price_response.price * price_response.volume.unwrap(),
-									price_response.volume.unwrap(),
-								),
-							);
+						if !price_response.volume.unwrap().is_zero() {
+							if let Some(value) = volume_weighted.get_mut(symbol) {
+								value.0 += price_response.price * price_response.volume.unwrap();
+								value.1 += price_response.volume.unwrap();
+							} else {
+								volume_weighted.insert(
+									symbol.clone(),
+									(
+										price_response.price * price_response.volume.unwrap(),
+										price_response.volume.unwrap(),
+									),
+								);
+							}
 						}
 					});
 				},

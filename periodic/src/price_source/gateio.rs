@@ -63,7 +63,7 @@ impl PriceFetcher for GateioPriceFetcher {
 impl GateioPriceFetcher {
 	pub async fn new() -> Result<Self, Error> {
 		let mut symbols: Vec<String> =
-			vec!["ETH".into(), "BFC".into(), "BNB".into(), "MATIC".into(), "BIFI".into()];
+			vec!["ETH".into(), "BFC".into(), "BNB".into(), "POL".into(), "BIFI".into()];
 
 		symbols.iter_mut().for_each(|symbol| {
 			if symbol.contains("BIFI") {
