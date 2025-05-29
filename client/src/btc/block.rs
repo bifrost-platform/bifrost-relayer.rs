@@ -359,6 +359,15 @@ where
 	#[inline]
 	fn is_block_confirmed(&self, latest_block_num: u64) -> bool {
 		if self.waiting_block > latest_block_num {
+			// difference is greater than 100 blocks
+			// if it suddenly rollbacked to an old block
+			if self.waiting_block > latest_block_num + 100 {
+				let msg = format!(
+					"⚠️ [Bitcoin] Block rollbacked. From #{:?} to #{:?}",
+					self.waiting_block, latest_block_num,
+				);
+				sentry::capture_message(&msg, sentry::Level::Warning);
+			}
 			return false;
 		}
 		latest_block_num.saturating_sub(self.waiting_block) >= self.block_confirmations
