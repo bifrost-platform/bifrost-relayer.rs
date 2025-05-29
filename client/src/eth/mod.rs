@@ -263,6 +263,7 @@ where
 		}
 
 		while let Some(mut tx_request) = transactions.pop_front() {
+			tx_request.from = Some(self.address().await);
 			// RBF
 			match tx_request.preferred_type() {
 				TxType::Legacy => {
