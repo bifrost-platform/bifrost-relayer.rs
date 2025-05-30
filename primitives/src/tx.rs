@@ -21,7 +21,7 @@ use crate::{
 	eth::{GasCoefficient, SocketEventStatus},
 	periodic::PriceResponse,
 	substrate::{
-		ApproveSetRefunds, BroadcastPoll, SubmitExecutedRequest, SubmitFeeRate,
+		BroadcastPoll, RemoveOutboundMessages, SubmitExecutedRequest, SubmitFeeRate,
 		SubmitOutboundRequests, SubmitRollbackPoll, SubmitSignedPsbt, SubmitSystemVaultKey,
 		SubmitUnsignedPsbt, SubmitUtxos, SubmitVaultKey, VaultKeyPresubmission,
 	},
@@ -392,24 +392,6 @@ impl Display for VaultKeyPresubmissionMetadata {
 }
 
 #[derive(Clone, Debug)]
-pub struct ApproveSetRefundsMetadata {
-	pub approved: usize,
-	pub denied: usize,
-}
-
-impl ApproveSetRefundsMetadata {
-	pub fn new(approved: usize, denied: usize) -> Self {
-		Self { approved, denied }
-	}
-}
-
-impl Display for ApproveSetRefundsMetadata {
-	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-		write!(f, "ApproveSetRefunds(approved: {}, denied: {})", self.approved, self.denied)
-	}
-}
-
-#[derive(Clone, Debug)]
 pub struct SubmitUtxoMetadata {
 	pub txid: Txid,
 	pub vout: u32,
@@ -463,6 +445,23 @@ impl Display for SubmitFeeRateMetadata {
 	}
 }
 
+#[derive(Clone, Debug)]
+pub struct RemoveOutboundMessagesMetadata {
+	pub len: usize,
+}
+
+impl RemoveOutboundMessagesMetadata {
+	pub fn new(len: usize) -> Self {
+		Self { len }
+	}
+}
+
+impl Display for RemoveOutboundMessagesMetadata {
+	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		write!(f, "RemoveOutboundMessages({})", self.len)
+	}
+}
+
 #[derive(Clone)]
 pub enum XtRequestMetadata {
 	SubmitVaultKey(SubmitVaultKeyMetadata),
@@ -471,11 +470,11 @@ pub enum XtRequestMetadata {
 	SubmitExecutedRequest(SubmitExecutedRequestMetadata),
 	SubmitRollbackPoll(SubmitRollbackPollMetadata),
 	VaultKeyPresubmission(VaultKeyPresubmissionMetadata),
-	ApproveSetRefunds(ApproveSetRefundsMetadata),
 	SubmitUtxos(SubmitUtxoMetadata),
 	BroadcastPoll(BroadcastPollMetadata),
 	SubmitOutboundRequests(SocketRelayMetadata),
 	SubmitFeeRate(SubmitFeeRateMetadata),
+	RemoveOutboundMessages(RemoveOutboundMessagesMetadata),
 }
 
 impl Display for XtRequestMetadata {
@@ -490,11 +489,11 @@ impl Display for XtRequestMetadata {
 				XtRequestMetadata::SubmitExecutedRequest(metadata) => metadata.to_string(),
 				XtRequestMetadata::SubmitRollbackPoll(metadata) => metadata.to_string(),
 				XtRequestMetadata::VaultKeyPresubmission(metadata) => metadata.to_string(),
-				XtRequestMetadata::ApproveSetRefunds(metadata) => metadata.to_string(),
 				XtRequestMetadata::SubmitUtxos(metadata) => metadata.to_string(),
 				XtRequestMetadata::BroadcastPoll(metadata) => metadata.to_string(),
 				XtRequestMetadata::SubmitOutboundRequests(metadata) => metadata.to_string(),
 				XtRequestMetadata::SubmitFeeRate(metadata) => metadata.to_string(),
+				XtRequestMetadata::RemoveOutboundMessages(metadata) => metadata.to_string(),
 			}
 		)
 	}
@@ -509,11 +508,11 @@ pub enum XtRequest {
 	SubmitSystemVaultKey(DefaultPayload<SubmitSystemVaultKey>),
 	SubmitRollbackPoll(DefaultPayload<SubmitRollbackPoll>),
 	VaultKeyPresubmission(DefaultPayload<VaultKeyPresubmission>),
-	ApproveSetRefunds(DefaultPayload<ApproveSetRefunds>),
 	SubmitUtxos(DefaultPayload<SubmitUtxos>),
 	BroadcastPoll(DefaultPayload<BroadcastPoll>),
 	SubmitOutboundRequests(DefaultPayload<SubmitOutboundRequests>),
 	SubmitFeeRate(DefaultPayload<SubmitFeeRate>),
+	RemoveOutboundMessages(DefaultPayload<RemoveOutboundMessages>),
 }
 
 // Macro to generate all implementations for XtRequest
@@ -560,11 +559,11 @@ impl_xt_request! {
 	SubmitSystemVaultKey(SubmitSystemVaultKey),
 	SubmitRollbackPoll(SubmitRollbackPoll),
 	VaultKeyPresubmission(VaultKeyPresubmission),
-	ApproveSetRefunds(ApproveSetRefunds),
 	SubmitUtxos(SubmitUtxos),
 	BroadcastPoll(BroadcastPoll),
 	SubmitOutboundRequests(SubmitOutboundRequests),
-	SubmitFeeRate(SubmitFeeRate)
+	SubmitFeeRate(SubmitFeeRate),
+	RemoveOutboundMessages(RemoveOutboundMessages)
 }
 
 /// The message format passed through the event channel.
