@@ -15,7 +15,6 @@ use bitcoincore_rpc::bitcoin::Txid;
 use br_primitives::{
 	bootstrap::BootstrapSharedData,
 	contracts::{bitcoin_socket::BitcoinSocketInstance, blaze::BlazeInstance},
-	eth::BootstrapState,
 	substrate::{BoundedVec, EthereumSignature, UtxoInfo, UtxoSubmission, bifrost_runtime},
 	tx::{
 		BitcoinRelayMetadata, SubmitUtxoMetadata, TxRequestMetadata, XtRequest, XtRequestMessage,

@@ -19,7 +19,7 @@ use br_primitives::{
 		socket::{Socket_Struct::Socket_Message, SocketContract::Socket},
 		socket_queue::SocketQueueInstance,
 	},
-	eth::{BootstrapState, BuiltRelayTransaction, SocketEventStatus},
+	eth::{BuiltRelayTransaction, SocketEventStatus},
 	substrate::{BroadcastSubmission, EthereumSignature, bifrost_runtime},
 	tx::{
 		BroadcastPollMetadata, SocketRelayMetadata, TxRequestMetadata, XtRequest, XtRequestMessage,
