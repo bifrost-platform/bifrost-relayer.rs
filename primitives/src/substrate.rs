@@ -16,9 +16,10 @@ pub use runtime_types::{
 	bp_btc_relay::{MigrationSequence, Public, blaze::UtxoInfo},
 	fp_account::EthereumSignature,
 	pallet_blaze::{
-		BroadcastSubmission, FeeRateSubmission, OutboundRequestSubmission, UtxoSubmission,
+		BroadcastSubmission, FeeRateSubmission, SocketMessagesSubmission, UtxoSubmission,
 		pallet::pallet::Call::{
-			broadcast_poll, submit_fee_rate, submit_outbound_requests, submit_utxos,
+			broadcast_poll, remove_outbound_messages, submit_fee_rate, submit_outbound_requests,
+			submit_utxos,
 		},
 	},
 	pallet_btc_registration_pool::{

@@ -67,15 +67,15 @@ where
 			XtRequest::VaultKeyPresubmission(call) => {
 				XtRequestMessage::new(call.into(), metadata.clone())
 			},
-			XtRequest::ApproveSetRefunds(call) => {
-				XtRequestMessage::new(call.into(), metadata.clone())
-			},
 			XtRequest::SubmitUtxos(call) => XtRequestMessage::new(call.into(), metadata.clone()),
 			XtRequest::BroadcastPoll(call) => XtRequestMessage::new(call.into(), metadata.clone()),
 			XtRequest::SubmitOutboundRequests(call) => {
 				XtRequestMessage::new(call.into(), metadata.clone())
 			},
 			XtRequest::SubmitFeeRate(call) => XtRequestMessage::new(call.into(), metadata.clone()),
+			XtRequest::RemoveOutboundMessages(call) => {
+				XtRequestMessage::new(call.into(), metadata.clone())
+			},
 		};
 		match self.xt_request_sender().send(msg) {
 			Ok(_) => log::info!(

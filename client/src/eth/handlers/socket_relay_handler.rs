@@ -25,7 +25,7 @@ use br_primitives::{
 		SocketContract::Socket,
 	},
 	eth::{BootstrapState, BuiltRelayTransaction, RelayDirection, SocketEventStatus},
-	substrate::{OutboundRequestSubmission, bifrost_runtime},
+	substrate::{SocketMessagesSubmission, bifrost_runtime},
 	tx::{
 		SocketRelayMetadata, TxRequestMetadata, XtRequest, XtRequestMessage, XtRequestMetadata,
 		XtRequestSender,
@@ -518,7 +518,7 @@ where
 				.await?
 				.into();
 			let call = XtRequest::from(bifrost_runtime::tx().blaze().submit_outbound_requests(
-				OutboundRequestSubmission {
+				SocketMessagesSubmission {
 					authority_id: AccountId20(self.client.address().await.0.0),
 					messages: vec![encoded_msg],
 				},
