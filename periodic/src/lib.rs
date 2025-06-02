@@ -1,3 +1,5 @@
+#![warn(unused_crate_dependencies)]
+
 mod bitcoin_rollback_verifier;
 mod heartbeat_sender;
 mod keypair_migrator;

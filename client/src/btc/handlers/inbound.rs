@@ -139,7 +139,7 @@ where
 				address: BoundedVec(address.assume_checked_ref().to_string().into_bytes()),
 			}],
 		};
-		let utxo_hash = keccak256(&Encode::encode(&(txid.to_byte_array(), vout, amount.to_sat())));
+		let utxo_hash = keccak256(Encode::encode(&(txid.to_byte_array(), vout, amount.to_sat())));
 
 		let signature = self
 			.bfc_client
@@ -299,7 +299,7 @@ where
 
 	async fn process_event(&self, event: Event) -> Result<()> {
 		let Event { mut txid, index, amount, ref address } = event;
-		if let Some(user_bfc_address) = self.get_user_bfc_address(&address).await? {
+		if let Some(user_bfc_address) = self.get_user_bfc_address(address).await? {
 			// txid from event is in little endian, convert it to big endian
 			txid = {
 				let mut slice: [u8; 32] = txid.to_byte_array();

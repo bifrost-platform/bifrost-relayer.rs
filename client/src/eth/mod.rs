@@ -104,7 +104,7 @@ where
 
 	/// Get the default signer address.
 	pub async fn address(&self) -> Address {
-		self.default_address.read().await.clone()
+		*self.default_address.read().await
 	}
 
 	/// Get the signer addresses.
@@ -339,7 +339,7 @@ where
 
 	/// Fill the gas-related fields for the given transaction.
 	async fn fill_gas(&self, request: &mut TransactionRequest) -> Result<()> {
-		if request.from == None {
+		if request.from.is_none() {
 			request.from = Some(self.address().await);
 		}
 
