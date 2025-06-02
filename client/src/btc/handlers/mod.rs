@@ -30,6 +30,14 @@ use eyre::Result;
 use std::{sync::Arc, time::Duration};
 use tokio::time::sleep;
 
+use super::block::EventMessage;
+
+macro_rules! create_xt_request_message {
+	($xt_request:expr, $metadata:expr) => {
+		XtRequestMessage::new($xt_request.into(), $metadata.clone())
+	};
+}
+
 #[async_trait::async_trait]
 pub trait XtRequester<F, P, N: Network>
 where
@@ -46,36 +54,7 @@ where
 		metadata: XtRequestMetadata,
 		sub_log_target: &str,
 	) {
-		let msg = match xt_request {
-			XtRequest::SubmitSignedPsbt(call) => {
-				XtRequestMessage::new(call.into(), metadata.clone())
-			},
-			XtRequest::SubmitVaultKey(call) => XtRequestMessage::new(call.into(), metadata.clone()),
-			XtRequest::SubmitUnsignedPsbt(call) => {
-				XtRequestMessage::new(call.into(), metadata.clone())
-			},
-			XtRequest::SubmitExecutedRequest(call) => {
-				XtRequestMessage::new(call.into(), metadata.clone())
-			},
-			XtRequest::SubmitSystemVaultKey(call) => {
-				XtRequestMessage::new(call.into(), metadata.clone())
-			},
-			XtRequest::SubmitRollbackPoll(call) => {
-				XtRequestMessage::new(call.into(), metadata.clone())
-			},
-			XtRequest::VaultKeyPresubmission(call) => {
-				XtRequestMessage::new(call.into(), metadata.clone())
-			},
-			XtRequest::SubmitUtxos(call) => XtRequestMessage::new(call.into(), metadata.clone()),
-			XtRequest::BroadcastPoll(call) => XtRequestMessage::new(call.into(), metadata.clone()),
-			XtRequest::SubmitOutboundRequests(call) => {
-				XtRequestMessage::new(call.into(), metadata.clone())
-			},
-			XtRequest::SubmitFeeRate(call) => XtRequestMessage::new(call.into(), metadata.clone()),
-			XtRequest::RemoveOutboundMessages(call) => {
-				XtRequestMessage::new(call.into(), metadata.clone())
-			},
-		};
+		let msg = create_xt_request_message!(xt_request, metadata);
 		match self.xt_request_sender().send(msg) {
 			Ok(_) => log::info!(
 				target: &self.bfc_client().get_chain_name(),
