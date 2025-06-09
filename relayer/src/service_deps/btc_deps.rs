@@ -106,9 +106,11 @@ where
 			substrate_deps.xt_request_sender.clone(),
 			block_manager.subscribe(),
 			if network == Network::Bitcoin {
-				MEMPOOL_SPACE_FEE_RATE_ENDPOINT
+				Some(MEMPOOL_SPACE_FEE_RATE_ENDPOINT)
+			} else if network == Network::Testnet {
+				Some(MEMPOOL_SPACE_TESTNET_FEE_RATE_ENDPOINT)
 			} else {
-				MEMPOOL_SPACE_TESTNET_FEE_RATE_ENDPOINT
+				None // regtest
 			},
 			debug_mode,
 		);

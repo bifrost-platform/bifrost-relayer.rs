@@ -37,7 +37,7 @@ where
 	/// The receiver that consumes new events from the block channel.
 	event_stream: BroadcastStream<EventMessage>,
 	/// The API endpoint for fetching Bitcoin fee rate.
-	fee_rate_api: &'static str,
+	fee_rate_api: Option<&'static str>,
 	/// Whether to enable debug mode.
 	debug_mode: bool,
 }
@@ -51,7 +51,7 @@ where
 		bfc_client: Arc<EthClient<F, P>>,
 		xt_request_sender: Arc<XtRequestSender>,
 		event_receiver: Receiver<EventMessage>,
-		fee_rate_api: &'static str,
+		fee_rate_api: Option<&'static str>,
 		debug_mode: bool,
 	) -> Self {
 		Self {
@@ -70,43 +70,48 @@ where
 
 	async fn fetch_fee_rate(&self) -> (u64, u64) {
 		loop {
-			match reqwest::get(self.fee_rate_api).await {
-				Ok(response) => match response.json::<FeeRateResponse>().await {
-					Ok(fee_rate) => {
-						let lt_fee_rate = fee_rate.economy_fee;
-						let final_fee_rate = (fee_rate.fastest_fee as f64
-							* MEMPOOL_SPACE_FEE_RATE_MULTIPLIER)
-							.round() as u64;
-						if self.debug_mode {
-							log::info!(
+			if let Some(fee_rate_api) = self.fee_rate_api {
+				match reqwest::get(fee_rate_api).await {
+					Ok(response) => match response.json::<FeeRateResponse>().await {
+						Ok(fee_rate) => {
+							let lt_fee_rate = fee_rate.economy_fee;
+							let final_fee_rate = (fee_rate.fastest_fee as f64
+								* MEMPOOL_SPACE_FEE_RATE_MULTIPLIER)
+								.round() as u64;
+							if self.debug_mode {
+								log::info!(
+									target: LOG_TARGET,
+									"-[{}] Fetched fee rate: ({:?}, {:?})",
+									sub_display_format(SUB_LOG_TARGET),
+									lt_fee_rate,
+									final_fee_rate
+								);
+							}
+							break (lt_fee_rate, final_fee_rate);
+						},
+						Err(e) => {
+							log::warn!(
 								target: LOG_TARGET,
-								"-[{}] Fetched fee rate: ({:?}, {:?})",
+								"-[{}] Failed to decode fee rate: {:?}. Retrying...",
 								sub_display_format(SUB_LOG_TARGET),
-								lt_fee_rate,
-								final_fee_rate
+								e
 							);
-						}
-						break (lt_fee_rate, final_fee_rate);
+							sleep(Duration::from_secs(5)).await;
+						},
 					},
 					Err(e) => {
 						log::warn!(
 							target: LOG_TARGET,
-							"-[{}] Failed to decode fee rate: {:?}. Retrying...",
+							"-[{}] Failed to fetch fee rate: {:?}. Retrying...",
 							sub_display_format(SUB_LOG_TARGET),
 							e
 						);
 						sleep(Duration::from_secs(5)).await;
 					},
-				},
-				Err(e) => {
-					log::warn!(
-						target: LOG_TARGET,
-						"-[{}] Failed to fetch fee rate: {:?}. Retrying...",
-						sub_display_format(SUB_LOG_TARGET),
-						e
-					);
-					sleep(Duration::from_secs(5)).await;
-				},
+				}
+			} else {
+				// we submit a fixed fee rate for regtest
+				break (1, 1);
 			}
 		}
 	}
