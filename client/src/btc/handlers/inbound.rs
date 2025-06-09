@@ -127,20 +127,27 @@ where
 		amount: Amount,
 		address: BtcAddress<NetworkUnchecked>,
 	) -> Result<(UtxoSubmission<AccountId20>, EthereumSignature)> {
+		let txid: subxt::utils::H256 = txid.to_byte_array().into();
 		let msg = UtxoSubmission {
 			authority_id: AccountId20(self.bfc_client.address().await.0.0),
 			utxos: vec![UtxoInfo {
-				txid: txid.to_byte_array().into(),
+				txid,
 				vout,
 				amount: amount.to_sat(),
 				address: BoundedVec(address.assume_checked_ref().to_string().into_bytes()),
 			}],
 		};
-		let utxo_hash = keccak256(Encode::encode(&(txid.to_byte_array(), vout, amount.to_sat())));
+		let utxo_hash = keccak256(Encode::encode(&(txid, vout, amount.to_sat())));
 
 		let signature = self
 			.bfc_client
-			.sign_message(&[keccak256("UtxosSubmission").as_slice(), utxo_hash.as_ref()].concat())
+			.sign_message(
+				&[
+					keccak256("UtxosSubmission").as_slice(),
+					array_bytes::bytes2hex("", utxo_hash).as_bytes(),
+				]
+				.concat(),
+			)
 			.await?
 			.into();
 
