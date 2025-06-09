@@ -192,8 +192,8 @@ where
 				continue;
 			}
 			// submit fee rate if blaze is activated
-			let (lt_fee_rate, fee_rate) = self.fetch_fee_rate().await;
 			if self.bfc_client.blaze_activation().await? {
+				let (lt_fee_rate, fee_rate) = self.fetch_fee_rate().await;
 				self.submit_fee_rate(lt_fee_rate, fee_rate).await?;
 			}
 		}
