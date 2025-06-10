@@ -6,21 +6,14 @@ use alloy::{
 	providers::{Provider, WalletProvider, fillers::TxFiller},
 };
 use bitcoincore_rpc::{Client as BtcClient, RpcApi};
-use br_client::{btc::LOG_TARGET, eth::EthClient};
+use br_client::eth::EthClient;
 use br_primitives::{
-	constants::{
-		errors::{INVALID_PERIODIC_SCHEDULE, PROVIDER_INTERNAL_ERROR},
-		schedule::PSBT_BROADCASTER_SCHEDULE,
-		tx::{DEFAULT_CALL_RETRIES, DEFAULT_CALL_RETRY_INTERVAL_MS},
-	},
+	constants::{errors::INVALID_PERIODIC_SCHEDULE, schedule::PSBT_BROADCASTER_SCHEDULE},
 	utils::sub_display_format,
 };
 use cron::Schedule;
 use eyre::Result;
 use miniscript::bitcoin::Psbt;
-use serde::Deserialize;
-use serde_json::Value;
-use tokio::time::{Duration, sleep};
 use tokio_stream::StreamExt;
 
 use crate::traits::PeriodicWorker;
@@ -64,34 +57,6 @@ where
 }
 
 #[async_trait::async_trait]
-impl<F, P> RpcApi for PsbtBroadcaster<F, P>
-where
-	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
-	P: Provider<AnyNetwork>,
-{
-	async fn call<T: for<'a> Deserialize<'a> + Send>(
-		&self,
-		cmd: &str,
-		args: &[Value],
-	) -> bitcoincore_rpc::Result<T> {
-		let mut error_msg = String::default();
-		for _ in 0..DEFAULT_CALL_RETRIES {
-			match self.btc_client.call(cmd, args).await {
-				Ok(ret) => return Ok(ret),
-				Err(e) => {
-					error_msg = e.to_string();
-				},
-			}
-			sleep(Duration::from_millis(DEFAULT_CALL_RETRY_INTERVAL_MS)).await;
-		}
-		panic!(
-			"[{}]-[{}] {} [cmd: {}]: {}",
-			LOG_TARGET, SUB_LOG_TARGET, PROVIDER_INTERNAL_ERROR, cmd, error_msg
-		);
-	}
-}
-
-#[async_trait::async_trait]
 impl<F, P> PeriodicWorker for PsbtBroadcaster<F, P>
 where
 	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
@@ -119,7 +84,11 @@ where
 					while let Some(finalized_psbt) = stream.next().await {
 						let psbt = Psbt::deserialize(&finalized_psbt).unwrap();
 
-						match self.get_raw_transaction(&psbt.unsigned_tx.txid(), None).await {
+						match self
+							.btc_client
+							.get_raw_transaction(&psbt.unsigned_tx.txid(), None)
+							.await
+						{
 							// If the transaction is already broadcasted
 							Ok(tx) => {
 								log::info!(
@@ -133,6 +102,7 @@ where
 							Err(_) => {
 								// Try to broadcast the transaction
 								match self
+									.btc_client
 									.send_raw_transaction(
 										&psbt.clone().extract_tx().expect("fee rate too high"),
 									)
