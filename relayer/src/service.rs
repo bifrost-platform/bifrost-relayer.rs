@@ -265,6 +265,7 @@ where
 		mut inbound,
 		mut block_manager,
 		mut psbt_signer,
+		mut psbt_broadcaster,
 		mut pub_key_submitter,
 		mut rollback_verifier,
 		mut fee_rate_feeder,
@@ -504,6 +505,22 @@ where
 				let log_msg = format!(
 					"bitcoin psbt signer({}) stopped: {:?}\nRestarting immediately...",
 					psbt_signer.client.address().await,
+					report
+				);
+				log::error!("{log_msg}");
+				sentry::capture_message(&log_msg, sentry::Level::Error);
+			}
+		},
+	);
+	task_manager.spawn_essential_handle().spawn(
+		"bitcoin-psbt-broadcaster",
+		Some("psbt-broadcaster"),
+		async move {
+			loop {
+				let report = psbt_broadcaster.run().await;
+				let log_msg = format!(
+					"bitcoin psbt broadcaster({}) stopped: {:?}\nRestarting immediately...",
+					psbt_broadcaster.bfc_client.address().await,
 					report
 				);
 				log::error!("{log_msg}");

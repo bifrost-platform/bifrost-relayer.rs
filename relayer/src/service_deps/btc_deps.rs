@@ -1,4 +1,5 @@
 use br_client::btc::handlers::FeeRateFeeder;
+use br_periodic::PsbtBroadcaster;
 use br_primitives::btc::{
 	MEMPOOL_SPACE_BLOCK_HEIGHT_ENDPOINT, MEMPOOL_SPACE_FEE_RATE_ENDPOINT,
 	MEMPOOL_SPACE_TESTNET_BLOCK_HEIGHT_ENDPOINT, MEMPOOL_SPACE_TESTNET_FEE_RATE_ENDPOINT,
@@ -19,6 +20,8 @@ where
 	pub block_manager: BlockManager<F, P>,
 	/// The Bitcoin PSBT signer.
 	pub psbt_signer: PsbtSigner<F, P>,
+	/// The Bitcoin PSBT broadcaster.
+	pub psbt_broadcaster: PsbtBroadcaster<F, P>,
 	/// The Bitcoin vault public key submitter.
 	pub pub_key_submitter: PubKeySubmitter<F, P>,
 	/// The Bitcoin rollback verifier.
@@ -90,6 +93,7 @@ where
 			migration_sequence.clone(),
 			network,
 		);
+		let psbt_broadcaster = PsbtBroadcaster::new(bfc_client.clone(), btc_client.clone());
 		let pub_key_submitter = PubKeySubmitter::new(
 			bfc_client.clone(),
 			substrate_deps.xt_request_sender.clone(),
@@ -120,6 +124,7 @@ where
 			inbound,
 			block_manager,
 			psbt_signer,
+			psbt_broadcaster,
 			pub_key_submitter,
 			rollback_verifier,
 			fee_rate_feeder,
