@@ -91,7 +91,9 @@ where
 		let round = self.get_current_round().await?;
 		let user_address = registration_pool.user_address(vault_address, round).call().await?;
 
-		if user_address == EthAddress::ZERO { Ok(None) } else { Ok(Some(user_address)) }
+		// if system vault address, return None.
+		// otherwise, return Some(user address).
+		if user_address == *registration_pool.address() { Ok(None) } else { Ok(Some(user_address)) }
 	}
 
 	async fn is_rollback_output(&self, txid: Txid, index: u32) -> Result<bool> {
@@ -301,19 +303,19 @@ where
 
 	async fn process_event(&self, event: Event) -> Result<()> {
 		let Event { mut txid, index, amount, ref address } = event;
+
+		// txid from event is in little endian, convert it to big endian
+		txid = {
+			let mut slice: [u8; 32] = txid.to_byte_array();
+			slice.reverse();
+			Txid::from_slice(&slice)?
+		};
+
+		if self.bfc_client.blaze_activation().await? {
+			self.submit_utxo(txid, index, amount, address.clone()).await?;
+		}
+
 		if let Some(user_bfc_address) = self.get_user_bfc_address(address).await? {
-			// txid from event is in little endian, convert it to big endian
-			txid = {
-				let mut slice: [u8; 32] = txid.to_byte_array();
-				slice.reverse();
-				Txid::from_slice(&slice).unwrap()
-			};
-
-			// submit utxo if blaze is activated
-			if self.bfc_client.blaze_activation().await? {
-				self.submit_utxo(txid, index, amount, address.clone()).await?;
-			}
-
 			// check if transaction has been submitted to be rollbacked
 			if self.is_rollback_output(txid, index).await? {
 				return Ok(());
