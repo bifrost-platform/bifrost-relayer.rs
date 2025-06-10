@@ -313,11 +313,20 @@ where
 		let registration_pool =
 			self.bfc_client.protocol_contracts.registration_pool.as_ref().unwrap();
 
-		Ok(registration_pool
+		let mut vault_addresses = registration_pool
 			.vault_addresses(self.get_current_round().await?)
 			.call()
 			.await?
-			._0)
+			._0;
+		vault_addresses.push(
+			registration_pool
+				.vault_address(*registration_pool.address(), 0)
+				.call()
+				.await?
+				._0,
+		);
+
+		Ok(vault_addresses)
 	}
 
 	/// Returns the registered user refund addresses.
