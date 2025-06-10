@@ -13,7 +13,7 @@ use br_primitives::{
 };
 use cron::Schedule;
 use eyre::Result;
-use miniscript::bitcoin::Psbt;
+use miniscript::bitcoin::{Psbt, Txid};
 use tokio_stream::StreamExt;
 
 use crate::traits::PeriodicWorker;
@@ -54,6 +54,65 @@ where
 		let res = socket_queue.finalized_psbts().call().await?._0;
 		Ok(res)
 	}
+
+	/// Check if the transaction is already broadcasted
+	async fn is_transaction_broadcasted(&self, txid: Txid) -> Result<bool> {
+		let tx = self.btc_client.get_raw_transaction(&txid, None).await;
+		Ok(tx.is_ok())
+	}
+
+	/// Try to broadcast the transaction
+	async fn broadcast_transaction(&self, psbt: Psbt) {
+		let tx = psbt.clone().extract_tx().expect("fee rate too high");
+
+		// First test if the transaction would be accepted
+		match self.btc_client.test_mempool_accept(&[&tx]).await {
+			Ok(results) => {
+				if let Some(result) = results.first() {
+					if result.allowed {
+						log::info!(
+							target: &self.bfc_client.get_chain_name(),
+							"-[{}] BRP-Outbound: Transaction passed mempool test, broadcasting...",
+							sub_display_format(SUB_LOG_TARGET),
+						);
+						match self.btc_client.send_raw_transaction(&tx).await {
+							Ok(txid) => {
+								log::info!(
+									target: &self.bfc_client.get_chain_name(),
+									"-[{}] BRP-Outbound: Broadcasted {:?}",
+									sub_display_format(SUB_LOG_TARGET),
+									txid,
+								);
+							},
+							Err(e) => {
+								log::error!(
+									target: &self.bfc_client.get_chain_name(),
+									"-[{}] BRP-Outbound: Broadcast failed: {:?}",
+									sub_display_format(SUB_LOG_TARGET),
+									e
+								);
+							},
+						}
+					} else {
+						log::error!(
+							target: &self.bfc_client.get_chain_name(),
+							"-[{}] BRP-Outbound: Transaction rejected by mempool test: {}",
+							sub_display_format(SUB_LOG_TARGET),
+							result.reject_reason.as_ref().unwrap_or(&"unknown reason".to_string())
+						);
+					}
+				}
+			},
+			Err(e) => {
+				log::error!(
+					target: &self.bfc_client.get_chain_name(),
+					"-[{}] BRP-Outbound: Mempool test request failed: {:?}",
+					sub_display_format(SUB_LOG_TARGET),
+					e
+				);
+			},
+		}
+	}
 }
 
 #[async_trait::async_trait]
@@ -84,49 +143,18 @@ where
 					while let Some(finalized_psbt) = stream.next().await {
 						let psbt = Psbt::deserialize(&finalized_psbt).unwrap();
 
-						match self
-							.btc_client
-							.get_raw_transaction(&psbt.unsigned_tx.txid(), None)
-							.await
-						{
-							// If the transaction is already broadcasted
-							Ok(tx) => {
-								log::info!(
-									target: &self.bfc_client.get_chain_name(),
-									"-[{}] BRP-Outbound: Transaction already broadcasted {:?}",
-									sub_display_format(SUB_LOG_TARGET),
-									tx.txid(),
-								);
-							},
-							// If the transaction is not broadcasted
-							Err(_) => {
-								// Try to broadcast the transaction
-								match self
-									.btc_client
-									.send_raw_transaction(
-										&psbt.clone().extract_tx().expect("fee rate too high"),
-									)
-									.await
-								{
-									Ok(txid) => {
-										log::info!(
-											target: &self.bfc_client.get_chain_name(),
-											"-[{}] BRP-Outbound: Broadcasted {:?}",
-											sub_display_format(SUB_LOG_TARGET),
-											txid,
-										);
-									},
-									Err(e) => {
-										log::warn!(
-											target: &self.bfc_client.get_chain_name(),
-											"-[{}] BRP-Outbound: Broadcast failed {:?}",
-											sub_display_format(SUB_LOG_TARGET),
-											e
-										);
-									},
-								}
-							},
+						let txid = psbt.unsigned_tx.txid();
+						if self.is_transaction_broadcasted(txid).await? {
+							log::info!(
+								target: &self.bfc_client.get_chain_name(),
+								"-[{}] BRP-Outbound: Transaction already broadcasted {:?}",
+								sub_display_format(SUB_LOG_TARGET),
+								txid,
+							);
+							continue;
 						}
+
+						self.broadcast_transaction(psbt).await;
 					}
 				}
 			}
