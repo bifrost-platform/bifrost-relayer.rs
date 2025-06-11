@@ -313,10 +313,7 @@ where
 		let registration_pool =
 			self.bfc_client.protocol_contracts.registration_pool.as_ref().unwrap();
 
-		let mut vault_addresses = registration_pool
-			.vault_addresses(self.get_current_round().await?)
-			.call()
-			.await?;
+		let mut vault_addresses = registration_pool.vault_addresses(0).call().await?;
 		vault_addresses.push(
 			registration_pool
 				.vault_address(*registration_pool.address(), 0)
