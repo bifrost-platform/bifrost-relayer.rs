@@ -88,8 +88,7 @@ where
 			self.bfc_client.protocol_contracts.registration_pool.as_ref().unwrap();
 
 		let vault_address = vault_address.clone().assume_checked().to_string();
-		let round = self.get_current_round().await?;
-		let user_address = registration_pool.user_address(vault_address, round).call().await?;
+		let user_address = registration_pool.user_address(vault_address, 0).call().await?;
 
 		// if system vault address, return None.
 		// otherwise, return Some(user address).
@@ -225,12 +224,6 @@ where
 			.isRelayerVoted(hash_key, self.bfc_client.address().await)
 			.call()
 			.await?)
-	}
-
-	async fn get_current_round(&self) -> Result<u32> {
-		let registration_pool =
-			self.bfc_client.protocol_contracts.registration_pool.as_ref().unwrap();
-		Ok(registration_pool.current_round().call().await?)
 	}
 
 	#[inline]
