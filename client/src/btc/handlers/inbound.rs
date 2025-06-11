@@ -89,8 +89,7 @@ where
 			self.bfc_client.protocol_contracts.registration_pool.as_ref().unwrap();
 
 		let vault_address = vault_address.clone().assume_checked().to_string();
-		let round = self.get_current_round().await?;
-		let user_address = registration_pool.user_address(vault_address, round).call().await?._0;
+		let user_address = registration_pool.user_address(vault_address, 0).call().await?._0;
 
 		// if system vault address, return None.
 		// otherwise, return Some(user address).
@@ -230,12 +229,6 @@ where
 			.call()
 			.await?
 			._0)
-	}
-
-	async fn get_current_round(&self) -> Result<u32> {
-		let registration_pool =
-			self.bfc_client.protocol_contracts.registration_pool.as_ref().unwrap();
-		Ok(registration_pool.current_round().call().await?._0)
 	}
 
 	#[inline]
