@@ -67,6 +67,7 @@ where
 		loop {
 			self.wait_until_next_time().await;
 
+			self.barrier.wait().await;
 			if self.is_relay_executive().await? {
 				let target_round = if *self.migration_sequence.read().await == ServiceState::Normal
 				{
@@ -110,7 +111,6 @@ where
 						continue;
 					}
 
-					self.barrier.wait().await;
 					let pub_key = self.keypair_storage.create_new_keypair().await;
 					let (call, metadata) = self.build_unsigned_tx(who, pub_key).await?;
 					self.request_send_transaction(call, metadata).await;
