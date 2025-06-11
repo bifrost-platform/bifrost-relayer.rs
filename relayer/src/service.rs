@@ -20,7 +20,7 @@ use alloy::{
 use futures::FutureExt;
 use miniscript::bitcoin::Network;
 use sc_service::{Error as ServiceError, TaskManager, config::PrometheusConfig};
-use tokio::sync::{Barrier, RwLock};
+use tokio::sync::RwLock;
 
 use crate::{
 	cli::{LOG_TARGET, SUB_LOG_TARGET},
@@ -191,8 +191,6 @@ pub async fn relay(config: Configuration) -> Result<TaskManager, ServiceError> {
 	let manager_deps = ManagerDeps::new(&config, Arc::new(clients), bootstrap_shared_data.clone());
 	let bfc_client = manager_deps.bifrost_client.clone();
 
-	let keypair_barrier = Arc::new(Barrier::new(2));
-
 	let debug_mode =
 		if let Some(system) = system { system.debug_mode.unwrap_or(false) } else { false };
 	let substrate_deps = SubstrateDeps::new(bfc_client.clone(), &task_manager);
@@ -204,7 +202,6 @@ pub async fn relay(config: Configuration) -> Result<TaskManager, ServiceError> {
 		manager_deps.clients.clone(),
 		bfc_client.clone(),
 		&task_manager,
-		keypair_barrier.clone(),
 		debug_mode,
 	);
 	let handler_deps = HandlerDeps::new(
@@ -225,7 +222,6 @@ pub async fn relay(config: Configuration) -> Result<TaskManager, ServiceError> {
 		migration_sequence.clone(),
 		bfc_client.clone(),
 		&task_manager,
-		keypair_barrier,
 		debug_mode,
 	);
 

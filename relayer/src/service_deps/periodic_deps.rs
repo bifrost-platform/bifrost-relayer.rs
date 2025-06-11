@@ -1,5 +1,4 @@
 use super::*;
-use tokio::sync::Barrier;
 
 pub struct PeriodicDeps<F, P>
 where
@@ -35,7 +34,6 @@ where
 		clients: Arc<ClientMap<F, P>>,
 		bfc_client: Arc<EthClient<F, P>>,
 		task_manager: &TaskManager,
-		keypair_barrier: Arc<Barrier>,
 		debug_mode: bool,
 	) -> Self {
 		// initialize the heartbeat sender
@@ -76,7 +74,6 @@ where
 			bfc_client.clone(),
 			migration_sequence.clone(),
 			keypair_storage.clone(),
-			keypair_barrier,
 		);
 		let presubmitter = PubKeyPreSubmitter::new(
 			bfc_client.clone(),

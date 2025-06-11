@@ -1,5 +1,3 @@
-use std::{str::FromStr, sync::Arc};
-
 use alloy::{
 	network::AnyNetwork,
 	primitives::{Address, Bytes},
@@ -24,8 +22,9 @@ use br_primitives::{
 };
 use cron::Schedule;
 use eyre::Result;
+use std::{str::FromStr, sync::Arc, time::Duration};
 use subxt::ext::subxt_core::utils::AccountId20;
-use tokio::sync::{Barrier, RwLock};
+use tokio::{sync::RwLock, time::sleep};
 use tokio_stream::StreamExt;
 
 use crate::traits::PeriodicWorker;
@@ -47,7 +46,6 @@ where
 	migration_sequence: Arc<RwLock<MigrationSequence>>,
 	/// The time schedule that represents when check pending registrations.
 	schedule: Schedule,
-	barrier: Arc<Barrier>,
 }
 
 #[async_trait::async_trait]
@@ -64,7 +62,6 @@ where
 		loop {
 			self.wait_until_next_time().await;
 
-			self.barrier.wait().await;
 			if self.is_relay_executive().await? {
 				let target_round = if *self.migration_sequence.read().await == ServiceState::Normal
 				{
@@ -106,7 +103,16 @@ where
 						continue;
 					}
 
-					let pub_key = self.keypair_storage.create_new_keypair().await;
+					let pub_key = {
+						loop {
+							if self.keypair_storage.loaded_round().await == target_round {
+								break;
+							}
+							sleep(Duration::from_secs(1)).await;
+						}
+
+						self.keypair_storage.create_new_keypair().await
+					};
 					let (call, metadata) = self.build_unsigned_tx(who, pub_key).await?;
 					self.request_send_transaction(call, metadata).await;
 				}
@@ -126,7 +132,6 @@ where
 		xt_request_sender: Arc<XtRequestSender>,
 		keypair_storage: KeypairStorage,
 		migration_sequence: Arc<RwLock<MigrationSequence>>,
-		barrier: Arc<Barrier>,
 	) -> Self {
 		Self {
 			client,
@@ -135,7 +140,6 @@ where
 			migration_sequence,
 			schedule: Schedule::from_str(PUB_KEY_SUBMITTER_SCHEDULE)
 				.expect(INVALID_PERIODIC_SCHEDULE),
-			barrier,
 		}
 	}
 
