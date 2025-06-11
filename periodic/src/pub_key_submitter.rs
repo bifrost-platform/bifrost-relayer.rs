@@ -73,8 +73,6 @@ where
 				{
 					self.get_current_round().await?
 				} else {
-					// wait for 9 seconds to ensure the migration sequence is updated. (at least finalization time)
-					sleep(Duration::from_secs(9)).await;
 					self.get_current_round().await?.saturating_add(1)
 				};
 
