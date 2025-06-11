@@ -22,7 +22,7 @@ use cron::Schedule;
 use eyre::Result;
 use std::{str::FromStr, sync::Arc, time::Duration};
 use subxt::OnlineClient;
-use tokio::sync::RwLock;
+use tokio::sync::{Barrier, RwLock};
 
 pub struct KeypairMigrator<F, P, N: Network>
 where
@@ -34,6 +34,7 @@ where
 	migration_sequence: Arc<RwLock<MigrationSequence>>,
 	keypair_storage: KeypairStorage,
 	schedule: Schedule,
+	barrier: Arc<Barrier>,
 }
 
 impl<F, P, N: Network> KeypairMigrator<F, P, N>
@@ -46,6 +47,7 @@ where
 		bfc_client: Arc<EthClient<F, P, N>>,
 		migration_sequence: Arc<RwLock<MigrationSequence>>,
 		keypair_storage: KeypairStorage,
+		barrier: Arc<Barrier>,
 	) -> Self {
 		Self {
 			sub_client: None,
@@ -53,6 +55,7 @@ where
 			migration_sequence,
 			keypair_storage,
 			schedule: Schedule::from_str(MIGRATION_DETECTOR_SCHEDULE).unwrap(),
+			barrier,
 		}
 	}
 
@@ -169,6 +172,7 @@ where
 					},
 				}
 				*write_lock = service_state;
+				self.barrier.wait().await;
 			}
 
 			self.wait_until_next_time().await;
