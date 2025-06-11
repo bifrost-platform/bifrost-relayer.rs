@@ -29,7 +29,8 @@ pub use runtime_types::{
 		},
 	},
 	pallet_btc_socket_queue::{
-		RollbackPollMessage, SignedPsbtMessage, pallet::pallet::Call::submit_unsigned_psbt,
+		ExecutedPsbtMessage, RollbackPollMessage, SignedPsbtMessage,
+		pallet::pallet::Call::submit_unsigned_psbt,
 	},
 };
 
