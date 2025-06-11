@@ -172,6 +172,8 @@ where
 					},
 				}
 				*write_lock = service_state;
+				drop(write_lock);
+
 				self.barrier.wait().await;
 			}
 
