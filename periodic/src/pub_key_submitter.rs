@@ -1,4 +1,4 @@
-use std::{str::FromStr, sync::Arc, time::Duration};
+use std::{str::FromStr, sync::Arc};
 
 use alloy::{
 	network::Network,
@@ -25,10 +25,7 @@ use br_primitives::{
 use cron::Schedule;
 use eyre::Result;
 use subxt::ext::subxt_core::utils::AccountId20;
-use tokio::{
-	sync::{Barrier, RwLock},
-	time::sleep,
-};
+use tokio::sync::{Barrier, RwLock};
 use tokio_stream::StreamExt;
 
 use crate::traits::PeriodicWorker;
