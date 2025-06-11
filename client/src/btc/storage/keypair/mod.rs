@@ -168,11 +168,15 @@ pub trait KeypairStorageT: Send + Sync {
 
 #[derive(Clone)]
 /// A wrapper for a keypair manager.
-pub struct KeypairStorage(Arc<RwLock<dyn KeypairStorageT>>);
+pub struct KeypairStorage(Arc<RwLock<dyn KeypairStorageT>>, Arc<RwLock<u32>>);
 
 impl KeypairStorage {
 	pub fn new(inner: Arc<RwLock<dyn KeypairStorageT>>) -> Self {
-		Self(inner)
+		Self(inner, Arc::new(RwLock::new(0)))
+	}
+
+	pub async fn loaded_round(&self) -> u32 {
+		*self.1.read().await
 	}
 }
 
@@ -180,10 +184,12 @@ impl KeypairStorage {
 impl KeypairStorageT for KeypairStorage {
 	async fn load(&mut self, round: u32) {
 		self.0.write().await.load(round).await;
+		*self.1.write().await = round;
 	}
 
 	async fn load_v1(&mut self, round: u32, secret: Option<SecretString>) {
 		self.0.write().await.load_v1(round, secret).await;
+		*self.1.write().await = round;
 	}
 
 	async fn db(&self) -> Arc<LocalKeystore> {

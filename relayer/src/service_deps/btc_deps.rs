@@ -4,7 +4,6 @@ use br_primitives::btc::{
 	MEMPOOL_SPACE_BLOCK_HEIGHT_ENDPOINT, MEMPOOL_SPACE_FEE_RATE_ENDPOINT,
 	MEMPOOL_SPACE_TESTNET_BLOCK_HEIGHT_ENDPOINT, MEMPOOL_SPACE_TESTNET_FEE_RATE_ENDPOINT,
 };
-use tokio::sync::Barrier;
 
 use super::*;
 
@@ -44,7 +43,6 @@ where
 		migration_sequence: Arc<RwLock<MigrationSequence>>,
 		bfc_client: Arc<EthClient<F, P, N>>,
 		task_manager: &TaskManager,
-		keypair_barrier: Arc<Barrier>,
 		debug_mode: bool,
 	) -> Self {
 		let btc_provider = &config.relayer_config.btc_provider;
@@ -105,7 +103,6 @@ where
 			substrate_deps.xt_request_sender.clone(),
 			keypair_storage.clone(),
 			migration_sequence.clone(),
-			keypair_barrier,
 		);
 		let rollback_verifier = BitcoinRollbackVerifier::new(
 			btc_client.clone(),
