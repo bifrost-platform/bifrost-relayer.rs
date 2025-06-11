@@ -95,7 +95,11 @@ where
 			migration_sequence.clone(),
 			network,
 		);
-		let psbt_broadcaster = PsbtBroadcaster::new(bfc_client.clone(), btc_client.clone());
+		let psbt_broadcaster = PsbtBroadcaster::new(
+			bfc_client.clone(),
+			btc_client.clone(),
+			substrate_deps.xt_request_sender.clone(),
+		);
 		let pub_key_submitter = PubKeySubmitter::new(
 			bfc_client.clone(),
 			substrate_deps.xt_request_sender.clone(),
