@@ -25,7 +25,10 @@ use br_primitives::{
 use cron::Schedule;
 use eyre::Result;
 use subxt::ext::subxt_core::utils::AccountId20;
-use tokio::{sync::RwLock, time::sleep};
+use tokio::{
+	sync::{Barrier, RwLock},
+	time::sleep,
+};
 use tokio_stream::StreamExt;
 
 use crate::traits::PeriodicWorker;
@@ -47,6 +50,7 @@ where
 	migration_sequence: Arc<RwLock<MigrationSequence>>,
 	/// The time schedule that represents when check pending registrations.
 	schedule: Schedule,
+	barrier: Arc<Barrier>,
 }
 
 #[async_trait::async_trait]
@@ -106,6 +110,7 @@ where
 						continue;
 					}
 
+					self.barrier.wait().await;
 					let pub_key = self.keypair_storage.create_new_keypair().await;
 					let (call, metadata) = self.build_unsigned_tx(who, pub_key).await?;
 					self.request_send_transaction(call, metadata).await;
@@ -126,6 +131,7 @@ where
 		xt_request_sender: Arc<XtRequestSender>,
 		keypair_storage: KeypairStorage,
 		migration_sequence: Arc<RwLock<MigrationSequence>>,
+		barrier: Arc<Barrier>,
 	) -> Self {
 		Self {
 			client,
@@ -134,6 +140,7 @@ where
 			migration_sequence,
 			schedule: Schedule::from_str(PUB_KEY_SUBMITTER_SCHEDULE)
 				.expect(INVALID_PERIODIC_SCHEDULE),
+			barrier,
 		}
 	}
 
