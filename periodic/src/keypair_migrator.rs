@@ -1,38 +1,53 @@
 use crate::traits::PeriodicWorker;
 
-use br_client::{btc::storage::keypair::KeypairStorage, eth::EthClient};
+use alloy::{
+	network::AnyNetwork,
+	providers::{Provider, WalletProvider, fillers::TxFiller},
+};
+use br_client::{
+	btc::storage::keypair::{KeypairStorage, KeypairStorageT},
+	eth::EthClient,
+};
 use br_primitives::{
 	constants::{
 		errors::INVALID_PROVIDER_URL, schedule::MIGRATION_DETECTOR_SCHEDULE,
 		tx::DEFAULT_CALL_RETRY_INTERVAL_MS,
 	},
 	substrate::{
+		CustomConfig, MigrationSequence,
 		bifrost_runtime::{
 			self, btc_registration_pool::storage::types::service_state::ServiceState,
 		},
-		CustomConfig, MigrationSequence,
 	},
 };
 use cron::Schedule;
-use ethers::prelude::JsonRpcClient;
+use eyre::Result;
 use std::{str::FromStr, sync::Arc, time::Duration};
 use subxt::OnlineClient;
 use tokio::sync::RwLock;
 
-pub struct KeypairMigrator<T> {
+pub struct KeypairMigrator<F, P>
+where
+	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
+	P: Provider<AnyNetwork>,
+{
 	sub_client: Option<OnlineClient<CustomConfig>>,
-	bfc_client: Arc<EthClient<T>>,
+	bfc_client: Arc<EthClient<F, P>>,
 	migration_sequence: Arc<RwLock<MigrationSequence>>,
-	keypair_storage: Arc<RwLock<KeypairStorage>>,
+	keypair_storage: KeypairStorage,
 	schedule: Schedule,
 }
 
-impl<T: JsonRpcClient> KeypairMigrator<T> {
+impl<F, P> KeypairMigrator<F, P>
+where
+	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
+	P: Provider<AnyNetwork>,
+{
 	/// Instantiates a new `KeypairMigrator` instance.
 	pub fn new(
-		bfc_client: Arc<EthClient<T>>,
+		bfc_client: Arc<EthClient<F, P>>,
 		migration_sequence: Arc<RwLock<MigrationSequence>>,
-		keypair_storage: Arc<RwLock<KeypairStorage>>,
+		keypair_storage: KeypairStorage,
 	) -> Self {
 		Self {
 			sub_client: None,
@@ -61,14 +76,10 @@ impl<T: JsonRpcClient> KeypairMigrator<T> {
 			ServiceState::Normal
 			| MigrationSequence::SetExecutiveMembers
 			| ServiceState::UTXOTransfer => {
-				self.keypair_storage.write().await.load(self.get_current_round().await).await;
+				self.keypair_storage.load(self.get_current_round().await).await;
 			},
 			ServiceState::PrepareNextSystemVault => {
-				self.keypair_storage
-					.write()
-					.await
-					.load(self.get_current_round().await + 1)
-					.await;
+				self.keypair_storage.load(self.get_current_round().await + 1).await;
 			},
 		}
 	}
@@ -135,12 +146,16 @@ impl<T: JsonRpcClient> KeypairMigrator<T> {
 }
 
 #[async_trait::async_trait]
-impl<T: JsonRpcClient> PeriodicWorker for KeypairMigrator<T> {
+impl<F, P> PeriodicWorker for KeypairMigrator<F, P>
+where
+	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
+	P: Provider<AnyNetwork>,
+{
 	fn schedule(&self) -> Schedule {
 		self.schedule.clone()
 	}
 
-	async fn run(&mut self) {
+	async fn run(&mut self) -> Result<()> {
 		self.initialize().await;
 
 		loop {
@@ -151,36 +166,19 @@ impl<T: JsonRpcClient> PeriodicWorker for KeypairMigrator<T> {
 				let mut write_lock = self.migration_sequence.write().await;
 				match *write_lock {
 					MigrationSequence::Normal | MigrationSequence::SetExecutiveMembers => {
-						match service_state {
-							ServiceState::PrepareNextSystemVault => {
-								self.keypair_storage
-									.write()
-									.await
-									.load(self.get_current_round().await + 1)
-									.await;
-							},
-							_ => {},
+						if service_state == ServiceState::PrepareNextSystemVault {
+							self.keypair_storage.load(self.get_current_round().await + 1).await;
 						}
 					},
-					MigrationSequence::PrepareNextSystemVault => match service_state {
-						ServiceState::UTXOTransfer => {
-							self.keypair_storage
-								.write()
-								.await
-								.load(self.get_current_round().await)
-								.await;
-						},
-						_ => {},
+					MigrationSequence::PrepareNextSystemVault => {
+						if service_state == ServiceState::UTXOTransfer {
+							self.keypair_storage.load(self.get_current_round().await).await;
+						}
 					},
-					MigrationSequence::UTXOTransfer => match service_state {
-						ServiceState::Normal => {
-							self.keypair_storage
-								.write()
-								.await
-								.load(self.get_current_round().await)
-								.await;
-						},
-						_ => {},
+					MigrationSequence::UTXOTransfer => {
+						if service_state == ServiceState::Normal {
+							self.keypair_storage.load(self.get_current_round().await).await;
+						}
 					},
 				}
 				*write_lock = service_state;

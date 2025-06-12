@@ -1,8 +1,10 @@
-use crate::{
-	btc::{storage::pending_outbound::PendingOutboundPool, LOG_TARGET},
-	eth::EthClient,
-};
+use crate::{btc::LOG_TARGET, eth::EthClient};
 
+use alloy::{
+	network::AnyNetwork,
+	primitives::ChainId,
+	providers::{Provider, WalletProvider, fillers::TxFiller},
+};
 use br_primitives::{
 	bootstrap::BootstrapSharedData,
 	constants::{
@@ -13,23 +15,20 @@ use br_primitives::{
 	eth::BootstrapState,
 	utils::sub_display_format,
 };
+use eyre::Result;
 
 use bitcoincore_rpc::{
-	bitcoincore_rpc_json::GetRawTransactionResultVout, Client as BtcClient, RpcApi,
+	Client as BtcClient, RpcApi, bitcoincore_rpc_json::GetRawTransactionResultVout,
 };
-use ethers::providers::JsonRpcClient;
-use miniscript::bitcoin::{address::NetworkUnchecked, Address, Amount, Txid};
+use miniscript::bitcoin::{Address, Amount, Txid, address::NetworkUnchecked};
 use serde::Deserialize;
 use serde_json::Value;
 use std::{collections::BTreeSet, str::FromStr, sync::Arc};
 use tokio::{
-	sync::{
-		broadcast,
-		broadcast::{Receiver, Sender},
-	},
-	time::{sleep, Duration},
+	sync::broadcast::{self, Receiver, Sender},
+	time::{Duration, interval, sleep},
 };
-use tokio_stream::StreamExt;
+use tokio_stream::{StreamExt, wrappers::IntervalStream};
 
 use super::handlers::BootstrapHandler;
 
@@ -86,11 +85,15 @@ impl EventMessage {
 }
 
 /// A module that reads every new Bitcoin block and filters `Inbound`, `Outbound` events.
-pub struct BlockManager<T> {
+pub struct BlockManager<F, P>
+where
+	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
+	P: Provider<AnyNetwork>,
+{
 	/// The Bitcoin client.
 	btc_client: BtcClient,
 	/// The Bifrost client.
-	bfc_client: Arc<EthClient<T>>,
+	pub bfc_client: Arc<EthClient<F, P>>,
 	/// The event message sender.
 	sender: Sender<EventMessage>,
 	/// The configured minimum block confirmations required to process a block.
@@ -103,12 +106,16 @@ pub struct BlockManager<T> {
 	bootstrap_shared_data: Arc<BootstrapSharedData>,
 	/// The bootstrap offset in blocks.
 	bootstrap_offset: u32,
-	/// NOTE: currently not used.
-	_pending_outbounds: PendingOutboundPool,
+	/// The API endpoint for fetching Bitcoin block height.
+	block_height_api: &'static str,
 }
 
 #[async_trait::async_trait]
-impl<C: JsonRpcClient> RpcApi for BlockManager<C> {
+impl<F, P> RpcApi for BlockManager<F, P>
+where
+	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
+	P: Provider<AnyNetwork>,
+{
 	async fn call<T: for<'a> Deserialize<'a> + Send>(
 		&self,
 		cmd: &str,
@@ -135,15 +142,19 @@ impl<C: JsonRpcClient> RpcApi for BlockManager<C> {
 	}
 }
 
-impl<T: JsonRpcClient + 'static> BlockManager<T> {
+impl<F, P> BlockManager<F, P>
+where
+	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
+	P: Provider<AnyNetwork>,
+{
 	/// Instantiates a new `BlockManager` instance.
 	pub fn new(
 		btc_client: BtcClient,
-		bfc_client: Arc<EthClient<T>>,
-		_pending_outbounds: PendingOutboundPool,
+		bfc_client: Arc<EthClient<F, P>>,
 		bootstrap_shared_data: Arc<BootstrapSharedData>,
 		call_interval: u64,
 		block_confirmations: u64,
+		block_height_api: &'static str,
 	) -> Self {
 		let (sender, _receiver) = broadcast::channel(512);
 
@@ -165,7 +176,7 @@ impl<T: JsonRpcClient + 'static> BlockManager<T> {
 			call_interval,
 			bootstrap_shared_data,
 			bootstrap_offset,
-			_pending_outbounds,
+			block_height_api,
 		}
 	}
 
@@ -174,8 +185,17 @@ impl<T: JsonRpcClient + 'static> BlockManager<T> {
 		self.sender.subscribe()
 	}
 
-	/// Starts the block manager.
-	pub async fn run(&mut self) {
+	/// Bootstrap phase 0-1.
+	pub async fn bootstrap_0(&mut self) {
+		self.initialize().await;
+		let should_bootstrap = self.is_before_bootstrap_state(BootstrapState::NormalStart).await;
+		if should_bootstrap {
+			self.wait_provider_sync().await.unwrap();
+		}
+	}
+
+	/// Initialize the block manager.
+	pub async fn initialize(&mut self) {
 		let latest_block = self.get_block_count().await.unwrap();
 		self.waiting_block = latest_block.saturating_add(1);
 
@@ -185,88 +205,169 @@ impl<T: JsonRpcClient + 'static> BlockManager<T> {
 			sub_display_format(SUB_LOG_TARGET),
 			latest_block
 		);
+	}
 
+	/// Wait for the provider to be synced.
+	pub async fn wait_provider_sync(&self) -> Result<()> {
+		let mut is_first_check = true;
 		loop {
-			if self.is_bootstrap_state_synced_as(BootstrapState::BootstrapSocketRelay).await {
-				self.bootstrap().await;
-			} else if self.is_bootstrap_state_synced_as(BootstrapState::NormalStart).await {
-				let latest_block_num = self.get_block_count().await.unwrap();
-				if self.is_block_confirmed(latest_block_num) {
-					let (vault_set, refund_set) = self.fetch_registration_sets().await;
-					self.process_confirmed_block(
-						latest_block_num.saturating_sub(self.block_confirmations),
-						&vault_set,
-						&refund_set,
-					)
-					.await;
-				}
+			let info = self.get_blockchain_info().await.unwrap();
+			match info.initial_block_download {
+				true => {
+					if is_first_check {
+						let msg = format!(
+							"⚙️  Syncing: #{:?}, Highest: #{:?} ({} relayer:{})",
+							info.blocks,
+							self.fetch_block_height().await,
+							LOG_TARGET,
+							self.bfc_client.address().await,
+						);
+						sentry::capture_message(&msg, sentry::Level::Warning);
+						is_first_check = false;
+					}
+					log::info!(
+						target: LOG_TARGET,
+						"-[{}] ⚙️  Syncing: #{:?}, Bitcoin is still in initial block download mode",
+						sub_display_format(SUB_LOG_TARGET),
+						info.blocks,
+					);
+				},
+				false => {
+					break;
+				},
 			}
+			sleep(Duration::from_millis(self.bfc_client.metadata.call_interval)).await;
+		}
+		self.set_bootstrap_state(BootstrapState::BootstrapSocketRelay).await;
+		log::info!(
+			target: LOG_TARGET,
+			"-[{}] ⚙️  [Bootstrap mode] NodeSyncing → BootstrapSocketRelay",
+			sub_display_format(SUB_LOG_TARGET),
+		);
+		Ok(())
+	}
 
-			sleep(Duration::from_millis(self.call_interval)).await;
+	/// Fetch the block height from the offchain API.
+	async fn fetch_block_height(&self) -> u64 {
+		loop {
+			match reqwest::get(self.block_height_api).await {
+				Ok(response) => match response.json::<u64>().await {
+					Ok(block_height) => {
+						break block_height;
+					},
+					Err(e) => {
+						log::warn!(
+							target: LOG_TARGET,
+							"-[{}] Failed to decode block height: {:?}. Retrying...",
+							sub_display_format(SUB_LOG_TARGET),
+							e
+						);
+						sleep(Duration::from_secs(5)).await;
+					},
+				},
+				Err(e) => {
+					log::warn!(
+						target: LOG_TARGET,
+						"-[{}] Failed to fetch block height: {:?}. Retrying...",
+						sub_display_format(SUB_LOG_TARGET),
+						e
+					);
+					sleep(Duration::from_secs(5)).await;
+				},
+			}
 		}
 	}
 
+	/// Starts the block manager.
+	pub async fn run(&mut self) -> Result<()> {
+		let should_bootstrap = self.is_before_bootstrap_state(BootstrapState::NormalStart).await;
+		if should_bootstrap {
+			self.bootstrap().await?;
+		}
+		self.wait_for_all_chains_bootstrapped().await?;
+
+		let mut stream = IntervalStream::new(interval(Duration::from_millis(self.call_interval)));
+		while (stream.next().await).is_some() {
+			let latest_block_num = self.get_block_count().await.unwrap();
+			if self.is_block_confirmed(latest_block_num) {
+				let (vault_set, refund_set) = self.fetch_registration_sets().await?;
+				self.process_confirmed_block(
+					latest_block_num.saturating_sub(self.block_confirmations),
+					&vault_set,
+					&refund_set,
+				)
+				.await;
+			}
+		}
+		Ok(())
+	}
+
 	/// Returns the generated user vault addresses.
-	async fn get_vault_addresses(&self) -> Vec<String> {
+	async fn get_vault_addresses(&self) -> Result<Vec<String>> {
 		let registration_pool =
 			self.bfc_client.protocol_contracts.registration_pool.as_ref().unwrap();
 
-		self.bfc_client
-			.contract_call(
-				registration_pool.vault_addresses(self.get_current_round().await),
-				"registration_pool.vault_addresses",
-			)
-			.await
+		Ok(registration_pool
+			.vault_addresses(self.get_current_round().await?)
+			.call()
+			.await?
+			._0)
 	}
 
 	/// Returns the registered user refund addresses.
-	async fn get_refund_addresses(&self) -> Vec<String> {
+	async fn get_refund_addresses(&self) -> Result<Vec<String>> {
 		let registration_pool =
 			self.bfc_client.protocol_contracts.registration_pool.as_ref().unwrap();
 
-		self.bfc_client
-			.contract_call(
-				registration_pool.refund_addresses(self.get_current_round().await),
-				"registration_pool.refund_addresses",
-			)
-			.await
+		Ok(registration_pool
+			.refund_addresses(self.get_current_round().await?)
+			.call()
+			.await?
+			._0)
 	}
 
 	/// Returns current pool round.
-	async fn get_current_round(&self) -> u32 {
+	async fn get_current_round(&self) -> Result<u32> {
 		let registration_pool =
 			self.bfc_client.protocol_contracts.registration_pool.as_ref().unwrap();
 
-		self.bfc_client
-			.contract_call(registration_pool.current_round(), "registration_pool.current_round")
-			.await
+		Ok(registration_pool.current_round().call().await?._0)
 	}
 
 	/// Returns the vault and refund addresses.
 	#[inline]
 	async fn fetch_registration_sets(
 		&self,
-	) -> (BTreeSet<Address<NetworkUnchecked>>, BTreeSet<Address<NetworkUnchecked>>) {
+	) -> Result<(BTreeSet<Address<NetworkUnchecked>>, BTreeSet<Address<NetworkUnchecked>>)> {
 		let vault_set: BTreeSet<Address<NetworkUnchecked>> = self
 			.get_vault_addresses()
-			.await
+			.await?
 			.iter()
 			.map(|s| Address::from_str(s).unwrap())
 			.collect();
 		let refund_set: BTreeSet<Address<NetworkUnchecked>> = self
 			.get_refund_addresses()
-			.await
+			.await?
 			.iter()
 			.map(|s| Address::from_str(s).unwrap())
 			.collect();
 
-		(vault_set, refund_set)
+		Ok((vault_set, refund_set))
 	}
 
 	/// Verifies if the stored waiting block has waited enough.
 	#[inline]
 	fn is_block_confirmed(&self, latest_block_num: u64) -> bool {
 		if self.waiting_block > latest_block_num {
+			// difference is greater than 100 blocks
+			// if it suddenly rollbacked to an old block
+			if self.waiting_block > latest_block_num + 100 {
+				let msg = format!(
+					"⚠️ [Bitcoin] Block rollbacked. From #{:?} to #{:?}",
+					self.waiting_block, latest_block_num,
+				);
+				sentry::capture_message(&msg, sentry::Level::Warning);
+			}
 			return false;
 		}
 		latest_block_num.saturating_sub(self.waiting_block) >= self.block_confirmations
@@ -357,43 +458,38 @@ impl<T: JsonRpcClient + 'static> BlockManager<T> {
 }
 
 #[async_trait::async_trait]
-impl<T: JsonRpcClient + 'static> BootstrapHandler for BlockManager<T> {
+impl<F, P> BootstrapHandler for BlockManager<F, P>
+where
+	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
+	P: Provider<AnyNetwork>,
+{
+	fn get_chain_id(&self) -> ChainId {
+		self.bfc_client.get_bitcoin_chain_id().unwrap()
+	}
+
 	fn bootstrap_shared_data(&self) -> Arc<BootstrapSharedData> {
 		self.bootstrap_shared_data.clone()
 	}
 
-	async fn bootstrap(&self) {
-		log::info!(
-			target: LOG_TARGET,
-			"-[{}] ⚙️  [Bootstrap mode] Bootstrapping Bitcoin events",
-			sub_display_format(SUB_LOG_TARGET),
-		);
+	async fn bootstrap(&self) -> Result<()> {
+		self.wait_for_bootstrap_state(BootstrapState::BootstrapSocketRelay).await?;
 
-		let (inbound, outbound) = self.get_bootstrap_events().await;
+		let (inbound, outbound) = self.get_bootstrap_events().await?;
 
 		self.sender.send(inbound).unwrap();
 		self.sender.send(outbound).unwrap();
 
-		let mut bootstrap_count = self.bootstrap_shared_data.socket_bootstrap_count.lock().await;
-		*bootstrap_count += 1;
-
-		if *bootstrap_count == self.bootstrap_shared_data.system_providers_len as u8 {
-			let mut bootstrap_guard = self.bootstrap_shared_data.bootstrap_states.write().await;
-
-			for state in bootstrap_guard.iter_mut() {
-				*state = BootstrapState::NormalStart;
-			}
-
-			log::info!(
-				target: "bifrost-relayer",
-				"-[{}] ⚙️  [Bootstrap mode] Bootstrap process successfully ended.",
-				sub_display_format(SUB_LOG_TARGET),
-			);
-		}
+		self.set_bootstrap_state(BootstrapState::NormalStart).await;
+		log::info!(
+			target: LOG_TARGET,
+			"-[{}] ⚙️  [Bootstrap mode] BootstrapSocketRelay → NormalStart",
+			sub_display_format(SUB_LOG_TARGET),
+		);
+		Ok(())
 	}
 
-	async fn get_bootstrap_events(&self) -> (EventMessage, EventMessage) {
-		let (vault_set, refund_set) = self.fetch_registration_sets().await;
+	async fn get_bootstrap_events(&self) -> Result<(EventMessage, EventMessage)> {
+		let (vault_set, refund_set) = self.fetch_registration_sets().await?;
 
 		let to_block = self.waiting_block.saturating_sub(1);
 		let from_block = to_block.saturating_sub(self.bootstrap_offset.into());
@@ -418,6 +514,6 @@ impl<T: JsonRpcClient + 'static> BootstrapHandler for BlockManager<T> {
 				.await;
 			}
 		}
-		(inbound, outbound)
+		Ok((inbound, outbound))
 	}
 }

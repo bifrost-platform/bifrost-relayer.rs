@@ -1,9 +1,10 @@
-use std::{collections::BTreeMap, fmt::Error, marker::PhantomData};
+use std::{collections::BTreeMap, fmt::Error};
 
-use ethers::{providers::JsonRpcClient, utils::parse_ether};
+use alloy::primitives::utils::parse_ether;
+use eyre::Result;
 use reqwest::{Response, Url};
 use serde::Deserialize;
-use tokio::time::{sleep, Duration};
+use tokio::time::{Duration, sleep};
 
 use br_primitives::{periodic::PriceResponse, utils::sub_display_format};
 
@@ -18,16 +19,15 @@ pub struct SupportedCoin {
 }
 
 #[derive(Clone)]
-pub struct CoingeckoPriceFetcher<T> {
+pub struct CoingeckoPriceFetcher {
 	pub base_url: Url,
 	pub ids: Vec<String>,
 	pub supported_coins: Vec<SupportedCoin>,
-	_phantom: PhantomData<T>,
 }
 
 #[async_trait::async_trait]
-impl<T: JsonRpcClient> PriceFetcher for CoingeckoPriceFetcher<T> {
-	async fn get_ticker_with_symbol(&self, symbol: String) -> Result<PriceResponse, Error> {
+impl PriceFetcher for CoingeckoPriceFetcher {
+	async fn get_ticker_with_symbol(&self, symbol: String) -> Result<PriceResponse> {
 		let id = self.get_id_from_symbol(&symbol);
 		let url = self
 			.base_url
@@ -36,53 +36,50 @@ impl<T: JsonRpcClient> PriceFetcher for CoingeckoPriceFetcher<T> {
 
 		let price = *self
 			._send_request(url)
-			.await
-			.unwrap()
+			.await?
 			.get(id)
 			.expect("Cannot find symbol in response")
 			.get("usd")
 			.expect("Cannot find usd price in response");
 
-		Ok(PriceResponse { price: parse_ether(price).unwrap(), volume: None })
+		Ok(PriceResponse { price: parse_ether(&price.to_string())?, volume: None })
 	}
 
-	async fn get_tickers(&self) -> Result<BTreeMap<String, PriceResponse>, Error> {
+	async fn get_tickers(&self) -> Result<BTreeMap<String, PriceResponse>> {
 		let url = self
 			.base_url
 			.join(&format!("simple/price?ids={}&vs_currencies=usd", self.ids.join(",")))
 			.unwrap();
 
-		return match self._send_request(url).await {
-			Ok(response) => {
-				let mut ret = BTreeMap::new();
-				self.ids.iter().for_each(|id| {
-					let price = response.get(id).unwrap().get("usd").unwrap();
-					let symbol = self
-						.supported_coins
-						.iter()
-						.find(|coin| coin.id == *id)
-						.unwrap()
-						.symbol
-						.to_uppercase();
-					ret.insert(
-						symbol,
-						PriceResponse { price: parse_ether(price).unwrap(), volume: None },
-					);
-				});
-				Ok(ret)
-			},
-			Err(e) => Err(e),
-		};
+		let response = self._send_request(url).await?;
+
+		let mut ret = BTreeMap::new();
+		self.ids.iter().for_each(|id| {
+			let price = response.get(id).unwrap().get("usd").unwrap();
+			let symbol = self
+				.supported_coins
+				.iter()
+				.find(|coin| coin.id == *id)
+				.unwrap()
+				.symbol
+				.to_uppercase();
+			ret.insert(
+				symbol,
+				PriceResponse { price: parse_ether(&price.to_string()).unwrap(), volume: None },
+			);
+		});
+
+		Ok(ret)
 	}
 }
 
-impl<T: JsonRpcClient> CoingeckoPriceFetcher<T> {
+impl CoingeckoPriceFetcher {
 	pub async fn new() -> Result<Self, Error> {
 		let ids: Vec<String> = vec![
 			"ethereum".into(),
 			"bifrost".into(),
 			"binancecoin".into(),
-			"matic-network".into(),
+			"polygon-ecosystem-token".into(),
 			"usd-coin".into(),
 			"bifi".into(),
 			"tether".into(),
@@ -103,7 +100,6 @@ impl<T: JsonRpcClient> CoingeckoPriceFetcher<T> {
 			base_url: Url::parse("https://api.coingecko.com/api/v3/").unwrap(),
 			ids,
 			supported_coins: support_coin_list,
-			_phantom: PhantomData,
 		})
 	}
 
@@ -129,7 +125,7 @@ impl<T: JsonRpcClient> CoingeckoPriceFetcher<T> {
 							);
 							Err(Error)
 						},
-					}
+					};
 				},
 				Err(e) => {
 					log::warn!(
@@ -169,7 +165,7 @@ impl<T: JsonRpcClient> CoingeckoPriceFetcher<T> {
 							);
 							Err(Error)
 						},
-					}
+					};
 				},
 				Err(e) => {
 					if retries_remaining == 0 {

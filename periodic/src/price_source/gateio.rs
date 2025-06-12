@@ -1,6 +1,7 @@
-use std::{collections::BTreeMap, fmt::Error, marker::PhantomData};
+use std::{collections::BTreeMap, fmt::Error};
 
-use ethers::{providers::JsonRpcClient, utils::parse_ether};
+use alloy::primitives::utils::parse_ether;
+use eyre::Result;
 use reqwest::Url;
 use serde::Deserialize;
 
@@ -19,15 +20,14 @@ pub struct GateioResponse {
 }
 
 #[derive(Clone)]
-pub struct GateioPriceFetcher<T> {
+pub struct GateioPriceFetcher {
 	base_url: Url,
 	symbols: Vec<String>,
-	_phantom: PhantomData<T>,
 }
 
 #[async_trait::async_trait]
-impl<T: JsonRpcClient> PriceFetcher for GateioPriceFetcher<T> {
-	async fn get_ticker_with_symbol(&self, symbol: String) -> Result<PriceResponse, Error> {
+impl PriceFetcher for GateioPriceFetcher {
+	async fn get_ticker_with_symbol(&self, symbol: String) -> Result<PriceResponse> {
 		let mut url = self.base_url.join("spot/tickers").unwrap();
 		url.query_pairs_mut()
 			.append_pair("currency_pair", (symbol.clone() + "_USDT").as_str());
@@ -40,32 +40,30 @@ impl<T: JsonRpcClient> PriceFetcher for GateioPriceFetcher<T> {
 		})
 	}
 
-	async fn get_tickers(&self) -> Result<BTreeMap<String, PriceResponse>, Error> {
-		return match self._send_request(self.base_url.join("spot/tickers").unwrap()).await {
-			Ok(response) => {
-				let mut ret = BTreeMap::new();
-				response.iter().for_each(|ticker| {
-					if self.symbols.contains(&ticker.currency_pair) {
-						ret.insert(
-							ticker.currency_pair.replace("BIFIF_USDT", "BIFI").replace("_USDT", ""),
-							PriceResponse {
-								price: parse_ether(&ticker.last).unwrap(),
-								volume: parse_ether(&ticker.base_volume).unwrap().into(),
-							},
-						);
-					}
-				});
-				Ok(ret)
-			},
-			Err(_) => Err(Error),
-		};
+	async fn get_tickers(&self) -> Result<BTreeMap<String, PriceResponse>> {
+		let response = self._send_request(self.base_url.join("spot/tickers")?).await?;
+
+		let mut ret = BTreeMap::new();
+		response.iter().for_each(|ticker| {
+			if self.symbols.contains(&ticker.currency_pair) {
+				ret.insert(
+					ticker.currency_pair.replace("BIFIF_USDT", "BIFI").replace("_USDT", ""),
+					PriceResponse {
+						price: parse_ether(&ticker.last).unwrap(),
+						volume: parse_ether(&ticker.base_volume).unwrap().into(),
+					},
+				);
+			}
+		});
+
+		Ok(ret)
 	}
 }
 
-impl<T: JsonRpcClient> GateioPriceFetcher<T> {
+impl GateioPriceFetcher {
 	pub async fn new() -> Result<Self, Error> {
 		let mut symbols: Vec<String> =
-			vec!["ETH".into(), "BFC".into(), "BNB".into(), "MATIC".into(), "BIFI".into()];
+			vec!["ETH".into(), "BFC".into(), "BNB".into(), "POL".into(), "BIFI".into()];
 
 		symbols.iter_mut().for_each(|symbol| {
 			if symbol.contains("BIFI") {
@@ -79,7 +77,6 @@ impl<T: JsonRpcClient> GateioPriceFetcher<T> {
 			base_url: Url::parse("https://api.gateio.ws/api/v4/")
 				.expect("Failed to parse GateIo URL"),
 			symbols,
-			_phantom: PhantomData,
 		})
 	}
 
@@ -96,13 +93,11 @@ impl<T: JsonRpcClient> GateioPriceFetcher<T> {
 
 #[cfg(test)]
 mod tests {
-	use ethers::providers::Http;
-
 	use super::*;
 
 	#[tokio::test]
 	async fn fetch_price() {
-		let gateio_fetcher: GateioPriceFetcher<Http> = GateioPriceFetcher::new().await.unwrap();
+		let gateio_fetcher: GateioPriceFetcher = GateioPriceFetcher::new().await.unwrap();
 		let res = gateio_fetcher.get_ticker_with_symbol("BTC".to_string()).await;
 
 		println!("{:?}", res);
@@ -110,7 +105,7 @@ mod tests {
 
 	#[tokio::test]
 	async fn fetch_prices() {
-		let gateio_fetcher: GateioPriceFetcher<Http> = GateioPriceFetcher::new().await.unwrap();
+		let gateio_fetcher: GateioPriceFetcher = GateioPriceFetcher::new().await.unwrap();
 		let res = gateio_fetcher.get_tickers().await;
 
 		println!("{:#?}", res);

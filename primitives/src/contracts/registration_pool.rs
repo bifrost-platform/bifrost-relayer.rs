@@ -1,7 +1,14 @@
-use ethers::prelude::abigen;
+use super::*;
 
-abigen!(
+sol!(
+	#[allow(missing_docs)]
+	#[derive(Debug)]
+	#[sol(rpc)]
 	RegistrationPoolContract,
-	"../abi/abi.registration_pool.bifrost.json",
-	event_derives(serde::Deserialize, serde::Serialize)
+	"../abi/abi.registration_pool.bifrost.json"
 );
+
+use RegistrationPoolContract::RegistrationPoolContractInstance;
+
+pub type RegistrationPoolInstance<F, P> =
+	RegistrationPoolContractInstance<(), Arc<FillProvider<F, P, AnyNetwork>>, AnyNetwork>;

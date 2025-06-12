@@ -1,9 +1,14 @@
 use std::{collections::BTreeMap, str::FromStr, sync::Arc, time::Duration};
 
+use alloy::{
+	network::AnyNetwork,
+	primitives::{Address as EvmAddress, B256, Bytes, keccak256},
+	providers::{Provider, WalletProvider, fillers::TxFiller},
+};
 use bitcoincore_rpc::{
-	bitcoin::{hashes::sha256d::Hash, Address, Amount, Psbt, Txid},
-	bitcoincore_rpc_json::GetRawTransactionResult,
 	Client as BtcClient, Error, RpcApi,
+	bitcoin::{Address, Amount, Psbt, Txid, hashes::sha256d::Hash},
+	bitcoincore_rpc_json::GetRawTransactionResult,
 };
 use br_client::{btc::handlers::XtRequester, eth::EthClient};
 use br_primitives::{
@@ -12,19 +17,16 @@ use br_primitives::{
 		schedule::BITCOIN_ROLLBACK_CHECK_SCHEDULE,
 		tx::{DEFAULT_CALL_RETRIES, DEFAULT_CALL_RETRY_INTERVAL_MS},
 	},
-	contracts::socket_queue::SocketQueueContract,
-	substrate::{bifrost_runtime, AccountId20, EthereumSignature, RollbackPollMessage},
+	contracts::socket_queue::{SocketQueueContract::rollback_requestReturn, SocketQueueInstance},
+	substrate::{EthereumSignature, RollbackPollMessage, bifrost_runtime},
 	tx::{SubmitRollbackPollMetadata, XtRequest, XtRequestMetadata, XtRequestSender},
-	utils::{convert_ethers_to_ecdsa_signature, sub_display_format},
+	utils::sub_display_format,
 };
 use cron::Schedule;
-use ethers::{
-	providers::{JsonRpcClient, Provider},
-	types::{Bytes, H160, H256, U256},
-	utils::keccak256,
-};
+use eyre::Result;
 use serde::Deserialize;
 use serde_json::Value;
+use subxt::{ext::subxt_core::utils::AccountId20, utils::H256};
 use tokio::time::sleep;
 use tokio_stream::StreamExt;
 
@@ -32,25 +34,13 @@ use crate::traits::PeriodicWorker;
 
 const SUB_LOG_TARGET: &str = "rollback-verifier";
 
-type EvmRollbackRequestOf = (
-	Bytes,     // unsigned_psbt
-	H160,      // who
-	[u8; 32],  // txid
-	U256,      // vout
-	String,    // to (=vault)
-	U256,      // amount
-	Vec<H160>, // authorities
-	Vec<bool>, // votes
-	bool,      // is_approved
-);
-
 #[derive(Debug)]
 /// (Bitcoin) Rollback request information.
 pub struct RollbackRequest {
 	/// The unsigned PSBT of the rollback request (in bytes).
 	pub unsigned_psbt: Bytes,
-	/// The registered user who attemps to request.
-	pub who: H160,
+	/// The registered user who attempts to request.
+	pub who: EvmAddress,
 	/// The Bitcoin transaction hash that contains the output.
 	pub txid: Txid,
 	/// The output index.
@@ -60,37 +50,42 @@ pub struct RollbackRequest {
 	/// The output amount.
 	pub amount: Amount,
 	/// The current voting state of the request.
-	pub votes: BTreeMap<H160, bool>,
+	pub votes: BTreeMap<EvmAddress, bool>,
 	/// The current voting result of the request.
 	pub is_approved: bool,
 }
 
-impl From<EvmRollbackRequestOf> for RollbackRequest {
-	fn from(value: EvmRollbackRequestOf) -> Self {
+impl From<rollback_requestReturn> for RollbackRequest {
+	fn from(value: rollback_requestReturn) -> Self {
 		let mut votes = BTreeMap::default();
-		for idx in 0..value.6.len() {
-			votes.insert(value.6[idx], value.7[idx]);
+		for idx in 0..value._6.len() {
+			votes.insert(value._6[idx], value._7[idx]);
 		}
-		let mut txid = value.2;
+		let mut txid = value._2;
 		txid.reverse();
+
 		Self {
-			unsigned_psbt: value.0,
-			who: value.1,
+			unsigned_psbt: value._0,
+			who: value._1,
 			txid: Txid::from_raw_hash(*Hash::from_bytes_ref(&txid)),
-			vout: value.3.as_usize(),
-			to: Address::from_str(&value.4).unwrap().assume_checked(),
-			amount: Amount::from_sat(value.5.as_u64()),
+			vout: usize::from_str(&value._3.to_string()).unwrap(),
+			to: Address::from_str(&value._4).unwrap().assume_checked(),
+			amount: Amount::from_sat(u64::from_str(&value._5.to_string()).unwrap()),
 			votes,
-			is_approved: value.8,
+			is_approved: value._8,
 		}
 	}
 }
 
-pub struct BitcoinRollbackVerifier<T> {
+pub struct BitcoinRollbackVerifier<F, P>
+where
+	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
+	P: Provider<AnyNetwork>,
+{
 	/// The Bitcoin client.
 	btc_client: BtcClient,
 	/// The Bifrost client.
-	bfc_client: Arc<EthClient<T>>,
+	pub bfc_client: Arc<EthClient<F, P>>,
 	/// The unsigned transaction message sender.
 	xt_request_sender: Arc<XtRequestSender>,
 	/// The periodic schedule.
@@ -98,7 +93,11 @@ pub struct BitcoinRollbackVerifier<T> {
 }
 
 #[async_trait::async_trait]
-impl<C: JsonRpcClient> RpcApi for BitcoinRollbackVerifier<C> {
+impl<F, P> RpcApi for BitcoinRollbackVerifier<F, P>
+where
+	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
+	P: Provider<AnyNetwork>,
+{
 	async fn call<T: for<'a> Deserialize<'a> + Send>(
 		&self,
 		cmd: &str,
@@ -119,28 +118,36 @@ impl<C: JsonRpcClient> RpcApi for BitcoinRollbackVerifier<C> {
 }
 
 #[async_trait::async_trait]
-impl<T: JsonRpcClient> XtRequester<T> for BitcoinRollbackVerifier<T> {
+impl<F, P> XtRequester<F, P> for BitcoinRollbackVerifier<F, P>
+where
+	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
+	P: Provider<AnyNetwork>,
+{
 	fn xt_request_sender(&self) -> Arc<XtRequestSender> {
 		self.xt_request_sender.clone()
 	}
 
-	fn bfc_client(&self) -> Arc<EthClient<T>> {
+	fn bfc_client(&self) -> Arc<EthClient<F, P>> {
 		self.bfc_client.clone()
 	}
 }
 
 #[async_trait::async_trait]
-impl<T: JsonRpcClient> PeriodicWorker for BitcoinRollbackVerifier<T> {
+impl<F, P> PeriodicWorker for BitcoinRollbackVerifier<F, P>
+where
+	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
+	P: Provider<AnyNetwork>,
+{
 	fn schedule(&self) -> Schedule {
 		self.schedule.clone()
 	}
 
-	async fn run(&mut self) {
+	async fn run(&mut self) -> Result<()> {
 		loop {
 			self.wait_until_next_time().await;
 
-			if self.bfc_client.is_selected_relayer().await {
-				let pending_rollback_psbts = self.get_rollback_psbts().await;
+			if self.bfc_client.is_selected_relayer().await? {
+				let pending_rollback_psbts = self.get_rollback_psbts().await?;
 
 				log::info!(
 					target: &self.bfc_client.get_chain_name(),
@@ -151,9 +158,9 @@ impl<T: JsonRpcClient> PeriodicWorker for BitcoinRollbackVerifier<T> {
 
 				let mut stream = tokio_stream::iter(pending_rollback_psbts);
 				while let Some(raw_psbt) = stream.next().await {
-					let psbt = Psbt::deserialize(&raw_psbt).unwrap();
-					let txid = H256::from_str(&psbt.unsigned_tx.txid().to_string()).unwrap();
-					let request = self.get_rollback_request(txid).await;
+					let psbt = Psbt::deserialize(&raw_psbt)?;
+					let txid = B256::from_str(&psbt.unsigned_tx.txid().to_string())?;
+					let request = self.get_rollback_request(txid).await?;
 
 					// the request must exist
 					if request.who.is_zero() {
@@ -184,30 +191,35 @@ impl<T: JsonRpcClient> PeriodicWorker for BitcoinRollbackVerifier<T> {
 					}
 
 					// check if already submitted
-					if let Some(vote) = request.votes.get(&self.bfc_client.address()) {
+					if let Some(vote) = request.votes.get(&self.bfc_client.address().await) {
 						if *vote == is_approved {
 							continue;
 						}
 					}
 
 					// build payload
-					let (call, metadata) = self.build_unsigned_tx(txid, is_approved);
+					let (call, metadata) = self.build_unsigned_tx(txid, is_approved).await?;
 					self.request_send_transaction(
 						call,
 						XtRequestMetadata::SubmitRollbackPoll(metadata),
 						SUB_LOG_TARGET,
-					);
+					)
+					.await;
 				}
 			}
 		}
 	}
 }
 
-impl<T: JsonRpcClient> BitcoinRollbackVerifier<T> {
+impl<F, P> BitcoinRollbackVerifier<F, P>
+where
+	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
+	P: Provider<AnyNetwork>,
+{
 	/// Instantiates a new `BitcoinRollbackVerifier` instance.
 	pub fn new(
 		btc_client: BtcClient,
-		bfc_client: Arc<EthClient<T>>,
+		bfc_client: Arc<EthClient<F, P>>,
 		xt_request_sender: Arc<XtRequestSender>,
 	) -> Self {
 		Self {
@@ -248,60 +260,57 @@ impl<T: JsonRpcClient> BitcoinRollbackVerifier<T> {
 	}
 
 	/// Build the payload for the unsigned transaction. (`submit_rollback_poll()`)
-	fn build_payload(
+	async fn build_payload(
 		&self,
-		txid: H256,
+		txid: B256,
 		is_approved: bool,
-	) -> (RollbackPollMessage<AccountId20>, EthereumSignature) {
+	) -> Result<(RollbackPollMessage<AccountId20>, EthereumSignature)> {
 		let msg = RollbackPollMessage {
-			authority_id: AccountId20(self.bfc_client.address().0),
-			txid,
+			authority_id: AccountId20(self.bfc_client.address().await.0.0),
+			txid: H256::from(txid.0),
 			is_approved,
 		};
-		let signature = convert_ethers_to_ecdsa_signature(self.bfc_client.wallet.sign_message(
-			&[keccak256("RollbackPoll").as_slice(), txid.as_ref(), &[is_approved as u8]].concat(),
-		));
+		let signature = self
+			.bfc_client
+			.sign_message(
+				&[keccak256("RollbackPoll").as_slice(), txid.as_ref(), &[is_approved as u8]]
+					.concat(),
+			)
+			.await?
+			.into();
 
-		(msg, signature)
+		Ok((msg, signature))
 	}
 
 	/// Build the calldata for the unsigned transaction. (`submit_rollback_poll()`)
-	fn build_unsigned_tx(
+	async fn build_unsigned_tx(
 		&self,
-		txid: H256,
+		txid: B256,
 		is_approved: bool,
-	) -> (XtRequest, SubmitRollbackPollMetadata) {
-		let (msg, signature) = self.build_payload(txid, is_approved);
+	) -> Result<(XtRequest, SubmitRollbackPollMetadata)> {
+		let (msg, signature) = self.build_payload(txid, is_approved).await?;
 		let metadata = SubmitRollbackPollMetadata::new(txid, is_approved);
 
-		(
+		Ok((
 			XtRequest::from(
 				bifrost_runtime::tx().btc_socket_queue().submit_rollback_poll(msg, signature),
 			),
 			metadata,
-		)
+		))
 	}
 
 	/// Get the pending rollback PSBT's.
-	async fn get_rollback_psbts(&self) -> Vec<Bytes> {
-		self.bfc_client
-			.contract_call(self.socket_queue().rollback_psbts(), "socket_queue.rollback_psbts")
-			.await
+	async fn get_rollback_psbts(&self) -> Result<Vec<Bytes>> {
+		Ok(self.socket_queue().rollback_psbts().call().await?._0)
 	}
 
 	/// Get the rollback information.
-	async fn get_rollback_request(&self, txid: H256) -> RollbackRequest {
-		self.bfc_client
-			.contract_call(
-				self.socket_queue().rollback_request(txid.into()),
-				"socket_queue.rollback_request",
-			)
-			.await
-			.into()
+	async fn get_rollback_request(&self, txid: B256) -> Result<RollbackRequest> {
+		Ok(self.socket_queue().rollback_request(txid).call().await?.into())
 	}
 
 	/// Get the `BtcSocketQueue` precompile contract instance.
-	fn socket_queue(&self) -> &SocketQueueContract<Provider<T>> {
+	fn socket_queue(&self) -> &SocketQueueInstance<F, P> {
 		self.bfc_client.protocol_contracts.socket_queue.as_ref().unwrap()
 	}
 }

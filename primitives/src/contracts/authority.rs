@@ -1,7 +1,14 @@
-use ethers::prelude::abigen;
+use super::*;
 
-abigen!(
+sol!(
+	#[allow(missing_docs)]
+	#[derive(Debug)]
+	#[sol(rpc)]
 	AuthorityContract,
-	"../abi/abi.authority.merged.json",
-	event_derives(serde::Deserialize, serde::Serialize)
+	"../abi/abi.authority.merged.json"
 );
+
+use AuthorityContract::AuthorityContractInstance;
+
+pub type AuthorityInstance<F, P> =
+	AuthorityContractInstance<(), Arc<FillProvider<F, P, AnyNetwork>>, AnyNetwork>;

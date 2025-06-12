@@ -1,3 +1,7 @@
+use alloy::{
+	network::AnyNetwork,
+	providers::{Provider, WalletProvider, fillers::TxFiller},
+};
 use br_primitives::{
 	constants::errors::INVALID_PROVIDER_URL,
 	substrate::CustomConfig,
@@ -5,36 +9,52 @@ use br_primitives::{
 	utils::sub_display_format,
 };
 
-use ethers::providers::JsonRpcClient;
 use sc_service::SpawnTaskHandle;
 use std::sync::Arc;
 use subxt::OnlineClient;
-use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
+use tokio::sync::mpsc::{self, UnboundedSender};
+use tokio_stream::{StreamExt, wrappers::UnboundedReceiverStream};
 
 use crate::{eth::EthClient, substrate::traits::ExtrinsicTask};
 
 const SUB_LOG_TARGET: &str = "unsigned-tx-manager";
 
 /// The essential task that sends unsigned transactions asynchronously.
-pub struct UnsignedTransactionManager<T> {
+pub struct UnsignedTransactionManager<F, P>
+where
+	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
+	P: Provider<AnyNetwork>,
+{
 	/// The substrate client.
 	sub_client: Option<OnlineClient<CustomConfig>>,
 	/// The Bifrost client.
-	bfc_client: Arc<EthClient<T>>,
+	bfc_client: Arc<EthClient<F, P>>,
 	/// The receiver connected to the tx request channel.
-	receiver: UnboundedReceiver<XtRequestMessage>,
+	message_stream: UnboundedReceiverStream<XtRequestMessage>,
 	/// A handle for spawning transaction tasks in the service.
 	xt_spawn_handle: SpawnTaskHandle,
 }
 
-impl<T: 'static + JsonRpcClient> UnsignedTransactionManager<T> {
+impl<F, P> UnsignedTransactionManager<F, P>
+where
+	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork> + 'static,
+	P: Provider<AnyNetwork> + 'static,
+{
 	/// Instantiates a new `UnsignedTransactionManager`.
 	pub fn new(
-		bfc_client: Arc<EthClient<T>>,
+		bfc_client: Arc<EthClient<F, P>>,
 		xt_spawn_handle: SpawnTaskHandle,
 	) -> (Self, UnboundedSender<XtRequestMessage>) {
 		let (sender, receiver) = mpsc::unbounded_channel::<XtRequestMessage>();
-		(Self { sub_client: None, bfc_client, receiver, xt_spawn_handle }, sender)
+		(
+			Self {
+				sub_client: None,
+				bfc_client,
+				message_stream: UnboundedReceiverStream::new(receiver),
+				xt_spawn_handle,
+			},
+			sender,
+		)
 	}
 
 	/// Initialize the substrate client.
@@ -57,7 +77,7 @@ impl<T: 'static + JsonRpcClient> UnsignedTransactionManager<T> {
 	pub async fn run(&mut self) {
 		self.initialize().await;
 
-		while let Some(msg) = self.receiver.recv().await {
+		while let Some(msg) = self.message_stream.next().await {
 			log::info!(
 				target: &self.bfc_client.get_chain_name(),
 				"-[{}] 🔖 Received unsigned transaction request: {}",
@@ -82,27 +102,42 @@ impl<T: 'static + JsonRpcClient> UnsignedTransactionManager<T> {
 }
 
 /// The transaction task for unsigned transactions.
-pub struct UnsignedTransactionTask<T> {
+pub struct UnsignedTransactionTask<F, P>
+where
+	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
+	P: Provider<AnyNetwork>,
+{
 	/// The substrate client.
 	sub_client: Arc<OnlineClient<CustomConfig>>,
 	/// The Bifrost client.
-	bfc_client: Arc<EthClient<T>>,
+	bfc_client: Arc<EthClient<F, P>>,
 }
 
-impl<T: JsonRpcClient> UnsignedTransactionTask<T> {
+impl<F, P> UnsignedTransactionTask<F, P>
+where
+	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
+	P: Provider<AnyNetwork>,
+{
 	/// Build an unsigned transaction task instance.
-	pub fn new(sub_client: Arc<OnlineClient<CustomConfig>>, bfc_client: Arc<EthClient<T>>) -> Self {
+	pub fn new(
+		sub_client: Arc<OnlineClient<CustomConfig>>,
+		bfc_client: Arc<EthClient<F, P>>,
+	) -> Self {
 		Self { sub_client, bfc_client }
 	}
 }
 
 #[async_trait::async_trait]
-impl<T: JsonRpcClient> ExtrinsicTask<T> for UnsignedTransactionTask<T> {
+impl<F, P> ExtrinsicTask<F, P> for UnsignedTransactionTask<F, P>
+where
+	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
+	P: Provider<AnyNetwork>,
+{
 	fn get_sub_client(&self) -> Arc<OnlineClient<CustomConfig>> {
 		self.sub_client.clone()
 	}
 
-	fn get_bfc_client(&self) -> Arc<EthClient<T>> {
+	fn get_bfc_client(&self) -> Arc<EthClient<F, P>> {
 		self.bfc_client.clone()
 	}
 

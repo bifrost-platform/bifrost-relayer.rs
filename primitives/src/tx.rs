@@ -3,13 +3,12 @@ use std::{
 	fmt::{Display, Formatter},
 };
 
-use bitcoincore_rpc::bitcoin::PublicKey;
-use ethers::types::{
-	transaction::eip2718::TypedTransaction, Address, Bytes, Eip1559TransactionRequest,
-	NameOrAddress, TransactionRequest, H256, U256,
+use alloy::{
+	primitives::{Address, ChainId, B256, U256},
+	rpc::types::TransactionRequest,
 };
-use miniscript::bitcoin::address::NetworkUnchecked;
-use miniscript::bitcoin::{Address as BtcAddress, Txid};
+use bitcoincore_rpc::bitcoin::PublicKey;
+use miniscript::bitcoin::{address::NetworkUnchecked, Address as BtcAddress, Txid};
 use subxt::{
 	ext::subxt_core::Error,
 	tx::{DefaultPayload, Payload},
@@ -19,7 +18,7 @@ use tokio::sync::mpsc::{error::SendError, UnboundedSender};
 
 use crate::{
 	constants::tx::{DEFAULT_TX_RETRIES, DEFAULT_TX_RETRY_INTERVAL_MS},
-	eth::{ChainID, GasCoefficient, SocketEventStatus},
+	eth::{GasCoefficient, SocketEventStatus},
 	periodic::PriceResponse,
 	substrate::{
 		ApproveSetRefunds, SubmitExecutedRequest, SubmitRollbackPoll, SubmitSignedPsbt,
@@ -36,9 +35,9 @@ pub struct SocketRelayMetadata {
 	/// The socket request sequence ID.
 	pub sequence: u128,
 	/// The source chain ID.
-	pub src_chain_id: ChainID,
+	pub src_chain_id: ChainId,
 	/// The destination chain ID.
-	pub dst_chain_id: ChainID,
+	pub dst_chain_id: ChainId,
 	/// The receiver address for this request.
 	pub receiver: Address,
 	/// The flag whether this relay is processed on bootstrap.
@@ -50,8 +49,8 @@ impl SocketRelayMetadata {
 		is_inbound: bool,
 		status: SocketEventStatus,
 		sequence: u128,
-		src_chain_id: ChainID,
-		dst_chain_id: ChainID,
+		src_chain_id: ChainId,
+		dst_chain_id: ChainId,
 		receiver: Address,
 		is_bootstrap: bool,
 	) -> Self {
@@ -121,11 +120,11 @@ pub struct VSPPhase2Metadata {
 	/// The round index to update.
 	pub round: U256,
 	/// The destination chain ID to update.
-	pub dst_chain_id: ChainID,
+	pub dst_chain_id: ChainId,
 }
 
 impl VSPPhase2Metadata {
-	pub fn new(round: U256, dst_chain_id: ChainID) -> Self {
+	pub fn new(round: U256, dst_chain_id: ChainId) -> Self {
 		Self { round, dst_chain_id }
 	}
 }
@@ -190,9 +189,9 @@ pub struct RollbackMetadata {
 	/// The socket request sequence ID.
 	pub sequence: u128,
 	/// The source chain ID.
-	pub src_chain_id: ChainID,
+	pub src_chain_id: ChainId,
 	/// The destination chain ID.
-	pub dst_chain_id: ChainID,
+	pub dst_chain_id: ChainId,
 }
 
 impl RollbackMetadata {
@@ -200,8 +199,8 @@ impl RollbackMetadata {
 		is_inbound: bool,
 		status: SocketEventStatus,
 		sequence: u128,
-		src_chain_id: ChainID,
-		dst_chain_id: ChainID,
+		src_chain_id: ChainId,
+		dst_chain_id: ChainId,
 	) -> Self {
 		Self { is_inbound, status, sequence, src_chain_id, dst_chain_id }
 	}
@@ -298,18 +297,18 @@ impl SubmitVaultKeyMetadata {
 
 impl Display for SubmitVaultKeyMetadata {
 	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-		write!(f, "SubmitVaultKey({:?}:{})", self.who, self.key.to_string())
+		write!(f, "SubmitVaultKey({:?}:{})", self.who, self.key)
 	}
 }
 
 #[derive(Clone, Debug)]
 /// The metadata used for signed psbt submission.
 pub struct SubmitSignedPsbtMetadata {
-	pub unsigned_psbt: H256,
+	pub unsigned_psbt: B256,
 }
 
 impl SubmitSignedPsbtMetadata {
-	pub fn new(unsigned_psbt: H256) -> Self {
+	pub fn new(unsigned_psbt: B256) -> Self {
 		Self { unsigned_psbt }
 	}
 }
@@ -323,11 +322,11 @@ impl Display for SubmitSignedPsbtMetadata {
 #[derive(Clone, Debug)]
 /// The metadata used for unsigned psbt submission.
 pub struct SubmitUnsignedPsbtMetadata {
-	pub unsigned_psbt: H256,
+	pub unsigned_psbt: B256,
 }
 
 impl SubmitUnsignedPsbtMetadata {
-	pub fn new(unsigned_psbt: H256) -> Self {
+	pub fn new(unsigned_psbt: B256) -> Self {
 		Self { unsigned_psbt }
 	}
 }
@@ -340,11 +339,11 @@ impl Display for SubmitUnsignedPsbtMetadata {
 
 #[derive(Clone, Debug)]
 pub struct SubmitExecutedRequestMetadata {
-	pub txid: H256,
+	pub txid: B256,
 }
 
 impl SubmitExecutedRequestMetadata {
-	pub fn new(txid: H256) -> Self {
+	pub fn new(txid: B256) -> Self {
 		Self { txid }
 	}
 }
@@ -358,12 +357,12 @@ impl Display for SubmitExecutedRequestMetadata {
 #[derive(Clone, Debug)]
 /// The metadata used for rollback poll submission.
 pub struct SubmitRollbackPollMetadata {
-	pub txid: H256,
+	pub txid: B256,
 	pub is_approved: bool,
 }
 
 impl SubmitRollbackPollMetadata {
-	pub fn new(txid: H256, is_approved: bool) -> Self {
+	pub fn new(txid: B256, is_approved: bool) -> Self {
 		Self { txid, is_approved }
 	}
 }
@@ -640,170 +639,6 @@ impl From<DefaultPayload<ApproveSetRefunds>> for XtRequest {
 	}
 }
 
-/// Wrapper for TransactionRequest|Eip1559TransactionRequest to support both fee payment in one
-/// relayer
-#[derive(Clone, Debug)]
-pub enum TxRequest {
-	Legacy(TransactionRequest),
-	Eip1559(Eip1559TransactionRequest),
-}
-
-impl TxRequest {
-	/// Get the `data` field of the transaction request.
-	pub fn get_data(&self) -> &Bytes {
-		match self {
-			TxRequest::Legacy(tx_request) => tx_request.data.as_ref().unwrap(),
-			TxRequest::Eip1559(tx_request) => tx_request.data.as_ref().unwrap(),
-		}
-	}
-
-	/// Get the `to` field of the transaction request.
-	pub fn get_to(&self) -> &NameOrAddress {
-		match self {
-			TxRequest::Legacy(tx_request) => tx_request.to.as_ref().unwrap(),
-			TxRequest::Eip1559(tx_request) => tx_request.to.as_ref().unwrap(),
-		}
-	}
-
-	/// Get the `from` field of the transaction request.
-	pub fn get_from(&self) -> &Address {
-		match self {
-			TxRequest::Legacy(tx_request) => tx_request.from.as_ref().unwrap(),
-			TxRequest::Eip1559(tx_request) => tx_request.from.as_ref().unwrap(),
-		}
-	}
-
-	/// Get the `gas_price` field of the transaction request.
-	pub fn get_gas_price(&self) -> Option<U256> {
-		match self {
-			TxRequest::Legacy(tx_request) => tx_request.gas_price,
-			TxRequest::Eip1559(_) => None,
-		}
-	}
-
-	/// Sets the `from` field in the transaction to the provided value.
-	pub fn from(&mut self, address: Address) {
-		match self {
-			TxRequest::Legacy(tx_request) => {
-				tx_request.from = Some(address);
-			},
-			TxRequest::Eip1559(tx_request) => {
-				tx_request.from = Some(address);
-			},
-		}
-	}
-
-	/// Get the `gas` field of the transaction request.
-	pub fn get_gas(&self) -> Option<U256> {
-		match self {
-			TxRequest::Legacy(tx_request) => tx_request.gas,
-			TxRequest::Eip1559(tx_request) => tx_request.gas,
-		}
-	}
-
-	/// Sets the `gas` field in the transaction to the provided.
-	pub fn gas(&mut self, estimated_gas: U256) {
-		match self {
-			TxRequest::Legacy(tx_request) => {
-				tx_request.gas = Some(estimated_gas);
-			},
-			TxRequest::Eip1559(tx_request) => {
-				tx_request.gas = Some(estimated_gas);
-			},
-		}
-	}
-
-	/// Sets the `max_fee_per_gas` field in the transaction request.
-	/// This method will only have effect when the type is EIP-1559.
-	/// It will be ignored if the type is legacy.
-	pub fn max_fee_per_gas(&mut self, max_fee_per_gas: U256) {
-		match self {
-			TxRequest::Legacy(_) => {},
-			TxRequest::Eip1559(tx_request) => {
-				tx_request.max_fee_per_gas = Some(max_fee_per_gas);
-			},
-		}
-	}
-
-	/// Sets the `max_priority_fee_per_gas` field in the transaction request.
-	/// This method will only have effect when the type is EIP-1559.
-	/// It will be ignored if the type is legacy.
-	pub fn max_priority_fee_per_gas(&mut self, max_priority_fee_per_gas: U256) {
-		match self {
-			TxRequest::Legacy(_) => {},
-			TxRequest::Eip1559(tx_request) => {
-				tx_request.max_priority_fee_per_gas = Some(max_priority_fee_per_gas);
-			},
-		}
-	}
-
-	/// Sets the `gas_price` field in the transaction request.
-	/// This method will only have effect when the type is legacy.
-	/// It will be ignored if the type is EIP-1559.
-	pub fn gas_price(&mut self, gas_price: U256) {
-		match self {
-			TxRequest::Legacy(tx_request) => {
-				tx_request.gas_price = Some(gas_price);
-			},
-			TxRequest::Eip1559(_) => {},
-		}
-	}
-
-	/// Sets the `nonce` field in the transaction request.
-	pub fn nonce(&mut self, nonce: Option<U256>) {
-		match self {
-			TxRequest::Legacy(tx_request) => {
-				tx_request.nonce = nonce;
-			},
-			TxRequest::Eip1559(tx_request) => {
-				tx_request.nonce = nonce;
-			},
-		}
-	}
-
-	/// If self is Eip1559, returns it self.
-	/// If self is Legacy, converts it self to Eip1559 and return it.
-	pub fn to_eip1559(&self) -> Eip1559TransactionRequest {
-		match self {
-			TxRequest::Legacy(tx_request) => Eip1559TransactionRequest {
-				from: tx_request.from,
-				to: tx_request.to.clone(),
-				value: tx_request.value,
-				nonce: tx_request.nonce,
-				data: tx_request.data.clone(),
-				gas: tx_request.gas,
-				..Default::default()
-			},
-			TxRequest::Eip1559(tx_request) => tx_request.clone(),
-		}
-	}
-
-	/// If self is Eip1559, converts it self to Legacy and return it.
-	/// If self is Legacy, returns it self.
-	pub fn to_legacy(&self) -> TransactionRequest {
-		match self {
-			TxRequest::Legacy(tx_request) => tx_request.clone(),
-			TxRequest::Eip1559(tx_request) => TransactionRequest {
-				from: tx_request.from,
-				to: tx_request.to.clone(),
-				value: tx_request.value,
-				nonce: tx_request.nonce,
-				data: tx_request.data.clone(),
-				gas: tx_request.gas,
-				..Default::default()
-			},
-		}
-	}
-
-	/// Converts to `TypedTransaction`.
-	pub fn to_typed(&self) -> TypedTransaction {
-		match self {
-			TxRequest::Legacy(tx_request) => TypedTransaction::Legacy(tx_request.clone()),
-			TxRequest::Eip1559(tx_request) => TypedTransaction::Eip1559(tx_request.clone()),
-		}
-	}
-}
-
 #[derive(Clone, Debug)]
 /// The message format passed through the event channel.
 pub struct TxRequestMessage {
@@ -812,7 +647,7 @@ pub struct TxRequestMessage {
 	/// The retry interval in milliseconds.
 	pub retry_interval: u64,
 	/// The raw transaction request.
-	pub tx_request: TxRequest,
+	pub tx_request: TransactionRequest,
 	/// Additional data of the transaction request.
 	pub metadata: TxRequestMetadata,
 	/// Check mempool to prevent duplicate relay.
@@ -829,7 +664,7 @@ pub struct TxRequestMessage {
 impl TxRequestMessage {
 	/// Instantiates a new `TxRequestMessage` instance.
 	pub fn new(
-		tx_request: TxRequest,
+		tx_request: TransactionRequest,
 		metadata: TxRequestMetadata,
 		check_mempool: bool,
 		give_random_delay: bool,
@@ -851,30 +686,8 @@ impl TxRequestMessage {
 	/// Builds a new `TxRequestMessage` to use on transaction retry. This will reduce the remaining
 	/// retry counter and increase the retry interval.
 	pub fn build_retry_event(&mut self) {
-		self.tx_request.nonce(None);
+		self.tx_request.nonce = None;
 		self.retries_remaining = self.retries_remaining.saturating_sub(1);
-	}
-}
-
-/// The message sender connected to the event channel.
-pub struct TxRequestSender {
-	/// The chain ID of the event channel.
-	pub id: ChainID,
-	/// The message sender.
-	pub sender: UnboundedSender<TxRequestMessage>,
-	/// Is Bifrost network?
-	pub is_native: bool,
-}
-
-impl TxRequestSender {
-	/// Instantiates a new `TxRequestSender` instance.
-	pub fn new(id: ChainID, sender: UnboundedSender<TxRequestMessage>, is_native: bool) -> Self {
-		Self { id, sender, is_native }
-	}
-
-	/// Sends a new event message.
-	pub fn send(&self, message: TxRequestMessage) -> Result<(), SendError<TxRequestMessage>> {
-		self.sender.send(message)
 	}
 }
 

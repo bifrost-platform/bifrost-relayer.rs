@@ -10,15 +10,9 @@ repository = { workspace = true }
 
 [dependencies]
 # General
-hex = { workspace = true }
-chrono = { workspace = true }
-cron = { workspace = true }
-ethers = { workspace = true }
+alloy = { workspace = true }
 thiserror = { workspace = true }
-async-trait = { workspace = true }
-reqwest = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
-serde_json = { workspace = true, features = ["alloc"] }
 tokio = { workspace = true, features = [
 	"signal",
 	"rt-multi-thread",
@@ -29,3 +23,6 @@ miniscript = { workspace = true }
 subxt = { workspace = true }
 bitcoincore-rpc = { workspace = true }
 url = { workspace = true }
+sha3 = { workspace = true }
+k256 = { workspace = true }
+secrecy = { workspace = true }

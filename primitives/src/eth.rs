@@ -1,24 +1,52 @@
-use std::{str::FromStr, sync::Arc};
-
-use ethers::{
-	providers::{JsonRpcClient, Provider},
-	types::{Address, Signature, TransactionRequest, Uint8, H160, U64},
+use alloy::{
+	network::AnyNetwork,
+	primitives::{Address, ChainId, map::AddressHashMap},
+	providers::{
+		Provider, WalletProvider,
+		fillers::{FillProvider, TxFiller},
+	},
+	rpc::types::TransactionRequest,
+	signers::Signer,
 };
+use std::{str::FromStr, sync::Arc};
 use url::Url;
 
 use crate::{
-	constants::errors::{INVALID_CONTRACT_ADDRESS, INVALID_PROVIDER_URL, MISSING_CONTRACT_ADDRESS},
+	cli::EVMProvider,
+	constants::{
+		cli::DEFAULT_GET_LOGS_BATCH_SIZE,
+		errors::{INVALID_CONTRACT_ADDRESS, MISSING_CONTRACT_ADDRESS},
+	},
 	contracts::{
-		authority::AuthorityContract, bitcoin_socket::BitcoinSocketContract,
-		chainlink_aggregator::ChainlinkContract, registration_pool::RegistrationPoolContract,
-		relay_executive::RelayExecutiveContract, relayer_manager::RelayerManagerContract,
-		socket::SocketContract, socket_queue::SocketQueueContract,
+		authority::{AuthorityContract, AuthorityInstance},
+		bitcoin_socket::{BitcoinSocketContract, BitcoinSocketInstance},
+		chainlink_aggregator::{ChainlinkContract, ChainlinkInstance},
+		registration_pool::{RegistrationPoolContract, RegistrationPoolInstance},
+		relay_executive::{RelayExecutiveContract, RelayExecutiveInstance},
+		relayer_manager::{RelayerManagerContract, RelayerManagerInstance},
+		socket::{SocketContract, SocketInstance},
+		socket_queue::{SocketQueueContract, SocketQueueInstance},
 	},
 };
 
-/// The type of EVM chain ID's.
-pub type ChainID = u32;
+#[derive(Clone, Default)]
+pub struct Signers(AddressHashMap<Arc<dyn Signer + Send + Sync>>);
 
+impl Signers {
+	pub fn get_signer(&self, address: &Address) -> Option<Arc<dyn Signer + Send + Sync>> {
+		self.0.get(address).cloned()
+	}
+
+	pub fn register_signer(&mut self, signer: Arc<dyn Signer + Send + Sync>) {
+		self.0.insert(signer.address(), signer);
+	}
+
+	pub fn signers_address(&self) -> Vec<Address> {
+		self.0.keys().cloned().collect()
+	}
+}
+
+#[derive(Clone)]
 /// The metadata of the EVM provider.
 pub struct ProviderMetadata {
 	/// The name of this provider.
@@ -26,68 +54,83 @@ pub struct ProviderMetadata {
 	/// The provider URL. (Allowed values: `http`, `https`)
 	pub url: Url,
 	/// Id of chain which this client interact with.
-	pub id: ChainID,
+	pub id: ChainId,
 	/// The bitcoin chain ID used for CCCP.
-	pub bitcoin_chain_id: Option<ChainID>,
+	pub bitcoin_chain_id: Option<ChainId>,
 	/// The total number of confirmations required for a block to be processed. (block
 	/// confirmations + eth_getLogs batch size)
-	pub block_confirmations: U64,
+	pub block_confirmations: u64,
 	/// The batch size used on `eth_getLogs()` requests.
-	pub get_logs_batch_size: U64,
+	pub get_logs_batch_size: u64,
 	/// The `get_block` request interval in milliseconds.
 	pub call_interval: u64,
+	/// The flag whether EIP-1559 is enabled.
+	pub eip1559: bool,
 	/// Relay direction when CCCP event points this chain as destination.
 	pub if_destination_chain: RelayDirection,
 	/// The flag whether the chain is Bifrost(native) or an external chain.
 	pub is_native: bool,
+	/// The flag whether the chain is relay target.
+	pub is_relay_target: bool,
 }
 
 impl ProviderMetadata {
 	pub fn new(
-		name: String,
-		url: String,
-		id: ChainID,
-		bitcoin_chain_id: Option<ChainID>,
-		block_confirmations: u64,
-		call_interval: u64,
-		get_logs_batch_size: u64,
+		evm_provider: EVMProvider,
+		url: Url,
+		bitcoin_chain_id: Option<ChainId>,
 		is_native: bool,
 	) -> Self {
+		let get_logs_batch_size =
+			evm_provider.get_logs_batch_size.unwrap_or(DEFAULT_GET_LOGS_BATCH_SIZE);
 		Self {
-			name,
-			url: Url::parse(&url).expect(INVALID_PROVIDER_URL),
-			id,
+			name: evm_provider.name,
+			url,
+			id: evm_provider.id,
 			bitcoin_chain_id,
-			block_confirmations: U64::from(block_confirmations.saturating_add(get_logs_batch_size)),
-			get_logs_batch_size: U64::from(get_logs_batch_size),
-			call_interval,
+			block_confirmations: evm_provider
+				.block_confirmations
+				.saturating_add(get_logs_batch_size),
+			get_logs_batch_size,
+			call_interval: evm_provider.call_interval,
+			eip1559: evm_provider.eip1559.unwrap_or(false),
 			is_native,
 			if_destination_chain: match is_native {
 				true => RelayDirection::Inbound,
 				false => RelayDirection::Outbound,
 			},
+			is_relay_target: evm_provider.is_relay_target,
 		}
 	}
 }
 
-pub struct AggregatorContracts<T> {
+#[derive(Clone)]
+pub struct AggregatorContracts<F, P>
+where
+	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
+	P: Provider<AnyNetwork>,
+{
 	/// Chainlink usdc/usd aggregator
-	pub chainlink_usdc_usd: Option<ChainlinkContract<Provider<T>>>,
+	pub chainlink_usdc_usd: Option<ChainlinkInstance<F, P>>,
 	/// Chainlink usdt/usd aggregator
-	pub chainlink_usdt_usd: Option<ChainlinkContract<Provider<T>>>,
+	pub chainlink_usdt_usd: Option<ChainlinkInstance<F, P>>,
 	/// Chainlink dai/usd aggregator
-	pub chainlink_dai_usd: Option<ChainlinkContract<Provider<T>>>,
+	pub chainlink_dai_usd: Option<ChainlinkInstance<F, P>>,
 	/// Chainlink btc/usd aggregator
-	pub chainlink_btc_usd: Option<ChainlinkContract<Provider<T>>>,
+	pub chainlink_btc_usd: Option<ChainlinkInstance<F, P>>,
 	/// Chainlink wbtc/usd aggregator
-	pub chainlink_wbtc_usd: Option<ChainlinkContract<Provider<T>>>,
+	pub chainlink_wbtc_usd: Option<ChainlinkInstance<F, P>>,
 	/// Chainlink cbbtc/usd aggregator
-	pub chainlink_cbbtc_usd: Option<ChainlinkContract<Provider<T>>>,
+	pub chainlink_cbbtc_usd: Option<ChainlinkInstance<F, P>>,
 }
 
-impl<T: JsonRpcClient> AggregatorContracts<T> {
+impl<F, P> AggregatorContracts<F, P>
+where
+	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
+	P: Provider<AnyNetwork>,
+{
 	pub fn new(
-		provider: Arc<Provider<T>>,
+		provider: Arc<FillProvider<F, P, AnyNetwork>>,
 		chainlink_usdc_usd_address: Option<String>,
 		chainlink_usdt_usd_address: Option<String>,
 		chainlink_dai_usd_address: Option<String>,
@@ -97,7 +140,7 @@ impl<T: JsonRpcClient> AggregatorContracts<T> {
 	) -> Self {
 		let create_contract_instance = |address: String| {
 			ChainlinkContract::new(
-				H160::from_str(&address).expect(INVALID_CONTRACT_ADDRESS),
+				Address::from_str(&address).expect(INVALID_CONTRACT_ADDRESS),
 				provider.clone(),
 			)
 		};
@@ -113,7 +156,11 @@ impl<T: JsonRpcClient> AggregatorContracts<T> {
 	}
 }
 
-impl<T: JsonRpcClient> Default for AggregatorContracts<T> {
+impl<F, P> Default for AggregatorContracts<F, P>
+where
+	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
+	P: Provider<AnyNetwork>,
+{
 	fn default() -> Self {
 		Self {
 			chainlink_usdc_usd: None,
@@ -126,43 +173,46 @@ impl<T: JsonRpcClient> Default for AggregatorContracts<T> {
 	}
 }
 
+#[derive(Clone)]
 /// The protocol contract instances of the EVM provider.
-pub struct ProtocolContracts<T> {
+pub struct ProtocolContracts<F, P>
+where
+	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
+	P: Provider<AnyNetwork>,
+{
 	/// SocketContract
-	pub socket: SocketContract<Provider<T>>,
+	pub socket: SocketInstance<F, P>,
 	/// AuthorityContract
-	pub authority: AuthorityContract<Provider<T>>,
+	pub authority: AuthorityInstance<F, P>,
 	/// RelayerManagerContract (Bifrost only)
-	pub relayer_manager: Option<RelayerManagerContract<Provider<T>>>,
+	pub relayer_manager: Option<RelayerManagerInstance<F, P>>,
 	/// BitcoinSocketContract (Bifrost only)
-	pub bitcoin_socket: Option<BitcoinSocketContract<Provider<T>>>,
+	pub bitcoin_socket: Option<BitcoinSocketInstance<F, P>>,
 	/// SocketQueueContract (Bifrost only)
-	pub socket_queue: Option<SocketQueueContract<Provider<T>>>,
+	pub socket_queue: Option<SocketQueueInstance<F, P>>,
 	/// RegistrationPoolContract (Bifrost only)
-	pub registration_pool: Option<RegistrationPoolContract<Provider<T>>>,
+	pub registration_pool: Option<RegistrationPoolInstance<F, P>>,
 	/// RelayExecutiveContract (Bifrost only)
-	pub relay_executive: Option<RelayExecutiveContract<Provider<T>>>,
+	pub relay_executive: Option<RelayExecutiveInstance<F, P>>,
 }
 
-impl<T: JsonRpcClient> ProtocolContracts<T> {
+impl<F, P> ProtocolContracts<F, P>
+where
+	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
+	P: Provider<AnyNetwork>,
+{
 	pub fn new(
 		is_native: bool,
-		provider: Arc<Provider<T>>,
-		socket_address: String,
-		authority_address: String,
-		relayer_manager_address: Option<String>,
-		bitcoin_socket_address: Option<String>,
-		socket_queue_address: Option<String>,
-		registration_pool_address: Option<String>,
-		relay_executive_address: Option<String>,
+		provider: Arc<FillProvider<F, P, AnyNetwork>>,
+		evm_provider: EVMProvider,
 	) -> Self {
 		let mut contracts = Self {
 			socket: SocketContract::new(
-				H160::from_str(&socket_address).expect(INVALID_CONTRACT_ADDRESS),
+				Address::from_str(&evm_provider.socket_address).expect(INVALID_CONTRACT_ADDRESS),
 				provider.clone(),
 			),
 			authority: AuthorityContract::new(
-				H160::from_str(&authority_address).expect(INVALID_CONTRACT_ADDRESS),
+				Address::from_str(&evm_provider.authority_address).expect(INVALID_CONTRACT_ADDRESS),
 				provider.clone(),
 			),
 			relayer_manager: None,
@@ -173,28 +223,38 @@ impl<T: JsonRpcClient> ProtocolContracts<T> {
 		};
 		if is_native {
 			contracts.relayer_manager = Some(RelayerManagerContract::new(
-				H160::from_str(&relayer_manager_address.expect(MISSING_CONTRACT_ADDRESS))
-					.expect(INVALID_CONTRACT_ADDRESS),
+				Address::from_str(
+					&evm_provider.relayer_manager_address.expect(MISSING_CONTRACT_ADDRESS),
+				)
+				.expect(INVALID_CONTRACT_ADDRESS),
 				provider.clone(),
 			));
 			contracts.bitcoin_socket = Some(BitcoinSocketContract::new(
-				H160::from_str(&bitcoin_socket_address.expect(MISSING_CONTRACT_ADDRESS))
-					.expect(INVALID_CONTRACT_ADDRESS),
+				Address::from_str(
+					&evm_provider.bitcoin_socket_address.expect(MISSING_CONTRACT_ADDRESS),
+				)
+				.expect(INVALID_CONTRACT_ADDRESS),
 				provider.clone(),
 			));
 			contracts.socket_queue = Some(SocketQueueContract::new(
-				H160::from_str(&socket_queue_address.expect(MISSING_CONTRACT_ADDRESS))
-					.expect(INVALID_CONTRACT_ADDRESS),
+				Address::from_str(
+					&evm_provider.socket_queue_address.expect(MISSING_CONTRACT_ADDRESS),
+				)
+				.expect(INVALID_CONTRACT_ADDRESS),
 				provider.clone(),
 			));
 			contracts.registration_pool = Some(RegistrationPoolContract::new(
-				H160::from_str(&registration_pool_address.expect(MISSING_CONTRACT_ADDRESS))
-					.expect(INVALID_CONTRACT_ADDRESS),
+				Address::from_str(
+					&evm_provider.registration_pool_address.expect(MISSING_CONTRACT_ADDRESS),
+				)
+				.expect(INVALID_CONTRACT_ADDRESS),
 				provider.clone(),
 			));
 			contracts.relay_executive = Some(RelayExecutiveContract::new(
-				H160::from_str(&relay_executive_address.expect(MISSING_CONTRACT_ADDRESS))
-					.expect(INVALID_CONTRACT_ADDRESS),
+				Address::from_str(
+					&evm_provider.relay_executive_address.expect(MISSING_CONTRACT_ADDRESS),
+				)
+				.expect(INVALID_CONTRACT_ADDRESS),
 				provider.clone(),
 			));
 		}
@@ -213,14 +273,14 @@ pub enum GasCoefficient {
 	High,
 }
 
-impl GasCoefficient {
-	pub fn into_f64(&self) -> f64 {
-		f64::from(self)
+impl From<bool> for GasCoefficient {
+	fn from(is_native: bool) -> Self {
+		if is_native { GasCoefficient::Mid } else { GasCoefficient::Low }
 	}
 }
 
-impl From<&GasCoefficient> for f64 {
-	fn from(value: &GasCoefficient) -> Self {
+impl From<GasCoefficient> for f64 {
+	fn from(value: GasCoefficient) -> Self {
 		match value {
 			GasCoefficient::Low => 1.2,
 			GasCoefficient::Mid => 7.0,
@@ -290,9 +350,9 @@ impl From<u8> for SocketEventStatus {
 	}
 }
 
-impl From<&Uint8> for SocketEventStatus {
-	fn from(value: &Uint8) -> Self {
-		Self::from(u8::from(value.clone()))
+impl From<&u8> for SocketEventStatus {
+	fn from(value: &u8) -> Self {
+		Self::from(*value)
 	}
 }
 
@@ -321,11 +381,13 @@ pub enum RelayDirection {
 	Outbound,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 /// The state for bootstrapping
 pub enum BootstrapState {
-	/// phase 0. check if the node is in syncing
+	/// phase 0-1. check if the node is in syncing
 	NodeSyncing,
+	/// phase 0-2. check if stalled transactions are flushed
+	FlushingStalledTransactions,
 	/// phase 1-1. emit all pushed RoundUp event
 	BootstrapRoundUpPhase1,
 	/// phase 1-2. bootstrap for RoundUp event
@@ -334,23 +396,6 @@ pub enum BootstrapState {
 	BootstrapSocketRelay,
 	/// phase 3. process for latest block as normal
 	NormalStart,
-}
-
-#[derive(Clone, Debug)]
-/// The information of a recovered signature.
-pub struct RecoveredSignature {
-	/// The original index that represents the order from the result of `get_signatures()`.
-	pub idx: usize,
-	/// The signature of the message.
-	pub signature: Signature,
-	/// The account who signed the message.
-	pub signer: Address,
-}
-
-impl RecoveredSignature {
-	pub fn new(idx: usize, signature: Signature, signer: Address) -> Self {
-		Self { idx, signature, signer }
-	}
 }
 
 #[derive(Clone, Debug)]

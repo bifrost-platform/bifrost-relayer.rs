@@ -1,283 +1,290 @@
-use std::{collections::BTreeMap, sync::Arc, time::Duration};
+use std::{collections::BTreeMap, sync::Arc};
 
-use ethers::{
-	abi::RawLog,
-	prelude::decode_logs,
-	providers::JsonRpcClient,
-	types::{Filter, Log, TransactionRequest, H256, U256},
+use alloy::{
+	network::AnyNetwork,
+	primitives::{B256, ChainId, U256},
+	providers::{Provider, WalletProvider, fillers::TxFiller},
+	rpc::types::{Filter, Log, TransactionRequest},
+	sol_types::SolEvent,
 };
-use tokio::{sync::broadcast::Receiver, time::sleep};
-use tokio_stream::StreamExt;
+use eyre::Result;
+use sc_service::SpawnTaskHandle;
+use tokio::sync::{broadcast::Receiver, mpsc::UnboundedSender};
+use tokio_stream::{StreamExt, wrappers::BroadcastStream};
 
 use br_primitives::{
 	bootstrap::BootstrapSharedData,
 	constants::{
 		cli::DEFAULT_BOOTSTRAP_ROUND_OFFSET,
 		config::BOOTSTRAP_BLOCK_CHUNK_SIZE,
-		errors::{INVALID_BIFROST_NATIVENESS, INVALID_CHAIN_ID, INVALID_CONTRACT_ABI},
+		errors::{INVALID_BIFROST_NATIVENESS, INVALID_CHAIN_ID},
 	},
-	contracts::{
-		authority::RoundMetaData,
-		socket::{Instruction, RequestID, Signatures, SocketEvents, SocketMessage},
+	contracts::socket::{
+		Socket_Struct::{Instruction, RequestID, Signatures, Socket_Message},
+		SocketContract::Socket,
 	},
-	eth::{
-		BootstrapState, BuiltRelayTransaction, ChainID, GasCoefficient, RelayDirection,
-		SocketEventStatus,
-	},
-	periodic::RollbackSender,
-	tx::{SocketRelayMetadata, TxRequest, TxRequestMessage, TxRequestMetadata, TxRequestSender},
+	eth::{BootstrapState, BuiltRelayTransaction, RelayDirection, SocketEventStatus},
+	tx::{SocketRelayMetadata, TxRequestMetadata},
 	utils::sub_display_format,
 };
 
 use crate::eth::{
+	ClientMap, EthClient,
 	events::EventMessage,
+	send_transaction,
 	traits::{BootstrapHandler, Handler, SocketRelayBuilder},
-	EthClient,
 };
 
 const SUB_LOG_TARGET: &str = "socket-handler";
 
 /// The essential task that handles `socket relay` related events.
-pub struct SocketRelayHandler<T> {
+pub struct SocketRelayHandler<F, P>
+where
+	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork> + 'static,
+	P: Provider<AnyNetwork> + 'static,
+{
 	/// The `EthClient` to interact with the connected blockchain.
-	pub client: Arc<EthClient<T>>,
-	/// The senders that sends messages to the tx request channel.
-	tx_request_senders: BTreeMap<ChainID, Arc<TxRequestSender>>,
-	/// The rollback senders that sends rollbackable socket messages.
-	rollback_senders: BTreeMap<ChainID, Arc<RollbackSender>>,
+	pub client: Arc<EthClient<F, P>>,
 	/// The receiver that consumes new events from the block channel.
-	event_receiver: Receiver<EventMessage>,
+	event_stream: BroadcastStream<EventMessage>,
 	/// The entire clients instantiated in the system. <chain_id, Arc<EthClient>>
-	system_clients: BTreeMap<ChainID, Arc<EthClient<T>>>,
-	/// Signature of the `Socket` Event.
-	socket_signature: H256,
+	system_clients: Arc<ClientMap<F, P>>,
+	/// The bifrost client.
+	bifrost_client: Arc<EthClient<F, P>>,
+	/// The rollback sender for each chain.
+	rollback_senders: Arc<BTreeMap<ChainId, Arc<UnboundedSender<Socket_Message>>>>,
+	/// The handle to spawn tasks.
+	handle: SpawnTaskHandle,
 	/// The bootstrap shared data.
 	bootstrap_shared_data: Arc<BootstrapSharedData>,
+	/// Whether to enable debug mode.
+	debug_mode: bool,
 }
 
 #[async_trait::async_trait]
-impl<T: 'static + JsonRpcClient> Handler for SocketRelayHandler<T> {
-	async fn run(&mut self) {
-		loop {
-			if self.is_bootstrap_state_synced_as(BootstrapState::BootstrapSocketRelay).await {
-				self.bootstrap().await;
+impl<F, P> Handler for SocketRelayHandler<F, P>
+where
+	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
+	P: Provider<AnyNetwork>,
+{
+	async fn run(&mut self) -> Result<()> {
+		let should_bootstrap = self.is_before_bootstrap_state(BootstrapState::NormalStart).await;
+		if should_bootstrap {
+			self.bootstrap().await?;
+		}
+		self.wait_for_all_chains_bootstrapped().await?;
 
-				sleep(Duration::from_millis(self.client.metadata.call_interval)).await;
-			} else if self.is_bootstrap_state_synced_as(BootstrapState::NormalStart).await {
-				let msg = self.event_receiver.recv().await.unwrap();
+		while let Some(Ok(msg)) = self.event_stream.next().await {
+			log::info!(
+				target: &self.client.get_chain_name(),
+				"-[{}] 📦 Imported #{:?} with target logs({:?})",
+				sub_display_format(SUB_LOG_TARGET),
+				msg.block_number,
+				msg.event_logs.len(),
+			);
 
-				log::info!(
-					target: &self.client.get_chain_name(),
-					"-[{}] 📦 Imported #{:?} with target logs({:?})",
-					sub_display_format(SUB_LOG_TARGET),
-					msg.block_number,
-					msg.event_logs.len(),
-				);
-
-				let mut stream = tokio_stream::iter(msg.event_logs);
-				while let Some(log) = stream.next().await {
-					if self.is_target_contract(&log) && self.is_target_event(log.topics[0]) {
-						self.process_confirmed_log(&log, false).await;
-					}
+			let mut stream = tokio_stream::iter(msg.event_logs);
+			while let Some(log) = stream.next().await {
+				if self.is_target_contract(&log) && self.is_target_event(log.topic0()) {
+					self.process_confirmed_log(&log, false).await?;
 				}
 			}
 		}
+
+		Ok(())
 	}
 
-	async fn process_confirmed_log(&self, log: &Log, is_bootstrap: bool) {
-		match decode_logs::<SocketEvents>(&[RawLog::from(log.clone())]) {
-			Ok(decoded) => match &decoded[0] {
-				SocketEvents::Socket(socket) => {
-					let msg = socket.clone().msg;
-					let metadata = SocketRelayMetadata::new(
-						self.is_inbound_sequence(ChainID::from_be_bytes(msg.ins_code.chain)),
-						SocketEventStatus::from(msg.status),
-						msg.req_id.sequence,
-						ChainID::from_be_bytes(msg.req_id.chain),
-						ChainID::from_be_bytes(msg.ins_code.chain),
-						msg.params.to,
-						is_bootstrap,
-					);
+	async fn process_confirmed_log(&self, log: &Log, is_bootstrap: bool) -> Result<()> {
+		match log.log_decode::<Socket>() {
+			Ok(decoded_log) => {
+				let decoded_socket = decoded_log.inner.data;
 
-					if !metadata.is_bootstrap {
-						log::info!(
-							target: &self.client.get_chain_name(),
-							"-[{}] 🔖 Detected socket event: {}, {:?}-{:?}",
-							sub_display_format(SUB_LOG_TARGET),
-							metadata,
-							log.block_number.unwrap(),
-							log.transaction_hash.unwrap(),
-						);
-					}
+				let msg = decoded_socket.msg.clone();
+				let metadata = SocketRelayMetadata::new(
+					self.is_inbound_sequence(Into::<u32>::into(msg.ins_code.ChainIndex) as ChainId),
+					SocketEventStatus::from(msg.status),
+					msg.req_id.sequence,
+					Into::<u32>::into(msg.req_id.ChainIndex) as ChainId,
+					Into::<u32>::into(msg.ins_code.ChainIndex) as ChainId,
+					msg.params.to,
+					is_bootstrap,
+				);
 
-					if !self.is_selected_relayer(&msg.req_id.round_id.into()).await {
-						// do nothing if not selected
-						return;
-					}
-					if self.is_sequence_ended(&msg.req_id, &msg.ins_code, metadata.status).await {
-						// do nothing if protocol sequence ended
-						return;
-					}
+				if !self.is_selected_relayer(&U256::from(msg.req_id.round_id)).await? {
+					// do nothing if not selected
+					return Ok(());
+				}
+				if self.is_sequence_ended(&msg.req_id, &msg.ins_code, metadata.status).await? {
+					// do nothing if protocol sequence ended
+					return Ok(());
+				}
 
-					self.send_socket_message(msg.clone(), metadata.clone(), metadata.is_inbound)
-						.await;
-				},
+				self.send_socket_message(msg.clone(), metadata.clone(), metadata.is_inbound)
+					.await?;
 			},
 			Err(error) => panic!(
 				"[{}]-[{}]-[{}] Unknown error while decoding socket event: {:?}",
-				self.client.get_chain_name(),
+				&self.client.get_chain_name(),
 				SUB_LOG_TARGET,
-				self.client.address(),
+				self.client.address().await,
 				error,
 			),
 		}
+
+		Ok(())
 	}
 
 	#[inline]
 	fn is_target_contract(&self, log: &Log) -> bool {
-		if let Some(bitcoin_socket) = self.client.protocol_contracts.bitcoin_socket.as_ref() {
-			log.address == self.client.protocol_contracts.socket.address()
-				|| log.address == bitcoin_socket.address()
-		} else {
-			log.address == self.client.protocol_contracts.socket.address()
+		match self.client.protocol_contracts.bitcoin_socket.as_ref() {
+			Some(bitcoin_socket) => {
+				log.address() == *self.client.protocol_contracts.socket.address()
+					|| log.address() == *bitcoin_socket.address()
+			},
+			_ => log.address() == *self.client.protocol_contracts.socket.address(),
 		}
 	}
 
 	#[inline]
-	fn is_target_event(&self, topic: H256) -> bool {
-		topic == self.socket_signature
+	fn is_target_event(&self, topic: Option<&B256>) -> bool {
+		match topic {
+			Some(topic) => topic == &Socket::SIGNATURE_HASH,
+			None => false,
+		}
 	}
 }
 
 #[async_trait::async_trait]
-impl<T: JsonRpcClient> SocketRelayBuilder<T> for SocketRelayHandler<T> {
-	fn get_client(&self) -> Arc<EthClient<T>> {
+impl<F, P> SocketRelayBuilder<F, P> for SocketRelayHandler<F, P>
+where
+	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
+	P: Provider<AnyNetwork>,
+{
+	fn get_client(&self) -> Arc<EthClient<F, P>> {
 		self.client.clone()
 	}
 
 	async fn build_transaction(
 		&self,
-		msg: SocketMessage,
+		msg: Socket_Message,
 		is_inbound: bool,
-		relay_tx_chain_id: ChainID,
-	) -> Option<BuiltRelayTransaction> {
+		relay_tx_chain_id: ChainId,
+	) -> Result<Option<BuiltRelayTransaction>> {
 		if let Some(system_client) = self.system_clients.get(&relay_tx_chain_id) {
 			let to_socket = system_client.protocol_contracts.socket.address();
 			// the original msg must be used for building calldata
 			let (signatures, is_external) = if is_inbound {
-				self.build_inbound_signatures(msg.clone()).await
+				self.build_inbound_signatures(msg.clone()).await?
 			} else {
-				self.build_outbound_signatures(msg.clone()).await
+				self.build_outbound_signatures(msg.clone()).await?
 			};
-			return Some(BuiltRelayTransaction::new(
+
+			return Ok(Some(BuiltRelayTransaction::new(
 				TransactionRequest::default()
-					.data(self.build_poll_call_data(msg, signatures))
-					.to(to_socket),
+					.input(self.build_poll_call_data(msg, signatures))
+					.to(*to_socket),
 				is_external,
-			));
+			)));
 		}
-		None
+		Ok(None)
 	}
 
-	async fn build_inbound_signatures(&self, mut msg: SocketMessage) -> (Signatures, bool) {
+	async fn build_inbound_signatures(
+		&self,
+		mut msg: Socket_Message,
+	) -> Result<(Signatures, bool)> {
 		let status = SocketEventStatus::from(msg.status);
 		let mut is_external = false;
 		let signatures = match status {
 			SocketEventStatus::Requested | SocketEventStatus::Failed => Signatures::default(),
 			SocketEventStatus::Executed => {
 				msg.status = SocketEventStatus::Accepted.into();
-				Signatures::from(self.sign_socket_message(msg))
+				Signatures::from(self.sign_socket_message(msg).await?)
 			},
 			SocketEventStatus::Reverted => {
 				msg.status = SocketEventStatus::Rejected.into();
-				Signatures::from(self.sign_socket_message(msg))
+				Signatures::from(self.sign_socket_message(msg).await?)
 			},
 			SocketEventStatus::Accepted | SocketEventStatus::Rejected => {
 				is_external = true;
-				self.get_sorted_signatures(msg).await
+				self.get_sorted_signatures(msg).await?
 			},
 			_ => panic!(
 				"[{}]-[{}]-[{}] Unknown socket event status received: {:?}",
 				&self.client.get_chain_name(),
 				SUB_LOG_TARGET,
-				self.client.address(),
+				self.client.address().await,
 				status
 			),
 		};
-		(signatures, is_external)
+		Ok((signatures, is_external))
 	}
 
-	async fn build_outbound_signatures(&self, mut msg: SocketMessage) -> (Signatures, bool) {
+	async fn build_outbound_signatures(
+		&self,
+		mut msg: Socket_Message,
+	) -> Result<(Signatures, bool)> {
 		let status = SocketEventStatus::from(msg.status);
 		let mut is_external = false;
 		let signatures = match status {
 			SocketEventStatus::Requested => {
 				msg.status = SocketEventStatus::Accepted.into();
-				Signatures::from(self.sign_socket_message(msg))
+				Signatures::from(self.sign_socket_message(msg).await?)
 			},
 			SocketEventStatus::Accepted | SocketEventStatus::Rejected => {
 				is_external = true;
-				self.get_sorted_signatures(msg).await
+				self.get_sorted_signatures(msg).await?
 			},
 			SocketEventStatus::Executed | SocketEventStatus::Reverted => Signatures::default(),
 			_ => panic!(
 				"[{}]-[{}]-[{}] Unknown socket event status received: {:?}",
 				&self.client.get_chain_name(),
 				SUB_LOG_TARGET,
-				self.client.address(),
+				self.client.address().await,
 				status
 			),
 		};
-		(signatures, is_external)
+		Ok((signatures, is_external))
 	}
 }
 
-impl<T: 'static + JsonRpcClient> SocketRelayHandler<T> {
+impl<F, P> SocketRelayHandler<F, P>
+where
+	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork> + 'static,
+	P: Provider<AnyNetwork> + 'static,
+{
 	/// Instantiates a new `SocketRelayHandler` instance.
 	pub fn new(
-		id: ChainID,
-		tx_request_senders_vec: Vec<Arc<TxRequestSender>>,
-		rollback_senders: BTreeMap<ChainID, Arc<RollbackSender>>,
+		id: ChainId,
 		event_receiver: Receiver<EventMessage>,
-		system_clients_vec: Vec<Arc<EthClient<T>>>,
+		system_clients: Arc<ClientMap<F, P>>,
+		bifrost_client: Arc<EthClient<F, P>>,
+		rollback_senders: Arc<BTreeMap<ChainId, Arc<UnboundedSender<Socket_Message>>>>,
+		handle: SpawnTaskHandle,
 		bootstrap_shared_data: Arc<BootstrapSharedData>,
+		debug_mode: bool,
 	) -> Self {
-		let system_clients: BTreeMap<ChainID, Arc<EthClient<T>>> = system_clients_vec
-			.iter()
-			.map(|client| (client.get_chain_id(), client.clone()))
-			.collect();
-
 		let client = system_clients.get(&id).expect(INVALID_CHAIN_ID).clone();
 
-		let tx_request_senders: BTreeMap<ChainID, Arc<TxRequestSender>> = tx_request_senders_vec
-			.iter()
-			.map(|sender| (sender.id, sender.clone()))
-			.collect();
-
 		Self {
-			tx_request_senders,
-			rollback_senders,
-			event_receiver,
-			socket_signature: client
-				.protocol_contracts
-				.socket
-				.abi()
-				.event("Socket")
-				.expect(INVALID_CONTRACT_ABI)
-				.signature(),
+			event_stream: BroadcastStream::new(event_receiver),
 			client,
 			system_clients,
+			bifrost_client,
+			rollback_senders,
+			handle,
 			bootstrap_shared_data,
+			debug_mode,
 		}
 	}
 
 	/// Sends the `SocketMessage` to the target chain channel.
 	async fn send_socket_message(
 		&self,
-		socket_msg: SocketMessage,
+		socket_msg: Socket_Message,
 		metadata: SocketRelayMetadata,
 		is_inbound: bool,
-	) {
+	) -> Result<()> {
 		let status = SocketEventStatus::from(socket_msg.status);
 
 		let relay_tx_chain_id = if is_inbound {
@@ -291,32 +298,29 @@ impl<T: 'static + JsonRpcClient> SocketRelayHandler<T> {
 		};
 
 		// build and send transaction request
-		if let Some(built_transaction) =
-			self.build_transaction(socket_msg.clone(), is_inbound, relay_tx_chain_id).await
+		if let Some(built_transaction) = self
+			.build_transaction(socket_msg.clone(), is_inbound, relay_tx_chain_id)
+			.await?
 		{
 			self.request_send_transaction(
 				relay_tx_chain_id,
 				built_transaction.tx_request,
 				metadata,
 				socket_msg,
-				built_transaction.is_external,
-				if built_transaction.is_external {
-					GasCoefficient::Low
-				} else {
-					GasCoefficient::Mid
-				},
 			)
 			.await;
 		}
+
+		Ok(())
 	}
 
 	/// Get the chain ID of the inbound sequence relay transaction.
 	fn get_inbound_relay_tx_chain_id(
 		&self,
 		status: SocketEventStatus,
-		src_chain_id: ChainID,
-		dst_chain_id: ChainID,
-	) -> ChainID {
+		src_chain_id: ChainId,
+		dst_chain_id: ChainId,
+	) -> ChainId {
 		match status {
 			SocketEventStatus::Requested
 			| SocketEventStatus::Failed
@@ -336,9 +340,9 @@ impl<T: 'static + JsonRpcClient> SocketRelayHandler<T> {
 	fn get_outbound_relay_tx_chain_id(
 		&self,
 		status: SocketEventStatus,
-		src_chain_id: ChainID,
-		dst_chain_id: ChainID,
-	) -> ChainID {
+		src_chain_id: ChainId,
+		dst_chain_id: ChainId,
+	) -> ChainId {
 		match status {
 			SocketEventStatus::Requested
 			| SocketEventStatus::Executed
@@ -360,37 +364,38 @@ impl<T: 'static + JsonRpcClient> SocketRelayHandler<T> {
 		req_id: &RequestID,
 		ins_code: &Instruction,
 		status: SocketEventStatus,
-	) -> bool {
-		let src = ChainID::from_be_bytes(req_id.chain);
-		let dst = ChainID::from_be_bytes(ins_code.chain);
+	) -> Result<bool> {
+		let src = Into::<u32>::into(req_id.ChainIndex) as ChainId;
+		let dst = Into::<u32>::into(ins_code.ChainIndex) as ChainId;
 
 		// if inbound::accepted and relaying to bitcoin we consider as ended
 		if let Some(bitcoin_chain_id) = self.client.get_bitcoin_chain_id() {
 			if self.is_inbound_sequence(dst) && bitcoin_chain_id == src {
-				return matches!(status, SocketEventStatus::Accepted);
+				return Ok(matches!(status, SocketEventStatus::Accepted));
 			}
 		}
 
 		if let Some(src_client) = &self.system_clients.get(&src) {
 			let request = src_client
-				.contract_call(
-					src_client.protocol_contracts.socket.get_request(req_id.clone()),
-					"socket.get_request",
-				)
-				.await;
+				.protocol_contracts
+				.socket
+				.get_request(req_id.clone())
+				.call()
+				.await?
+				._0;
 
-			return matches!(
+			return Ok(matches!(
 				SocketEventStatus::from(&request.field[0]),
 				SocketEventStatus::Committed | SocketEventStatus::Rollbacked
-			);
+			));
 		}
-		false
+		Ok(false)
 	}
 
 	/// Verifies whether the socket event is an inbound sequence.
-	fn is_inbound_sequence(&self, dst_chain_id: ChainID) -> bool {
+	fn is_inbound_sequence(&self, dst_chain_id: ChainId) -> bool {
 		matches!(
-			(self.client.get_chain_id() == dst_chain_id, self.client.metadata.if_destination_chain),
+			(self.client.chain_id() == dst_chain_id, self.client.metadata.if_destination_chain),
 			(true, RelayDirection::Inbound) | (false, RelayDirection::Outbound)
 		)
 	}
@@ -404,96 +409,49 @@ impl<T: 'static + JsonRpcClient> SocketRelayHandler<T> {
 	}
 
 	/// Verifies whether the current relayer was selected at the given round.
-	async fn is_selected_relayer(&self, round: &U256) -> bool {
-		if self.client.metadata.is_native {
-			let relayer_manager = self.client.protocol_contracts.relayer_manager.as_ref().unwrap();
-			return self
-				.client
-				.contract_call(
-					relayer_manager.is_previous_selected_relayer(
-						*round,
-						self.client.address(),
-						false,
-					),
-					"relayer_manager.is_previous_selected_relayer",
-				)
-				.await;
-		} else if let Some((_id, native_client)) =
-			self.system_clients.iter().find(|(_id, client)| client.metadata.is_native)
-		{
-			// always use the native client's contract. due to handle missed VSP's.
-			let relayer_manager =
-				native_client.protocol_contracts.relayer_manager.as_ref().unwrap();
-			return native_client
-				.contract_call(
-					relayer_manager.is_previous_selected_relayer(
-						*round,
-						self.client.address(),
-						false,
-					),
-					"relayer_manager.is_previous_selected_relayer",
-				)
-				.await;
-		}
-		false
+	async fn is_selected_relayer(&self, round: &U256) -> Result<bool> {
+		let relayer_manager =
+			self.bifrost_client.protocol_contracts.relayer_manager.as_ref().unwrap();
+		let res = relayer_manager
+			.is_previous_selected_relayer(*round, self.client.address().await, false)
+			.call()
+			.await?
+			._0;
+		Ok(res)
 	}
 
 	/// Request send socket relay transaction to the target event channel.
 	async fn request_send_transaction(
 		&self,
-		chain_id: ChainID,
+		chain_id: ChainId,
 		tx_request: TransactionRequest,
 		metadata: SocketRelayMetadata,
-		socket_msg: SocketMessage,
-		give_random_delay: bool,
-		gas_coefficient: GasCoefficient,
+		socket_msg: Socket_Message,
 	) {
-		if let Some(sender) = self.tx_request_senders.get(&chain_id) {
+		if let Some(client) = self.system_clients.get(&chain_id) {
 			if self.is_executable(metadata.is_inbound, metadata.status) {
-				self.send_rollbackable_request(chain_id, metadata.clone(), socket_msg);
+				self.send_rollbackable_request(chain_id, metadata.clone(), socket_msg).await;
 			}
 
-			match sender.send(TxRequestMessage::new(
-				TxRequest::Legacy(tx_request),
-				TxRequestMetadata::SocketRelay(metadata.clone()),
-				true,
-				give_random_delay,
-				gas_coefficient,
-				metadata.is_bootstrap,
-			)) {
-				Ok(()) => log::info!(
-					target: &self.client.get_chain_name(),
-					"-[{}] 🔖 Request relay transaction to chain({:?}): {}",
-					sub_display_format(SUB_LOG_TARGET),
-					chain_id,
-					metadata
-				),
-				Err(error) => {
-					let log_msg = format!(
-						"-[{}]-[{}] ❗️ Failed to send relay transaction to chain({:?}): {}, Error: {}",
-						sub_display_format(SUB_LOG_TARGET),
-						self.client.address(),
-						chain_id,
-						metadata,
-						error
-					);
-					log::error!(target: &self.client.get_chain_name(), "{log_msg}");
-					sentry::capture_message(
-						&format!("[{}]{log_msg}", &self.client.get_chain_name()),
-						sentry::Level::Error,
-					);
-				},
-			}
+			let metadata = TxRequestMetadata::SocketRelay(metadata);
+			send_transaction(
+				client.clone(),
+				tx_request,
+				format!("{} ({})", SUB_LOG_TARGET, self.client.get_chain_name()),
+				metadata,
+				self.debug_mode,
+				self.handle.clone(),
+			);
 		}
 	}
 
 	/// Sends a rollbackable socket message to the rollback channel.
 	/// The received message will be handled when the interval has been reached.
-	fn send_rollbackable_request(
+	async fn send_rollbackable_request(
 		&self,
-		chain_id: ChainID,
+		chain_id: ChainId,
 		metadata: SocketRelayMetadata,
-		socket_msg: SocketMessage,
+		socket_msg: Socket_Message,
 	) {
 		if let Some(rollback_sender) = self.rollback_senders.get(&chain_id) {
 			match rollback_sender.send(socket_msg) {
@@ -507,9 +465,9 @@ impl<T: 'static + JsonRpcClient> SocketRelayHandler<T> {
 					let msg = format!(
 						"-[{}]-[{}] ❗️ Failed to store rollbackable socket message: {}, Error: {}",
 						sub_display_format(SUB_LOG_TARGET),
-						self.client.address(),
+						self.client.address().await,
 						metadata,
-						error.to_string()
+						error
 					);
 					log::error!(target: &self.client.get_chain_name(), "{msg}");
 					sentry::capture_message(
@@ -523,71 +481,58 @@ impl<T: 'static + JsonRpcClient> SocketRelayHandler<T> {
 }
 
 #[async_trait::async_trait]
-impl<T: 'static + JsonRpcClient> BootstrapHandler for SocketRelayHandler<T> {
+impl<F, P> BootstrapHandler for SocketRelayHandler<F, P>
+where
+	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
+	P: Provider<AnyNetwork>,
+{
+	fn get_chain_id(&self) -> ChainId {
+		self.client.metadata.id
+	}
+
 	fn bootstrap_shared_data(&self) -> Arc<BootstrapSharedData> {
 		self.bootstrap_shared_data.clone()
 	}
 
-	async fn bootstrap(&self) {
-		log::info!(
-			target: &self.client.get_chain_name(),
-			"-[{}] ⚙️  [Bootstrap mode] Bootstrapping Socket events.",
-			sub_display_format(SUB_LOG_TARGET),
-		);
+	async fn bootstrap(&self) -> Result<()> {
+		self.wait_for_bootstrap_state(BootstrapState::BootstrapSocketRelay).await?;
 
-		let logs = self.get_bootstrap_events().await;
+		let logs = self.get_bootstrap_events().await?;
 
 		let mut stream = tokio_stream::iter(logs);
 		while let Some(log) = stream.next().await {
-			self.process_confirmed_log(&log, true).await;
+			self.process_confirmed_log(&log, true).await?;
 		}
 
-		let mut bootstrap_count = self.bootstrap_shared_data.socket_bootstrap_count.lock().await;
-		*bootstrap_count += 1;
-
-		// If All thread complete the task, starts the blockManager
-		if *bootstrap_count == self.bootstrap_shared_data.system_providers_len as u8 {
-			let mut bootstrap_guard = self.bootstrap_shared_data.bootstrap_states.write().await;
-
-			for state in bootstrap_guard.iter_mut() {
-				*state = BootstrapState::NormalStart;
-			}
-
-			log::info!(
-				target: "bifrost-relayer",
-				"-[{}] ⚙️  [Bootstrap mode] Bootstrap process successfully ended.",
-				sub_display_format(SUB_LOG_TARGET),
-			);
-		}
+		self.set_bootstrap_state(BootstrapState::NormalStart).await;
+		log::info!(
+			target: &self.client.get_chain_name(),
+			"-[{}] ⚙️  [Bootstrap mode] BootstrapSocketRelay → NormalStart",
+			sub_display_format(SUB_LOG_TARGET),
+		);
+		Ok(())
 	}
 
-	async fn get_bootstrap_events(&self) -> Vec<Log> {
+	async fn get_bootstrap_events(&self) -> Result<Vec<Log>> {
 		let mut logs = vec![];
 
 		if let Some(bootstrap_config) = &self.bootstrap_shared_data.bootstrap_config {
-			let round_info: RoundMetaData = if self.client.metadata.is_native {
-				self.client
-					.contract_call(
-						self.client.protocol_contracts.authority.round_info(),
-						"authority.round_info",
-					)
-					.await
-			} else if let Some((_id, native_client)) =
-				self.system_clients.iter().find(|(_id, client)| client.metadata.is_native)
-			{
-				native_client
-					.contract_call(
-						native_client.protocol_contracts.authority.round_info(),
-						"authority.round_info",
-					)
-					.await
+			let round_info = if self.client.metadata.is_native {
+				self.client.protocol_contracts.authority.round_info().call().await?._0
 			} else {
-				panic!(
-					"[{}]-[{}] {}",
-					self.client.get_chain_name(),
-					SUB_LOG_TARGET,
-					INVALID_BIFROST_NATIVENESS,
-				);
+				match self.system_clients.iter().find(|(_id, client)| client.metadata.is_native) {
+					Some((_id, native_client)) => {
+						native_client.protocol_contracts.authority.round_info().call().await?._0
+					},
+					_ => {
+						panic!(
+							"[{}]-[{}] {}",
+							self.client.get_chain_name(),
+							SUB_LOG_TARGET,
+							INVALID_BIFROST_NATIVENESS,
+						);
+					},
+				}
 			};
 
 			let bootstrap_offset_height = self
@@ -596,9 +541,9 @@ impl<T: 'static + JsonRpcClient> BootstrapHandler for SocketRelayHandler<T> {
 					bootstrap_config.round_offset.unwrap_or(DEFAULT_BOOTSTRAP_ROUND_OFFSET),
 					round_info,
 				)
-				.await;
+				.await?;
 
-			let latest_block_number = self.client.get_latest_block_number().await;
+			let latest_block_number = self.client.get_block_number().await?;
 			let mut from_block = latest_block_number.saturating_sub(bootstrap_offset_height);
 			let to_block = latest_block_number;
 
@@ -607,65 +552,60 @@ impl<T: 'static + JsonRpcClient> BootstrapHandler for SocketRelayHandler<T> {
 				let chunk_to_block =
 					std::cmp::min(from_block + BOOTSTRAP_BLOCK_CHUNK_SIZE - 1, to_block);
 
-				let filter =
-					if let Some(bitcoin_socket) = &self.client.protocol_contracts.bitcoin_socket {
-						Filter::new()
-							.address(vec![
-								self.client.protocol_contracts.socket.address(),
-								bitcoin_socket.address(),
-							])
-							.topic0(self.socket_signature)
-							.from_block(from_block)
-							.to_block(chunk_to_block)
-					} else {
-						Filter::new()
-							.address(self.client.protocol_contracts.socket.address())
-							.topic0(self.socket_signature)
-							.from_block(from_block)
-							.to_block(chunk_to_block)
-					};
-				let target_logs_chunk = self.client.get_logs(&filter).await;
+				let filter = match &self.client.protocol_contracts.bitcoin_socket {
+					Some(bitcoin_socket) => Filter::new()
+						.address(vec![
+							*self.client.protocol_contracts.socket.address(),
+							*bitcoin_socket.address(),
+						])
+						.event_signature(Socket::SIGNATURE_HASH)
+						.from_block(from_block)
+						.to_block(chunk_to_block),
+					_ => Filter::new()
+						.address(*self.client.protocol_contracts.socket.address())
+						.event_signature(Socket::SIGNATURE_HASH)
+						.from_block(from_block)
+						.to_block(chunk_to_block),
+				};
+				let target_logs_chunk = self.client.get_logs(&filter).await?;
 				logs.extend(target_logs_chunk);
 
 				from_block = chunk_to_block + 1;
 			}
 		}
 
-		logs
+		Ok(logs)
 	}
 }
 
 #[cfg(test)]
 mod tests {
-	use std::{str::FromStr, sync::Arc};
-
-	use ethers::{
-		abi::AbiDecode,
-		providers::{Http, Provider},
-		types::{Bytes, H160},
-		utils::hex::ToHexExt,
+	use alloy::{
+		primitives::{address, bytes},
+		providers::ProviderBuilder,
+		sol_types::SolEvent,
 	};
-
-	use br_primitives::contracts::socket::{Socket, SocketContract};
+	use br_primitives::contracts::socket::SocketContract::{self, Socket};
+	use std::sync::Arc;
 
 	use super::*;
 
 	#[tokio::test]
 	async fn test_is_already_done() {
-		let src_provider = Arc::new(Provider::<Http>::try_from("").unwrap());
-		let dst_provider = Arc::new(Provider::<Http>::try_from("").unwrap());
+		let src_provider = Arc::new(ProviderBuilder::new().on_http("".parse().unwrap()));
+		let dst_provider = Arc::new(ProviderBuilder::new().on_http("".parse().unwrap()));
 
 		let src_socket = SocketContract::new(
-			H160::from_str("0xd551F33Ca8eCb0Be83d8799D9C68a368BA36Dd52").unwrap(),
+			address!("d551F33Ca8eCb0Be83d8799D9C68a368BA36Dd52"),
 			src_provider.clone(),
 		);
 		let dst_socket = SocketContract::new(
-			H160::from_str("0xb5Fa48E8B9b89760a9f9176388D1B64A8D4968dF").unwrap(),
+			address!("b5Fa48E8B9b89760a9f9176388D1B64A8D4968dF"),
 			dst_provider.clone(),
 		);
 
-		let request_id: RequestID =
-			RequestID { chain: [0, 0, 11, 252], round_id: 677, sequence: 3446 };
+		let request_id =
+			RequestID { ChainIndex: [0, 0, 11, 252].into(), round_id: 677, sequence: 3446 };
 		println!("request_id : {:?}", request_id);
 
 		let src_request = src_socket.get_request(request_id.clone()).call().await.unwrap();
@@ -676,30 +616,33 @@ mod tests {
 
 	#[test]
 	fn test_socket_event_decode() {
-		let data = Bytes::from_str("0x00000000000000000000000000000000000000000000000000000000000000200000bfc000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001e000000000000000000000000000000000000000000000000000000000000000200000000000000000000000000000000000000000000000000000000000000050000271200000000000000000000000000000000000000000000000000000000030203010000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000e000000003000000030000bfc0148a26ea2376f006c09b7d3163f1fc70ad4134a300000000000000000000000000000000000000000000000000000000000000000000000000000000000000006e661745856b03130d03932f683cda020d7ee9ea0000000000000000000000006e661745856b03130d03932f683cda020d7ee9ea00000000000000000000000000000000000000000000000000000000000ee5e800000000000000000000000000000000000000000000000000000000000000c00000000000000000000000000000000000000000000000000000000000000000").unwrap();
+		let data = bytes!(
+			"00000000000000000000000000000000000000000000000000000000000000200000bfc000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001e000000000000000000000000000000000000000000000000000000000000000200000000000000000000000000000000000000000000000000000000000000050000271200000000000000000000000000000000000000000000000000000000030203010000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000e000000003000000030000bfc0148a26ea2376f006c09b7d3163f1fc70ad4134a300000000000000000000000000000000000000000000000000000000000000000000000000000000000000006e661745856b03130d03932f683cda020d7ee9ea0000000000000000000000006e661745856b03130d03932f683cda020d7ee9ea00000000000000000000000000000000000000000000000000000000000ee5e800000000000000000000000000000000000000000000000000000000000000c00000000000000000000000000000000000000000000000000000000000000000"
+		);
 
-		match Socket::decode(&data) {
+		match Socket::abi_decode_data(&data, true) {
 			Ok(socket) => {
-				let req_id = socket.msg.req_id;
-				let status = socket.msg.status;
-				let ins_code = socket.msg.ins_code;
-				let params = socket.msg.params;
+				let socket_msg = socket.0;
+				let req_id = socket_msg.req_id;
+				let status = socket_msg.status;
+				let ins_code = socket_msg.ins_code;
+				let params = socket_msg.params;
 
-				println!("req_id.chain -> {:?}", req_id.chain.encode_hex_with_prefix());
+				println!("req_id.chain -> {:?}", req_id.ChainIndex);
 				println!("req_id.round_id -> {:?}", req_id.round_id);
 				println!("req_id.sequence -> {:?}", req_id.sequence);
 
 				println!("status -> {:?}", status);
 
-				println!("ins_code.chain -> {:?}", ins_code.chain.encode_hex_with_prefix());
-				println!("ins_code.method -> {:?}", ins_code.method.encode_hex_with_prefix());
+				println!("ins_code.chain -> {:?}", ins_code.ChainIndex);
+				println!("ins_code.method -> {:?}", ins_code.RBCmethod);
 
-				println!("params.tokenIDX0 -> {:?}", params.token_idx0.encode_hex_with_prefix());
-				println!("params.tokenIDX1 -> {:?}", params.token_idx1.encode_hex_with_prefix());
+				println!("params.tokenIDX0 -> {:?}", params.tokenIDX0);
+				println!("params.tokenIDX1 -> {:?}", params.tokenIDX1);
 				println!("params.refund -> {:?}", params.refund);
 				println!("params.to -> {:?}", params.to);
 				println!("params.amount -> {:?}", params.amount);
-				println!("params.variants -> {:?}", params.variants.to_string());
+				println!("params.variants -> {:?}", params.variants);
 			},
 			Err(error) => {
 				panic!("decode failed -> {}", error);

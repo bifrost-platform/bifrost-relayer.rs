@@ -1,6 +1,5 @@
-use br_primitives::contracts::socket::SocketMessage;
-use br_primitives::substrate::BoundedVec;
-use ethers::abi::Token;
+use alloy::sol_types::SolValue;
+use br_primitives::{contracts::socket::Socket_Struct::Socket_Message, substrate::BoundedVec};
 use miniscript::bitcoin::{address::NetworkUnchecked, Address, Amount};
 use std::{
 	collections::{BTreeMap, HashMap},
@@ -10,20 +9,16 @@ use tokio::sync::RwLock;
 
 #[derive(Debug, Clone)]
 pub struct PendingOutboundValue {
-	pub socket_messages: Vec<SocketMessage>,
+	pub socket_messages: Vec<Socket_Message>,
 	pub amount: Amount,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct PendingOutboundPool(
 	Arc<RwLock<BTreeMap<Address<NetworkUnchecked>, PendingOutboundValue>>>,
 );
 
 impl PendingOutboundPool {
-	pub fn new() -> Self {
-		Self(Default::default())
-	}
-
 	pub async fn insert(
 		&self,
 		key: Address<NetworkUnchecked>,
@@ -77,36 +72,7 @@ impl PendingOutboundPool {
 		(outputs, socket_messages)
 	}
 
-	fn encode_socket_messages(&self, messages: Vec<SocketMessage>) -> Vec<Vec<u8>> {
-		messages
-			.into_iter()
-			.map(|msg| {
-				let req_id_token = Token::Tuple(vec![
-					Token::FixedBytes(msg.req_id.chain.into()),
-					Token::Uint(msg.req_id.round_id.into()),
-					Token::Uint(msg.req_id.sequence.into()),
-				]);
-				let status_token = Token::Uint(msg.status.into());
-				let ins_code_token = Token::Tuple(vec![
-					Token::FixedBytes(msg.ins_code.chain.into()),
-					Token::FixedBytes(msg.ins_code.method.into()),
-				]);
-				let params_token = Token::Tuple(vec![
-					Token::FixedBytes(msg.params.token_idx0.into()),
-					Token::FixedBytes(msg.params.token_idx1.into()),
-					Token::Address(msg.params.refund),
-					Token::Address(msg.params.to),
-					Token::Uint(msg.params.amount),
-					Token::Bytes(msg.params.variants.to_vec()),
-				]);
-
-				ethers::abi::encode(&[Token::Tuple(vec![
-					req_id_token,
-					status_token,
-					ins_code_token,
-					params_token,
-				])])
-			})
-			.collect()
+	fn encode_socket_messages(&self, messages: Vec<Socket_Message>) -> Vec<Vec<u8>> {
+		messages.iter().map(|msg| msg.abi_encode()).collect()
 	}
 }

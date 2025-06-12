@@ -1,7 +1,7 @@
 use std::time::SystemTime;
 
-use ethers::{types::TransactionReceipt, utils::format_units};
-use prometheus_endpoint::{Gauge, GaugeVec, Opts, Registry, F64, U64};
+use alloy::{primitives::utils::format_units, rpc::types::TransactionReceipt};
+use prometheus_endpoint::{F64, Gauge, GaugeVec, Opts, Registry, U64};
 
 lazy_static! {
 	pub static ref BLOCK_HEIGHT: GaugeVec<U64> = GaugeVec::<U64>::new(
@@ -68,15 +68,16 @@ pub fn set_native_balance(label: &str, balance: f64) {
 
 /// Increase the payed transaction fees.
 pub fn set_payed_fees(label: &str, receipt: &TransactionReceipt) {
-	if let (Some(gas_price), Some(gas_used)) = (receipt.effective_gas_price, receipt.gas_used) {
-		let payed_fee = format_units(gas_price.saturating_mul(gas_used), "ether")
-			.unwrap()
-			.parse::<f64>()
-			.unwrap();
-		PAYED_FEES
-			.with_label_values(&[label])
-			.set(PAYED_FEES.with_label_values(&[label]).get() + payed_fee)
-	}
+	let gas_price = receipt.effective_gas_price;
+	let gas_used = receipt.gas_used;
+
+	let payed_fee = format_units(gas_price.saturating_mul(gas_used.into()), "eth")
+		.unwrap()
+		.parse::<f64>()
+		.unwrap();
+	PAYED_FEES
+		.with_label_values(&[label])
+		.set(PAYED_FEES.with_label_values(&[label]).get() + payed_fee)
 }
 
 /// Set the relayer uptime.

@@ -1,24 +1,30 @@
 use std::{str::FromStr, sync::Arc, time::Duration};
 
+use alloy::{
+	network::AnyNetwork,
+	primitives::{Address, Bytes},
+	providers::{Provider, WalletProvider, fillers::TxFiller},
+};
 use bitcoincore_rpc::bitcoin::PublicKey;
-use br_client::{btc::storage::keypair::KeypairStorage, eth::EthClient};
+use br_client::{
+	btc::storage::keypair::{KeypairStorage, KeypairStorageT},
+	eth::EthClient,
+};
 use br_primitives::{
 	constants::{errors::INVALID_PERIODIC_SCHEDULE, schedule::PUB_KEY_SUBMITTER_SCHEDULE},
-	contracts::registration_pool::RegistrationPoolContract,
+	contracts::registration_pool::RegistrationPoolInstance,
 	substrate::{
+		EthereumSignature, MigrationSequence, Public, VaultKeySubmission,
 		bifrost_runtime::{
 			self, btc_registration_pool::storage::types::service_state::ServiceState,
 		},
-		AccountId20, EthereumSignature, MigrationSequence, Public, VaultKeySubmission,
 	},
 	tx::{SubmitVaultKeyMetadata, XtRequest, XtRequestMessage, XtRequestMetadata, XtRequestSender},
-	utils::{convert_ethers_to_ecdsa_signature, sub_display_format},
+	utils::sub_display_format,
 };
 use cron::Schedule;
-use ethers::{
-	providers::{JsonRpcClient, Provider},
-	types::{Address, Bytes},
-};
+use eyre::Result;
+use subxt::ext::subxt_core::utils::AccountId20;
 use tokio::{sync::RwLock, time::sleep};
 use tokio_stream::StreamExt;
 
@@ -26,13 +32,17 @@ use crate::traits::PeriodicWorker;
 
 const SUB_LOG_TARGET: &str = "pubkey-submitter";
 
-pub struct PubKeySubmitter<T> {
+pub struct PubKeySubmitter<F, P>
+where
+	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
+	P: Provider<AnyNetwork>,
+{
 	/// The Bifrost client.
-	client: Arc<EthClient<T>>,
+	pub client: Arc<EthClient<F, P>>,
 	/// The unsigned transaction message sender.
 	xt_request_sender: Arc<XtRequestSender>,
 	/// The public and private keypair local storage.
-	keypair_storage: Arc<RwLock<KeypairStorage>>,
+	keypair_storage: KeypairStorage,
 	/// The migration sequence.
 	migration_sequence: Arc<RwLock<MigrationSequence>>,
 	/// The time schedule that represents when check pending registrations.
@@ -40,26 +50,30 @@ pub struct PubKeySubmitter<T> {
 }
 
 #[async_trait::async_trait]
-impl<T: JsonRpcClient + 'static> PeriodicWorker for PubKeySubmitter<T> {
+impl<F, P> PeriodicWorker for PubKeySubmitter<F, P>
+where
+	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
+	P: Provider<AnyNetwork>,
+{
 	fn schedule(&self) -> Schedule {
 		self.schedule.clone()
 	}
 
-	async fn run(&mut self) {
+	async fn run(&mut self) -> Result<()> {
 		loop {
 			self.wait_until_next_time().await;
 
-			if self.is_relay_executive().await {
+			if self.is_relay_executive().await? {
 				let target_round = if *self.migration_sequence.read().await == ServiceState::Normal
 				{
-					self.get_current_round().await
+					self.get_current_round().await?
 				} else {
 					// wait for 9 seconds to ensure the migration sequence is updated. (at least finalization time)
 					sleep(Duration::from_secs(9)).await;
-					self.get_current_round().await.saturating_add(1)
+					self.get_current_round().await?.saturating_add(1)
 				};
 
-				let pending_registrations = self.get_pending_registrations(target_round).await;
+				let pending_registrations = self.get_pending_registrations(target_round).await?;
 
 				log::info!(
 					target: &self.client.get_chain_name(),
@@ -77,7 +91,7 @@ impl<T: JsonRpcClient + 'static> PeriodicWorker for PubKeySubmitter<T> {
 						continue;
 					}
 
-					let registration_info = self.get_registration_info(who, target_round).await;
+					let registration_info = self.get_registration_info(who, target_round).await?;
 
 					// user doesn't exist in the pool.
 					if registration_info.0 != who {
@@ -88,25 +102,29 @@ impl<T: JsonRpcClient + 'static> PeriodicWorker for PubKeySubmitter<T> {
 						continue;
 					}
 					// the relayer already submitted a public key.
-					if registration_info.3.contains(&self.client.address()) {
+					if registration_info.3.contains(&self.client.address().await) {
 						continue;
 					}
 
-					let pub_key = self.keypair_storage.write().await.create_new_keypair().await;
-					let (call, metadata) = self.build_unsigned_tx(who, pub_key).await;
-					self.request_send_transaction(call, metadata);
+					let pub_key = self.keypair_storage.create_new_keypair().await;
+					let (call, metadata) = self.build_unsigned_tx(who, pub_key).await?;
+					self.request_send_transaction(call, metadata).await;
 				}
 			}
 		}
 	}
 }
 
-impl<T: JsonRpcClient> PubKeySubmitter<T> {
+impl<F, P> PubKeySubmitter<F, P>
+where
+	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
+	P: Provider<AnyNetwork>,
+{
 	/// Instantiates a new `PubKeySubmitter` instance.
 	pub fn new(
-		client: Arc<EthClient<T>>,
+		client: Arc<EthClient<F, P>>,
 		xt_request_sender: Arc<XtRequestSender>,
-		keypair_storage: Arc<RwLock<KeypairStorage>>,
+		keypair_storage: KeypairStorage,
 		migration_sequence: Arc<RwLock<MigrationSequence>>,
 	) -> Self {
 		Self {
@@ -125,30 +143,32 @@ impl<T: JsonRpcClient> PubKeySubmitter<T> {
 		&self,
 		who: Address,
 		pub_key: PublicKey,
-	) -> (VaultKeySubmission<AccountId20>, EthereumSignature) {
+	) -> Result<(VaultKeySubmission<AccountId20>, EthereumSignature)> {
 		let mut converted_pub_key = [0u8; 33];
 		converted_pub_key.copy_from_slice(&pub_key.to_bytes());
 
 		let pool_round = if *self.migration_sequence.read().await == ServiceState::Normal {
-			self.get_current_round().await
+			self.get_current_round().await?
 		} else {
-			self.get_current_round().await.saturating_add(1)
+			self.get_current_round().await?.saturating_add(1)
 		};
 
 		let msg = VaultKeySubmission {
-			authority_id: AccountId20(self.client.address().0),
-			who: AccountId20(who.0),
+			authority_id: AccountId20(self.client.address().await.0.0),
+			who: AccountId20(who.0.0),
 			pub_key: Public(converted_pub_key),
 			pool_round,
 		};
-		let signature = convert_ethers_to_ecdsa_signature(
-			self.client.wallet.sign_message(
-				&format!("{}:{}", pool_round, array_bytes::bytes2hex("0x", converted_pub_key))
+		let signature = self
+			.client
+			.sign_message(
+				format!("{}:{}", pool_round, array_bytes::bytes2hex("0x", converted_pub_key))
 					.as_bytes(),
-			),
-		);
+			)
+			.await?
+			.into();
 
-		(msg, signature)
+		Ok((msg, signature))
 	}
 
 	/// Build the calldata for the unsigned transaction.
@@ -157,30 +177,30 @@ impl<T: JsonRpcClient> PubKeySubmitter<T> {
 		&self,
 		who: Address,
 		pub_key: PublicKey,
-	) -> (XtRequest, SubmitVaultKeyMetadata) {
-		let (msg, signature) = self.build_payload(who, pub_key).await;
+	) -> Result<(XtRequest, SubmitVaultKeyMetadata)> {
+		let (msg, signature) = self.build_payload(who, pub_key).await?;
 		let metadata = SubmitVaultKeyMetadata::new(who, pub_key);
 		if self.is_system_vault(who) {
-			(
+			Ok((
 				XtRequest::from(
 					bifrost_runtime::tx()
 						.btc_registration_pool()
 						.submit_system_vault_key(msg, signature),
 				),
 				metadata,
-			)
+			))
 		} else {
-			(
+			Ok((
 				XtRequest::from(
 					bifrost_runtime::tx().btc_registration_pool().submit_vault_key(msg, signature),
 				),
 				metadata,
-			)
+			))
 		}
 	}
 
 	/// Send the transaction request message to the channel.
-	fn request_send_transaction(&self, call: XtRequest, metadata: SubmitVaultKeyMetadata) {
+	async fn request_send_transaction(&self, call: XtRequest, metadata: SubmitVaultKeyMetadata) {
 		match self
 			.xt_request_sender
 			.send(XtRequestMessage::new(call, XtRequestMetadata::SubmitVaultKey(metadata.clone())))
@@ -195,9 +215,9 @@ impl<T: JsonRpcClient> PubKeySubmitter<T> {
 				let log_msg = format!(
 					"-[{}]-[{}] ❗️ Failed to send unsigned transaction: {}, Error: {}",
 					sub_display_format(SUB_LOG_TARGET),
-					self.client.address(),
+					self.client.address().await,
 					metadata,
-					error.to_string()
+					error
 				);
 				log::error!(target: &self.client.get_chain_name(), "{log_msg}");
 				sentry::capture_message(
@@ -209,14 +229,8 @@ impl<T: JsonRpcClient> PubKeySubmitter<T> {
 	}
 
 	/// Get the pending registrations.
-	async fn get_pending_registrations(&self, round: u32) -> Vec<Address> {
-		self.client
-			.contract_call(
-				self.registration_pool().pending_registrations(round),
-				"registration_pool.pending_registrations",
-			)
-			.await
-			.0
+	async fn get_pending_registrations(&self, round: u32) -> Result<Vec<Address>> {
+		Ok(self.registration_pool().pending_registrations(round).call().await?._0)
 	}
 
 	/// Get the user's registration information.
@@ -224,38 +238,27 @@ impl<T: JsonRpcClient> PubKeySubmitter<T> {
 		&self,
 		who: Address,
 		round: u32,
-	) -> (Address, String, String, Vec<Address>, Vec<Bytes>) {
-		self.client
-			.contract_call(
-				self.registration_pool().registration_info(who, round),
-				"registration_pool.registration_info",
-			)
-			.await
+	) -> Result<(Address, String, String, Vec<Address>, Vec<Bytes>)> {
+		Ok(self.registration_pool().registration_info(who, round).call().await?.into())
 	}
 
-	fn registration_pool(&self) -> &RegistrationPoolContract<Provider<T>> {
+	fn registration_pool(&self) -> &RegistrationPoolInstance<F, P> {
 		self.client.protocol_contracts.registration_pool.as_ref().unwrap()
 	}
 
 	/// Verify whether the current relayer is an executive.
-	async fn is_relay_executive(&self) -> bool {
+	async fn is_relay_executive(&self) -> Result<bool> {
 		let relay_exec = self.client.protocol_contracts.relay_executive.as_ref().unwrap();
-
-		self.client
-			.contract_call(relay_exec.is_member(self.client.address()), "relay_executive.is_member")
-			.await
+		Ok(relay_exec.is_member(self.client.address().await).call().await?._0)
 	}
 
 	/// Verify whether the given address is a system vault.
 	#[inline]
 	fn is_system_vault(&self, who: Address) -> bool {
-		who == self.registration_pool().address()
+		who == *self.registration_pool().address()
 	}
 
-	async fn get_current_round(&self) -> u32 {
-		let registration_pool = self.registration_pool();
-		self.client
-			.contract_call(registration_pool.current_round(), "registration_pool.current_round")
-			.await
+	async fn get_current_round(&self) -> Result<u32> {
+		Ok(self.registration_pool().current_round().call().await?._0)
 	}
 }

@@ -1,26 +1,26 @@
 use std::{collections::BTreeMap, fmt::Error, str::FromStr, sync::Arc};
 
+use alloy::{
+	network::AnyNetwork,
+	primitives::{B256, FixedBytes, U256, utils::parse_ether},
+	providers::{Provider, WalletProvider, fillers::TxFiller},
+	rpc::types::{TransactionInput, TransactionRequest},
+};
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use cron::Schedule;
-use ethers::{
-	providers::JsonRpcClient,
-	types::{TransactionRequest, H256, U256},
-	utils::parse_ether,
-};
+use eyre::Result;
 use rand::Rng;
+use sc_service::SpawnTaskHandle;
 use tokio::time::sleep;
 
-use br_client::eth::EthClient;
+use br_client::eth::{ClientMap, EthClient, send_transaction};
 use br_primitives::{
-	constants::{
-		errors::{INVALID_BIFROST_NATIVENESS, INVALID_PERIODIC_SCHEDULE},
-		schedule::PRICE_FEEDER_SCHEDULE,
-	},
+	constants::{errors::INVALID_PERIODIC_SCHEDULE, schedule::PRICE_FEEDER_SCHEDULE},
 	contracts::socket::get_asset_oids,
-	eth::GasCoefficient,
+	eth::AggregatorContracts,
 	periodic::{PriceResponse, PriceSource},
-	tx::{PriceFeedMetadata, TxRequest, TxRequestMessage, TxRequestMetadata, TxRequestSender},
+	tx::{PriceFeedMetadata, TxRequestMetadata},
 	utils::sub_display_format,
 };
 
@@ -32,37 +32,47 @@ use crate::{
 const SUB_LOG_TARGET: &str = "price-feeder";
 
 /// The essential task that handles oracle price feedings.
-pub struct OraclePriceFeeder<T> {
+pub struct OraclePriceFeeder<F, P>
+where
+	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
+	P: Provider<AnyNetwork>,
+{
 	/// The `EthClient` to interact with the bifrost network.
-	pub client: Arc<EthClient<T>>,
+	pub client: Arc<EthClient<F, P>>,
 	/// The time schedule that represents when to send price feeds.
 	schedule: Schedule,
 	/// The primary source for fetching prices. (Coingecko)
-	primary_source: Vec<PriceFetchers<T>>,
+	primary_source: Vec<PriceFetchers<F, P>>,
 	/// The secondary source for fetching prices. (aggregated from external sources)
-	secondary_sources: Vec<PriceFetchers<T>>,
-	/// The sender that sends messages to the tx request channel.
-	tx_request_sender: Arc<TxRequestSender>,
+	secondary_sources: Vec<PriceFetchers<F, P>>,
 	/// The pre-defined oracle ID's for each asset.
-	asset_oid: BTreeMap<&'static str, H256>,
+	asset_oid: BTreeMap<&'static str, B256>,
 	/// The vector that contains each `EthClient`.
-	system_clients: Vec<Arc<EthClient<T>>>,
+	clients: Arc<ClientMap<F, P>>,
+	/// The handle to spawn tasks.
+	handle: SpawnTaskHandle,
+	/// Whether to enable debug mode.
+	debug_mode: bool,
 }
 
 #[async_trait]
-impl<T: JsonRpcClient + 'static> PeriodicWorker for OraclePriceFeeder<T> {
+impl<F, P> PeriodicWorker for OraclePriceFeeder<F, P>
+where
+	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork> + 'static,
+	P: Provider<AnyNetwork> + 'static,
+{
 	fn schedule(&self) -> Schedule {
 		self.schedule.clone()
 	}
 
-	async fn run(&mut self) {
+	async fn run(&mut self) -> Result<()> {
 		self.initialize_fetchers().await;
 
 		loop {
 			let upcoming = self.schedule.upcoming(Utc).next().unwrap();
 			self.feed_period_spreader(upcoming, true).await;
 
-			if self.client.is_selected_relayer().await {
+			if self.client.is_selected_relayer().await? {
 				if self.primary_source.is_empty() {
 					log::warn!(
 						target: &self.client.get_chain_name(),
@@ -80,10 +90,16 @@ impl<T: JsonRpcClient + 'static> PeriodicWorker for OraclePriceFeeder<T> {
 	}
 }
 
-impl<T: JsonRpcClient + 'static> OraclePriceFeeder<T> {
+impl<F, P> OraclePriceFeeder<F, P>
+where
+	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork> + 'static,
+	P: Provider<AnyNetwork> + 'static,
+{
 	pub fn new(
-		tx_request_senders: Vec<Arc<TxRequestSender>>,
-		system_clients: Vec<Arc<EthClient<T>>>,
+		client: Arc<EthClient<F, P>>,
+		clients: Arc<ClientMap<F, P>>,
+		handle: SpawnTaskHandle,
+		debug_mode: bool,
 	) -> Self {
 		let asset_oid = get_asset_oids();
 
@@ -91,18 +107,11 @@ impl<T: JsonRpcClient + 'static> OraclePriceFeeder<T> {
 			schedule: Schedule::from_str(PRICE_FEEDER_SCHEDULE).expect(INVALID_PERIODIC_SCHEDULE),
 			primary_source: vec![],
 			secondary_sources: vec![],
-			tx_request_sender: tx_request_senders
-				.iter()
-				.find(|sender| sender.is_native)
-				.expect(INVALID_BIFROST_NATIVENESS)
-				.clone(),
 			asset_oid,
-			client: system_clients
-				.iter()
-				.find(|client| client.metadata.is_native)
-				.expect(INVALID_BIFROST_NATIVENESS)
-				.clone(),
-			system_clients,
+			client,
+			clients,
+			handle,
+			debug_mode,
 		}
 	}
 
@@ -112,7 +121,7 @@ impl<T: JsonRpcClient + 'static> OraclePriceFeeder<T> {
 		if in_between {
 			let sleep_duration = should_be_done_in
 				- chrono::Duration::seconds(
-					rand::thread_rng().gen_range(0..=should_be_done_in.num_seconds()),
+					rand::rng().random_range(0..=should_be_done_in.num_seconds()),
 				);
 
 			if let Ok(sleep_duration) = sleep_duration.to_std() {
@@ -151,7 +160,7 @@ impl<T: JsonRpcClient + 'static> OraclePriceFeeder<T> {
 				let log_msg = format!(
 					"-[{}]-[{}] ❗️ Failed to fetch price feed data from secondary sources. First off, skip this feeding.",
 					sub_display_format(SUB_LOG_TARGET),
-					self.client.address()
+					self.client.address().await
 				);
 				log::error!(target: &self.client.get_chain_name(), "{log_msg}");
 				sentry::capture_message(
@@ -171,17 +180,19 @@ impl<T: JsonRpcClient + 'static> OraclePriceFeeder<T> {
 			match fetcher.get_tickers().await {
 				Ok(tickers) => {
 					tickers.iter().for_each(|(symbol, price_response)| {
-						if let Some(value) = volume_weighted.get_mut(symbol) {
-							value.0 += price_response.price * price_response.volume.unwrap();
-							value.1 += price_response.volume.unwrap();
-						} else {
-							volume_weighted.insert(
-								symbol.clone(),
-								(
-									price_response.price * price_response.volume.unwrap(),
-									price_response.volume.unwrap(),
-								),
-							);
+						if !price_response.volume.unwrap().is_zero() {
+							if let Some(value) = volume_weighted.get_mut(symbol) {
+								value.0 += price_response.price * price_response.volume.unwrap();
+								value.1 += price_response.volume.unwrap();
+							} else {
+								volume_weighted.insert(
+									symbol.clone(),
+									(
+										price_response.price * price_response.volume.unwrap(),
+										price_response.volume.unwrap(),
+									),
+								);
+							}
 						}
 					});
 				},
@@ -194,13 +205,13 @@ impl<T: JsonRpcClient + 'static> OraclePriceFeeder<T> {
 		}
 
 		if !volume_weighted.contains_key("USDC") {
-			volume_weighted.insert("USDC".into(), (parse_ether(1).unwrap(), U256::from(1)));
+			volume_weighted.insert("USDC".into(), (parse_ether("1").unwrap(), U256::from(1)));
 		}
 		if !volume_weighted.contains_key("USDT") {
-			volume_weighted.insert("USDT".into(), (parse_ether(1).unwrap(), U256::from(1)));
+			volume_weighted.insert("USDT".into(), (parse_ether("1").unwrap(), U256::from(1)));
 		}
 		if !volume_weighted.contains_key("DAI") {
-			volume_weighted.insert("DAI".into(), (parse_ether(1).unwrap(), U256::from(1)));
+			volume_weighted.insert("DAI".into(), (parse_ether("1").unwrap(), U256::from(1)));
 		}
 
 		Ok(volume_weighted
@@ -234,10 +245,9 @@ impl<T: JsonRpcClient + 'static> OraclePriceFeeder<T> {
 				self.secondary_sources.push(fetcher);
 			}
 		}
-		for client in &self.system_clients {
-			if client.aggregator_contracts.chainlink_usdc_usd.is_some()
-				|| client.aggregator_contracts.chainlink_usdt_usd.is_some()
-			{
+
+		for (_, client) in self.clients.iter() {
+			if Self::has_any_chainlink_feeds(&client.aggregator_contracts) {
 				if let Ok(fetcher) =
 					PriceFetchers::new(PriceSource::Chainlink, client.clone().into()).await
 				{
@@ -247,13 +257,26 @@ impl<T: JsonRpcClient + 'static> OraclePriceFeeder<T> {
 		}
 	}
 
+	fn has_any_chainlink_feeds(contracts: &AggregatorContracts<F, P>) -> bool {
+		[
+			&contracts.chainlink_usdc_usd,
+			&contracts.chainlink_usdt_usd,
+			&contracts.chainlink_dai_usd,
+			&contracts.chainlink_btc_usd,
+			&contracts.chainlink_wbtc_usd,
+			&contracts.chainlink_cbbtc_usd,
+		]
+		.iter()
+		.any(|contract| contract.is_some())
+	}
+
 	/// Build and send transaction.
 	async fn build_and_send_transaction(&self, price_responses: BTreeMap<String, PriceResponse>) {
-		let mut oid_bytes_list: Vec<[u8; 32]> = vec![];
-		let mut price_bytes_list: Vec<[u8; 32]> = vec![];
+		let mut oid_bytes_list: Vec<FixedBytes<32>> = vec![];
+		let mut price_bytes_list: Vec<FixedBytes<32>> = vec![];
 
 		price_responses.iter().for_each(|(symbol, price_response)| {
-			oid_bytes_list.push(self.asset_oid.get(symbol.as_str()).unwrap().to_fixed_bytes());
+			oid_bytes_list.push(*self.asset_oid.get(symbol.as_str()).unwrap());
 			price_bytes_list.push(price_response.price.into());
 		});
 
@@ -267,19 +290,20 @@ impl<T: JsonRpcClient + 'static> OraclePriceFeeder<T> {
 	/// Build price feed transaction.
 	async fn build_transaction(
 		&self,
-		oid_bytes_list: Vec<[u8; 32]>,
-		price_bytes_list: Vec<[u8; 32]>,
+		oid_bytes_list: Vec<FixedBytes<32>>,
+		price_bytes_list: Vec<FixedBytes<32>>,
 	) -> TransactionRequest {
+		let input = self
+			.client
+			.protocol_contracts
+			.socket
+			.oracle_aggregate_feeding(oid_bytes_list, price_bytes_list)
+			.calldata()
+			.clone();
+
 		TransactionRequest::default()
-			.to(self.client.protocol_contracts.socket.address())
-			.data(
-				self.client
-					.protocol_contracts
-					.socket
-					.oracle_aggregate_feeding(oid_bytes_list, price_bytes_list)
-					.calldata()
-					.unwrap(),
-			)
+			.to(*self.client.protocol_contracts.socket.address())
+			.input(TransactionInput::new(input))
 	}
 
 	/// Request send transaction to the target tx request channel.
@@ -288,36 +312,13 @@ impl<T: JsonRpcClient + 'static> OraclePriceFeeder<T> {
 		tx_request: TransactionRequest,
 		metadata: PriceFeedMetadata,
 	) {
-		match self.tx_request_sender.send(TxRequestMessage::new(
-			TxRequest::Legacy(tx_request),
-			TxRequestMetadata::PriceFeed(metadata.clone()),
-			false,
-			false,
-			GasCoefficient::Mid,
-			false,
-		)) {
-			Ok(()) => log::info!(
-				target: &self.client.get_chain_name(),
-				"-[{}] 💵 Request price feed transaction to chain({:?}): {}",
-				sub_display_format(SUB_LOG_TARGET),
-				self.client.get_chain_id(),
-				metadata
-			),
-			Err(error) => {
-				let log_msg = format!(
-					"-[{}]-[{}] ❗️ Failed to request price feed transaction to chain({:?}): {}, Error: {}",
-					sub_display_format(SUB_LOG_TARGET),
-					self.client.address(),
-					self.client.get_chain_id(),
-					metadata,
-					error.to_string()
-				);
-				log::error!(target: &self.client.get_chain_name(), "{log_msg}");
-				sentry::capture_message(
-					&format!("[{}]{log_msg}", &self.client.get_chain_name()),
-					sentry::Level::Error,
-				);
-			},
-		}
+		send_transaction(
+			self.client.clone(),
+			tx_request,
+			SUB_LOG_TARGET.to_string(),
+			TxRequestMetadata::PriceFeed(metadata),
+			self.debug_mode,
+			self.handle.clone(),
+		);
 	}
 }

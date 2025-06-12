@@ -1,6 +1,6 @@
 [package]
 name = "bifrost-relayer"
-version = "2.0.1"
+version = "2.1.1"
 description = "The core rust implementation for Bifrost relayer"
 authors = { workspace = true }
 homepage = { workspace = true }
@@ -12,10 +12,10 @@ build = "build.rs"
 [dependencies]
 # General
 log = { workspace = true }
+hex = { workspace = true }
 env_logger = { workspace = true }
 chrono = { workspace = true }
-serde_yaml = { workspace = true }
-ethers = { workspace = true }
+alloy = { workspace = true }
 futures = { workspace = true }
 clap = { workspace = true, features = ["derive"] }
 tokio = { workspace = true, features = [
@@ -25,7 +25,10 @@ tokio = { workspace = true, features = [
 ] }
 miniscript = { workspace = true }
 bitcoincore-rpc = { workspace = true }
-subxt = { workspace = true }
+sentry = { workspace = true }
+aws-sdk-kms = { workspace = true }
+aws-config = { workspace = true }
+secrecy = { workspace = true }
 
 # Bifrost Relayer
 br-cli = { path = "../client/cli", default-features = false }
@@ -38,6 +41,7 @@ br-metrics = { path = "../metrics", default-features = false }
 sc-cli = { workspace = true }
 sc-service = { workspace = true }
 sc-sysinfo = { workspace = true }
+sp-application-crypto = { workspace = true }
 prometheus-endpoint = { workspace = true }
 
 [build-dependencies]

@@ -1,8 +1,7 @@
+use alloy::primitives::ChainId;
+use secrecy::SecretString;
 use serde::Deserialize;
-use std::{borrow::Cow, fmt::Display};
-
-use crate::eth::ChainID;
-
+use std::borrow::Cow;
 pub type Result<T> = std::result::Result<T, Error>;
 
 /// Error type for the CLI.
@@ -39,7 +38,11 @@ pub struct Configuration {
 #[derive(Debug, Clone, Deserialize)]
 pub struct RelayerConfig {
 	/// System config
-	pub system: SystemConfig,
+	pub system: Option<SystemConfig>,
+	/// Signer config
+	pub signer_config: Vec<SignerConfig>,
+	/// Keystore config
+	pub keystore_config: Option<KeystoreConfig>,
 	/// EVM configs
 	pub evm_providers: Vec<EVMProvider>,
 	/// BTC configs
@@ -56,12 +59,6 @@ pub struct RelayerConfig {
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct SystemConfig {
-	/// The private key of the relayer.
-	pub private_key: String,
-	/// Path of the keystore. (default: `./keys`)
-	pub keystore_path: Option<String>,
-	/// Password of the keystore. (default: `None`)
-	pub keystore_password: Option<String>,
 	/// Debug mode enabled if set to `true`.
 	pub debug_mode: Option<bool>,
 }
@@ -71,7 +68,7 @@ pub struct EVMProvider {
 	/// Network name
 	pub name: String,
 	/// Chain ID
-	pub id: ChainID,
+	pub id: ChainId,
 	/// Endpoint provider
 	pub provider: String,
 	/// The time interval(ms) used when to request a new block
@@ -84,20 +81,6 @@ pub struct EVMProvider {
 	pub is_relay_target: bool,
 	/// If true, enables Eip1559. (default: false)
 	pub eip1559: Option<bool>,
-	/// The minimum value use for gas_price. (default: 0, unit: WEI)
-	pub min_gas_price: Option<u64>,
-	/// The minimum priority fee required. (default: 0, unit: WEI)
-	pub min_priority_fee: Option<u64>,
-	/// Gas price increase percentage on gas price escalation such as when handling tx
-	/// replacements. (default: 15.0)
-	pub escalate_percentage: Option<f64>,
-	/// The flag whether if the gas price will be initially escalated. The `escalate_percentage`
-	/// will be used on escalation. This will only have effect on legacy transactions. (default:
-	/// false)
-	pub is_initially_escalated: Option<bool>,
-	/// If first relay transaction is stuck in mempool after waiting for this amount of time(ms),
-	/// ignore duplicate prevent logic. (default: 12s)
-	pub duplicate_confirm_delay: Option<u64>,
 	/// The batch size (=block range) used when requesting `eth_getLogs()`. If increased the RPC
 	/// request ratio will be reduced, however event processing will be delayed regarded to the
 	/// configured batch size. Default size is set to 1, which means it will be requested on every
@@ -134,7 +117,7 @@ pub struct EVMProvider {
 #[derive(Debug, Clone, Deserialize)]
 pub struct BTCProvider {
 	/// The bitcoin chain ID used for CCCP.
-	pub id: u32,
+	pub id: u64,
 	/// The Bitcoin provider URL.
 	pub provider: String,
 	/// The time interval(ms) used when to request a new block
@@ -159,22 +142,12 @@ pub enum HandlerType {
 	Roundup,
 }
 
-impl Display for HandlerType {
-	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-		let str = match *self {
-			HandlerType::Socket => "Socket",
-			HandlerType::Roundup => "Roundup",
-		};
-		write!(f, "{}", str)
-	}
-}
-
 #[derive(Debug, Clone, Deserialize)]
 pub struct HandlerConfig {
 	/// Handle type
 	pub handler_type: HandlerType,
 	/// Watch target list
-	pub watch_list: Vec<ChainID>,
+	pub watch_list: Vec<ChainId>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -182,7 +155,7 @@ pub struct BootstrapConfig {
 	/// Bootstrapping flag
 	pub is_enabled: bool,
 	/// Optional. The round offset used for EVM bootstrap.
-	pub round_offset: Option<u32>,
+	pub round_offset: Option<u64>,
 	/// Optional. The block offset used for Bitcoin bootstrap.
 	pub btc_block_offset: Option<u32>,
 }
@@ -209,4 +182,22 @@ pub struct PrometheusConfig {
 	pub is_external: Option<bool>,
 	/// Prometheus exporter TCP Port.
 	pub port: Option<u16>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct SignerConfig {
+	/// AWS KMS key ID. (to use AwsSigner)
+	pub kms_key_id: Option<String>,
+	/// The private key of the relayer. (to use LocalSigner)
+	pub private_key: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct KeystoreConfig {
+	/// Path of the keystore. (default: `./keys`)
+	pub path: Option<String>,
+	/// Password of the keystore. (default: `None`)
+	pub password: Option<SecretString>,
+	/// AWS KMS key ID. (to use keystore encryption/decryption)
+	pub kms_key_id: Option<String>,
 }

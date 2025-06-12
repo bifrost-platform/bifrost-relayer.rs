@@ -1,4 +1,5 @@
 pub mod bootstrap;
+pub mod btc;
 pub mod cli;
 pub mod constants;
 pub mod contracts;

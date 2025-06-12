@@ -1,7 +1,12 @@
 use std::{collections::BTreeMap, fmt::Error, ops::Mul, sync::Arc};
 
+use alloy::{
+	network::AnyNetwork,
+	primitives::U256,
+	providers::{Provider, WalletProvider, fillers::TxFiller},
+};
 use async_trait::async_trait;
-use ethers::{providers::JsonRpcClient, types::U256};
+use eyre::Result;
 use serde::Deserialize;
 
 use br_client::eth::EthClient;
@@ -26,13 +31,17 @@ mod upbit;
 const LOG_TARGET: &str = "price-fetcher";
 
 #[derive(Clone)]
-pub enum PriceFetchers<T> {
-	Binance(BinancePriceFetcher<T>),
-	Chainlink(ChainlinkPriceFetcher<T>),
-	CoinGecko(CoingeckoPriceFetcher<T>),
-	Gateio(GateioPriceFetcher<T>),
-	Kucoin(KucoinPriceFetcher<T>),
-	Upbit(UpbitPriceFetcher<T>),
+pub enum PriceFetchers<F, P>
+where
+	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
+	P: Provider<AnyNetwork>,
+{
+	Binance(BinancePriceFetcher),
+	Chainlink(ChainlinkPriceFetcher<F, P>),
+	CoinGecko(CoingeckoPriceFetcher),
+	Gateio(GateioPriceFetcher),
+	Kucoin(KucoinPriceFetcher),
+	Upbit(UpbitPriceFetcher),
 }
 
 #[derive(Deserialize)]
@@ -73,11 +82,12 @@ pub async fn krw_to_usd(krw_amount: U256) -> Result<U256, Error> {
 	}
 }
 
-impl<T: JsonRpcClient> PriceFetchers<T> {
-	pub async fn new(
-		exchange: PriceSource,
-		client: Option<Arc<EthClient<T>>>,
-	) -> Result<Self, Error> {
+impl<F, P> PriceFetchers<F, P>
+where
+	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
+	P: Provider<AnyNetwork>,
+{
+	pub async fn new(exchange: PriceSource, client: Option<Arc<EthClient<F, P>>>) -> Result<Self> {
 		match exchange {
 			PriceSource::Binance => Ok(PriceFetchers::Binance(BinancePriceFetcher::new().await?)),
 			PriceSource::Chainlink => {
@@ -94,8 +104,12 @@ impl<T: JsonRpcClient> PriceFetchers<T> {
 }
 
 #[async_trait]
-impl<T: JsonRpcClient + 'static> PriceFetcher for PriceFetchers<T> {
-	async fn get_ticker_with_symbol(&self, symbol: String) -> Result<PriceResponse, Error> {
+impl<F, P> PriceFetcher for PriceFetchers<F, P>
+where
+	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
+	P: Provider<AnyNetwork>,
+{
+	async fn get_ticker_with_symbol(&self, symbol: String) -> Result<PriceResponse> {
 		match self {
 			PriceFetchers::Binance(fetcher) => fetcher.get_ticker_with_symbol(symbol).await,
 			PriceFetchers::Chainlink(fetcher) => fetcher.get_ticker_with_symbol(symbol).await,
@@ -106,7 +120,7 @@ impl<T: JsonRpcClient + 'static> PriceFetcher for PriceFetchers<T> {
 		}
 	}
 
-	async fn get_tickers(&self) -> Result<BTreeMap<String, PriceResponse>, Error> {
+	async fn get_tickers(&self) -> Result<BTreeMap<String, PriceResponse>> {
 		match self {
 			PriceFetchers::Binance(fetcher) => fetcher.get_tickers().await,
 			PriceFetchers::Chainlink(fetcher) => fetcher.get_tickers().await,
@@ -120,28 +134,13 @@ impl<T: JsonRpcClient + 'static> PriceFetcher for PriceFetchers<T> {
 
 #[cfg(test)]
 mod tests {
-	use ethers::{providers::Http, utils::parse_ether};
+	use alloy::primitives::utils::parse_ether;
 
 	use super::*;
 
 	#[tokio::test]
-	async fn fetcher_enum_matching() {
-		let fetchers: Vec<PriceFetchers<Http>> = vec![
-			PriceFetchers::new(PriceSource::Binance, None).await.unwrap(),
-			PriceFetchers::new(PriceSource::Coingecko, None).await.unwrap(),
-			PriceFetchers::new(PriceSource::Gateio, None).await.unwrap(),
-			PriceFetchers::new(PriceSource::Kucoin, None).await.unwrap(),
-			PriceFetchers::new(PriceSource::Upbit, None).await.unwrap(),
-		];
-
-		for fetcher in fetchers {
-			println!("{:?}", fetcher.get_tickers().await);
-		}
-	}
-
-	#[tokio::test]
 	async fn krw_to_usd_exchange() {
-		let res = krw_to_usd(parse_ether(1).unwrap()).await;
+		let res = krw_to_usd(parse_ether("1").unwrap()).await;
 		println!("{:?}", res);
 	}
 }

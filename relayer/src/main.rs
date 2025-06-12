@@ -1,5 +1,7 @@
 mod cli;
+mod commands;
 mod service;
+mod service_deps;
 mod verification;
 
 use std::io::Write;
@@ -40,16 +42,30 @@ fn main() {
 	let cli = Cli::from_args();
 
 	let tokio_runtime = build_runtime().unwrap();
-	let configuration =
-		create_configuration(tokio_runtime.handle().clone(), cli.load_spec()).unwrap();
+	let configuration = create_configuration(
+		tokio_runtime.handle().clone(),
+		match &cli.subcommand {
+			Some(cli::Subcommand::MigrateKeystore(cmd)) => cmd.load_spec(),
+			None => cli.load_spec(),
+		},
+	)
+	.unwrap();
 
 	sc_sysinfo::print_sysinfo(&sc_sysinfo::gather_sysinfo());
 	cli.print_relayer_infos();
 
 	let runner = Runner::new(configuration, tokio_runtime).unwrap();
-	runner
-		.run_relayer_until_exit(|config| async move {
-			service::relay(config).map_err(sc_cli::Error::Service)
-		})
-		.unwrap_or_default();
+
+	match cli.subcommand {
+		Some(cli::Subcommand::MigrateKeystore(cmd)) => {
+			let _ = runner.async_run(|config| Ok(cmd.run(config.clone())));
+		},
+		None => {
+			runner
+				.run_relayer_until_exit(|config| async move {
+					service::relay(config).await.map_err(sc_cli::Error::Service)
+				})
+				.unwrap_or_default();
+		},
+	}
 }

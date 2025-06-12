@@ -54,5 +54,11 @@ pub const PROVIDER_INTERNAL_ERROR: &str =
 pub const KEYSTORE_INTERNAL_ERROR: &str =
 	"An internal error thrown when accessing the keystore. Please check your keystore's validness.";
 
+pub const KEYSTORE_DECRYPTION_ERROR: &str =
+	"Keypair mismatch. Please check your keystore's encryption method.";
+
 pub const PARAMETER_OUT_OF_RANGE: &str =
 	"An invalid parameter is out of range. Please check your configuration file.";
+
+pub const KMS_INITIALIZATION_ERROR: &str =
+	"An internal error thrown when initializing the KMS. Please check your KMS's status.";

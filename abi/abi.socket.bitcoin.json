@@ -105,8 +105,8 @@
             {
               "components": [
                 {
-                  "internalType": "ChainIndex",
-                  "name": "chain",
+                  "internalType": "bytes4",
+                  "name": "ChainIndex",
                   "type": "bytes4"
                 },
                 {
@@ -132,13 +132,13 @@
             {
               "components": [
                 {
-                  "internalType": "ChainIndex",
-                  "name": "chain",
+                  "internalType": "bytes4",
+                  "name": "ChainIndex",
                   "type": "bytes4"
                 },
                 {
-                  "internalType": "RBCmethod",
-                  "name": "method",
+                  "internalType": "bytes16",
+                  "name": "RBCmethod",
                   "type": "bytes16"
                 }
               ],
@@ -149,12 +149,12 @@
             {
               "components": [
                 {
-                  "internalType": "Asset_Index",
+                  "internalType": "bytes32",
                   "name": "tokenIDX0",
                   "type": "bytes32"
                 },
                 {
-                  "internalType": "Asset_Index",
+                  "internalType": "bytes32",
                   "name": "tokenIDX1",
                   "type": "bytes32"
                 },
@@ -234,8 +234,8 @@
       "name": "BFC_MAIN",
       "outputs": [
         {
-          "internalType": "ChainIndex",
-          "name": "",
+          "internalType": "bytes4",
+          "name": "ChainIndex",
           "type": "bytes4"
         }
       ],
@@ -247,8 +247,8 @@
       "name": "BTC_ON_BTC",
       "outputs": [
         {
-          "internalType": "Asset_Index",
-          "name": "",
+          "internalType": "bytes32",
+          "name": "Asset_Index",
           "type": "bytes32"
         }
       ],
@@ -829,8 +829,8 @@
     {
       "inputs": [
         {
-          "internalType": "Asset_Index",
-          "name": "_index",
+          "internalType": "bytes32",
+          "name": "Asset_Index",
           "type": "bytes32"
         }
       ],
@@ -842,8 +842,8 @@
     {
       "inputs": [
         {
-          "internalType": "ChainIndex",
-          "name": "_chain",
+          "internalType": "bytes4",
+          "name": "ChainIndex",
           "type": "bytes4"
         }
       ],
@@ -939,8 +939,8 @@
       "name": "this_chain",
       "outputs": [
         {
-          "internalType": "ChainIndex",
-          "name": "",
+          "internalType": "bytes4",
+          "name": "ChainIndex",
           "type": "bytes4"
         }
       ],
@@ -1007,8 +1007,8 @@
         {
           "components": [
             {
-              "internalType": "ChainIndex",
-              "name": "chain",
+              "internalType": "bytes4",
+              "name": "ChainIndex",
               "type": "bytes4"
             },
             {

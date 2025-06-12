@@ -1,26 +1,30 @@
+use alloy::{
+	network::AnyNetwork,
+	providers::{Provider, WalletProvider, fillers::TxFiller},
+};
 use br_primitives::{
 	substrate::CustomConfig,
 	tx::{XtRequestMessage, XtRequestMetadata},
 	utils::sub_display_format,
 };
 
-use ethers::providers::JsonRpcClient;
 use std::{error::Error, sync::Arc, time::Duration};
-use subxt::{blocks::ExtrinsicEvents, Config, OnlineClient};
+use subxt::{Config, OnlineClient, blocks::ExtrinsicEvents};
 use tokio::time::sleep;
 
 use crate::eth::EthClient;
 
 #[async_trait::async_trait]
-pub trait ExtrinsicTask<T>
+pub trait ExtrinsicTask<F, P>
 where
-	T: JsonRpcClient,
+	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
+	P: Provider<AnyNetwork>,
 {
 	/// Get the substrate client.
 	fn get_sub_client(&self) -> Arc<OnlineClient<CustomConfig>>;
 
 	/// Get the Bifrost client.
-	fn get_bfc_client(&self) -> Arc<EthClient<T>>;
+	fn get_bfc_client(&self) -> Arc<EthClient<F, P>>;
 
 	/// Sends the consumed unsigned transaction request to the Bifrost network.
 	async fn try_send_unsigned_transaction(&self, msg: XtRequestMessage);
@@ -39,21 +43,33 @@ where
 	{
 		let error_str = error.to_string();
 
-		// If the transaction is a SubmitSignedPsbt, and the error is RequestDNE, then we don't need to retry
-		if let XtRequestMetadata::SubmitSignedPsbt(_) = msg.metadata {
-			if error_str.contains("BtcSocketQueue::RequestDNE") {
-				log::info!(
-					target: &self.get_bfc_client().get_chain_name(),
-					"M-of-N signature has been collected, so not retrying"
-				);
-				return;
-			}
-		}
+		// Some ~DNE errors are not retryable
+		match msg.metadata {
+			XtRequestMetadata::SubmitSignedPsbt(_) => {
+				if error_str.contains("BtcSocketQueue::RequestDNE") {
+					log::info!(
+						target: &self.get_bfc_client().get_chain_name(),
+						"M-of-N signature has been collected, so not retrying"
+					);
+					return;
+				}
+			},
+			XtRequestMetadata::SubmitExecutedRequest(_) => {
+				if error_str.contains("BtcSocketQueue::RequestDNE") {
+					log::info!(
+						target: &self.get_bfc_client().get_chain_name(),
+						"Executed notification has been collected, no need to retry"
+					);
+					return;
+				}
+			},
+			_ => {},
+		};
 
 		let log_msg = format!(
 			"-[{}]-[{}] ♻️  Unknown error while requesting a transaction request: {}, Retries left: {:?}, Error: {}",
 			sub_display_format(sub_target),
-			self.get_bfc_client().address(),
+			self.get_bfc_client().address().await,
 			msg.metadata,
 			msg.retries_remaining - 1,
 			error_str,
@@ -75,10 +91,10 @@ where
 		let log_msg = format!(
 			"-[{}]-[{}] ♻️  Unknown error while creating a tx request: {}, Retries left: {:?}, Error: {}",
 			sub_display_format(sub_target),
-			self.get_bfc_client().address(),
+			self.get_bfc_client().address().await,
 			msg.metadata,
 			msg.retries_remaining - 1,
-			error.to_string(),
+			error,
 		);
 		log::error!(target: &self.get_bfc_client().get_chain_name(), "{log_msg}");
 		sentry::capture_message(

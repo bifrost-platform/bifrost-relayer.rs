@@ -1,8 +1,18 @@
 system:
-  private_key: "<YOUR_RELAYER_PRIVATE_KEY>"
-  keystore_path: "<YOUR_KEYSTORE_PATH>"
-  keystore_password: "<YOUR_KEYSTORE_PASSWORD>"
   debug_mode: false
+
+signer_config:
+  # Two parameters below are optional, but one of them must be provided.
+  # `kms_key_id` has higher priority than `private_key`.
+  - kms_key_id: "<YOUR_KMS_KEY_ID_FOR_SIGNER>"
+    private_key: "<YOUR_RELAYER_PRIVATE_KEY>"
+
+keystore_config:
+  path: "<YOUR_KEYSTORE_PATH>"
+  # Two parameters below are optional, but one of them must be provided.
+  # `kms_key_id` has higher priority than `password`.
+  kms_key_id: "<YOUR_KMS_KEY_ID_FOR_KEYSTORE>"
+  password: "<YOUR_KEYSTORE_PASSWORD>"
 
 btc_provider:
   id: 10001
