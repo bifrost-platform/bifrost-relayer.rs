@@ -167,7 +167,9 @@ where
 		loop {
 			self.wait_until_next_time().await;
 
-			if self.bfc_client.is_selected_relayer().await? {
+			if self.bfc_client.is_selected_relayer().await?
+				&& self.bfc_client.blaze_activation().await?
+			{
 				let finalized_psbts = self.get_finalized_psbts().await?;
 				if !finalized_psbts.is_empty() {
 					log::info!(
