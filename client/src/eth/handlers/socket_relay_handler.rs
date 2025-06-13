@@ -128,9 +128,7 @@ where
 					// do nothing if protocol sequence ended
 					return Ok(());
 				}
-				if self.client.blaze_activation().await? {
-					self.submit_brp_outbound_request(msg.clone(), metadata.clone()).await?;
-				}
+				self.submit_brp_outbound_request(msg.clone(), metadata.clone()).await?;
 
 				self.send_socket_message(msg.clone(), metadata.clone(), metadata.is_inbound)
 					.await?;
