@@ -28,5 +28,5 @@ pub const PRESUBMISSION_SCHEDULE: &str = "0 0 * * * * *";
 /// The schedule definition for PSBT signer. This will trigger on every 9th second.
 pub const PSBT_SIGNER_SCHEDULE: &str = "*/9 * * * * * *";
 
-/// The schedule definition for PSBT broadcaster. This will trigger on every 3rd second.
-pub const PSBT_BROADCASTER_SCHEDULE: &str = "*/3 * * * * * *";
+/// The schedule definition for PSBT broadcaster. This will trigger on every 9th second.
+pub const PSBT_BROADCASTER_SCHEDULE: &str = "*/9 * * * * * *";
