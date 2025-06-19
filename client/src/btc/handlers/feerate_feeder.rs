@@ -4,6 +4,7 @@ use alloy::{
 	network::AnyNetwork,
 	providers::{Provider, WalletProvider, fillers::TxFiller},
 };
+use bitcoincore_rpc::{Client as BtcClient, RpcApi};
 use br_primitives::{
 	btc::{FeeRateResponse, MEMPOOL_SPACE_FEE_RATE_MULTIPLIER},
 	substrate::{
@@ -30,6 +31,8 @@ where
 {
 	/// `EthClient` to interact with Bifrost network.
 	pub bfc_client: Arc<EthClient<F, P>>,
+	/// `Client` to interact with bitcoin core RPC.
+	btc_client: BtcClient,
 	/// The substrate client.
 	sub_client: Option<OnlineClient<CustomConfig>>,
 	/// The unsigned transaction message sender.
@@ -49,6 +52,7 @@ where
 {
 	pub fn new(
 		bfc_client: Arc<EthClient<F, P>>,
+		btc_client: BtcClient,
 		xt_request_sender: Arc<XtRequestSender>,
 		event_receiver: Receiver<EventMessage>,
 		fee_rate_api: Option<&'static str>,
@@ -56,6 +60,7 @@ where
 	) -> Self {
 		Self {
 			bfc_client,
+			btc_client,
 			sub_client: None,
 			xt_request_sender,
 			event_stream: BroadcastStream::new(event_receiver),
@@ -90,6 +95,10 @@ where
 							break (lt_fee_rate, final_fee_rate);
 						},
 						Err(e) => {
+							if let Ok(fallback) = self.fallback_estimate_fee().await {
+								break fallback;
+							}
+
 							log::warn!(
 								target: LOG_TARGET,
 								"-[{}] Failed to decode fee rate: {:?}. Retrying...",
@@ -100,6 +109,10 @@ where
 						},
 					},
 					Err(e) => {
+						if let Ok(fallback) = self.fallback_estimate_fee().await {
+							break fallback;
+						}
+
 						log::warn!(
 							target: LOG_TARGET,
 							"-[{}] Failed to fetch fee rate: {:?}. Retrying...",
@@ -114,6 +127,26 @@ where
 				break (1, 1);
 			}
 		}
+	}
+
+	/// Fallback method to estimate fee rate if the mempool.space API is not available.
+	async fn fallback_estimate_fee(&self) -> Result<(u64, u64)> {
+		let st_fee_rate =
+			self.btc_client.estimate_smart_fee(1, None).await?.fee_rate.unwrap().to_sat() / 1000;
+		let lt_fee_rate =
+			self.btc_client.estimate_smart_fee(6, None).await?.fee_rate.unwrap().to_sat() / 1000;
+
+		if self.debug_mode {
+			log::info!(
+				target: LOG_TARGET,
+				"-[{}] Fallback fee rate: ({:?}, {:?})",
+				sub_display_format(SUB_LOG_TARGET),
+				lt_fee_rate,
+				st_fee_rate
+			);
+		}
+
+		Ok((lt_fee_rate, st_fee_rate))
 	}
 
 	async fn build_payload(

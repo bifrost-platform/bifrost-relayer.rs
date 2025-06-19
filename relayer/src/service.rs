@@ -6,9 +6,9 @@ use std::{
 	time::Duration,
 };
 
-use alloy::primitives::Address;
 use alloy::{
 	network::{AnyNetwork, EthereumWallet},
+	primitives::Address,
 	providers::{
 		Provider, ProviderBuilder, WalletProvider,
 		fillers::{ChainIdFiller, GasFiller, TxFiller},
