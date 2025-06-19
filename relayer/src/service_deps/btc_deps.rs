@@ -111,6 +111,7 @@ where
 		);
 		let fee_rate_feeder = FeeRateFeeder::new(
 			bfc_client.clone(),
+			btc_client.clone(),
 			substrate_deps.xt_request_sender.clone(),
 			block_manager.subscribe(),
 			if network == Network::Bitcoin {
