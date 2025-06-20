@@ -46,7 +46,7 @@ where
 							let (_, price, _, _, _) =
 								contract.latestRoundData().call().await?.into();
 							let price = price.into_raw();
-							let decimals = contract.decimals().call().await?._0;
+							let decimals = contract.decimals().call().await?;
 
 							let price = price * U256::from(10u128.pow((18 - decimals).into()));
 							let volume = Some(U256::from(1));

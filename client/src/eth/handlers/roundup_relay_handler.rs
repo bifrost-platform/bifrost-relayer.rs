@@ -2,7 +2,7 @@ use std::{sync::Arc, time::Duration};
 
 use alloy::{
 	network::{AnyNetwork, primitives::ReceiptResponse as _},
-	primitives::{Address, B256, PrimitiveSignature, U256},
+	primitives::{Address, B256, Signature, U256},
 	providers::{Provider, WalletProvider, fillers::TxFiller},
 	rpc::types::{Filter, Log, TransactionInput, TransactionRequest},
 	sol_types::SolEvent as _,
@@ -208,16 +208,10 @@ where
 		round: U256,
 		new_relayers: &[Address],
 	) -> Result<Signatures> {
-		let signatures = self
-			.client
-			.protocol_contracts
-			.socket
-			.get_round_signatures(round)
-			.call()
-			.await?
-			._0;
+		let signatures =
+			self.client.protocol_contracts.socket.get_round_signatures(round).call().await?;
 
-		let mut signature_vec = Vec::<PrimitiveSignature>::from(signatures);
+		let mut signature_vec = Vec::<Signature>::from(signatures);
 		signature_vec
 			.sort_by_key(|k| recover_message(*k, &encode_roundup_param(round, new_relayers)));
 
@@ -230,14 +224,13 @@ where
 		Ok(relayer_manager
 			.is_previous_selected_relayer(round, relayer, true)
 			.call()
-			.await?
-			._0)
+			.await?)
 	}
 
 	async fn relay_as(&self, round: U256) -> Address {
 		let relayer_manager = self.client.protocol_contracts.relayer_manager.as_ref().unwrap();
 		let prev_relayers =
-			relayer_manager.previous_selected_relayers(round, true).call().await.unwrap()._0;
+			relayer_manager.previous_selected_relayers(round, true).call().await.unwrap();
 		let signers = self.client.signers();
 
 		signers.into_iter().find(|s| prev_relayers.contains(s)).unwrap_or_default()
@@ -283,7 +276,7 @@ where
 		while let Some((dst_chain_id, target_client)) = stream.next().await {
 			// Check roundup submitted to target chain before.
 			let latest_round =
-				target_client.protocol_contracts.authority.latest_round().call().await?._0;
+				target_client.protocol_contracts.authority.latest_round().call().await?;
 			if roundup_submit.round > latest_round {
 				let transaction_request = self.build_transaction_request(
 					&target_client.protocol_contracts.socket,
@@ -337,8 +330,8 @@ where
 			let target_authority = target_client.protocol_contracts.authority.clone();
 
 			tokio::spawn(async move {
-				while target_authority.latest_round().call().await.unwrap()._0
-					< bifrost_authority.latest_round().call().await.unwrap()._0
+				while target_authority.latest_round().call().await.unwrap()
+					< bifrost_authority.latest_round().call().await.unwrap()
 				{
 					tokio::time::sleep(Duration::from_millis(DEFAULT_CALL_RETRY_INTERVAL_MS)).await;
 				}
@@ -414,7 +407,7 @@ where
 				.client
 				.get_bootstrap_offset_height_based_on_block_time(
 					bootstrap_config.round_offset.unwrap_or(DEFAULT_BOOTSTRAP_ROUND_OFFSET),
-					self.client.protocol_contracts.authority.round_info().call().await?._0,
+					self.client.protocol_contracts.authority.round_info().call().await?,
 				)
 				.await?;
 

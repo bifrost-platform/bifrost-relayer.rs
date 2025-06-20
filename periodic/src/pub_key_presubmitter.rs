@@ -227,7 +227,7 @@ where
 	/// Verify whether the current relayer is an executive.
 	async fn is_relay_executive(&self) -> Result<bool> {
 		let relay_exec = self.bfc_client.protocol_contracts.relay_executive.as_ref().unwrap();
-		Ok(relay_exec.is_member(self.bfc_client.address().await).call().await?._0)
+		Ok(relay_exec.is_member(self.bfc_client.address().await).call().await?)
 	}
 
 	async fn get_latest_storage(&self) -> Storage<CustomConfig, OnlineClient<CustomConfig>> {

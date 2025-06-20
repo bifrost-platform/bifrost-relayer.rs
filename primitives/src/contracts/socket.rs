@@ -28,8 +28,8 @@ sol!(
 	"../abi/abi.socket.merged.json"
 );
 
-impl From<PrimitiveSignature> for Signatures {
-	fn from(signature: PrimitiveSignature) -> Self {
+impl From<Signature> for Signatures {
+	fn from(signature: Signature) -> Self {
 		let r = signature.r().into();
 		let s = signature.s().into();
 		let v = signature.v() as u8 + 27;
@@ -38,8 +38,8 @@ impl From<PrimitiveSignature> for Signatures {
 	}
 }
 
-impl From<Vec<PrimitiveSignature>> for Signatures {
-	fn from(signatures: Vec<PrimitiveSignature>) -> Self {
+impl From<Vec<Signature>> for Signatures {
+	fn from(signatures: Vec<Signature>) -> Self {
 		let mut r = Vec::with_capacity(signatures.len());
 		let mut s = Vec::with_capacity(signatures.len());
 		let mut v = Vec::with_capacity(signatures.len());
@@ -54,14 +54,14 @@ impl From<Vec<PrimitiveSignature>> for Signatures {
 	}
 }
 
-impl From<Signatures> for Vec<PrimitiveSignature> {
+impl From<Signatures> for Vec<Signature> {
 	fn from(signatures: Signatures) -> Self {
 		let mut res = Vec::with_capacity(signatures.r.len());
 		for idx in 0..signatures.r.len() {
 			let r = signatures.r[idx].into();
 			let s = signatures.s[idx].into();
 			let v = (signatures.v[idx] - 27) != 0;
-			res.push(PrimitiveSignature::new(r, s, v));
+			res.push(Signature::new(r, s, v));
 		}
 
 		res
@@ -71,4 +71,4 @@ impl From<Signatures> for Vec<PrimitiveSignature> {
 use SocketContract::SocketContractInstance;
 
 pub type SocketInstance<F, P> =
-	SocketContractInstance<(), Arc<FillProvider<F, P, AnyNetwork>>, AnyNetwork>;
+	SocketContractInstance<Arc<FillProvider<F, P, AnyNetwork>>, AnyNetwork>;

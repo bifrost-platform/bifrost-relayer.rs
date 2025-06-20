@@ -131,7 +131,7 @@ pub async fn relay(config: Configuration) -> Result<TaskManager, ServiceError> {
 				.filler(ChainIdFiller::new(evm_provider.id.into()))
 				.network::<AnyNetwork>()
 				.wallet(wallet.clone())
-				.on_client(retry_client.clone()),
+				.connect_client(retry_client.clone()),
 		);
 		let client = Arc::new(EthClient::new(
 			provider.clone(),

@@ -9,7 +9,7 @@ pub mod socket_queue;
 
 use alloy::{
 	network::AnyNetwork,
-	primitives::{b256, Bytes, PrimitiveSignature, B256},
+	primitives::{B256, Bytes, Signature, b256},
 	providers::fillers::FillProvider,
 	sol,
 };

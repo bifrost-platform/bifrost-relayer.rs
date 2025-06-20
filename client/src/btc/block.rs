@@ -310,8 +310,7 @@ where
 		Ok(registration_pool
 			.vault_addresses(self.get_current_round().await?)
 			.call()
-			.await?
-			._0)
+			.await?)
 	}
 
 	/// Returns the registered user refund addresses.
@@ -322,8 +321,7 @@ where
 		Ok(registration_pool
 			.refund_addresses(self.get_current_round().await?)
 			.call()
-			.await?
-			._0)
+			.await?)
 	}
 
 	/// Returns current pool round.
@@ -331,7 +329,7 @@ where
 		let registration_pool =
 			self.bfc_client.protocol_contracts.registration_pool.as_ref().unwrap();
 
-		Ok(registration_pool.current_round().call().await?._0)
+		Ok(registration_pool.current_round().call().await?)
 	}
 
 	/// Returns the vault and refund addresses.

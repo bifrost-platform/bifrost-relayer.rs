@@ -81,7 +81,7 @@ where
 
 		let vault_address = vault_address.clone().assume_checked().to_string();
 		let round = self.get_current_round().await?;
-		let user_address = registration_pool.user_address(vault_address, round).call().await?._0;
+		let user_address = registration_pool.user_address(vault_address, round).call().await?;
 
 		if user_address == EthAddress::ZERO { Ok(None) } else { Ok(Some(user_address)) }
 	}
@@ -91,7 +91,7 @@ where
 
 		let slice: [u8; 32] = txid.to_byte_array();
 		let psbt_txid =
-			socket_queue.rollback_output(slice.into(), U256::from(index)).call().await?._0;
+			socket_queue.rollback_output(slice.into(), U256::from(index)).call().await?;
 
 		Ok(!B256::from(psbt_txid).is_zero())
 	}
@@ -124,12 +124,11 @@ where
 				U256::from(event.amount.to_sat()),
 			)
 			.call()
-			.await?
-			._0;
+			.await?;
 
 		let tx_info = self.bitcoin_socket().txs(hash_key).call().await?;
 		if tx_info.voteCount
-			>= self.bfc_client.protocol_contracts.authority.majority_0().call().await?._0
+			>= self.bfc_client.protocol_contracts.authority.majority_0().call().await?
 		{
 			// a vote for a request has already finished
 			return Ok(true);
@@ -140,14 +139,13 @@ where
 			.bitcoin_socket()
 			.isRelayerVoted(hash_key, self.bfc_client.address().await)
 			.call()
-			.await?
-			._0)
+			.await?)
 	}
 
 	async fn get_current_round(&self) -> Result<u32> {
 		let registration_pool =
 			self.bfc_client.protocol_contracts.registration_pool.as_ref().unwrap();
-		Ok(registration_pool.current_round().call().await?._0)
+		Ok(registration_pool.current_round().call().await?)
 	}
 
 	#[inline]

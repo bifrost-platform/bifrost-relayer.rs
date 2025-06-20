@@ -1,6 +1,6 @@
 use alloy::{
 	dyn_abi::DynSolValue,
-	primitives::{Address, B256, PrimitiveSignature, U256, keccak256},
+	primitives::{Address, B256, Signature as PrimitiveSignature, U256, keccak256},
 };
 use k256::{ecdsa::VerifyingKey, elliptic_curve::sec1::ToEncodedPoint};
 use sha3::{Digest, Keccak256};

@@ -249,7 +249,7 @@ where
 	/// Verify whether the current relayer is an executive.
 	async fn is_relay_executive(&self) -> Result<bool> {
 		let relay_exec = self.client.protocol_contracts.relay_executive.as_ref().unwrap();
-		Ok(relay_exec.is_member(self.client.address().await).call().await?._0)
+		Ok(relay_exec.is_member(self.client.address().await).call().await?)
 	}
 
 	/// Verify whether the given address is a system vault.
@@ -259,6 +259,6 @@ where
 	}
 
 	async fn get_current_round(&self) -> Result<u32> {
-		Ok(self.registration_pool().current_round().call().await?._0)
+		Ok(self.registration_pool().current_round().call().await?)
 	}
 }

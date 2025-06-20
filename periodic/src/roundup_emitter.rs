@@ -134,15 +134,13 @@ where
 		Ok(relayer_manager
 			.is_previous_selected_relayer(round, self.client.address().await, true)
 			.call()
-			.await?
-			._0)
+			.await?)
 	}
 
 	/// Fetch new validator list
 	async fn fetch_validator_list(&self, round: U256) -> Result<Vec<Address>> {
 		let relayer_manager = self.client.protocol_contracts.relayer_manager.as_ref().unwrap();
-		let mut addresses =
-			relayer_manager.previous_selected_relayers(round, true).call().await?._0;
+		let mut addresses = relayer_manager.previous_selected_relayers(round, true).call().await?;
 		addresses.sort();
 		Ok(addresses)
 	}
@@ -191,13 +189,13 @@ where
 
 	/// Get the latest round index.
 	async fn get_latest_round(&self) -> Result<U256> {
-		Ok(self.client.protocol_contracts.authority.latest_round().call().await?._0)
+		Ok(self.client.protocol_contracts.authority.latest_round().call().await?)
 	}
 
 	async fn relay_as(&self, round: U256) -> Address {
 		let relayer_manager = self.client.protocol_contracts.relayer_manager.as_ref().unwrap();
 		let prev_relayers =
-			relayer_manager.previous_selected_relayers(round, true).call().await.unwrap()._0;
+			relayer_manager.previous_selected_relayers(round, true).call().await.unwrap();
 		let signers = self.client.signers();
 
 		signers.into_iter().find(|s| prev_relayers.contains(s)).unwrap_or_default()
@@ -330,7 +328,7 @@ where
 		let mut round_up_events = vec![];
 
 		if let Some(bootstrap_config) = &self.bootstrap_shared_data.bootstrap_config {
-			let round_info = self.client.protocol_contracts.authority.round_info().call().await?._0;
+			let round_info = self.client.protocol_contracts.authority.round_info().call().await?;
 			let bootstrap_offset_height = self
 				.client
 				.get_bootstrap_offset_height_based_on_block_time(

@@ -82,11 +82,11 @@ where
 		let mut slice: [u8; 32] = txid.to_byte_array();
 		slice.reverse();
 
-		let socket_messages = self.socket_queue().outbound_tx(slice.into()).call().await?._0;
+		let socket_messages = self.socket_queue().outbound_tx(slice.into()).call().await?;
 
 		socket_messages
 			.iter()
-			.map(|bytes| Socket::abi_decode_data(bytes, true).map(|decoded| decoded.0))
+			.map(|bytes| Socket::abi_decode_data(bytes).map(|decoded| decoded.0))
 			.collect::<Result<Vec<_>, _>>()
 			.map_err(|e| e.into())
 	}

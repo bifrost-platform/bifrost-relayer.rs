@@ -148,7 +148,7 @@ where
 	) -> Result<Option<RequestInfo>> {
 		if let Some(client) = self.system_clients.get(&chain_id) {
 			return Ok(Some(
-				client.protocol_contracts.socket.get_request(req_id.clone()).call().await?._0,
+				client.protocol_contracts.socket.get_request(req_id.clone()).call().await?,
 			));
 		}
 		Ok(None)
