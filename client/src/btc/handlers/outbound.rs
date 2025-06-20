@@ -98,11 +98,11 @@ where
 	/// Check if the transaction was originated by CCCP. If true, returns the composed socket messages.
 	async fn check_socket_queue(&self, txid: Txid) -> Result<Vec<Socket_Message>> {
 		let socket_messages =
-			self.socket_queue().outbound_tx(txid.to_byte_array().into()).call().await?._0;
+			self.socket_queue().outbound_tx(txid.to_byte_array().into()).call().await?;
 
 		socket_messages
 			.iter()
-			.map(|bytes| Socket::abi_decode_data(bytes, true).map(|decoded| decoded.0))
+			.map(|bytes| Socket::abi_decode_data(bytes).map(|decoded| decoded.0))
 			.collect::<Result<Vec<_>, _>>()
 			.map_err(|e| e.into())
 	}
@@ -113,7 +113,6 @@ where
 			.is_tx_broadcastable(txid.to_byte_array().into(), self.bfc_client.address().await)
 			.call()
 			.await?
-			._0
 		{
 			let (call, metadata) = self.build_unsigned_tx(txid).await?;
 			self.request_send_transaction(call, metadata).await;

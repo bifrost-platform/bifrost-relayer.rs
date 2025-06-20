@@ -11,4 +11,4 @@ sol!(
 use AuthorityContract::AuthorityContractInstance;
 
 pub type AuthorityInstance<F, P> =
-	AuthorityContractInstance<(), Arc<FillProvider<F, P, AnyNetwork>>, AnyNetwork>;
+	AuthorityContractInstance<Arc<FillProvider<F, P, AnyNetwork>>, AnyNetwork>;

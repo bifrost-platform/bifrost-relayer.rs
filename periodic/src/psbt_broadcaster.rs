@@ -61,8 +61,7 @@ where
 	/// Get the finalized PSBT's (in bytes)
 	async fn get_finalized_psbts(&self) -> Result<Vec<Bytes>> {
 		let socket_queue = self.bfc_client.protocol_contracts.socket_queue.as_ref().unwrap();
-		let res = socket_queue.finalized_psbts().call().await?._0;
-		Ok(res)
+		Ok(socket_queue.finalized_psbts().call().await?)
 	}
 
 	/// Check if the transaction is already broadcasted

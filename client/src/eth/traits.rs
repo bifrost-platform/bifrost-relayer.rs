@@ -123,8 +123,7 @@ where
 			.socket
 			.get_signatures(msg.req_id.clone(), msg.status)
 			.call()
-			.await?
-			._0;
+			.await?;
 
 		let mut signature_vec = Vec::<Signature>::from(signatures);
 		signature_vec.sort_by_key(|k| recover_message(*k, &msg.abi_encode()));

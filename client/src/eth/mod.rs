@@ -123,7 +123,7 @@ where
 			Some(relayers) => relayers.to_vec(),
 			None => {
 				let relayer_manager = self.protocol_contracts.relayer_manager.as_ref().unwrap();
-				relayer_manager.selected_relayers(true).call().await.unwrap()._0
+				relayer_manager.selected_relayers(true).call().await.unwrap()
 			},
 		};
 
@@ -213,17 +213,13 @@ where
 	/// Verifies whether the current relayer was selected at the current round
 	pub async fn is_selected_relayer(&self) -> Result<bool> {
 		let relayer_manager = self.protocol_contracts.relayer_manager.as_ref().unwrap();
-		Ok(relayer_manager
-			.is_selected_relayer(self.address().await, false)
-			.call()
-			.await?
-			._0)
+		Ok(relayer_manager.is_selected_relayer(self.address().await, false).call().await?)
 	}
 
 	/// Check the blaze activation state
 	pub async fn blaze_activation(&self) -> Result<bool> {
 		if let Some(blaze) = self.protocol_contracts.blaze.as_ref() {
-			Ok(blaze.is_activated().call().await?._0)
+			Ok(blaze.is_activated().call().await?)
 		} else {
 			Ok(false)
 		}

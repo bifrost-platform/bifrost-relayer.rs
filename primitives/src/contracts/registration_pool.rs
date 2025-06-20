@@ -11,4 +11,4 @@ sol!(
 use RegistrationPoolContract::RegistrationPoolContractInstance;
 
 pub type RegistrationPoolInstance<F, P> =
-	RegistrationPoolContractInstance<(), Arc<FillProvider<F, P, AnyNetwork>>, AnyNetwork>;
+	RegistrationPoolContractInstance<Arc<FillProvider<F, P, AnyNetwork>>, AnyNetwork>;

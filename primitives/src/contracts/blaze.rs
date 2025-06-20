@@ -11,4 +11,4 @@ sol!(
 use BlazeContract::BlazeContractInstance;
 
 pub type BlazeInstance<F, P> =
-	BlazeContractInstance<(), Arc<FillProvider<F, P, AnyNetwork>>, AnyNetwork>;
+	BlazeContractInstance<Arc<FillProvider<F, P, AnyNetwork>>, AnyNetwork>;

@@ -48,12 +48,12 @@ where
 			let address = self.client.address().await;
 
 			let relayer_manager = self.client.protocol_contracts.relayer_manager.as_ref().unwrap();
-			let is_selected = relayer_manager.is_selected_relayer(address, false).call().await?._0;
-			let is_heartbeat_pulsed = relayer_manager.is_heartbeat_pulsed(address).call().await?._0;
+			let is_selected = relayer_manager.is_selected_relayer(address, false).call().await?;
+			let is_heartbeat_pulsed = relayer_manager.is_heartbeat_pulsed(address).call().await?;
 
 			if is_selected && !is_heartbeat_pulsed {
 				let round_info =
-					self.client.protocol_contracts.authority.round_info().call().await?._0;
+					self.client.protocol_contracts.authority.round_info().call().await?;
 				self.request_send_transaction(
 					self.build_transaction(),
 					HeartbeatMetadata::new(

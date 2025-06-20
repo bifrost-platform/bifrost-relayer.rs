@@ -301,7 +301,7 @@ where
 
 	/// Get the pending rollback PSBT's.
 	async fn get_rollback_psbts(&self) -> Result<Vec<Bytes>> {
-		Ok(self.socket_queue().rollback_psbts().call().await?._0)
+		Ok(self.socket_queue().rollback_psbts().call().await?)
 	}
 
 	/// Get the rollback information.

@@ -11,4 +11,4 @@ sol!(
 use BitcoinSocketContract::BitcoinSocketContractInstance;
 
 pub type BitcoinSocketInstance<F, P> =
-	BitcoinSocketContractInstance<(), Arc<FillProvider<F, P, AnyNetwork>>, AnyNetwork>;
+	BitcoinSocketContractInstance<Arc<FillProvider<F, P, AnyNetwork>>, AnyNetwork>;

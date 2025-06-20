@@ -1,6 +1,6 @@
 use alloy::{
 	dyn_abi::DynSolValue,
-	primitives::{Address, B256, PrimitiveSignature, U256, keccak256},
+	primitives::{Address, B256, Signature, U256, keccak256},
 };
 use k256::{ecdsa::VerifyingKey, elliptic_curve::sec1::ToEncodedPoint};
 use sha3::{Digest, Keccak256};
@@ -22,8 +22,8 @@ pub fn encode_roundup_param(round: U256, new_relayers: &[Address]) -> Vec<u8> {
 	.abi_encode_params()
 }
 
-impl From<PrimitiveSignature> for EthereumSignature {
-	fn from(signature: PrimitiveSignature) -> Self {
+impl From<Signature> for EthereumSignature {
+	fn from(signature: Signature) -> Self {
 		let sig: [u8; 65] = signature.into();
 		EthereumSignature(sig)
 	}
@@ -35,7 +35,7 @@ pub fn hash_bytes(bytes: &Vec<u8>) -> B256 {
 }
 
 /// Recovers the address from the given signature and message.
-pub fn recover_message(sig: PrimitiveSignature, msg: &[u8]) -> Address {
+pub fn recover_message(sig: Signature, msg: &[u8]) -> Address {
 	let v = sig.recid();
 	let rs = sig.to_k256().unwrap();
 
