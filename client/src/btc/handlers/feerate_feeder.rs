@@ -7,6 +7,7 @@ use alloy::{
 use bitcoincore_rpc::{Client as BtcClient, RpcApi};
 use br_primitives::{
 	btc::{FeeRateResponse, MEMPOOL_SPACE_FEE_RATE_MULTIPLIER},
+	constants::tx::DEFAULT_CALL_RETRY_INTERVAL_MS,
 	substrate::{
 		CustomConfig, EthereumSignature, FeeRateSubmission, bifrost_runtime, initialize_sub_client,
 	},
@@ -129,6 +130,39 @@ where
 		}
 	}
 
+	/// Check if the fee rate has been submitted by this authority.
+	async fn is_fee_rate_submitted(&self) -> bool {
+		loop {
+			match self.sub_client.as_ref().unwrap().storage().at_latest().await {
+				Ok(storage) => {
+					match storage.fetch(&bifrost_runtime::storage().blaze().fee_rates()).await {
+						Ok(Some(fee_rates)) => {
+							let address = self.bfc_client.address().await.0.0;
+							if fee_rates.0.iter().any(|(key, _)| key.0 == address) {
+								return true;
+							}
+							return false;
+						},
+						Ok(None) => {
+							unreachable!("The fee rate should always be available.")
+						},
+						Err(_) => {
+							tokio::time::sleep(Duration::from_millis(
+								DEFAULT_CALL_RETRY_INTERVAL_MS,
+							))
+							.await;
+							continue;
+						},
+					}
+				},
+				Err(_) => {
+					tokio::time::sleep(Duration::from_millis(DEFAULT_CALL_RETRY_INTERVAL_MS)).await;
+					continue;
+				},
+			}
+		}
+	}
+
 	/// Fallback method to estimate fee rate if the mempool.space API is not available.
 	async fn fallback_estimate_fee(&self) -> Result<(u64, u64)> {
 		let st_fee_rate =
@@ -230,7 +264,7 @@ where
 				continue;
 			}
 			// submit fee rate if blaze is activated
-			if self.bfc_client.blaze_activation().await? {
+			if self.bfc_client.blaze_activation().await? && !self.is_fee_rate_submitted().await {
 				let (lt_fee_rate, fee_rate) = self.fetch_fee_rate().await;
 				self.submit_fee_rate(lt_fee_rate, fee_rate).await?;
 			}
