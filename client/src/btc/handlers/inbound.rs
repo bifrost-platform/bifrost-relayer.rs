@@ -294,15 +294,15 @@ where
 		Ok(())
 	}
 
-	async fn process_event(&self, event: Event) -> Result<()> {
-		let Event { mut txid, index, amount, ref address } = event;
-
+	async fn process_event(&self, mut event: Event) -> Result<()> {
 		// txid from event is in little endian, convert it to big endian
-		txid = {
-			let mut slice: [u8; 32] = txid.to_byte_array();
+		event.txid = {
+			let mut slice: [u8; 32] = event.txid.to_byte_array();
 			slice.reverse();
 			Txid::from_slice(&slice)?
 		};
+
+		let Event { txid, index, amount, ref address } = event;
 
 		if self.bfc_client.blaze_activation().await? {
 			self.submit_utxo(txid, index, amount, address.clone()).await?;
