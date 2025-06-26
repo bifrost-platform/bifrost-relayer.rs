@@ -25,7 +25,6 @@ use eyre::Result;
 use std::{str::FromStr, sync::Arc, time::Duration};
 use subxt::ext::subxt_core::utils::AccountId20;
 use tokio::{sync::RwLock, time::sleep};
-use tokio_stream::StreamExt;
 
 use crate::traits::PeriodicWorker;
 
@@ -79,8 +78,7 @@ where
 					pending_registrations.len()
 				);
 
-				let mut stream = tokio_stream::iter(pending_registrations);
-				while let Some(who) = stream.next().await {
+				for who in pending_registrations {
 					// Skip the registration if the service is in maintenance mode. (Only system vaults are allowed to register in maintenance mode.)
 					if *self.migration_sequence.read().await != ServiceState::Normal
 						&& !self.is_system_vault(who)

@@ -17,7 +17,6 @@ use cron::Schedule;
 use eyre::Result;
 use miniscript::bitcoin::{Psbt, Txid, hashes::Hash};
 use subxt::ext::subxt_core::utils::AccountId20;
-use tokio_stream::StreamExt;
 
 use crate::traits::PeriodicWorker;
 
@@ -179,10 +178,8 @@ where
 						finalized_psbts.len()
 					);
 
-					let mut stream = tokio_stream::iter(finalized_psbts);
-					while let Some(finalized_psbt) = stream.next().await {
-						let psbt = Psbt::deserialize(&finalized_psbt).unwrap();
-
+					for finalized_psbt in finalized_psbts {
+						let psbt = Psbt::deserialize(&finalized_psbt)?;
 						let txid = psbt.unsigned_tx.txid();
 						if self.is_transaction_broadcasted(txid).await? {
 							log::info!(

@@ -17,6 +17,7 @@ use subxt::{
 use tokio::sync::mpsc::{UnboundedSender, error::SendError};
 
 use crate::{
+	btc::Event as BtcEvent,
 	constants::tx::{DEFAULT_TX_RETRIES, DEFAULT_TX_RETRY_INTERVAL_MS},
 	eth::{GasCoefficient, SocketEventStatus},
 	periodic::PriceResponse,
@@ -230,13 +231,13 @@ pub struct BitcoinRelayMetadata {
 }
 
 impl BitcoinRelayMetadata {
-	pub fn new(
-		btc_address: BtcAddress<NetworkUnchecked>,
-		bfc_address: Address,
-		txid: Txid,
-		index: u32,
-	) -> Self {
-		Self { btc_address, bfc_address, txid, index }
+	pub fn new(event: &BtcEvent, bfc_address: Address) -> Self {
+		Self {
+			btc_address: event.address.clone(),
+			bfc_address,
+			txid: event.txid,
+			index: event.index,
+		}
 	}
 }
 
@@ -399,8 +400,8 @@ pub struct SubmitUtxoMetadata {
 }
 
 impl SubmitUtxoMetadata {
-	pub fn new(txid: Txid, vout: u32, amount: Amount) -> Self {
-		Self { txid, vout, amount }
+	pub fn new(event: &BtcEvent) -> Self {
+		Self { txid: event.txid, vout: event.index, amount: event.amount }
 	}
 }
 

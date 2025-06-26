@@ -6,8 +6,8 @@ use alloy::{
 };
 use bitcoincore_rpc::{Client as BtcClient, RpcApi};
 use br_primitives::{
-	btc::{FeeRateResponse, MEMPOOL_SPACE_FEE_RATE_MULTIPLIER},
-	constants::tx::DEFAULT_CALL_RETRY_INTERVAL_MS,
+	btc::FeeRateResponse,
+	constants::{btc::MEMPOOL_SPACE_FEE_RATE_MULTIPLIER, tx::DEFAULT_CALL_RETRY_INTERVAL_MS},
 	substrate::{
 		CustomConfig, EthereumSignature, FeeRateSubmission, bifrost_runtime, initialize_sub_client,
 	},
@@ -272,7 +272,7 @@ where
 		Ok(())
 	}
 
-	async fn process_event(&self, _event: Event) -> Result<()> {
+	async fn process_event(&self, _event: &Event) -> Result<()> {
 		unreachable!()
 	}
 

@@ -1,3 +1,5 @@
+use bitcoincore_rpc::bitcoin::address::NetworkUnchecked;
+use bitcoincore_rpc::bitcoin::{Address, Amount, Txid};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -11,19 +13,58 @@ pub struct FeeRateResponse {
 	pub minimum_fee: u64,
 }
 
-/// Mempool.space endpoint. (=block height)
-pub const MEMPOOL_SPACE_BLOCK_HEIGHT_ENDPOINT: &str = "https://mempool.space/api/blocks/tip/height";
+#[derive(Debug, Clone, Eq, PartialEq)]
+/// A Bitcoin related event type.
+pub enum EventType {
+	/// An inbound action.
+	Inbound,
+	/// An outbound action.
+	Outbound,
+	/// A new block has been created.
+	NewBlock,
+}
 
-/// Mempool.space testnet endpoint. (=block height)
-pub const MEMPOOL_SPACE_TESTNET_BLOCK_HEIGHT_ENDPOINT: &str =
-	"https://mempool.space/testnet/api/blocks/tip/height";
+#[derive(Debug, Clone)]
+/// A Bitcoin related event details. (Only for `Inbound` and `Outbound`)
+pub struct Event {
+	/// The transaction hash.
+	pub txid: Txid,
+	/// The output index of the transaction.
+	pub index: u32,
+	/// The account address.
+	pub address: Address<NetworkUnchecked>,
+	/// The transferred amount.
+	pub amount: Amount,
+}
 
-/// Mempool.space fee rate multiplier.
-pub const MEMPOOL_SPACE_FEE_RATE_MULTIPLIER: f64 = 1.2;
+#[derive(Debug, Clone)]
+/// The event message delivered through channels.
+pub struct EventMessage {
+	/// The current block number.
+	pub block_number: u64,
+	/// The event type.
+	pub event_type: EventType,
+	/// The event details.
+	pub events: Vec<Event>,
+}
 
-/// Mempool.space endpoint. (=fee rate)
-pub const MEMPOOL_SPACE_FEE_RATE_ENDPOINT: &str = "https://mempool.space/api/v1/fees/recommended";
+impl EventMessage {
+	/// Instantiates a new `EventMessage` instance.
+	pub fn new(block_number: u64, event_type: EventType, events: Vec<Event>) -> Self {
+		Self { block_number, event_type, events }
+	}
 
-/// Mempool.space testnet endpoint. (=fee rate)
-pub const MEMPOOL_SPACE_TESTNET_FEE_RATE_ENDPOINT: &str =
-	"https://mempool.space/testnet/api/v1/fees/recommended";
+	/// Instantiates an `Inbound` typed `EventMessage` instance.
+	pub fn inbound(block_number: u64) -> Self {
+		Self::new(block_number, EventType::Inbound, vec![])
+	}
+
+	/// Instantiates an `Outbound` typed `EventMessage` instance.
+	pub fn outbound(block_number: u64) -> Self {
+		Self::new(block_number, EventType::Outbound, vec![])
+	}
+
+	pub fn new_block(block_number: u64) -> Self {
+		Self::new(block_number, EventType::NewBlock, vec![])
+	}
+}

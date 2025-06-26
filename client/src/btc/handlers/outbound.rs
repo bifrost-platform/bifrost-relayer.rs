@@ -1,8 +1,5 @@
 use crate::{
-	btc::{
-		block::{Event, EventMessage as BTCEventMessage, EventType},
-		handlers::{Handler, LOG_TARGET},
-	},
+	btc::handlers::{Handler, LOG_TARGET},
 	eth::{EthClient, send_transaction, traits::SocketRelayBuilder},
 };
 
@@ -14,6 +11,7 @@ use alloy::{
 };
 use br_primitives::{
 	bootstrap::BootstrapSharedData,
+	btc::{Event, EventMessage as BTCEventMessage, EventType},
 	contracts::{
 		blaze::BlazeInstance,
 		socket::{Socket_Struct::Socket_Message, SocketContract::Socket},
@@ -199,23 +197,23 @@ where
 				msg.events.len()
 			);
 
-			let mut stream = tokio_stream::iter(msg.events);
-			while let Some(event) = stream.next().await {
-				self.process_event(event).await?;
+			for event in msg.events {
+				self.process_event(&event).await?;
 			}
 		}
 
 		Ok(())
 	}
 
-	async fn process_event(&self, event: Event) -> Result<()> {
+	async fn process_event(&self, event: &Event) -> Result<()> {
 		let txid = {
 			let mut slice: [u8; 32] = event.txid.to_byte_array();
 			slice.reverse();
-			Txid::from_slice(&slice).unwrap()
+			Txid::from_slice(&slice)?
 		};
-		let mut stream = tokio_stream::iter(self.check_socket_queue(txid).await?.into_iter());
-		while let Some(mut msg) = stream.next().await {
+
+		let socket_queue = self.check_socket_queue(txid).await?;
+		for mut msg in socket_queue {
 			msg.status = SocketEventStatus::Executed.into();
 
 			if let Some(built_transaction) =

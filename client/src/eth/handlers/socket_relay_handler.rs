@@ -93,10 +93,9 @@ where
 				msg.event_logs.len(),
 			);
 
-			let mut stream = tokio_stream::iter(msg.event_logs);
-			while let Some(log) = stream.next().await {
-				if self.is_target_contract(&log) && self.is_target_event(log.topic0()) {
-					self.process_confirmed_log(&log, false).await?;
+			for log in &msg.event_logs {
+				if self.is_target_contract(log) && self.is_target_event(log.topic0()) {
+					self.process_confirmed_log(log, false).await?;
 				}
 			}
 		}
@@ -562,9 +561,7 @@ where
 		self.wait_for_bootstrap_state(BootstrapState::BootstrapSocketRelay).await?;
 
 		let logs = self.get_bootstrap_events().await?;
-
-		let mut stream = tokio_stream::iter(logs);
-		while let Some(log) = stream.next().await {
+		for log in logs {
 			self.process_confirmed_log(&log, true).await?;
 		}
 

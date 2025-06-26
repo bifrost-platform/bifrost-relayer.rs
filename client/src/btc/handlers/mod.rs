@@ -6,13 +6,7 @@ pub use feerate_feeder::*;
 pub use inbound::*;
 pub use outbound::*;
 
-use crate::{
-	btc::{
-		LOG_TARGET,
-		block::{Event, EventType},
-	},
-	eth::EthClient,
-};
+use crate::{btc::LOG_TARGET, eth::EthClient};
 
 use super::block::EventMessage;
 use alloy::{
@@ -22,6 +16,7 @@ use alloy::{
 };
 use br_primitives::{
 	bootstrap::BootstrapSharedData,
+	btc::{Event, EventMessage, EventType},
 	eth::BootstrapState,
 	tx::{XtRequest, XtRequestMessage, XtRequestMetadata, XtRequestSender},
 	utils::sub_display_format,
@@ -29,8 +24,6 @@ use br_primitives::{
 use eyre::Result;
 use std::{sync::Arc, time::Duration};
 use tokio::time::sleep;
-
-use super::block::EventMessage;
 
 macro_rules! create_xt_request_message {
 	($xt_request:expr, $metadata:expr) => {
@@ -84,7 +77,7 @@ where
 pub trait Handler {
 	async fn run(&mut self) -> Result<()>;
 
-	async fn process_event(&self, event_tx: Event) -> Result<()>;
+	async fn process_event(&self, event_tx: &Event) -> Result<()>;
 
 	fn is_target_event(&self, event_type: EventType) -> bool;
 }

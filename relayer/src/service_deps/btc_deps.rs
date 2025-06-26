@@ -1,6 +1,6 @@
 use br_client::btc::handlers::FeeRateFeeder;
 use br_periodic::PsbtBroadcaster;
-use br_primitives::btc::{
+use br_primitives::constants::btc::{
 	MEMPOOL_SPACE_BLOCK_HEIGHT_ENDPOINT, MEMPOOL_SPACE_FEE_RATE_ENDPOINT,
 	MEMPOOL_SPACE_TESTNET_BLOCK_HEIGHT_ENDPOINT, MEMPOOL_SPACE_TESTNET_FEE_RATE_ENDPOINT,
 };

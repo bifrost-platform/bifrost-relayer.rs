@@ -28,7 +28,6 @@ use serde::Deserialize;
 use serde_json::Value;
 use subxt::{ext::subxt_core::utils::AccountId20, utils::H256};
 use tokio::time::sleep;
-use tokio_stream::StreamExt;
 
 use crate::traits::PeriodicWorker;
 
@@ -156,8 +155,7 @@ where
 					pending_rollback_psbts.len()
 				);
 
-				let mut stream = tokio_stream::iter(pending_rollback_psbts);
-				while let Some(raw_psbt) = stream.next().await {
+				for raw_psbt in pending_rollback_psbts {
 					let psbt = Psbt::deserialize(&raw_psbt)?;
 					let txid = B256::from_str(&psbt.unsigned_tx.txid().to_string())?;
 					let request = self.get_rollback_request(txid).await?;

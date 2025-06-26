@@ -1,11 +1,9 @@
 use crate::{
-	btc::{
-		block::{Event, EventMessage as BTCEventMessage, EventType},
-		handlers::{Handler, LOG_TARGET},
-	},
+	btc::handlers::{Handler, LOG_TARGET},
 	eth::{EthClient, send_transaction},
 };
 
+use super::{BootstrapHandler, XtRequester};
 use alloy::{
 	network::Network,
 	primitives::{Address as EthAddress, B256, ChainId, U256, keccak256},
@@ -14,6 +12,7 @@ use alloy::{
 use bitcoincore_rpc::bitcoin::Txid;
 use br_primitives::{
 	bootstrap::BootstrapSharedData,
+	btc::{Event, EventMessage as BTCEventMessage, EventType},
 	contracts::{bitcoin_socket::BitcoinSocketInstance, blaze::BlazeInstance},
 	substrate::{BoundedVec, EthereumSignature, UtxoInfo, UtxoSubmission, bifrost_runtime},
 	tx::{
@@ -23,15 +22,13 @@ use br_primitives::{
 	utils::sub_display_format,
 };
 use eyre::Result;
-use miniscript::bitcoin::{Address as BtcAddress, Amount, address::NetworkUnchecked, hashes::Hash};
+use miniscript::bitcoin::{Address as BtcAddress, address::NetworkUnchecked, hashes::Hash};
 use parity_scale_codec::Encode;
 use sc_service::SpawnTaskHandle;
 use std::sync::Arc;
 use subxt::ext::subxt_core::utils::AccountId20;
 use tokio::sync::broadcast::Receiver;
 use tokio_stream::{StreamExt, wrappers::BroadcastStream};
-
-use super::{BootstrapHandler, EventMessage, XtRequester};
 
 const SUB_LOG_TARGET: &str = "inbound-handler";
 
@@ -123,22 +120,19 @@ where
 	/// Build the payload for the unsigned transaction. (`submit_utxos()`)
 	async fn build_payload(
 		&self,
-		txid: Txid,
-		vout: u32,
-		amount: Amount,
-		address: BtcAddress<NetworkUnchecked>,
+		event: &Event,
 	) -> Result<(UtxoSubmission<AccountId20>, EthereumSignature)> {
-		let txid: subxt::utils::H256 = txid.to_byte_array().into();
+		let txid: subxt::utils::H256 = event.txid.to_byte_array().into();
 		let msg = UtxoSubmission {
 			authority_id: AccountId20(self.bfc_client.address().await.0.0),
 			utxos: vec![UtxoInfo {
 				txid,
-				vout,
-				amount: amount.to_sat(),
-				address: BoundedVec(address.assume_checked_ref().to_string().into_bytes()),
+				vout: event.index,
+				amount: event.amount.to_sat(),
+				address: BoundedVec(event.address.assume_checked_ref().to_string().into_bytes()),
 			}],
 		};
-		let utxo_hash = keccak256(Encode::encode(&(txid, vout, amount.to_sat())));
+		let utxo_hash = keccak256(Encode::encode(&(txid, event.index, event.amount.to_sat())));
 
 		let signature = self
 			.bfc_client
@@ -156,15 +150,9 @@ where
 	}
 
 	/// Build the calldata for the unsigned transaction. (`submit_utxos()`)
-	async fn build_unsigned_tx(
-		&self,
-		txid: Txid,
-		vout: u32,
-		amount: Amount,
-		address: BtcAddress<NetworkUnchecked>,
-	) -> Result<(XtRequest, SubmitUtxoMetadata)> {
-		let (msg, signature) = self.build_payload(txid, vout, amount, address).await?;
-		let metadata = SubmitUtxoMetadata::new(txid, vout, amount);
+	async fn build_unsigned_tx(&self, event: &Event) -> Result<(XtRequest, SubmitUtxoMetadata)> {
+		let (msg, signature) = self.build_payload(event).await?;
+		let metadata = SubmitUtxoMetadata::new(event);
 		Ok((XtRequest::from(bifrost_runtime::tx().blaze().submit_utxos(msg, signature)), metadata))
 	}
 
@@ -236,26 +224,20 @@ where
 		self.bfc_client.protocol_contracts.blaze.as_ref().unwrap()
 	}
 
-	async fn submit_utxo(
-		&self,
-		txid: Txid,
-		vout: u32,
-		amount: Amount,
-		address: BtcAddress<NetworkUnchecked>,
-	) -> Result<()> {
+	async fn submit_utxo(&self, event: &Event) -> Result<()> {
 		if self
 			.blaze()
 			.is_submittable_utxo(
-				txid.to_byte_array().into(),
-				U256::from(vout),
-				U256::from(amount.to_sat()),
+				event.txid.to_byte_array().into(),
+				U256::from(event.index),
+				U256::from(event.amount.to_sat()),
 				self.bfc_client().address().await,
 			)
 			.call()
 			.await?
 			._0
 		{
-			let (call, metadata) = self.build_unsigned_tx(txid, vout, amount, address).await?;
+			let (call, metadata) = self.build_unsigned_tx(event).await?;
 			self.request_send_transaction(call, metadata).await;
 		}
 		Ok(())
@@ -285,32 +267,27 @@ where
 				msg.events.len()
 			);
 
-			let mut stream = tokio_stream::iter(msg.events);
-			while let Some(event) = stream.next().await {
-				self.process_event(event).await?;
+			for mut event in msg.events {
+				event.txid = {
+					let mut slice: [u8; 32] = event.txid.to_byte_array();
+					slice.reverse();
+					Txid::from_slice(&slice)?
+				};
+				self.process_event(&event).await?;
 			}
 		}
 
 		Ok(())
 	}
 
-	async fn process_event(&self, mut event: Event) -> Result<()> {
-		// txid from event is in little endian, convert it to big endian
-		event.txid = {
-			let mut slice: [u8; 32] = event.txid.to_byte_array();
-			slice.reverse();
-			Txid::from_slice(&slice)?
-		};
-
-		let Event { txid, index, amount, ref address } = event;
-
+	async fn process_event(&self, event: &Event) -> Result<()> {
 		if self.bfc_client.blaze_activation().await? {
-			self.submit_utxo(txid, index, amount, address.clone()).await?;
+			self.submit_utxo(&event).await?;
 		}
 
-		if let Some(user_bfc_address) = self.get_user_bfc_address(address).await? {
+		if let Some(user_bfc_address) = self.get_user_bfc_address(&event.address).await? {
 			// check if transaction has been submitted to be rollbacked
-			if self.is_rollback_output(txid, index).await? {
+			if self.is_rollback_output(event.txid, event.index).await? {
 				return Ok(());
 			}
 			// check if vote for this request has already finished or if the relayer has voted for this request
@@ -319,8 +296,7 @@ where
 			}
 
 			let tx_request = self.build_transaction(&event, user_bfc_address);
-			let metadata =
-				BitcoinRelayMetadata::new(address.clone(), user_bfc_address, txid, index);
+			let metadata = BitcoinRelayMetadata::new(&event, user_bfc_address);
 
 			send_transaction(
 				self.bfc_client.clone(),
@@ -359,7 +335,7 @@ where
 		unreachable!("unimplemented")
 	}
 
-	async fn get_bootstrap_events(&self) -> Result<(EventMessage, EventMessage)> {
+	async fn get_bootstrap_events(&self) -> Result<(BTCEventMessage, BTCEventMessage)> {
 		unreachable!("unimplemented")
 	}
 }
