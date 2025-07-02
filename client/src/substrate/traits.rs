@@ -43,7 +43,7 @@ where
 	{
 		let error_str = error.to_string();
 
-		// Some ~DNE errors are not retryable
+		// Some pallet errors are not retryable
 		match msg.metadata {
 			XtRequestMetadata::SubmitSignedPsbt(_) => {
 				if error_str.contains("BtcSocketQueue::RequestDNE") {
@@ -59,6 +59,15 @@ where
 					log::info!(
 						target: &self.get_bfc_client().get_chain_name(),
 						"Executed notification has been collected, no need to retry"
+					);
+					return;
+				}
+			},
+			XtRequestMetadata::BroadcastPoll(_) => {
+				if error_str.contains("Blaze::AlreadySpent") {
+					log::info!(
+						target: &self.get_bfc_client().get_chain_name(),
+						"UTXO has been spent, no need to retry"
 					);
 					return;
 				}
