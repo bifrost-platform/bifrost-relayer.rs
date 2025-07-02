@@ -7,7 +7,7 @@ use crate::{
 };
 
 use alloy::{
-	network::{AnyNetwork, Network},
+	network::Network,
 	primitives::ChainId,
 	providers::{Provider, WalletProvider, fillers::TxFiller},
 	sol_types::SolEvent,
@@ -33,7 +33,7 @@ use super::{BootstrapHandler, EventMessage};
 
 const SUB_LOG_TARGET: &str = "outbound-handler";
 
-pub struct OutboundHandler<F, P, N: Network = AnyNetwork>
+pub struct OutboundHandler<F, P, N: Network>
 where
 	F: TxFiller<N> + WalletProvider<N>,
 	P: Provider<N>,
