@@ -1,11 +1,10 @@
 use alloy::{
-	network::AnyNetwork,
+	network::Network,
 	primitives::{Address, ChainId, map::AddressHashMap},
 	providers::{
 		Provider, WalletProvider,
 		fillers::{FillProvider, TxFiller},
 	},
-	rpc::types::TransactionRequest,
 	signers::Signer,
 };
 use std::{str::FromStr, sync::Arc};
@@ -105,32 +104,32 @@ impl ProviderMetadata {
 }
 
 #[derive(Clone)]
-pub struct AggregatorContracts<F, P>
+pub struct AggregatorContracts<F, P, N: Network>
 where
-	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
-	P: Provider<AnyNetwork>,
+	F: TxFiller<N> + WalletProvider<N>,
+	P: Provider<N>,
 {
 	/// Chainlink usdc/usd aggregator
-	pub chainlink_usdc_usd: Option<ChainlinkInstance<F, P>>,
+	pub chainlink_usdc_usd: Option<ChainlinkInstance<F, P, N>>,
 	/// Chainlink usdt/usd aggregator
-	pub chainlink_usdt_usd: Option<ChainlinkInstance<F, P>>,
+	pub chainlink_usdt_usd: Option<ChainlinkInstance<F, P, N>>,
 	/// Chainlink dai/usd aggregator
-	pub chainlink_dai_usd: Option<ChainlinkInstance<F, P>>,
+	pub chainlink_dai_usd: Option<ChainlinkInstance<F, P, N>>,
 	/// Chainlink btc/usd aggregator
-	pub chainlink_btc_usd: Option<ChainlinkInstance<F, P>>,
+	pub chainlink_btc_usd: Option<ChainlinkInstance<F, P, N>>,
 	/// Chainlink wbtc/usd aggregator
-	pub chainlink_wbtc_usd: Option<ChainlinkInstance<F, P>>,
+	pub chainlink_wbtc_usd: Option<ChainlinkInstance<F, P, N>>,
 	/// Chainlink cbbtc/usd aggregator
-	pub chainlink_cbbtc_usd: Option<ChainlinkInstance<F, P>>,
+	pub chainlink_cbbtc_usd: Option<ChainlinkInstance<F, P, N>>,
 }
 
-impl<F, P> AggregatorContracts<F, P>
+impl<F, P, N: Network> AggregatorContracts<F, P, N>
 where
-	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
-	P: Provider<AnyNetwork>,
+	F: TxFiller<N> + WalletProvider<N>,
+	P: Provider<N>,
 {
 	pub fn new(
-		provider: Arc<FillProvider<F, P, AnyNetwork>>,
+		provider: Arc<FillProvider<F, P, N>>,
 		chainlink_usdc_usd_address: Option<String>,
 		chainlink_usdt_usd_address: Option<String>,
 		chainlink_dai_usd_address: Option<String>,
@@ -156,10 +155,10 @@ where
 	}
 }
 
-impl<F, P> Default for AggregatorContracts<F, P>
+impl<F, P, N: Network> Default for AggregatorContracts<F, P, N>
 where
-	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
-	P: Provider<AnyNetwork>,
+	F: TxFiller<N> + WalletProvider<N>,
+	P: Provider<N>,
 {
 	fn default() -> Self {
 		Self {
@@ -175,35 +174,35 @@ where
 
 #[derive(Clone)]
 /// The protocol contract instances of the EVM provider.
-pub struct ProtocolContracts<F, P>
+pub struct ProtocolContracts<F, P, N: Network>
 where
-	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
-	P: Provider<AnyNetwork>,
+	F: TxFiller<N> + WalletProvider<N>,
+	P: Provider<N>,
 {
 	/// SocketContract
-	pub socket: SocketInstance<F, P>,
+	pub socket: SocketInstance<F, P, N>,
 	/// AuthorityContract
-	pub authority: AuthorityInstance<F, P>,
+	pub authority: AuthorityInstance<F, P, N>,
 	/// RelayerManagerContract (Bifrost only)
-	pub relayer_manager: Option<RelayerManagerInstance<F, P>>,
+	pub relayer_manager: Option<RelayerManagerInstance<F, P, N>>,
 	/// BitcoinSocketContract (Bifrost only)
-	pub bitcoin_socket: Option<BitcoinSocketInstance<F, P>>,
+	pub bitcoin_socket: Option<BitcoinSocketInstance<F, P, N>>,
 	/// SocketQueueContract (Bifrost only)
-	pub socket_queue: Option<SocketQueueInstance<F, P>>,
+	pub socket_queue: Option<SocketQueueInstance<F, P, N>>,
 	/// RegistrationPoolContract (Bifrost only)
-	pub registration_pool: Option<RegistrationPoolInstance<F, P>>,
+	pub registration_pool: Option<RegistrationPoolInstance<F, P, N>>,
 	/// RelayExecutiveContract (Bifrost only)
-	pub relay_executive: Option<RelayExecutiveInstance<F, P>>,
+	pub relay_executive: Option<RelayExecutiveInstance<F, P, N>>,
 }
 
-impl<F, P> ProtocolContracts<F, P>
+impl<F, P, N: Network> ProtocolContracts<F, P, N>
 where
-	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
-	P: Provider<AnyNetwork>,
+	F: TxFiller<N> + WalletProvider<N>,
+	P: Provider<N>,
 {
 	pub fn new(
 		is_native: bool,
-		provider: Arc<FillProvider<F, P, AnyNetwork>>,
+		provider: Arc<FillProvider<F, P, N>>,
 		evm_provider: EVMProvider,
 	) -> Self {
 		let mut contracts = Self {
@@ -400,15 +399,15 @@ pub enum BootstrapState {
 
 #[derive(Clone, Debug)]
 /// The built relay transaction request.
-pub struct BuiltRelayTransaction {
+pub struct BuiltRelayTransaction<N: Network> {
 	/// The raw transaction request body.
-	pub tx_request: TransactionRequest,
+	pub tx_request: N::TransactionRequest,
 	/// The flag whether if the destination is an external chain.
 	pub is_external: bool,
 }
 
-impl BuiltRelayTransaction {
-	pub fn new(tx_request: TransactionRequest, is_external: bool) -> Self {
+impl<N: Network> BuiltRelayTransaction<N> {
+	pub fn new(tx_request: N::TransactionRequest, is_external: bool) -> Self {
 		Self { tx_request, is_external }
 	}
 }

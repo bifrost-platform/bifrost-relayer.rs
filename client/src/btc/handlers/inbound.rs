@@ -7,10 +7,9 @@ use crate::{
 };
 
 use alloy::{
-	network::AnyNetwork,
+	network::Network,
 	primitives::{Address as EthAddress, B256, ChainId, U256},
 	providers::{Provider, WalletProvider, fillers::TxFiller},
-	rpc::types::{TransactionInput, TransactionRequest},
 };
 use bitcoincore_rpc::bitcoin::Txid;
 use br_primitives::{
@@ -31,13 +30,13 @@ use super::{BootstrapHandler, EventMessage};
 
 const SUB_LOG_TARGET: &str = "inbound-handler";
 
-pub struct InboundHandler<F, P>
+pub struct InboundHandler<F, P, N: Network>
 where
-	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
-	P: Provider<AnyNetwork>,
+	F: TxFiller<N> + WalletProvider<N>,
+	P: Provider<N>,
 {
 	/// `EthClient` for interact with Bifrost network.
-	pub bfc_client: Arc<EthClient<F, P>>,
+	pub bfc_client: Arc<EthClient<F, P, N>>,
 	/// The receiver that consumes new events from the block channel.
 	event_stream: BroadcastStream<BTCEventMessage>,
 	/// Event type which this handler should handle.
@@ -50,13 +49,13 @@ where
 	debug_mode: bool,
 }
 
-impl<F, P> InboundHandler<F, P>
+impl<F, P, N: Network> InboundHandler<F, P, N>
 where
-	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
-	P: Provider<AnyNetwork>,
+	F: TxFiller<N> + WalletProvider<N>,
+	P: Provider<N>,
 {
 	pub fn new(
-		bfc_client: Arc<EthClient<F, P>>,
+		bfc_client: Arc<EthClient<F, P, N>>,
 		event_receiver: Receiver<BTCEventMessage>,
 		bootstrap_shared_data: Arc<BootstrapSharedData>,
 		handle: SpawnTaskHandle,
@@ -96,21 +95,19 @@ where
 		Ok(!B256::from(psbt_txid).is_zero())
 	}
 
-	fn build_transaction(&self, event: &Event, user_bfc_address: EthAddress) -> TransactionRequest {
-		let calldata = self
-			.bitcoin_socket()
+	fn build_transaction(
+		&self,
+		event: &Event,
+		user_bfc_address: EthAddress,
+	) -> N::TransactionRequest {
+		self.bitcoin_socket()
 			.poll(
 				event.txid.to_byte_array().into(),
 				U256::from(event.index),
 				user_bfc_address,
 				U256::from(event.amount.to_sat()),
 			)
-			.calldata()
-			.clone();
-
-		TransactionRequest::default()
-			.input(TransactionInput::new(calldata))
-			.to(*self.bitcoin_socket().address())
+			.into_transaction_request()
 	}
 
 	/// Checks if the vote for a request has already finished.
@@ -149,16 +146,16 @@ where
 	}
 
 	#[inline]
-	fn bitcoin_socket(&self) -> &BitcoinSocketInstance<F, P> {
+	fn bitcoin_socket(&self) -> &BitcoinSocketInstance<F, P, N> {
 		self.bfc_client.protocol_contracts.bitcoin_socket.as_ref().unwrap()
 	}
 }
 
 #[async_trait::async_trait]
-impl<F, P> Handler for InboundHandler<F, P>
+impl<F, P, N: Network> Handler for InboundHandler<F, P, N>
 where
-	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork> + 'static,
-	P: Provider<AnyNetwork> + 'static,
+	F: TxFiller<N> + WalletProvider<N> + 'static,
+	P: Provider<N> + 'static,
 {
 	async fn run(&mut self) -> Result<()> {
 		self.wait_for_all_chains_bootstrapped().await?;
@@ -228,10 +225,10 @@ where
 }
 
 #[async_trait::async_trait]
-impl<F, P> BootstrapHandler for InboundHandler<F, P>
+impl<F, P, N: Network> BootstrapHandler for InboundHandler<F, P, N>
 where
-	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
-	P: Provider<AnyNetwork>,
+	F: TxFiller<N> + WalletProvider<N>,
+	P: Provider<N>,
 {
 	fn get_chain_id(&self) -> ChainId {
 		self.bfc_client.get_bitcoin_chain_id().unwrap()

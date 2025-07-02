@@ -1,38 +1,38 @@
 use super::*;
 
-pub struct PeriodicDeps<F, P>
+pub struct PeriodicDeps<F, P, N: AlloyNetwork>
 where
-	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
-	P: Provider<AnyNetwork>,
+	F: TxFiller<N> + WalletProvider<N>,
+	P: Provider<N>,
 {
 	/// The `HeartbeatSender` used for system health checks.
-	pub heartbeat_sender: HeartbeatSender<F, P>,
+	pub heartbeat_sender: HeartbeatSender<F, P, N>,
 	/// The `OraclePriceFeeder` used for price feeding.
-	pub oracle_price_feeder: OraclePriceFeeder<F, P>,
+	pub oracle_price_feeder: OraclePriceFeeder<F, P, N>,
 	/// The `RoundupEmitter` used for detecting and emitting new round updates.
-	pub roundup_emitter: RoundupEmitter<F, P>,
+	pub roundup_emitter: RoundupEmitter<F, P, N>,
 	/// The `SocketRollbackEmitter`'s for each specified chain.
-	pub rollback_emitters: Vec<SocketRollbackEmitter<F, P>>,
+	pub rollback_emitters: Vec<SocketRollbackEmitter<F, P, N>>,
 	/// The `RollbackSender`'s for each specified chain.
 	pub rollback_senders: Arc<BTreeMap<ChainId, Arc<UnboundedSender<Socket_Message>>>>,
 	/// The `KeypairMigrator` used for detecting migration sequences.
-	pub keypair_migrator: KeypairMigrator<F, P>,
+	pub keypair_migrator: KeypairMigrator<F, P, N>,
 	/// The `PubKeyPreSubmitter` used for presubmitting public keys.
-	pub presubmitter: PubKeyPreSubmitter<F, P>,
+	pub presubmitter: PubKeyPreSubmitter<F, P, N>,
 }
 
-impl<F, P> PeriodicDeps<F, P>
+impl<F, P, N: AlloyNetwork> PeriodicDeps<F, P, N>
 where
-	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork> + 'static,
-	P: Provider<AnyNetwork> + 'static,
+	F: TxFiller<N> + WalletProvider<N> + 'static,
+	P: Provider<N> + 'static,
 {
 	pub fn new(
 		bootstrap_shared_data: BootstrapSharedData,
 		migration_sequence: Arc<RwLock<MigrationSequence>>,
 		keypair_storage: KeypairStorage,
-		substrate_deps: &SubstrateDeps<F, P>,
-		clients: Arc<ClientMap<F, P>>,
-		bfc_client: Arc<EthClient<F, P>>,
+		substrate_deps: &SubstrateDeps<F, P, N>,
+		clients: Arc<ClientMap<F, P, N>>,
+		bfc_client: Arc<EthClient<F, P, N>>,
 		task_manager: &TaskManager,
 		debug_mode: bool,
 	) -> Self {

@@ -1,5 +1,5 @@
 use alloy::{
-	network::AnyNetwork,
+	network::Network,
 	providers::{Provider, WalletProvider, fillers::TxFiller},
 };
 use br_primitives::{
@@ -15,16 +15,16 @@ use tokio::time::sleep;
 use crate::eth::EthClient;
 
 #[async_trait::async_trait]
-pub trait ExtrinsicTask<F, P>
+pub trait ExtrinsicTask<F, P, N: Network>
 where
-	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
-	P: Provider<AnyNetwork>,
+	F: TxFiller<N> + WalletProvider<N>,
+	P: Provider<N>,
 {
 	/// Get the substrate client.
 	fn get_sub_client(&self) -> Arc<OnlineClient<CustomConfig>>;
 
 	/// Get the Bifrost client.
-	fn get_bfc_client(&self) -> Arc<EthClient<F, P>>;
+	fn get_bfc_client(&self) -> Arc<EthClient<F, P, N>>;
 
 	/// Sends the consumed unsigned transaction request to the Bifrost network.
 	async fn try_send_unsigned_transaction(&self, msg: XtRequestMessage);

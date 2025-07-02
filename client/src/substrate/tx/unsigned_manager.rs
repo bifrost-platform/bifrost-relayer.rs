@@ -1,5 +1,5 @@
 use alloy::{
-	network::AnyNetwork,
+	network::Network,
 	providers::{Provider, WalletProvider, fillers::TxFiller},
 };
 use br_primitives::{
@@ -20,29 +20,29 @@ use crate::{eth::EthClient, substrate::traits::ExtrinsicTask};
 const SUB_LOG_TARGET: &str = "unsigned-tx-manager";
 
 /// The essential task that sends unsigned transactions asynchronously.
-pub struct UnsignedTransactionManager<F, P>
+pub struct UnsignedTransactionManager<F, P, N: Network>
 where
-	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
-	P: Provider<AnyNetwork>,
+	F: TxFiller<N> + WalletProvider<N>,
+	P: Provider<N>,
 {
 	/// The substrate client.
 	sub_client: Option<OnlineClient<CustomConfig>>,
 	/// The Bifrost client.
-	bfc_client: Arc<EthClient<F, P>>,
+	bfc_client: Arc<EthClient<F, P, N>>,
 	/// The receiver connected to the tx request channel.
 	message_stream: UnboundedReceiverStream<XtRequestMessage>,
 	/// A handle for spawning transaction tasks in the service.
 	xt_spawn_handle: SpawnTaskHandle,
 }
 
-impl<F, P> UnsignedTransactionManager<F, P>
+impl<F, P, N: Network> UnsignedTransactionManager<F, P, N>
 where
-	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork> + 'static,
-	P: Provider<AnyNetwork> + 'static,
+	F: TxFiller<N> + WalletProvider<N> + 'static,
+	P: Provider<N> + 'static,
 {
 	/// Instantiates a new `UnsignedTransactionManager`.
 	pub fn new(
-		bfc_client: Arc<EthClient<F, P>>,
+		bfc_client: Arc<EthClient<F, P, N>>,
 		xt_spawn_handle: SpawnTaskHandle,
 	) -> (Self, UnboundedSender<XtRequestMessage>) {
 		let (sender, receiver) = mpsc::unbounded_channel::<XtRequestMessage>();
@@ -102,42 +102,42 @@ where
 }
 
 /// The transaction task for unsigned transactions.
-pub struct UnsignedTransactionTask<F, P>
+pub struct UnsignedTransactionTask<F, P, N: Network>
 where
-	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
-	P: Provider<AnyNetwork>,
+	F: TxFiller<N> + WalletProvider<N>,
+	P: Provider<N>,
 {
 	/// The substrate client.
 	sub_client: Arc<OnlineClient<CustomConfig>>,
 	/// The Bifrost client.
-	bfc_client: Arc<EthClient<F, P>>,
+	bfc_client: Arc<EthClient<F, P, N>>,
 }
 
-impl<F, P> UnsignedTransactionTask<F, P>
+impl<F, P, N: Network> UnsignedTransactionTask<F, P, N>
 where
-	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
-	P: Provider<AnyNetwork>,
+	F: TxFiller<N> + WalletProvider<N>,
+	P: Provider<N>,
 {
 	/// Build an unsigned transaction task instance.
 	pub fn new(
 		sub_client: Arc<OnlineClient<CustomConfig>>,
-		bfc_client: Arc<EthClient<F, P>>,
+		bfc_client: Arc<EthClient<F, P, N>>,
 	) -> Self {
 		Self { sub_client, bfc_client }
 	}
 }
 
 #[async_trait::async_trait]
-impl<F, P> ExtrinsicTask<F, P> for UnsignedTransactionTask<F, P>
+impl<F, P, N: Network> ExtrinsicTask<F, P, N> for UnsignedTransactionTask<F, P, N>
 where
-	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
-	P: Provider<AnyNetwork>,
+	F: TxFiller<N> + WalletProvider<N>,
+	P: Provider<N>,
 {
 	fn get_sub_client(&self) -> Arc<OnlineClient<CustomConfig>> {
 		self.sub_client.clone()
 	}
 
-	fn get_bfc_client(&self) -> Arc<EthClient<F, P>> {
+	fn get_bfc_client(&self) -> Arc<EthClient<F, P, N>> {
 		self.bfc_client.clone()
 	}
 

@@ -1,9 +1,8 @@
 use alloy::{
 	consensus::BlockHeader as _,
-	network::AnyNetwork,
+	network::{BlockResponse, Network},
 	primitives::ChainId,
 	providers::{Provider, WalletProvider, fillers::TxFiller},
-	rpc::types::TransactionRequest,
 };
 use cron::Schedule;
 use eyre::Result;
@@ -31,15 +30,15 @@ const SUB_LOG_TARGET: &str = "rollback-emitter";
 /// The essential task that handles `Socket` event rollbacks.
 /// This only handles requests that are relayed to the target client.
 /// (`client` and `tx_request_sender` are connected to the same chain)
-pub struct SocketRollbackEmitter<F, P>
+pub struct SocketRollbackEmitter<F, P, N: Network>
 where
-	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
-	P: Provider<AnyNetwork>,
+	F: TxFiller<N> + WalletProvider<N>,
+	P: Provider<N>,
 {
 	/// The `EthClient` to interact with the connected blockchain.
-	pub client: Arc<EthClient<F, P>>,
+	pub client: Arc<EthClient<F, P, N>>,
 	/// The entire clients instantiated in the system. <chain_id, Arc<EthClient>>
-	system_clients: Arc<ClientMap<F, P>>,
+	system_clients: Arc<ClientMap<F, P, N>>,
 	/// The receiver connected to the socket rollback channel.
 	rollback_receiver: UnboundedReceiver<Socket_Message>,
 	/// The local storage saving emitted `Socket` event messages.
@@ -52,15 +51,15 @@ where
 	debug_mode: bool,
 }
 
-impl<F, P> SocketRollbackEmitter<F, P>
+impl<F, P, N: Network> SocketRollbackEmitter<F, P, N>
 where
-	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork> + 'static,
-	P: Provider<AnyNetwork> + 'static,
+	F: TxFiller<N> + WalletProvider<N> + 'static,
+	P: Provider<N> + 'static,
 {
 	/// Instantiates a new `SocketRollbackEmitter`.
 	pub fn new(
-		client: Arc<EthClient<F, P>>,
-		system_clients: Arc<ClientMap<F, P>>,
+		client: Arc<EthClient<F, P, N>>,
+		system_clients: Arc<ClientMap<F, P, N>>,
 		handle: SpawnTaskHandle,
 		debug_mode: bool,
 	) -> (Self, Arc<UnboundedSender<Socket_Message>>) {
@@ -170,9 +169,7 @@ where
 	async fn try_rollback_inbound(&self, socket_msg: &Socket_Message) {
 		let mut submit_sig = socket_msg.clone();
 		submit_sig.status = SocketEventStatus::Failed.into();
-		let tx_request = TransactionRequest::default()
-			.input(self.build_poll_call_data(submit_sig.clone(), Signatures::default()))
-			.to(*self.client.protocol_contracts.socket.address());
+		let tx_request = self.build_poll_request(submit_sig.clone(), Signatures::default());
 
 		let metadata = RollbackMetadata::new(
 			true,
@@ -193,12 +190,10 @@ where
 		// `socket_msg` is the origin message that will be used for signature builds.
 		let mut submit_sig = socket_msg.clone();
 		submit_sig.status = SocketEventStatus::Rejected.into();
-		let tx_request = TransactionRequest::default()
-			.input(self.build_poll_call_data(
-				submit_sig.clone(),
-				self.get_sorted_signatures(socket_msg.clone()).await?,
-			))
-			.to(*self.client.protocol_contracts.socket.address());
+		let tx_request = self.build_poll_request(
+			submit_sig.clone(),
+			self.get_sorted_signatures(socket_msg.clone()).await?,
+		);
 
 		let metadata = RollbackMetadata::new(
 			false,
@@ -246,7 +241,11 @@ where
 	}
 
 	/// Request a socket rollback transaction to the target tx request channel.
-	fn request_send_transaction(&self, tx_request: TransactionRequest, metadata: RollbackMetadata) {
+	fn request_send_transaction(
+		&self,
+		tx_request: N::TransactionRequest,
+		metadata: RollbackMetadata,
+	) {
 		send_transaction(
 			self.client.clone(),
 			tx_request,
@@ -259,12 +258,12 @@ where
 }
 
 #[async_trait::async_trait]
-impl<F, P> SocketRelayBuilder<F, P> for SocketRollbackEmitter<F, P>
+impl<F, P, N: Network> SocketRelayBuilder<F, P, N> for SocketRollbackEmitter<F, P, N>
 where
-	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
-	P: Provider<AnyNetwork>,
+	F: TxFiller<N> + WalletProvider<N>,
+	P: Provider<N>,
 {
-	fn get_client(&self) -> Arc<EthClient<F, P>> {
+	fn get_client(&self) -> Arc<EthClient<F, P, N>> {
 		// This will always return the Bifrost client.
 		// Used only for `get_sorted_signatures()` on `Outbound::Accepted` rollbacks.
 		self.system_clients
@@ -277,10 +276,10 @@ where
 }
 
 #[async_trait::async_trait]
-impl<F, P> PeriodicWorker for SocketRollbackEmitter<F, P>
+impl<F, P, N: Network> PeriodicWorker for SocketRollbackEmitter<F, P, N>
 where
-	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork> + 'static,
-	P: Provider<AnyNetwork> + 'static,
+	F: TxFiller<N> + WalletProvider<N> + 'static,
+	P: Provider<N> + 'static,
 {
 	fn schedule(&self) -> Schedule {
 		self.schedule.clone()
@@ -299,7 +298,7 @@ where
 				.full()
 				.await?
 			{
-				self.receive(latest_block.header.timestamp());
+				self.receive(latest_block.header().timestamp());
 
 				for (req_id, rollback_msg) in self.rollback_msgs.clone() {
 					// ignore if the request has already been processed.
@@ -311,7 +310,7 @@ where
 					// ignore if the required interval didn't pass.
 					if !self.is_request_timeout(
 						rollback_msg.timeout_started_at,
-						latest_block.header.timestamp(),
+						latest_block.header().timestamp(),
 					) {
 						continue;
 					}

@@ -1,7 +1,7 @@
 use std::{collections::BTreeMap, str::FromStr, sync::Arc, time::Duration};
 
 use alloy::{
-	network::AnyNetwork,
+	network::Network,
 	primitives::{Address as EvmAddress, B256, Bytes, keccak256},
 	providers::{Provider, WalletProvider, fillers::TxFiller},
 };
@@ -77,15 +77,15 @@ impl From<rollback_requestReturn> for RollbackRequest {
 	}
 }
 
-pub struct BitcoinRollbackVerifier<F, P>
+pub struct BitcoinRollbackVerifier<F, P, N: Network>
 where
-	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
-	P: Provider<AnyNetwork>,
+	F: TxFiller<N> + WalletProvider<N>,
+	P: Provider<N>,
 {
 	/// The Bitcoin client.
 	btc_client: BtcClient,
 	/// The Bifrost client.
-	pub bfc_client: Arc<EthClient<F, P>>,
+	pub bfc_client: Arc<EthClient<F, P, N>>,
 	/// The unsigned transaction message sender.
 	xt_request_sender: Arc<XtRequestSender>,
 	/// The periodic schedule.
@@ -93,10 +93,10 @@ where
 }
 
 #[async_trait::async_trait]
-impl<F, P> RpcApi for BitcoinRollbackVerifier<F, P>
+impl<F, P, N: Network> RpcApi for BitcoinRollbackVerifier<F, P, N>
 where
-	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
-	P: Provider<AnyNetwork>,
+	F: TxFiller<N> + WalletProvider<N>,
+	P: Provider<N>,
 {
 	async fn call<T: for<'a> Deserialize<'a> + Send>(
 		&self,
@@ -118,25 +118,25 @@ where
 }
 
 #[async_trait::async_trait]
-impl<F, P> XtRequester<F, P> for BitcoinRollbackVerifier<F, P>
+impl<F, P, N: Network> XtRequester<F, P, N> for BitcoinRollbackVerifier<F, P, N>
 where
-	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
-	P: Provider<AnyNetwork>,
+	F: TxFiller<N> + WalletProvider<N>,
+	P: Provider<N>,
 {
 	fn xt_request_sender(&self) -> Arc<XtRequestSender> {
 		self.xt_request_sender.clone()
 	}
 
-	fn bfc_client(&self) -> Arc<EthClient<F, P>> {
+	fn bfc_client(&self) -> Arc<EthClient<F, P, N>> {
 		self.bfc_client.clone()
 	}
 }
 
 #[async_trait::async_trait]
-impl<F, P> PeriodicWorker for BitcoinRollbackVerifier<F, P>
+impl<F, P, N: Network> PeriodicWorker for BitcoinRollbackVerifier<F, P, N>
 where
-	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
-	P: Provider<AnyNetwork>,
+	F: TxFiller<N> + WalletProvider<N>,
+	P: Provider<N>,
 {
 	fn schedule(&self) -> Schedule {
 		self.schedule.clone()
@@ -211,15 +211,15 @@ where
 	}
 }
 
-impl<F, P> BitcoinRollbackVerifier<F, P>
+impl<F, P, N: Network> BitcoinRollbackVerifier<F, P, N>
 where
-	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
-	P: Provider<AnyNetwork>,
+	F: TxFiller<N> + WalletProvider<N>,
+	P: Provider<N>,
 {
 	/// Instantiates a new `BitcoinRollbackVerifier` instance.
 	pub fn new(
 		btc_client: BtcClient,
-		bfc_client: Arc<EthClient<F, P>>,
+		bfc_client: Arc<EthClient<F, P, N>>,
 		xt_request_sender: Arc<XtRequestSender>,
 	) -> Self {
 		Self {
@@ -310,7 +310,7 @@ where
 	}
 
 	/// Get the `BtcSocketQueue` precompile contract instance.
-	fn socket_queue(&self) -> &SocketQueueInstance<F, P> {
+	fn socket_queue(&self) -> &SocketQueueInstance<F, P, N> {
 		self.bfc_client.protocol_contracts.socket_queue.as_ref().unwrap()
 	}
 }

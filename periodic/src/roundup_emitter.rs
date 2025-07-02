@@ -1,8 +1,8 @@
 use alloy::{
-	network::AnyNetwork,
+	network::Network,
 	primitives::{Address, U256},
 	providers::{Provider, WalletProvider, fillers::TxFiller},
-	rpc::types::{Filter, Log, TransactionInput, TransactionRequest},
+	rpc::types::{Filter, Log},
 	sol_types::SolEvent as _,
 };
 use cron::Schedule;
@@ -31,15 +31,15 @@ use crate::traits::PeriodicWorker;
 
 const SUB_LOG_TARGET: &str = "roundup-emitter";
 
-pub struct RoundupEmitter<F, P>
+pub struct RoundupEmitter<F, P, N: Network>
 where
-	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
-	P: Provider<AnyNetwork>,
+	F: TxFiller<N> + WalletProvider<N>,
+	P: Provider<N>,
 {
 	/// Current round number
 	current_round: U256,
 	/// The ethereum client for the Bifrost network.
-	pub client: Arc<EthClient<F, P>>,
+	pub client: Arc<EthClient<F, P, N>>,
 	/// The time schedule that represents when to check round info.
 	schedule: Schedule,
 	/// The bootstrap shared data.
@@ -51,10 +51,10 @@ where
 }
 
 #[async_trait::async_trait]
-impl<F, P> PeriodicWorker for RoundupEmitter<F, P>
+impl<F, P, N: Network> PeriodicWorker for RoundupEmitter<F, P, N>
 where
-	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork> + 'static,
-	P: Provider<AnyNetwork> + 'static,
+	F: TxFiller<N> + WalletProvider<N> + 'static,
+	P: Provider<N> + 'static,
 {
 	fn schedule(&self) -> Schedule {
 		self.schedule.clone()
@@ -105,14 +105,14 @@ where
 	}
 }
 
-impl<F, P> RoundupEmitter<F, P>
+impl<F, P, N: Network> RoundupEmitter<F, P, N>
 where
-	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork> + 'static,
-	P: Provider<AnyNetwork> + 'static,
+	F: TxFiller<N> + WalletProvider<N> + 'static,
+	P: Provider<N> + 'static,
 {
 	/// Instantiates a new `RoundupEmitter` instance.
 	pub fn new(
-		client: Arc<EthClient<F, P>>,
+		client: Arc<EthClient<F, P, N>>,
 		bootstrap_shared_data: Arc<BootstrapSharedData>,
 		handle: SpawnTaskHandle,
 		debug_mode: bool,
@@ -151,30 +151,25 @@ where
 		round: U256,
 		new_relayers: Vec<Address>,
 		from: Address,
-	) -> Result<TransactionRequest> {
+	) -> Result<N::TransactionRequest> {
 		let encoded_msg = encode_roundup_param(round, &new_relayers);
 
 		let sigs = Signatures::from(self.client.sign_message(&encoded_msg).await?);
 		let round_up_submit = Round_Up_Submit { round, new_relayers, sigs };
 
-		let input = self
+		Ok(self
 			.client
 			.protocol_contracts
 			.socket
 			.round_control_poll(round_up_submit)
-			.calldata()
-			.clone();
-
-		Ok(TransactionRequest::default()
-			.to(*self.client.protocol_contracts.socket.address())
 			.from(from)
-			.input(TransactionInput::new(input)))
+			.into_transaction_request())
 	}
 
 	/// Request send transaction to the target tx request channel.
 	fn request_send_transaction(
 		&self,
-		tx_request: TransactionRequest,
+		tx_request: N::TransactionRequest,
 		metadata: VSPPhase1Metadata,
 	) {
 		send_transaction(
@@ -203,10 +198,10 @@ where
 }
 
 #[async_trait::async_trait]
-impl<F, P> BootstrapHandler for RoundupEmitter<F, P>
+impl<F, P, N: Network> BootstrapHandler for RoundupEmitter<F, P, N>
 where
-	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork> + 'static,
-	P: Provider<AnyNetwork> + 'static,
+	F: TxFiller<N> + WalletProvider<N> + 'static,
+	P: Provider<N> + 'static,
 {
 	fn get_chain_id(&self) -> u64 {
 		self.client.metadata.id

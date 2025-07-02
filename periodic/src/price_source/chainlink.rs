@@ -2,7 +2,7 @@ use std::{collections::BTreeMap, sync::Arc};
 
 use crate::traits::PriceFetcher;
 use alloy::{
-	network::AnyNetwork,
+	network::Network,
 	primitives::U256,
 	providers::{Provider, WalletProvider, fillers::TxFiller},
 };
@@ -11,19 +11,19 @@ use br_primitives::periodic::PriceResponse;
 use eyre::{Result, eyre};
 
 #[derive(Clone)]
-pub struct ChainlinkPriceFetcher<F, P>
+pub struct ChainlinkPriceFetcher<F, P, N: Network>
 where
-	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
-	P: Provider<AnyNetwork>,
+	F: TxFiller<N> + WalletProvider<N>,
+	P: Provider<N>,
 {
-	client: Option<Arc<EthClient<F, P>>>,
+	client: Option<Arc<EthClient<F, P, N>>>,
 }
 
 #[async_trait::async_trait]
-impl<F, P> PriceFetcher for ChainlinkPriceFetcher<F, P>
+impl<F, P, N: Network> PriceFetcher for ChainlinkPriceFetcher<F, P, N>
 where
-	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
-	P: Provider<AnyNetwork>,
+	F: TxFiller<N> + WalletProvider<N>,
+	P: Provider<N>,
 {
 	/// Get the price of a symbol from Chainlink aggregator.
 	/// Available symbols: USDC, USDT, DAI, BTC, WBTC, CBBTC
@@ -84,12 +84,12 @@ where
 	}
 }
 
-impl<F, P> ChainlinkPriceFetcher<F, P>
+impl<F, P, N: Network> ChainlinkPriceFetcher<F, P, N>
 where
-	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
-	P: Provider<AnyNetwork>,
+	F: TxFiller<N> + WalletProvider<N>,
+	P: Provider<N>,
 {
-	pub async fn new(client: Option<Arc<EthClient<F, P>>>) -> Self {
+	pub async fn new(client: Option<Arc<EthClient<F, P, N>>>) -> Self {
 		ChainlinkPriceFetcher { client }
 	}
 }

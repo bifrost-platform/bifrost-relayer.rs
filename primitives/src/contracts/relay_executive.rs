@@ -10,5 +10,5 @@ sol!(
 
 use RelayExecutiveContract::RelayExecutiveContractInstance;
 
-pub type RelayExecutiveInstance<F, P> =
-	RelayExecutiveContractInstance<Arc<FillProvider<F, P, AnyNetwork>>, AnyNetwork>;
+pub type RelayExecutiveInstance<F, P, N> =
+	RelayExecutiveContractInstance<Arc<FillProvider<F, P, N>>, N>;

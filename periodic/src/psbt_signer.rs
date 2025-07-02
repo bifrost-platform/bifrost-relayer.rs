@@ -1,6 +1,6 @@
 use crate::traits::PeriodicWorker;
 use alloy::{
-	network::AnyNetwork,
+	network::Network as AlloyNetwork,
 	primitives::{B256, Bytes, keccak256},
 	providers::{Provider, WalletProvider, fillers::TxFiller},
 };
@@ -28,13 +28,13 @@ use tokio_stream::StreamExt;
 const SUB_LOG_TARGET: &str = "psbt-signer";
 
 /// The essential task that submits signed PSBT's.
-pub struct PsbtSigner<F, P>
+pub struct PsbtSigner<F, P, N: AlloyNetwork>
 where
-	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
-	P: Provider<AnyNetwork>,
+	F: TxFiller<N> + WalletProvider<N>,
+	P: Provider<N>,
 {
 	/// The Bifrost client.
-	pub client: Arc<EthClient<F, P>>,
+	pub client: Arc<EthClient<F, P, N>>,
 	/// The unsigned transaction message sender.
 	xt_request_sender: Arc<XtRequestSender>,
 	/// The public and private keypair local storage.
@@ -47,14 +47,14 @@ where
 	schedule: Schedule,
 }
 
-impl<F, P> PsbtSigner<F, P>
+impl<F, P, N: AlloyNetwork> PsbtSigner<F, P, N>
 where
-	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
-	P: Provider<AnyNetwork>,
+	F: TxFiller<N> + WalletProvider<N>,
+	P: Provider<N>,
 {
 	/// Instantiates a new `PsbtSigner` instance.
 	pub fn new(
-		client: Arc<EthClient<F, P>>,
+		client: Arc<EthClient<F, P, N>>,
 		xt_request_sender: Arc<XtRequestSender>,
 		keypair_storage: KeypairStorage,
 		migration_sequence: Arc<RwLock<MigrationSequence>>,
@@ -197,25 +197,25 @@ where
 }
 
 #[async_trait::async_trait]
-impl<F, P> XtRequester<F, P> for PsbtSigner<F, P>
+impl<F, P, N: AlloyNetwork> XtRequester<F, P, N> for PsbtSigner<F, P, N>
 where
-	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
-	P: Provider<AnyNetwork>,
+	F: TxFiller<N> + WalletProvider<N>,
+	P: Provider<N>,
 {
 	fn xt_request_sender(&self) -> Arc<XtRequestSender> {
 		self.xt_request_sender.clone()
 	}
 
-	fn bfc_client(&self) -> Arc<EthClient<F, P>> {
+	fn bfc_client(&self) -> Arc<EthClient<F, P, N>> {
 		self.client.clone()
 	}
 }
 
 #[async_trait::async_trait]
-impl<F, P> PeriodicWorker for PsbtSigner<F, P>
+impl<F, P, N: AlloyNetwork> PeriodicWorker for PsbtSigner<F, P, N>
 where
-	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
-	P: Provider<AnyNetwork>,
+	F: TxFiller<N> + WalletProvider<N>,
+	P: Provider<N>,
 {
 	fn schedule(&self) -> Schedule {
 		self.schedule.clone()

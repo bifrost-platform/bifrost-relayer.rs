@@ -1,7 +1,6 @@
 use crate::{btc::LOG_TARGET, eth::EthClient};
 
 use alloy::{
-	network::AnyNetwork,
 	primitives::ChainId,
 	providers::{Provider, WalletProvider, fillers::TxFiller},
 };
@@ -17,6 +16,7 @@ use br_primitives::{
 };
 use eyre::Result;
 
+use alloy::network::Network;
 use bitcoincore_rpc::{
 	Client as BtcClient, RpcApi, bitcoincore_rpc_json::GetRawTransactionResultVout,
 };
@@ -85,15 +85,15 @@ impl EventMessage {
 }
 
 /// A module that reads every new Bitcoin block and filters `Inbound`, `Outbound` events.
-pub struct BlockManager<F, P>
+pub struct BlockManager<F, P, N: Network>
 where
-	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
-	P: Provider<AnyNetwork>,
+	F: TxFiller<N> + WalletProvider<N>,
+	P: Provider<N>,
 {
 	/// The Bitcoin client.
 	btc_client: BtcClient,
 	/// The Bifrost client.
-	pub bfc_client: Arc<EthClient<F, P>>,
+	pub bfc_client: Arc<EthClient<F, P, N>>,
 	/// The event message sender.
 	sender: Sender<EventMessage>,
 	/// The configured minimum block confirmations required to process a block.
@@ -111,10 +111,10 @@ where
 }
 
 #[async_trait::async_trait]
-impl<F, P> RpcApi for BlockManager<F, P>
+impl<F, P, N: Network> RpcApi for BlockManager<F, P, N>
 where
-	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
-	P: Provider<AnyNetwork>,
+	F: TxFiller<N> + WalletProvider<N>,
+	P: Provider<N>,
 {
 	async fn call<T: for<'a> Deserialize<'a> + Send>(
 		&self,
@@ -142,15 +142,15 @@ where
 	}
 }
 
-impl<F, P> BlockManager<F, P>
+impl<F, P, N: Network> BlockManager<F, P, N>
 where
-	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
-	P: Provider<AnyNetwork>,
+	F: TxFiller<N> + WalletProvider<N>,
+	P: Provider<N>,
 {
 	/// Instantiates a new `BlockManager` instance.
 	pub fn new(
 		btc_client: BtcClient,
-		bfc_client: Arc<EthClient<F, P>>,
+		bfc_client: Arc<EthClient<F, P, N>>,
 		bootstrap_shared_data: Arc<BootstrapSharedData>,
 		call_interval: u64,
 		block_confirmations: u64,
@@ -456,10 +456,10 @@ where
 }
 
 #[async_trait::async_trait]
-impl<F, P> BootstrapHandler for BlockManager<F, P>
+impl<F, P, N: Network> BootstrapHandler for BlockManager<F, P, N>
 where
-	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
-	P: Provider<AnyNetwork>,
+	F: TxFiller<N> + WalletProvider<N>,
+	P: Provider<N>,
 {
 	fn get_chain_id(&self) -> ChainId {
 		self.bfc_client.get_bitcoin_chain_id().unwrap()

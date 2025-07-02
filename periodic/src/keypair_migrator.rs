@@ -1,7 +1,7 @@
 use crate::traits::PeriodicWorker;
 
 use alloy::{
-	network::AnyNetwork,
+	network::Network,
 	providers::{Provider, WalletProvider, fillers::TxFiller},
 };
 use br_client::{
@@ -26,26 +26,26 @@ use std::{str::FromStr, sync::Arc, time::Duration};
 use subxt::OnlineClient;
 use tokio::sync::RwLock;
 
-pub struct KeypairMigrator<F, P>
+pub struct KeypairMigrator<F, P, N: Network>
 where
-	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
-	P: Provider<AnyNetwork>,
+	F: TxFiller<N> + WalletProvider<N>,
+	P: Provider<N>,
 {
 	sub_client: Option<OnlineClient<CustomConfig>>,
-	bfc_client: Arc<EthClient<F, P>>,
+	bfc_client: Arc<EthClient<F, P, N>>,
 	migration_sequence: Arc<RwLock<MigrationSequence>>,
 	keypair_storage: KeypairStorage,
 	schedule: Schedule,
 }
 
-impl<F, P> KeypairMigrator<F, P>
+impl<F, P, N: Network> KeypairMigrator<F, P, N>
 where
-	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
-	P: Provider<AnyNetwork>,
+	F: TxFiller<N> + WalletProvider<N>,
+	P: Provider<N>,
 {
 	/// Instantiates a new `KeypairMigrator` instance.
 	pub fn new(
-		bfc_client: Arc<EthClient<F, P>>,
+		bfc_client: Arc<EthClient<F, P, N>>,
 		migration_sequence: Arc<RwLock<MigrationSequence>>,
 		keypair_storage: KeypairStorage,
 	) -> Self {
@@ -146,10 +146,10 @@ where
 }
 
 #[async_trait::async_trait]
-impl<F, P> PeriodicWorker for KeypairMigrator<F, P>
+impl<F, P, N: Network> PeriodicWorker for KeypairMigrator<F, P, N>
 where
-	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
-	P: Provider<AnyNetwork>,
+	F: TxFiller<N> + WalletProvider<N>,
+	P: Provider<N>,
 {
 	fn schedule(&self) -> Schedule {
 		self.schedule.clone()

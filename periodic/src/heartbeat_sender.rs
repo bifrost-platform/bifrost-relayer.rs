@@ -1,7 +1,7 @@
+use crate::traits::PeriodicWorker;
 use alloy::{
-	network::AnyNetwork,
+	network::Network,
 	providers::{Provider, WalletProvider, fillers::TxFiller},
-	rpc::types::TransactionRequest,
 };
 use br_client::eth::{EthClient, send_transaction};
 use br_primitives::{
@@ -13,20 +13,18 @@ use eyre::Result;
 use sc_service::SpawnTaskHandle;
 use std::{str::FromStr, sync::Arc};
 
-use crate::traits::PeriodicWorker;
-
 const SUB_LOG_TARGET: &str = "heartbeat-sender";
 
 /// The essential task that sending heartbeat transaction.
-pub struct HeartbeatSender<F, P>
+pub struct HeartbeatSender<F, P, N: Network>
 where
-	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
-	P: Provider<AnyNetwork>,
+	F: TxFiller<N> + WalletProvider<N>,
+	P: Provider<N>,
 {
 	/// The time schedule that represents when to check heartbeat pulsed.
 	schedule: Schedule,
 	/// The `EthClient` to interact with the bifrost network.
-	pub client: Arc<EthClient<F, P>>,
+	pub client: Arc<EthClient<F, P, N>>,
 	/// The handle to spawn tasks.
 	handle: SpawnTaskHandle,
 	/// Whether to enable debug mode.
@@ -34,10 +32,10 @@ where
 }
 
 #[async_trait::async_trait]
-impl<F, P> PeriodicWorker for HeartbeatSender<F, P>
+impl<F, P, N: Network> PeriodicWorker for HeartbeatSender<F, P, N>
 where
-	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork> + 'static,
-	P: Provider<AnyNetwork> + 'static,
+	F: TxFiller<N> + WalletProvider<N> + 'static,
+	P: Provider<N> + 'static,
 {
 	fn schedule(&self) -> Schedule {
 		self.schedule.clone()
@@ -68,13 +66,13 @@ where
 	}
 }
 
-impl<F, P> HeartbeatSender<F, P>
+impl<F, P, N: Network> HeartbeatSender<F, P, N>
 where
-	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork> + 'static,
-	P: Provider<AnyNetwork> + 'static,
+	F: TxFiller<N> + WalletProvider<N> + 'static,
+	P: Provider<N> + 'static,
 {
 	/// Instantiates a new `HeartbeatSender` instance.
-	pub fn new(client: Arc<EthClient<F, P>>, handle: SpawnTaskHandle, debug_mode: bool) -> Self {
+	pub fn new(client: Arc<EthClient<F, P, N>>, handle: SpawnTaskHandle, debug_mode: bool) -> Self {
 		Self {
 			schedule: Schedule::from_str(HEARTBEAT_SCHEDULE).expect(INVALID_PERIODIC_SCHEDULE),
 			client,
@@ -84,17 +82,20 @@ where
 	}
 
 	/// Build `heartbeat` transaction.
-	fn build_transaction(&self) -> TransactionRequest {
-		let relayer_manager = self.client.protocol_contracts.relayer_manager.as_ref().unwrap();
-		TransactionRequest::default()
-			.to(*relayer_manager.address())
-			.input(relayer_manager.heartbeat().calldata().clone().into())
+	fn build_transaction(&self) -> N::TransactionRequest {
+		self.client
+			.protocol_contracts
+			.relayer_manager
+			.as_ref()
+			.unwrap()
+			.heartbeat()
+			.into_transaction_request()
 	}
 
 	/// Request send transaction to the target tx request channel.
 	async fn request_send_transaction(
 		&self,
-		tx_request: TransactionRequest,
+		tx_request: N::TransactionRequest,
 		metadata: HeartbeatMetadata,
 	) {
 		send_transaction(
