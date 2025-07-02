@@ -230,7 +230,8 @@ where
 		// possibility of txpool being flushed automatically. wait for 2 blocks.
 		sleep(Duration::from_millis(self.metadata.call_interval * 2)).await;
 
-		let content = self.txpool_content().await?.remove_from(&self.address().await);
+		let address = self.address().await;
+		let content = self.txpool_content().await?.remove_from(&address);
 		let mut pending = content.pending;
 		pending.extend(content.queued);
 
@@ -242,7 +243,7 @@ where
 			.into_values()
 			.map(|tx| {
 				let mut request = N::TransactionRequest::default()
-					.with_from(tx.from())
+					.with_from(address)
 					.with_to(tx.to().unwrap())
 					.with_input(tx.input().clone())
 					.with_nonce(tx.nonce());
@@ -261,7 +262,7 @@ where
 		transactions.make_contiguous().sort_by_key(|a| a.nonce().unwrap());
 
 		// if the nonce of the first transaction is not equal to the current nonce, update the nonce
-		let mut count = self.get_transaction_count(self.address().await).await?;
+		let mut count = self.get_transaction_count(address).await?;
 		if transactions.front().unwrap().nonce().unwrap() != count {
 			for tx in transactions.iter_mut() {
 				tx.set_nonce(count);
@@ -321,7 +322,7 @@ where
 					let msg = format!(
 						" ❗️ Failed to send transaction ({} address:{}): Flush, Error: {}",
 						self.get_chain_name(),
-						self.address().await,
+						address,
 						err
 					);
 					log::warn!(target: &self.get_chain_name(), "{msg}");
