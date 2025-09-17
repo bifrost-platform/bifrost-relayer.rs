@@ -23,7 +23,6 @@ use miniscript::bitcoin::{Address as BtcAddress, Network, Psbt};
 use std::{str::FromStr, sync::Arc};
 use subxt::ext::subxt_core::utils::AccountId20;
 use tokio::sync::RwLock;
-use tokio_stream::StreamExt;
 
 const SUB_LOG_TARGET: &str = "psbt-signer";
 
@@ -234,8 +233,7 @@ where
 					unsigned_psbts.len()
 				);
 
-				let mut stream = tokio_stream::iter(unsigned_psbts);
-				while let Some(unsigned_psbt) = stream.next().await {
+				for unsigned_psbt in unsigned_psbts {
 					// Build the unsigned transaction.
 					if let Some((call, metadata)) = self
 						.build_unsigned_tx(&mut Psbt::deserialize(&unsigned_psbt).unwrap())

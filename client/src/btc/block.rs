@@ -17,10 +17,12 @@ use br_primitives::{
 use eyre::Result;
 
 use alloy::network::Network;
+use super::handlers::BootstrapHandler;
 use bitcoincore_rpc::{
 	Client as BtcClient, RpcApi, bitcoincore_rpc_json::GetRawTransactionResultVout,
 };
-use miniscript::bitcoin::{Address, Amount, Txid, address::NetworkUnchecked};
+use br_primitives::btc::{Event, EventMessage};
+use miniscript::bitcoin::{Address, Txid, address::NetworkUnchecked};
 use serde::Deserialize;
 use serde_json::Value;
 use std::{collections::BTreeSet, str::FromStr, sync::Arc};
@@ -30,59 +32,7 @@ use tokio::{
 };
 use tokio_stream::{StreamExt, wrappers::IntervalStream};
 
-use super::handlers::BootstrapHandler;
-
 const SUB_LOG_TARGET: &str = "block-manager";
-
-#[derive(Debug, Clone, Eq, PartialEq)]
-/// A Bitcoin related event type.
-pub enum EventType {
-	/// An inbound action.
-	Inbound,
-	/// An outbound action.
-	Outbound,
-}
-
-#[derive(Debug, Clone)]
-/// A Bitcoin related event details. (Only for `Inbound` and `Outbound`)
-pub struct Event {
-	/// The transaction hash.
-	pub txid: Txid,
-	/// The output index of the transaction.
-	pub index: u32,
-	/// The account address.
-	pub address: Address<NetworkUnchecked>,
-	/// The transferred amount.
-	pub amount: Amount,
-}
-
-#[derive(Debug, Clone)]
-/// The event message delivered through channels.
-pub struct EventMessage {
-	/// The current block number.
-	pub block_number: u64,
-	/// The event type.
-	pub event_type: EventType,
-	/// The event details.
-	pub events: Vec<Event>,
-}
-
-impl EventMessage {
-	/// Instantiates a new `EventMessage` instance.
-	pub fn new(block_number: u64, event_type: EventType, events: Vec<Event>) -> Self {
-		Self { block_number, event_type, events }
-	}
-
-	/// Instantiates an `Inbound` typed `EventMessage` instance.
-	pub fn inbound(block_number: u64) -> Self {
-		Self::new(block_number, EventType::Inbound, vec![])
-	}
-
-	/// Instantiates an `Outbound` typed `EventMessage` instance.
-	pub fn outbound(block_number: u64) -> Self {
-		Self::new(block_number, EventType::Outbound, vec![])
-	}
-}
 
 /// A module that reads every new Bitcoin block and filters `Inbound`, `Outbound` events.
 pub struct BlockManager<F, P, N: Network>
@@ -288,7 +238,7 @@ where
 
 		let mut stream = IntervalStream::new(interval(Duration::from_millis(self.call_interval)));
 		while (stream.next().await).is_some() {
-			let latest_block_num = self.get_block_count().await.unwrap();
+			let latest_block_num = self.get_block_count().await?;
 			if self.is_block_confirmed(latest_block_num) {
 				let (vault_set, refund_set) = self.fetch_registration_sets().await?;
 				self.process_confirmed_block(
@@ -307,10 +257,15 @@ where
 		let registration_pool =
 			self.bfc_client.protocol_contracts.registration_pool.as_ref().unwrap();
 
-		Ok(registration_pool
-			.vault_addresses(self.get_current_round().await?)
-			.call()
-			.await?)
+		let mut vault_addresses = registration_pool.vault_addresses(0).call().await?;
+		vault_addresses.push(
+			registration_pool
+				.vault_address(*registration_pool.address(), 0)
+				.call()
+				.await?
+		);
+
+		Ok(vault_addresses)
 	}
 
 	/// Returns the registered user refund addresses.
@@ -387,9 +342,7 @@ where
 
 			let block_hash = self.get_block_hash(num).await.unwrap();
 			let txs = self.get_block_info_with_txs(&block_hash).await.unwrap().tx;
-
-			let mut stream = tokio_stream::iter(txs.iter());
-			while let Some(tx) = stream.next().await {
+			for tx in txs {
 				self.filter(
 					tx.txid,
 					&tx.vout,
@@ -410,6 +363,7 @@ where
 				outbound.events.len()
 			);
 
+			self.sender.send(EventMessage::new_block(num)).unwrap();
 			self.sender.send(inbound).unwrap();
 			self.sender.send(outbound).unwrap();
 		}
@@ -428,8 +382,7 @@ where
 		vault_set: &BTreeSet<Address<NetworkUnchecked>>,
 		refund_set: &BTreeSet<Address<NetworkUnchecked>>,
 	) {
-		let mut stream = tokio_stream::iter(vouts.iter());
-		while let Some(vout) = stream.next().await {
+		for vout in vouts {
 			if let Some(address) = vout.script_pub_key.address.clone() {
 				// address can only be contained in either one set.
 				if vault_set.contains(&address) {
@@ -474,8 +427,8 @@ where
 
 		let (inbound, outbound) = self.get_bootstrap_events().await?;
 
-		self.sender.send(inbound).unwrap();
-		self.sender.send(outbound).unwrap();
+		self.sender.send(inbound)?;
+		self.sender.send(outbound)?;
 
 		self.set_bootstrap_state(BootstrapState::NormalStart).await;
 		log::info!(
@@ -496,11 +449,9 @@ where
 		let mut outbound = EventMessage::outbound(to_block);
 
 		for i in from_block..=to_block {
-			let block_hash = self.get_block_hash(i).await.unwrap();
-			let txs = self.get_block_info_with_txs(&block_hash).await.unwrap().tx;
-			let mut stream = tokio_stream::iter(txs);
-
-			while let Some(tx) = stream.next().await {
+			let block_hash = self.get_block_hash(i).await?;
+			let txs = self.get_block_info_with_txs(&block_hash).await?.tx;
+			for tx in txs {
 				self.filter(
 					tx.txid,
 					&tx.vout,

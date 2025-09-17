@@ -9,14 +9,13 @@ use br_client::{
 	eth::EthClient,
 };
 use br_primitives::{
-	constants::{
-		errors::INVALID_PROVIDER_URL, schedule::PRESUBMISSION_SCHEDULE,
-		tx::DEFAULT_CALL_RETRY_INTERVAL_MS,
-	},
+	constants::{schedule::PRESUBMISSION_SCHEDULE, tx::DEFAULT_CALL_RETRY_INTERVAL_MS},
 	substrate::{
 		CustomConfig, EthereumSignature, MigrationSequence, Public, VaultKeyPreSubmission,
-		bifrost_runtime,
-		bifrost_runtime::btc_registration_pool::storage::types::service_state::ServiceState,
+		bifrost_runtime::{
+			self, btc_registration_pool::storage::types::service_state::ServiceState,
+		},
+		initialize_sub_client,
 	},
 	tx::{
 		VaultKeyPresubmissionMetadata, XtRequest, XtRequestMessage, XtRequestMetadata,
@@ -111,18 +110,7 @@ where
 	}
 
 	async fn initialize(&mut self) {
-		let mut url = self.bfc_client.get_url();
-		if url.scheme() == "https" {
-			url.set_scheme("wss").expect(INVALID_PROVIDER_URL);
-		} else {
-			url.set_scheme("ws").expect(INVALID_PROVIDER_URL);
-		}
-
-		self.sub_client = Some(
-			OnlineClient::<CustomConfig>::from_insecure_url(url.as_str())
-				.await
-				.expect(INVALID_PROVIDER_URL),
-		);
+		self.sub_client = Some(initialize_sub_client(self.bfc_client.get_url()).await);
 	}
 
 	async fn build_unsigned_tx(

@@ -19,6 +19,7 @@ where
 	pub fn new(
 		config: &Configuration,
 		manager_deps: &ManagerDeps<F, P, N>,
+		substrate_deps: &SubstrateDeps<F, P, N>,
 		bootstrap_shared_data: BootstrapSharedData,
 		bfc_client: Arc<EthClient<F, P, N>>,
 		rollback_senders: Arc<BTreeMap<ChainId, Arc<UnboundedSender<Socket_Message>>>>,
@@ -36,6 +37,7 @@ where
 						event_managers.get(target).expect(INVALID_CHAIN_ID).sender.subscribe(),
 						clients.clone(),
 						bifrost_client.clone(),
+						substrate_deps.xt_request_sender.clone(),
 						rollback_senders.clone(),
 						task_manager.spawn_handle(),
 						Arc::new(bootstrap_shared_data.clone()),

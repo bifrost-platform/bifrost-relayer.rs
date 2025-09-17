@@ -1,35 +1,39 @@
 use crate::{
-	btc::{
-		block::{Event, EventMessage as BTCEventMessage, EventType},
-		handlers::{Handler, LOG_TARGET},
-	},
+	btc::handlers::{Handler, LOG_TARGET},
 	eth::{EthClient, send_transaction, traits::SocketRelayBuilder},
 };
 
 use alloy::{
 	network::Network,
-	primitives::ChainId,
+	primitives::{ChainId, keccak256},
 	providers::{Provider, WalletProvider, fillers::TxFiller},
 	sol_types::SolEvent,
 };
 use br_primitives::{
 	bootstrap::BootstrapSharedData,
+	btc::{Event, EventMessage as BTCEventMessage, EventType},
 	contracts::{
+		blaze::BlazeInstance,
 		socket::{Socket_Struct::Socket_Message, SocketContract::Socket},
 		socket_queue::SocketQueueInstance,
 	},
 	eth::{BuiltRelayTransaction, SocketEventStatus},
-	tx::{SocketRelayMetadata, TxRequestMetadata},
+	substrate::{BroadcastSubmission, EthereumSignature, bifrost_runtime},
+	tx::{
+		BroadcastPollMetadata, SocketRelayMetadata, TxRequestMetadata, XtRequest, XtRequestMessage,
+		XtRequestMetadata, XtRequestSender,
+	},
 	utils::sub_display_format,
 };
 use eyre::Result;
 use miniscript::bitcoin::{Txid, hashes::Hash};
 use sc_service::SpawnTaskHandle;
 use std::sync::Arc;
+use subxt::ext::subxt_core::utils::AccountId20;
 use tokio::sync::broadcast::Receiver;
 use tokio_stream::{StreamExt, wrappers::BroadcastStream};
 
-use super::{BootstrapHandler, EventMessage};
+use super::{BootstrapHandler, EventMessage, XtRequester};
 
 const SUB_LOG_TARGET: &str = "outbound-handler";
 
@@ -38,8 +42,13 @@ where
 	F: TxFiller<N> + WalletProvider<N>,
 	P: Provider<N>,
 {
+	/// `EthClient` to interact with Bifrost network.
 	pub bfc_client: Arc<EthClient<F, P, N>>,
+	/// The unsigned transaction message sender.
+	xt_request_sender: Arc<XtRequestSender>,
+	/// The receiver that consumes new events from the block channel.
 	event_stream: BroadcastStream<BTCEventMessage>,
+	/// Event type which this handler should handle.
 	target_event: EventType,
 	/// The bootstrap shared data.
 	bootstrap_shared_data: Arc<BootstrapSharedData>,
@@ -56,6 +65,7 @@ where
 {
 	pub fn new(
 		bfc_client: Arc<EthClient<F, P, N>>,
+		xt_request_sender: Arc<XtRequestSender>,
 		event_receiver: Receiver<BTCEventMessage>,
 		bootstrap_shared_data: Arc<BootstrapSharedData>,
 		handle: SpawnTaskHandle,
@@ -63,6 +73,7 @@ where
 	) -> Self {
 		Self {
 			bfc_client,
+			xt_request_sender,
 			event_stream: BroadcastStream::new(event_receiver),
 			target_event: EventType::Outbound,
 			bootstrap_shared_data,
@@ -76,18 +87,89 @@ where
 		self.bfc_client.protocol_contracts.socket_queue.as_ref().unwrap()
 	}
 
+	#[inline]
+	fn blaze(&self) -> &BlazeInstance<F, P, N> {
+		self.bfc_client.protocol_contracts.blaze.as_ref().unwrap()
+	}
+
 	/// Check if the transaction was originated by CCCP. If true, returns the composed socket messages.
 	async fn check_socket_queue(&self, txid: Txid) -> Result<Vec<Socket_Message>> {
-		let mut slice: [u8; 32] = txid.to_byte_array();
-		slice.reverse();
-
-		let socket_messages = self.socket_queue().outbound_tx(slice.into()).call().await?;
+		let socket_messages =
+			self.socket_queue().outbound_tx(txid.to_byte_array().into()).call().await?;
 
 		socket_messages
 			.iter()
 			.map(|bytes| Socket::abi_decode_data(bytes).map(|decoded| decoded.0))
 			.collect::<Result<Vec<_>, _>>()
 			.map_err(|e| e.into())
+	}
+
+	async fn broadcast_poll(&self, txid: Txid) -> Result<()> {
+		if self
+			.blaze()
+			.is_tx_broadcastable(txid.to_byte_array().into(), self.bfc_client.address().await)
+			.call()
+			.await?
+		{
+			let (call, metadata) = self.build_unsigned_tx(txid).await?;
+			self.request_send_transaction(call, metadata).await;
+		}
+		Ok(())
+	}
+
+	async fn build_payload(
+		&self,
+		txid: Txid,
+	) -> Result<(BroadcastSubmission<AccountId20>, EthereumSignature)> {
+		let msg = BroadcastSubmission {
+			authority_id: AccountId20(self.bfc_client.address().await.0.0),
+			txid: txid.to_byte_array().into(),
+		};
+		let signature = self
+			.bfc_client
+			.sign_message(&[keccak256("BroadcastPoll").as_slice(), txid.as_ref()].concat())
+			.await?
+			.into();
+
+		Ok((msg, signature))
+	}
+
+	async fn build_unsigned_tx(&self, txid: Txid) -> Result<(XtRequest, BroadcastPollMetadata)> {
+		let (msg, signature) = self.build_payload(txid).await?;
+		let metadata = BroadcastPollMetadata::new(txid);
+		Ok((
+			XtRequest::from(bifrost_runtime::tx().blaze().broadcast_poll(msg, signature)),
+			metadata,
+		))
+	}
+
+	/// Send the transaction request message to the channel.
+	async fn request_send_transaction(&self, call: XtRequest, metadata: BroadcastPollMetadata) {
+		match self
+			.xt_request_sender
+			.send(XtRequestMessage::new(call, XtRequestMetadata::BroadcastPoll(metadata.clone())))
+		{
+			Ok(_) => log::info!(
+				target: &self.bfc_client.get_chain_name(),
+				"-[{}] 🔖 Request unsigned transaction: {}",
+				sub_display_format(SUB_LOG_TARGET),
+				metadata
+			),
+			Err(error) => {
+				let log_msg = format!(
+					"-[{}]-[{}] ❗️ Failed to send unsigned transaction: {}, Error: {}",
+					sub_display_format(SUB_LOG_TARGET),
+					self.bfc_client.address().await,
+					metadata,
+					error
+				);
+				log::error!(target: &self.bfc_client.get_chain_name(), "{log_msg}");
+				sentry::capture_message(
+					&format!("[{}]{log_msg}", &self.bfc_client.get_chain_name()),
+					sentry::Level::Error,
+				);
+			},
+		}
 	}
 }
 
@@ -114,18 +196,23 @@ where
 				msg.events.len()
 			);
 
-			let mut stream = tokio_stream::iter(msg.events);
-			while let Some(event) = stream.next().await {
-				self.process_event(event).await?;
+			for event in msg.events {
+				self.process_event(&event).await?;
 			}
 		}
 
 		Ok(())
 	}
 
-	async fn process_event(&self, event: Event) -> Result<()> {
-		let mut stream = tokio_stream::iter(self.check_socket_queue(event.txid).await?.into_iter());
-		while let Some(mut msg) = stream.next().await {
+	async fn process_event(&self, event: &Event) -> Result<()> {
+		let txid = {
+			let mut slice: [u8; 32] = event.txid.to_byte_array();
+			slice.reverse();
+			Txid::from_slice(&slice)?
+		};
+
+		let socket_queue = self.check_socket_queue(txid).await?;
+		for mut msg in socket_queue {
 			msg.status = SocketEventStatus::Executed.into();
 
 			if let Some(built_transaction) =
@@ -148,6 +235,10 @@ where
 					self.handle.clone(),
 				);
 			}
+		}
+
+		if self.bfc_client.blaze_activation().await? {
+			self.broadcast_poll(txid).await?;
 		}
 
 		Ok(())
@@ -201,5 +292,20 @@ where
 
 	async fn get_bootstrap_events(&self) -> Result<(EventMessage, EventMessage)> {
 		unreachable!("unimplemented")
+	}
+}
+
+#[async_trait::async_trait]
+impl<F, P, N: Network> XtRequester<F, P, N> for OutboundHandler<F, P, N>
+where
+	F: TxFiller<N> + WalletProvider<N>,
+	P: Provider<N>,
+{
+	fn xt_request_sender(&self) -> Arc<XtRequestSender> {
+		self.xt_request_sender.clone()
+	}
+
+	fn bfc_client(&self) -> Arc<EthClient<F, P, N>> {
+		self.bfc_client.clone()
 	}
 }
