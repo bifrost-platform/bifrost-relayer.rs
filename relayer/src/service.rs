@@ -6,9 +6,9 @@ use std::{
 	time::Duration,
 };
 
-use alloy::primitives::Address;
 use alloy::{
-	network::{AnyNetwork, EthereumWallet},
+	network::{AnyNetwork, EthereumWallet, Network as AlloyNetwork},
+	primitives::Address,
 	providers::{
 		Provider, ProviderBuilder, WalletProvider,
 		fillers::{ChainIdFiller, GasFiller, TxFiller},
@@ -35,7 +35,6 @@ use br_client::{
 	eth::{EthClient, retry::RetryBackoffLayer, traits::Handler as _},
 };
 use br_periodic::traits::PeriodicWorker;
-use br_primitives::eth::Signers;
 use br_primitives::{
 	bootstrap::BootstrapSharedData,
 	cli::{Configuration, HandlerType},
@@ -47,7 +46,7 @@ use br_primitives::{
 		},
 		tx::DEFAULT_CALL_RETRIES,
 	},
-	eth::{AggregatorContracts, ProtocolContracts, ProviderMetadata},
+	eth::{AggregatorContracts, ProtocolContracts, ProviderMetadata, Signers},
 	substrate::MigrationSequence,
 	utils::sub_display_format,
 };
@@ -131,7 +130,7 @@ pub async fn relay(config: Configuration) -> Result<TaskManager, ServiceError> {
 				.filler(ChainIdFiller::new(evm_provider.id.into()))
 				.network::<AnyNetwork>()
 				.wallet(wallet.clone())
-				.on_client(retry_client.clone()),
+				.connect_client(retry_client.clone()),
 		);
 		let client = Arc::new(EthClient::new(
 			provider.clone(),
@@ -234,14 +233,14 @@ pub async fn relay(config: Configuration) -> Result<TaskManager, ServiceError> {
 }
 
 /// Spawn relayer service tasks by the `TaskManager`.
-fn spawn_relayer_tasks<F, P>(
+fn spawn_relayer_tasks<F, P, N: AlloyNetwork>(
 	task_manager: TaskManager,
-	deps: FullDeps<F, P>,
+	deps: FullDeps<F, P, N>,
 	config: &Configuration,
 ) -> TaskManager
 where
-	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork> + 'static,
-	P: Provider<AnyNetwork> + 'static,
+	F: TxFiller<N> + WalletProvider<N> + 'static,
+	P: Provider<N> + 'static,
 {
 	let prometheus_config = &config.relayer_config.prometheus_config;
 
@@ -590,10 +589,10 @@ where
 }
 
 /// Log the configured relay targets.
-async fn print_relay_targets<F, P>(manager_deps: &ManagerDeps<F, P>)
+async fn print_relay_targets<F, P, N: AlloyNetwork>(manager_deps: &ManagerDeps<F, P, N>)
 where
-	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
-	P: Provider<AnyNetwork>,
+	F: TxFiller<N> + WalletProvider<N>,
+	P: Provider<N>,
 {
 	log::info!(
 		target: LOG_TARGET,

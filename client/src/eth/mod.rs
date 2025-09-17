@@ -5,14 +5,15 @@ use br_primitives::{
 		tx::DEFAULT_TX_TIMEOUT_MS,
 	},
 	contracts::authority::BfcStaking::round_meta_data,
-	eth::{AggregatorContracts, GasCoefficient, ProtocolContracts, ProviderMetadata},
+	eth::{AggregatorContracts, GasCoefficient, ProtocolContracts, ProviderMetadata, Signers},
 	tx::TxRequestMetadata,
+	utils::sub_display_format,
 };
 
 use alloy::{
-	consensus::TxType,
+	consensus::{BlockHeader, Transaction, TxType, Typed2718},
 	eips::BlockNumberOrTag,
-	network::{AnyNetwork, AnyRpcTransaction, AnyTypedTransaction},
+	network::{BlockResponse, Network, TransactionBuilder, TransactionResponse},
 	primitives::{
 		Address, ChainId, U64, keccak256,
 		utils::{Unit, format_units},
@@ -22,12 +23,9 @@ use alloy::{
 		ext::TxPoolApi as _,
 		fillers::{FillProvider, TxFiller},
 	},
-	rpc::types::{TransactionRequest, serde_helpers::WithOtherFields, txpool::TxpoolContentFrom},
 	signers::Signature,
 	transports::TransportResult,
 };
-use br_primitives::eth::Signers;
-use br_primitives::utils::sub_display_format;
 use eyre::{Result, eyre};
 use rand::Rng as _;
 use sc_service::SpawnTaskHandle;
@@ -37,26 +35,28 @@ use std::{
 	sync::Arc,
 	time::Duration,
 };
-use tokio::sync::RwLock;
-use tokio::{sync::Mutex, time::sleep};
+use tokio::{
+	sync::{Mutex, RwLock},
+	time::sleep,
+};
 use url::Url;
 
 pub mod events;
 pub mod handlers;
 pub mod traits;
 
-pub type ClientMap<F, P> = BTreeMap<ChainId, Arc<EthClient<F, P>>>;
+pub type ClientMap<F, P, N> = BTreeMap<ChainId, Arc<EthClient<F, P, N>>>;
 
 const SUB_LOG_TARGET: &str = "eth-client";
 
 #[derive(Clone)]
-pub struct EthClient<F, P>
+pub struct EthClient<F, P, N: Network>
 where
-	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
-	P: Provider<AnyNetwork>,
+	F: TxFiller<N> + WalletProvider<N>,
+	P: Provider<N>,
 {
 	/// The inner provider.
-	inner: Arc<FillProvider<F, P, AnyNetwork>>,
+	inner: Arc<FillProvider<F, P, N>>,
 	/// The signers.
 	signers: Signers,
 	/// The default signer address.
@@ -64,26 +64,26 @@ where
 	/// The provider metadata.
 	pub metadata: ProviderMetadata,
 	/// The protocol contracts.
-	pub protocol_contracts: ProtocolContracts<F, P>,
+	pub protocol_contracts: ProtocolContracts<F, P, N>,
 	/// The aggregator contracts.
-	pub aggregator_contracts: AggregatorContracts<F, P>,
+	pub aggregator_contracts: AggregatorContracts<F, P, N>,
 	/// flushing not allowed to work concurrently.
 	pub martial_law: Arc<Mutex<()>>,
 }
 
-impl<F, P> EthClient<F, P>
+impl<F, P, N: Network> EthClient<F, P, N>
 where
-	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
-	P: Provider<AnyNetwork>,
+	F: TxFiller<N> + WalletProvider<N>,
+	P: Provider<N>,
 {
 	/// Create a new EthClient
 	pub fn new(
-		inner: Arc<FillProvider<F, P, AnyNetwork>>,
+		inner: Arc<FillProvider<F, P, N>>,
 		signers: Signers,
 		default_address: Arc<RwLock<Address>>,
 		metadata: ProviderMetadata,
-		protocol_contracts: ProtocolContracts<F, P>,
-		aggregator_contracts: AggregatorContracts<F, P>,
+		protocol_contracts: ProtocolContracts<F, P, N>,
+		aggregator_contracts: AggregatorContracts<F, P, N>,
 	) -> Self {
 		Self {
 			inner,
@@ -123,7 +123,7 @@ where
 			Some(relayers) => relayers.to_vec(),
 			None => {
 				let relayer_manager = self.protocol_contracts.relayer_manager.as_ref().unwrap();
-				relayer_manager.selected_relayers(true).call().await.unwrap()._0
+				relayer_manager.selected_relayers(true).call().await.unwrap()
 			},
 		};
 
@@ -194,8 +194,8 @@ where
 		let prev_block = self.get_block(prev_block_number.into()).full().await?;
 		match (current_block, prev_block) {
 			(Some(current_block), Some(prev_block)) => {
-				let current_timestamp = current_block.header.timestamp;
-				let prev_timestamp = prev_block.header.timestamp;
+				let current_timestamp = current_block.header().timestamp();
+				let prev_timestamp = prev_block.header().timestamp();
 				let timestamp_diff = current_timestamp.checked_sub(prev_timestamp).unwrap() as f64;
 				let avg_block_time = timestamp_diff / block_diff as f64;
 
@@ -213,11 +213,7 @@ where
 	/// Verifies whether the current relayer was selected at the current round
 	pub async fn is_selected_relayer(&self) -> Result<bool> {
 		let relayer_manager = self.protocol_contracts.relayer_manager.as_ref().unwrap();
-		Ok(relayer_manager
-			.is_selected_relayer(self.address().await, false)
-			.call()
-			.await?
-			._0)
+		Ok(relayer_manager.is_selected_relayer(self.address().await, false).call().await?)
 	}
 
 	/// Flush stalled transactions from the txpool.
@@ -234,8 +230,8 @@ where
 		// possibility of txpool being flushed automatically. wait for 2 blocks.
 		sleep(Duration::from_millis(self.metadata.call_interval * 2)).await;
 
-		let content: TxpoolContentFrom<AnyRpcTransaction> =
-			self.txpool_content().await?.remove_from(&self.address().await);
+		let address = self.address().await;
+		let content = self.txpool_content().await?.remove_from(&address);
 		let mut pending = content.pending;
 		pending.extend(content.queued);
 
@@ -246,50 +242,64 @@ where
 		let mut transactions = pending
 			.into_values()
 			.map(|tx| {
-				WithOtherFields::<TransactionRequest>::from(AnyTypedTransaction::from(
-					tx.0.inner.into_inner(),
-				))
+				let mut request = N::TransactionRequest::default()
+					.with_from(address)
+					.with_to(tx.to().unwrap())
+					.with_input(tx.input().clone())
+					.with_nonce(tx.nonce());
+				if tx.is_eip1559() {
+					request.set_max_fee_per_gas(
+						TransactionResponse::max_fee_per_gas(&tx).unwrap_or(0),
+					);
+					request
+						.set_max_priority_fee_per_gas(tx.max_priority_fee_per_gas().unwrap_or(0));
+				} else {
+					request.set_gas_price(TransactionResponse::gas_price(&tx).unwrap_or(0));
+				}
+				request
 			})
-			.collect::<VecDeque<WithOtherFields<TransactionRequest>>>();
-		transactions.make_contiguous().sort_by_key(|a| a.nonce.unwrap());
+			.collect::<VecDeque<_>>();
+		transactions.make_contiguous().sort_by_key(|a| a.nonce().unwrap());
 
 		// if the nonce of the first transaction is not equal to the current nonce, update the nonce
-		let mut count = self.get_transaction_count(self.address().await).await?;
-		if transactions.front().unwrap().nonce.unwrap() != count {
+		let mut count = self.get_transaction_count(address).await?;
+		if transactions.front().unwrap().nonce().unwrap() != count {
 			for tx in transactions.iter_mut() {
-				tx.nonce = Some(count);
+				tx.set_nonce(count);
 				count += 1;
 			}
 		}
 
 		while let Some(mut tx_request) = transactions.pop_front() {
-			tx_request.from = Some(self.address().await);
 			// RBF
-			match tx_request.preferred_type() {
+			match TxType::try_from(tx_request.output_tx_type().into())? {
 				TxType::Legacy => {
 					let new_gas_price =
-						((tx_request.gas_price.unwrap() as f64) * 1.1).ceil() as u128;
+						((tx_request.gas_price().unwrap() as f64) * 1.1).ceil() as u128;
 					let current_gas_price = self.get_gas_price().await?;
 
-					tx_request.gas_price = Some(max(new_gas_price, current_gas_price));
+					tx_request.set_gas_price(max(new_gas_price, current_gas_price));
 				},
 				TxType::Eip1559 => {
 					let current_gas_price = self.estimate_eip1559_fees().await?;
 
 					let new_max_fee_per_gas =
-						(tx_request.max_fee_per_gas.unwrap() as f64 * 1.1).ceil() as u128;
+						(tx_request.max_fee_per_gas().unwrap() as f64 * 1.1).ceil() as u128;
 					let new_max_priority_fee_per_gas =
-						(tx_request.max_priority_fee_per_gas.unwrap() as f64 * 1.1).ceil() as u128;
+						(tx_request.max_priority_fee_per_gas().unwrap() as f64 * 1.1).ceil()
+							as u128;
 
-					tx_request.max_fee_per_gas =
-						Some(max(new_max_fee_per_gas, current_gas_price.max_fee_per_gas));
-					tx_request.max_priority_fee_per_gas = Some(max(
+					tx_request.set_max_fee_per_gas(max(
+						new_max_fee_per_gas,
+						current_gas_price.max_fee_per_gas,
+					));
+					tx_request.set_max_priority_fee_per_gas(max(
 						new_max_priority_fee_per_gas,
 						current_gas_price.max_priority_fee_per_gas,
 					));
 				},
 				_ => {
-					eyre::bail!("Unsupported transaction type: {}", tx_request.preferred_type());
+					eyre::bail!("Unsupported transaction type: {}", tx_request.output_tx_type());
 				},
 			}
 
@@ -312,7 +322,7 @@ where
 					let msg = format!(
 						" ❗️ Failed to send transaction ({} address:{}): Flush, Error: {}",
 						self.get_chain_name(),
-						self.address().await,
+						address,
 						err
 					);
 					log::warn!(target: &self.get_chain_name(), "{msg}");
@@ -329,27 +339,27 @@ where
 	}
 
 	/// Fill the gas-related fields for the given transaction.
-	async fn fill_gas(&self, request: &mut TransactionRequest) -> Result<()> {
-		if request.from == None {
-			request.from = Some(self.address().await);
+	async fn fill_gas(&self, request: &mut N::TransactionRequest) -> Result<()> {
+		if request.from() == None {
+			request.set_from(self.address().await);
 		}
 
-		let gas = self.estimate_gas(WithOtherFields::new(request.clone())).await?;
+		let gas = self.estimate_gas(request.clone()).await?;
 		let coefficient: f64 = GasCoefficient::from(self.metadata.is_native).into();
 		let estimated_gas = gas as f64 * coefficient;
-		request.gas = Some(estimated_gas.ceil() as u64);
+		request.set_gas_limit(estimated_gas.ceil() as u64);
 
 		if self.metadata.is_native {
 			// gas price is fixed to 1000 Gwei on bifrost network
-			request.max_fee_per_gas = Some(1000 * Unit::GWEI.wei().to::<u128>());
-			request.max_priority_fee_per_gas = Some(0);
+			request.set_max_fee_per_gas(1000 * Unit::GWEI.wei().to::<u128>());
+			request.set_max_priority_fee_per_gas(0);
 		} else {
 			// to avoid duplicate(will revert) external networks transactions
 			let duration = Duration::from_millis(rand::rng().random_range(0..=12000));
 			sleep(duration).await;
 
 			if !self.metadata.eip1559 {
-				request.gas_price = Some(self.get_gas_price().await?);
+				request.set_gas_price(self.get_gas_price().await?);
 			}
 		}
 
@@ -359,7 +369,7 @@ where
 	/// Send a transaction synchronously.
 	async fn sync_send_transaction(
 		&self,
-		request: TransactionRequest,
+		mut request: N::TransactionRequest,
 		requester: String,
 		metadata: TxRequestMetadata,
 	) -> Result<()> {
@@ -367,10 +377,8 @@ where
 			return Ok(());
 		}
 
-		let mut this_request = request.clone();
-		self.fill_gas(&mut this_request).await?;
-
-		let pending = match self.send_transaction(WithOtherFields::new(this_request)).await {
+		self.fill_gas(&mut request).await?;
+		let pending = match self.send_transaction(request).await {
 			Ok(pending) => pending,
 			Err(err) => {
 				let msg = format!(
@@ -410,19 +418,16 @@ where
 }
 
 #[async_trait::async_trait]
-impl<F, P> Provider<AnyNetwork> for EthClient<F, P>
+impl<F, P, N: Network> Provider<N> for EthClient<F, P, N>
 where
-	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
-	P: Provider<AnyNetwork>,
+	F: TxFiller<N> + WalletProvider<N>,
+	P: Provider<N>,
 {
-	fn root(&self) -> &RootProvider<AnyNetwork> {
+	fn root(&self) -> &RootProvider<N> {
 		self.inner.root()
 	}
 
-	fn estimate_gas(
-		&self,
-		tx: <AnyNetwork as alloy::providers::Network>::TransactionRequest,
-	) -> EthCall<AnyNetwork, U64, u64> {
+	fn estimate_gas(&self, tx: N::TransactionRequest) -> EthCall<N, U64, u64> {
 		let call = EthCall::gas_estimate(self.inner.weak_client(), tx);
 
 		if self.chain_id() == 56 || self.chain_id() == 97 {
@@ -434,23 +439,23 @@ where
 
 	async fn send_transaction_internal(
 		&self,
-		tx: SendableTx<AnyNetwork>,
-	) -> TransportResult<PendingTransactionBuilder<AnyNetwork>> {
+		tx: SendableTx<N>,
+	) -> TransportResult<PendingTransactionBuilder<N>> {
 		self.inner.send_transaction_internal(tx).await
 	}
 }
 
 /// Send a transaction asynchronously.
-pub fn send_transaction<F, P>(
-	client: Arc<EthClient<F, P>>,
-	mut request: TransactionRequest,
+pub fn send_transaction<F, P, N: Network>(
+	client: Arc<EthClient<F, P, N>>,
+	mut request: N::TransactionRequest,
 	requester: String,
 	metadata: TxRequestMetadata,
 	debug_mode: bool,
 	handle: SpawnTaskHandle,
 ) where
-	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork> + 'static,
-	P: Provider<AnyNetwork> + 'static,
+	F: TxFiller<N> + WalletProvider<N> + 'static,
+	P: Provider<N> + 'static,
 {
 	if !client.metadata.is_relay_target {
 		return;
@@ -477,7 +482,7 @@ pub fn send_transaction<F, P>(
 			return;
 		}
 
-		match client.send_transaction(WithOtherFields::new(request.clone())).await {
+		match client.send_transaction(request.clone()).await {
 			Ok(pending) => {
 				log::info!(
 					target: &requester,

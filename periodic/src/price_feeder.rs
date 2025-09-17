@@ -1,10 +1,9 @@
 use std::{collections::BTreeMap, fmt::Error, str::FromStr, sync::Arc};
 
 use alloy::{
-	network::AnyNetwork,
+	network::Network,
 	primitives::{B256, FixedBytes, U256, utils::parse_ether},
 	providers::{Provider, WalletProvider, fillers::TxFiller},
-	rpc::types::{TransactionInput, TransactionRequest},
 };
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
@@ -32,23 +31,23 @@ use crate::{
 const SUB_LOG_TARGET: &str = "price-feeder";
 
 /// The essential task that handles oracle price feedings.
-pub struct OraclePriceFeeder<F, P>
+pub struct OraclePriceFeeder<F, P, N: Network>
 where
-	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
-	P: Provider<AnyNetwork>,
+	F: TxFiller<N> + WalletProvider<N>,
+	P: Provider<N>,
 {
 	/// The `EthClient` to interact with the bifrost network.
-	pub client: Arc<EthClient<F, P>>,
+	pub client: Arc<EthClient<F, P, N>>,
 	/// The time schedule that represents when to send price feeds.
 	schedule: Schedule,
 	/// The primary source for fetching prices. (Coingecko)
-	primary_source: Vec<PriceFetchers<F, P>>,
+	primary_source: Vec<PriceFetchers<F, P, N>>,
 	/// The secondary source for fetching prices. (aggregated from external sources)
-	secondary_sources: Vec<PriceFetchers<F, P>>,
+	secondary_sources: Vec<PriceFetchers<F, P, N>>,
 	/// The pre-defined oracle ID's for each asset.
 	asset_oid: BTreeMap<&'static str, B256>,
 	/// The vector that contains each `EthClient`.
-	clients: Arc<ClientMap<F, P>>,
+	clients: Arc<ClientMap<F, P, N>>,
 	/// The handle to spawn tasks.
 	handle: SpawnTaskHandle,
 	/// Whether to enable debug mode.
@@ -56,10 +55,10 @@ where
 }
 
 #[async_trait]
-impl<F, P> PeriodicWorker for OraclePriceFeeder<F, P>
+impl<F, P, N: Network> PeriodicWorker for OraclePriceFeeder<F, P, N>
 where
-	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork> + 'static,
-	P: Provider<AnyNetwork> + 'static,
+	F: TxFiller<N> + WalletProvider<N> + 'static,
+	P: Provider<N> + 'static,
 {
 	fn schedule(&self) -> Schedule {
 		self.schedule.clone()
@@ -90,14 +89,14 @@ where
 	}
 }
 
-impl<F, P> OraclePriceFeeder<F, P>
+impl<F, P, N: Network> OraclePriceFeeder<F, P, N>
 where
-	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork> + 'static,
-	P: Provider<AnyNetwork> + 'static,
+	F: TxFiller<N> + WalletProvider<N> + 'static,
+	P: Provider<N> + 'static,
 {
 	pub fn new(
-		client: Arc<EthClient<F, P>>,
-		clients: Arc<ClientMap<F, P>>,
+		client: Arc<EthClient<F, P, N>>,
+		clients: Arc<ClientMap<F, P, N>>,
 		handle: SpawnTaskHandle,
 		debug_mode: bool,
 	) -> Self {
@@ -257,7 +256,7 @@ where
 		}
 	}
 
-	fn has_any_chainlink_feeds(contracts: &AggregatorContracts<F, P>) -> bool {
+	fn has_any_chainlink_feeds(contracts: &AggregatorContracts<F, P, N>) -> bool {
 		[
 			&contracts.chainlink_usdc_usd,
 			&contracts.chainlink_usdt_usd,
@@ -292,24 +291,18 @@ where
 		&self,
 		oid_bytes_list: Vec<FixedBytes<32>>,
 		price_bytes_list: Vec<FixedBytes<32>>,
-	) -> TransactionRequest {
-		let input = self
-			.client
+	) -> N::TransactionRequest {
+		self.client
 			.protocol_contracts
 			.socket
 			.oracle_aggregate_feeding(oid_bytes_list, price_bytes_list)
-			.calldata()
-			.clone();
-
-		TransactionRequest::default()
-			.to(*self.client.protocol_contracts.socket.address())
-			.input(TransactionInput::new(input))
+			.into_transaction_request()
 	}
 
 	/// Request send transaction to the target tx request channel.
 	async fn request_send_transaction(
 		&self,
-		tx_request: TransactionRequest,
+		tx_request: N::TransactionRequest,
 		metadata: PriceFeedMetadata,
 	) {
 		send_transaction(

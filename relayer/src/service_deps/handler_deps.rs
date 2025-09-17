@@ -1,26 +1,26 @@
 use super::*;
 
-pub struct HandlerDeps<F, P>
+pub struct HandlerDeps<F, P, N: AlloyNetwork>
 where
-	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork> + 'static,
-	P: Provider<AnyNetwork> + 'static,
+	F: TxFiller<N> + WalletProvider<N> + 'static,
+	P: Provider<N> + 'static,
 {
 	/// The `SocketRelayHandler`'s for each specified chain.
-	pub socket_relay_handlers: Vec<SocketRelayHandler<F, P>>,
+	pub socket_relay_handlers: Vec<SocketRelayHandler<F, P, N>>,
 	/// The `RoundupRelayHandler`'s for each specified chain.
-	pub roundup_relay_handlers: Vec<RoundupRelayHandler<F, P>>,
+	pub roundup_relay_handlers: Vec<RoundupRelayHandler<F, P, N>>,
 }
 
-impl<F, P> HandlerDeps<F, P>
+impl<F, P, N: AlloyNetwork> HandlerDeps<F, P, N>
 where
-	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
-	P: Provider<AnyNetwork>,
+	F: TxFiller<N> + WalletProvider<N>,
+	P: Provider<N>,
 {
 	pub fn new(
 		config: &Configuration,
-		manager_deps: &ManagerDeps<F, P>,
+		manager_deps: &ManagerDeps<F, P, N>,
 		bootstrap_shared_data: BootstrapSharedData,
-		bfc_client: Arc<EthClient<F, P>>,
+		bfc_client: Arc<EthClient<F, P, N>>,
 		rollback_senders: Arc<BTreeMap<ChainId, Arc<UnboundedSender<Socket_Message>>>>,
 		task_manager: &TaskManager,
 		debug_mode: bool,

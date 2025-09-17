@@ -4,37 +4,37 @@ use br_primitives::btc::{
 
 use super::*;
 
-pub struct BtcDeps<F, P>
+pub struct BtcDeps<F, P, N: AlloyNetwork>
 where
-	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
-	P: Provider<AnyNetwork>,
+	F: TxFiller<N> + WalletProvider<N>,
+	P: Provider<N>,
 {
 	/// The Bitcoin outbound handler.
-	pub outbound: OutboundHandler<F, P>,
+	pub outbound: OutboundHandler<F, P, N>,
 	/// The Bitcoin inbound handler.
-	pub inbound: InboundHandler<F, P>,
+	pub inbound: InboundHandler<F, P, N>,
 	/// The Bitcoin block manager.
-	pub block_manager: BlockManager<F, P>,
+	pub block_manager: BlockManager<F, P, N>,
 	/// The Bitcoin PSBT signer.
-	pub psbt_signer: PsbtSigner<F, P>,
+	pub psbt_signer: PsbtSigner<F, P, N>,
 	/// The Bitcoin vault public key submitter.
-	pub pub_key_submitter: PubKeySubmitter<F, P>,
+	pub pub_key_submitter: PubKeySubmitter<F, P, N>,
 	/// The Bitcoin rollback verifier.
-	pub rollback_verifier: BitcoinRollbackVerifier<F, P>,
+	pub rollback_verifier: BitcoinRollbackVerifier<F, P, N>,
 }
 
-impl<F, P> BtcDeps<F, P>
+impl<F, P, N: AlloyNetwork> BtcDeps<F, P, N>
 where
-	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
-	P: Provider<AnyNetwork>,
+	F: TxFiller<N> + WalletProvider<N>,
+	P: Provider<N>,
 {
 	pub fn new(
 		config: &Configuration,
 		keypair_storage: KeypairStorage,
 		bootstrap_shared_data: BootstrapSharedData,
-		substrate_deps: &SubstrateDeps<F, P>,
+		substrate_deps: &SubstrateDeps<F, P, N>,
 		migration_sequence: Arc<RwLock<MigrationSequence>>,
-		bfc_client: Arc<EthClient<F, P>>,
+		bfc_client: Arc<EthClient<F, P, N>>,
 		task_manager: &TaskManager,
 		debug_mode: bool,
 	) -> Self {

@@ -2,10 +2,10 @@ use std::{sync::Arc, time::Duration};
 
 use alloy::{
 	dyn_abi::DynSolValue,
-	network::AnyNetwork,
+	network::Network,
 	primitives::{B256, ChainId, FixedBytes, U256},
 	providers::{Provider, WalletProvider, fillers::TxFiller},
-	rpc::types::{Log, TransactionInput},
+	rpc::types::Log,
 	signers::Signature,
 	sol_types::SolValue,
 };
@@ -37,20 +37,21 @@ pub trait Handler {
 
 #[async_trait::async_trait]
 /// The client to interact with the `Socket` contract instance.
-pub trait SocketRelayBuilder<F, P>
+pub trait SocketRelayBuilder<F, P, N: Network>
 where
-	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
-	P: Provider<AnyNetwork>,
+	F: TxFiller<N> + WalletProvider<N>,
+	P: Provider<N>,
 {
 	/// Get the `EthClient` of the implemented handler.
-	fn get_client(&self) -> Arc<EthClient<F, P>>;
+	fn get_client(&self) -> Arc<EthClient<F, P, N>>;
 
 	/// Builds the `poll()` function call data.
-	fn build_poll_call_data(&self, msg: Socket_Message, sigs: Signatures) -> TransactionInput {
-		let poll_submit = Poll_Submit { msg, sigs, option: U256::default() };
-		TransactionInput::new(
-			self.get_client().protocol_contracts.socket.poll(poll_submit).calldata().clone(),
-		)
+	fn build_poll_request(&self, msg: Socket_Message, sigs: Signatures) -> N::TransactionRequest {
+		self.get_client()
+			.protocol_contracts
+			.socket
+			.poll(Poll_Submit { msg, sigs, option: U256::default() })
+			.into_transaction_request()
 	}
 
 	/// Builds the `poll()` transaction request.
@@ -62,7 +63,7 @@ where
 		_msg: Socket_Message,
 		_is_inbound: bool,
 		_relay_tx_chain_id: ChainId,
-	) -> Result<Option<BuiltRelayTransaction>> {
+	) -> Result<Option<BuiltRelayTransaction<N>>> {
 		Ok(None)
 	}
 
@@ -123,8 +124,7 @@ where
 			.socket
 			.get_signatures(msg.req_id.clone(), msg.status)
 			.call()
-			.await?
-			._0;
+			.await?;
 
 		let mut signature_vec = Vec::<Signature>::from(signatures);
 		signature_vec.sort_by_key(|k| recover_message(*k, &msg.abi_encode()));

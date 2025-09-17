@@ -1,5 +1,5 @@
 use alloy::{
-	network::AnyNetwork,
+	network::Network,
 	primitives::{BlockNumber, ChainId},
 	providers::{Provider, WalletProvider, fillers::TxFiller},
 	rpc::types::{Filter, Log, SyncStatus},
@@ -50,13 +50,13 @@ impl EventReceiver {
 const SUB_LOG_TARGET: &str = "event-manager";
 
 /// The essential task that listens and handle new events.
-pub struct EventManager<F, P>
+pub struct EventManager<F, P, N: Network>
 where
-	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
-	P: Provider<AnyNetwork>,
+	F: TxFiller<N> + WalletProvider<N>,
+	P: Provider<N>,
 {
 	/// The ethereum client for the connected chain.
-	pub client: Arc<EthClient<F, P>>,
+	pub client: Arc<EthClient<F, P, N>>,
 	/// The channel sending event messages.
 	pub sender: Sender<EventMessage>,
 	/// The block waiting for enough confirmations.
@@ -68,14 +68,14 @@ where
 	is_balance_sync_enabled: bool,
 }
 
-impl<F, P> EventManager<F, P>
+impl<F, P, N: Network> EventManager<F, P, N>
 where
-	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
-	P: Provider<AnyNetwork>,
+	F: TxFiller<N> + WalletProvider<N>,
+	P: Provider<N>,
 {
 	/// Instantiates a new `EventManager` instance.
 	pub fn new(
-		client: Arc<EthClient<F, P>>,
+		client: Arc<EthClient<F, P, N>>,
 		bootstrap_shared_data: Arc<BootstrapSharedData>,
 		is_balance_sync_enabled: bool,
 	) -> Self {
@@ -264,10 +264,10 @@ where
 }
 
 #[async_trait::async_trait]
-impl<F, P> BootstrapHandler for EventManager<F, P>
+impl<F, P, N: Network> BootstrapHandler for EventManager<F, P, N>
 where
-	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
-	P: Provider<AnyNetwork>,
+	F: TxFiller<N> + WalletProvider<N>,
+	P: Provider<N>,
 {
 	fn get_chain_id(&self) -> ChainId {
 		self.client.metadata.id

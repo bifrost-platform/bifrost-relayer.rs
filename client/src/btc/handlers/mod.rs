@@ -13,8 +13,9 @@ use crate::{
 	eth::EthClient,
 };
 
+use super::block::EventMessage;
 use alloy::{
-	network::AnyNetwork,
+	network::Network,
 	primitives::ChainId,
 	providers::{Provider, WalletProvider, fillers::TxFiller},
 };
@@ -27,17 +28,15 @@ use br_primitives::{
 use eyre::Result;
 use std::{sync::Arc, time::Duration};
 
-use super::block::EventMessage;
-
 #[async_trait::async_trait]
-pub trait XtRequester<F, P>
+pub trait XtRequester<F, P, N: Network>
 where
-	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
-	P: Provider<AnyNetwork>,
+	F: TxFiller<N> + WalletProvider<N>,
+	P: Provider<N>,
 {
 	fn xt_request_sender(&self) -> Arc<XtRequestSender>;
 
-	fn bfc_client(&self) -> Arc<EthClient<F, P>>;
+	fn bfc_client(&self) -> Arc<EthClient<F, P, N>>;
 
 	async fn request_send_transaction(
 		&self,

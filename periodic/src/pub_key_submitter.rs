@@ -1,7 +1,7 @@
 use std::{str::FromStr, sync::Arc, time::Duration};
 
 use alloy::{
-	network::AnyNetwork,
+	network::Network,
 	primitives::{Address, Bytes},
 	providers::{Provider, WalletProvider, fillers::TxFiller},
 };
@@ -32,13 +32,13 @@ use crate::traits::PeriodicWorker;
 
 const SUB_LOG_TARGET: &str = "pubkey-submitter";
 
-pub struct PubKeySubmitter<F, P>
+pub struct PubKeySubmitter<F, P, N: Network>
 where
-	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
-	P: Provider<AnyNetwork>,
+	F: TxFiller<N> + WalletProvider<N>,
+	P: Provider<N>,
 {
 	/// The Bifrost client.
-	pub client: Arc<EthClient<F, P>>,
+	pub client: Arc<EthClient<F, P, N>>,
 	/// The unsigned transaction message sender.
 	xt_request_sender: Arc<XtRequestSender>,
 	/// The public and private keypair local storage.
@@ -50,10 +50,10 @@ where
 }
 
 #[async_trait::async_trait]
-impl<F, P> PeriodicWorker for PubKeySubmitter<F, P>
+impl<F, P, N: Network> PeriodicWorker for PubKeySubmitter<F, P, N>
 where
-	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
-	P: Provider<AnyNetwork>,
+	F: TxFiller<N> + WalletProvider<N>,
+	P: Provider<N>,
 {
 	fn schedule(&self) -> Schedule {
 		self.schedule.clone()
@@ -115,14 +115,14 @@ where
 	}
 }
 
-impl<F, P> PubKeySubmitter<F, P>
+impl<F, P, N: Network> PubKeySubmitter<F, P, N>
 where
-	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
-	P: Provider<AnyNetwork>,
+	F: TxFiller<N> + WalletProvider<N>,
+	P: Provider<N>,
 {
 	/// Instantiates a new `PubKeySubmitter` instance.
 	pub fn new(
-		client: Arc<EthClient<F, P>>,
+		client: Arc<EthClient<F, P, N>>,
 		xt_request_sender: Arc<XtRequestSender>,
 		keypair_storage: KeypairStorage,
 		migration_sequence: Arc<RwLock<MigrationSequence>>,
@@ -242,14 +242,14 @@ where
 		Ok(self.registration_pool().registration_info(who, round).call().await?.into())
 	}
 
-	fn registration_pool(&self) -> &RegistrationPoolInstance<F, P> {
+	fn registration_pool(&self) -> &RegistrationPoolInstance<F, P, N> {
 		self.client.protocol_contracts.registration_pool.as_ref().unwrap()
 	}
 
 	/// Verify whether the current relayer is an executive.
 	async fn is_relay_executive(&self) -> Result<bool> {
 		let relay_exec = self.client.protocol_contracts.relay_executive.as_ref().unwrap();
-		Ok(relay_exec.is_member(self.client.address().await).call().await?._0)
+		Ok(relay_exec.is_member(self.client.address().await).call().await?)
 	}
 
 	/// Verify whether the given address is a system vault.
@@ -259,6 +259,6 @@ where
 	}
 
 	async fn get_current_round(&self) -> Result<u32> {
-		Ok(self.registration_pool().current_round().call().await?._0)
+		Ok(self.registration_pool().current_round().call().await?)
 	}
 }

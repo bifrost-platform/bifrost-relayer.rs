@@ -7,10 +7,9 @@ use crate::{
 };
 
 use alloy::{
-	network::AnyNetwork,
+	network::Network,
 	primitives::ChainId,
 	providers::{Provider, WalletProvider, fillers::TxFiller},
-	rpc::types::TransactionRequest,
 	sol_types::SolEvent,
 };
 use br_primitives::{
@@ -34,12 +33,12 @@ use super::{BootstrapHandler, EventMessage};
 
 const SUB_LOG_TARGET: &str = "outbound-handler";
 
-pub struct OutboundHandler<F, P>
+pub struct OutboundHandler<F, P, N: Network>
 where
-	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
-	P: Provider<AnyNetwork>,
+	F: TxFiller<N> + WalletProvider<N>,
+	P: Provider<N>,
 {
-	pub bfc_client: Arc<EthClient<F, P>>,
+	pub bfc_client: Arc<EthClient<F, P, N>>,
 	event_stream: BroadcastStream<BTCEventMessage>,
 	target_event: EventType,
 	/// The bootstrap shared data.
@@ -50,13 +49,13 @@ where
 	debug_mode: bool,
 }
 
-impl<F, P> OutboundHandler<F, P>
+impl<F, P, N: Network> OutboundHandler<F, P, N>
 where
-	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
-	P: Provider<AnyNetwork>,
+	F: TxFiller<N> + WalletProvider<N>,
+	P: Provider<N>,
 {
 	pub fn new(
-		bfc_client: Arc<EthClient<F, P>>,
+		bfc_client: Arc<EthClient<F, P, N>>,
 		event_receiver: Receiver<BTCEventMessage>,
 		bootstrap_shared_data: Arc<BootstrapSharedData>,
 		handle: SpawnTaskHandle,
@@ -73,7 +72,7 @@ where
 	}
 
 	#[inline]
-	fn socket_queue(&self) -> &SocketQueueInstance<F, P> {
+	fn socket_queue(&self) -> &SocketQueueInstance<F, P, N> {
 		self.bfc_client.protocol_contracts.socket_queue.as_ref().unwrap()
 	}
 
@@ -82,21 +81,21 @@ where
 		let mut slice: [u8; 32] = txid.to_byte_array();
 		slice.reverse();
 
-		let socket_messages = self.socket_queue().outbound_tx(slice.into()).call().await?._0;
+		let socket_messages = self.socket_queue().outbound_tx(slice.into()).call().await?;
 
 		socket_messages
 			.iter()
-			.map(|bytes| Socket::abi_decode_data(bytes, true).map(|decoded| decoded.0))
+			.map(|bytes| Socket::abi_decode_data(bytes).map(|decoded| decoded.0))
 			.collect::<Result<Vec<_>, _>>()
 			.map_err(|e| e.into())
 	}
 }
 
 #[async_trait::async_trait]
-impl<F, P> Handler for OutboundHandler<F, P>
+impl<F, P, N: Network> Handler for OutboundHandler<F, P, N>
 where
-	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork> + 'static,
-	P: Provider<AnyNetwork> + 'static,
+	F: TxFiller<N> + WalletProvider<N> + 'static,
+	P: Provider<N> + 'static,
 {
 	async fn run(&mut self) -> Result<()> {
 		self.wait_for_all_chains_bootstrapped().await?;
@@ -161,12 +160,12 @@ where
 }
 
 #[async_trait::async_trait]
-impl<F, P> SocketRelayBuilder<F, P> for OutboundHandler<F, P>
+impl<F, P, N: Network> SocketRelayBuilder<F, P, N> for OutboundHandler<F, P, N>
 where
-	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
-	P: Provider<AnyNetwork>,
+	F: TxFiller<N> + WalletProvider<N>,
+	P: Provider<N>,
 {
-	fn get_client(&self) -> Arc<EthClient<F, P>> {
+	fn get_client(&self) -> Arc<EthClient<F, P, N>> {
 		self.bfc_client.clone()
 	}
 
@@ -175,23 +174,18 @@ where
 		msg: Socket_Message,
 		_: bool,
 		_: ChainId,
-	) -> Result<Option<BuiltRelayTransaction>> {
+	) -> Result<Option<BuiltRelayTransaction<N>>> {
 		// the original msg must be used for building calldata
 		let (signatures, is_external) = self.build_outbound_signatures(msg.clone()).await?;
-		return Ok(Some(BuiltRelayTransaction::new(
-			TransactionRequest::default()
-				.input(self.build_poll_call_data(msg, signatures))
-				.to(*self.bfc_client.protocol_contracts.socket.address()),
-			is_external,
-		)));
+		Ok(Some(BuiltRelayTransaction::new(self.build_poll_request(msg, signatures), is_external)))
 	}
 }
 
 #[async_trait::async_trait]
-impl<F, P> BootstrapHandler for OutboundHandler<F, P>
+impl<F, P, N: Network> BootstrapHandler for OutboundHandler<F, P, N>
 where
-	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
-	P: Provider<AnyNetwork>,
+	F: TxFiller<N> + WalletProvider<N>,
+	P: Provider<N>,
 {
 	fn get_chain_id(&self) -> ChainId {
 		self.bfc_client.get_bitcoin_chain_id().unwrap()

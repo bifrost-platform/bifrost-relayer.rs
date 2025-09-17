@@ -1,10 +1,10 @@
 use std::{collections::BTreeMap, sync::Arc};
 
 use alloy::{
-	network::AnyNetwork,
+	network::{Network, TransactionBuilder},
 	primitives::{B256, ChainId, U256},
 	providers::{Provider, WalletProvider, fillers::TxFiller},
-	rpc::types::{Filter, Log, TransactionRequest},
+	rpc::types::{Filter, Log},
 	sol_types::SolEvent,
 };
 use eyre::Result;
@@ -38,19 +38,19 @@ use crate::eth::{
 const SUB_LOG_TARGET: &str = "socket-handler";
 
 /// The essential task that handles `socket relay` related events.
-pub struct SocketRelayHandler<F, P>
+pub struct SocketRelayHandler<F, P, N: Network>
 where
-	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork> + 'static,
-	P: Provider<AnyNetwork> + 'static,
+	F: TxFiller<N> + WalletProvider<N> + 'static,
+	P: Provider<N> + 'static,
 {
 	/// The `EthClient` to interact with the connected blockchain.
-	pub client: Arc<EthClient<F, P>>,
+	pub client: Arc<EthClient<F, P, N>>,
 	/// The receiver that consumes new events from the block channel.
 	event_stream: BroadcastStream<EventMessage>,
 	/// The entire clients instantiated in the system. <chain_id, Arc<EthClient>>
-	system_clients: Arc<ClientMap<F, P>>,
+	system_clients: Arc<ClientMap<F, P, N>>,
 	/// The bifrost client.
-	bifrost_client: Arc<EthClient<F, P>>,
+	bifrost_client: Arc<EthClient<F, P, N>>,
 	/// The rollback sender for each chain.
 	rollback_senders: Arc<BTreeMap<ChainId, Arc<UnboundedSender<Socket_Message>>>>,
 	/// The handle to spawn tasks.
@@ -62,10 +62,10 @@ where
 }
 
 #[async_trait::async_trait]
-impl<F, P> Handler for SocketRelayHandler<F, P>
+impl<F, P, N: Network> Handler for SocketRelayHandler<F, P, N>
 where
-	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
-	P: Provider<AnyNetwork>,
+	F: TxFiller<N> + WalletProvider<N>,
+	P: Provider<N>,
 {
 	async fn run(&mut self) -> Result<()> {
 		let should_bootstrap = self.is_before_bootstrap_state(BootstrapState::NormalStart).await;
@@ -155,12 +155,12 @@ where
 }
 
 #[async_trait::async_trait]
-impl<F, P> SocketRelayBuilder<F, P> for SocketRelayHandler<F, P>
+impl<F, P, N: Network> SocketRelayBuilder<F, P, N> for SocketRelayHandler<F, P, N>
 where
-	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
-	P: Provider<AnyNetwork>,
+	F: TxFiller<N> + WalletProvider<N>,
+	P: Provider<N>,
 {
-	fn get_client(&self) -> Arc<EthClient<F, P>> {
+	fn get_client(&self) -> Arc<EthClient<F, P, N>> {
 		self.client.clone()
 	}
 
@@ -169,7 +169,7 @@ where
 		msg: Socket_Message,
 		is_inbound: bool,
 		relay_tx_chain_id: ChainId,
-	) -> Result<Option<BuiltRelayTransaction>> {
+	) -> Result<Option<BuiltRelayTransaction<N>>> {
 		if let Some(system_client) = self.system_clients.get(&relay_tx_chain_id) {
 			let to_socket = system_client.protocol_contracts.socket.address();
 			// the original msg must be used for building calldata
@@ -180,9 +180,7 @@ where
 			};
 
 			return Ok(Some(BuiltRelayTransaction::new(
-				TransactionRequest::default()
-					.input(self.build_poll_call_data(msg, signatures))
-					.to(*to_socket),
+				self.build_poll_request(msg, signatures).with_to(*to_socket),
 				is_external,
 			)));
 		}
@@ -248,17 +246,17 @@ where
 	}
 }
 
-impl<F, P> SocketRelayHandler<F, P>
+impl<F, P, N: Network> SocketRelayHandler<F, P, N>
 where
-	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork> + 'static,
-	P: Provider<AnyNetwork> + 'static,
+	F: TxFiller<N> + WalletProvider<N> + 'static,
+	P: Provider<N> + 'static,
 {
 	/// Instantiates a new `SocketRelayHandler` instance.
 	pub fn new(
 		id: ChainId,
 		event_receiver: Receiver<EventMessage>,
-		system_clients: Arc<ClientMap<F, P>>,
-		bifrost_client: Arc<EthClient<F, P>>,
+		system_clients: Arc<ClientMap<F, P, N>>,
+		bifrost_client: Arc<EthClient<F, P, N>>,
 		rollback_senders: Arc<BTreeMap<ChainId, Arc<UnboundedSender<Socket_Message>>>>,
 		handle: SpawnTaskHandle,
 		bootstrap_shared_data: Arc<BootstrapSharedData>,
@@ -376,13 +374,8 @@ where
 		}
 
 		if let Some(src_client) = &self.system_clients.get(&src) {
-			let request = src_client
-				.protocol_contracts
-				.socket
-				.get_request(req_id.clone())
-				.call()
-				.await?
-				._0;
+			let request =
+				src_client.protocol_contracts.socket.get_request(req_id.clone()).call().await?;
 
 			return Ok(matches!(
 				SocketEventStatus::from(&request.field[0]),
@@ -415,8 +408,7 @@ where
 		let res = relayer_manager
 			.is_previous_selected_relayer(*round, self.client.address().await, false)
 			.call()
-			.await?
-			._0;
+			.await?;
 		Ok(res)
 	}
 
@@ -424,7 +416,7 @@ where
 	async fn request_send_transaction(
 		&self,
 		chain_id: ChainId,
-		tx_request: TransactionRequest,
+		tx_request: N::TransactionRequest,
 		metadata: SocketRelayMetadata,
 		socket_msg: Socket_Message,
 	) {
@@ -481,10 +473,10 @@ where
 }
 
 #[async_trait::async_trait]
-impl<F, P> BootstrapHandler for SocketRelayHandler<F, P>
+impl<F, P, N: Network> BootstrapHandler for SocketRelayHandler<F, P, N>
 where
-	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
-	P: Provider<AnyNetwork>,
+	F: TxFiller<N> + WalletProvider<N>,
+	P: Provider<N>,
 {
 	fn get_chain_id(&self) -> ChainId {
 		self.client.metadata.id
@@ -518,11 +510,11 @@ where
 
 		if let Some(bootstrap_config) = &self.bootstrap_shared_data.bootstrap_config {
 			let round_info = if self.client.metadata.is_native {
-				self.client.protocol_contracts.authority.round_info().call().await?._0
+				self.client.protocol_contracts.authority.round_info().call().await?
 			} else {
 				match self.system_clients.iter().find(|(_id, client)| client.metadata.is_native) {
 					Some((_id, native_client)) => {
-						native_client.protocol_contracts.authority.round_info().call().await?._0
+						native_client.protocol_contracts.authority.round_info().call().await?
 					},
 					_ => {
 						panic!(
@@ -592,8 +584,8 @@ mod tests {
 
 	#[tokio::test]
 	async fn test_is_already_done() {
-		let src_provider = Arc::new(ProviderBuilder::new().on_http("".parse().unwrap()));
-		let dst_provider = Arc::new(ProviderBuilder::new().on_http("".parse().unwrap()));
+		let src_provider = Arc::new(ProviderBuilder::new().connect_http("".parse().unwrap()));
+		let dst_provider = Arc::new(ProviderBuilder::new().connect_http("".parse().unwrap()));
 
 		let src_socket = SocketContract::new(
 			address!("d551F33Ca8eCb0Be83d8799D9C68a368BA36Dd52"),
@@ -620,7 +612,7 @@ mod tests {
 			"00000000000000000000000000000000000000000000000000000000000000200000bfc000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001e000000000000000000000000000000000000000000000000000000000000000200000000000000000000000000000000000000000000000000000000000000050000271200000000000000000000000000000000000000000000000000000000030203010000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000e000000003000000030000bfc0148a26ea2376f006c09b7d3163f1fc70ad4134a300000000000000000000000000000000000000000000000000000000000000000000000000000000000000006e661745856b03130d03932f683cda020d7ee9ea0000000000000000000000006e661745856b03130d03932f683cda020d7ee9ea00000000000000000000000000000000000000000000000000000000000ee5e800000000000000000000000000000000000000000000000000000000000000c00000000000000000000000000000000000000000000000000000000000000000"
 		);
 
-		match Socket::abi_decode_data(&data, true) {
+		match Socket::abi_decode_data(&data) {
 			Ok(socket) => {
 				let socket_msg = socket.0;
 				let req_id = socket_msg.req_id;

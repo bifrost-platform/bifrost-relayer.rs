@@ -1,6 +1,6 @@
 use crate::traits::PeriodicWorker;
 use alloy::{
-	network::AnyNetwork,
+	network::Network as AlloyNetwork,
 	primitives::{B256, Bytes, keccak256},
 	providers::{Provider, WalletProvider, fillers::TxFiller},
 };
@@ -28,13 +28,13 @@ use tokio_stream::StreamExt;
 const SUB_LOG_TARGET: &str = "psbt-signer";
 
 /// The essential task that submits signed PSBT's.
-pub struct PsbtSigner<F, P>
+pub struct PsbtSigner<F, P, N: AlloyNetwork>
 where
-	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
-	P: Provider<AnyNetwork>,
+	F: TxFiller<N> + WalletProvider<N>,
+	P: Provider<N>,
 {
 	/// The Bifrost client.
-	pub client: Arc<EthClient<F, P>>,
+	pub client: Arc<EthClient<F, P, N>>,
 	/// The unsigned transaction message sender.
 	xt_request_sender: Arc<XtRequestSender>,
 	/// The public and private keypair local storage.
@@ -47,14 +47,14 @@ where
 	schedule: Schedule,
 }
 
-impl<F, P> PsbtSigner<F, P>
+impl<F, P, N: AlloyNetwork> PsbtSigner<F, P, N>
 where
-	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
-	P: Provider<AnyNetwork>,
+	F: TxFiller<N> + WalletProvider<N>,
+	P: Provider<N>,
 {
 	/// Instantiates a new `PsbtSigner` instance.
 	pub fn new(
-		client: Arc<EthClient<F, P>>,
+		client: Arc<EthClient<F, P, N>>,
 		xt_request_sender: Arc<XtRequestSender>,
 		keypair_storage: KeypairStorage,
 		migration_sequence: Arc<RwLock<MigrationSequence>>,
@@ -73,14 +73,14 @@ where
 	/// Get the pending unsigned PSBT's (in bytes)
 	async fn get_unsigned_psbts(&self) -> Result<Vec<Bytes>> {
 		let socket_queue = self.client.protocol_contracts.socket_queue.as_ref().unwrap();
-		let res = socket_queue.unsigned_psbts().call().await?._0;
+		let res = socket_queue.unsigned_psbts().call().await?;
 		Ok(res)
 	}
 
 	/// Verify whether the current relayer is an executive.
 	async fn is_relay_executive(&self) -> Result<bool> {
 		let relay_exec = self.client.protocol_contracts.relay_executive.as_ref().unwrap();
-		Ok(relay_exec.is_member(self.client.address().await).call().await?._0)
+		Ok(relay_exec.is_member(self.client.address().await).call().await?)
 	}
 
 	/// Build the payload for the unsigned transaction. (`submit_signed_psbt()`)
@@ -175,8 +175,7 @@ where
 		let system_vault = registration_pool
 			.vault_address(*registration_pool.address(), round)
 			.call()
-			.await?
-			._0;
+			.await?;
 
 		Ok(BtcAddress::from_str(&system_vault)?.assume_checked())
 	}
@@ -184,7 +183,7 @@ where
 	/// Get the current round number.
 	async fn get_current_round(&self) -> Result<u32> {
 		let registration_pool = self.client.protocol_contracts.registration_pool.as_ref().unwrap();
-		Ok(registration_pool.current_round().call().await?._0)
+		Ok(registration_pool.current_round().call().await?)
 	}
 
 	async fn is_signed_psbt_submitted(&self, txid: B256, psbt: Vec<u8>) -> Result<bool> {
@@ -192,32 +191,31 @@ where
 		let res = socket_queue
 			.is_signed_psbt_submitted(txid, Bytes::from(psbt), self.client.address().await)
 			.call()
-			.await?
-			._0;
+			.await?;
 		Ok(res)
 	}
 }
 
 #[async_trait::async_trait]
-impl<F, P> XtRequester<F, P> for PsbtSigner<F, P>
+impl<F, P, N: AlloyNetwork> XtRequester<F, P, N> for PsbtSigner<F, P, N>
 where
-	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
-	P: Provider<AnyNetwork>,
+	F: TxFiller<N> + WalletProvider<N>,
+	P: Provider<N>,
 {
 	fn xt_request_sender(&self) -> Arc<XtRequestSender> {
 		self.xt_request_sender.clone()
 	}
 
-	fn bfc_client(&self) -> Arc<EthClient<F, P>> {
+	fn bfc_client(&self) -> Arc<EthClient<F, P, N>> {
 		self.client.clone()
 	}
 }
 
 #[async_trait::async_trait]
-impl<F, P> PeriodicWorker for PsbtSigner<F, P>
+impl<F, P, N: AlloyNetwork> PeriodicWorker for PsbtSigner<F, P, N>
 where
-	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
-	P: Provider<AnyNetwork>,
+	F: TxFiller<N> + WalletProvider<N>,
+	P: Provider<N>,
 {
 	fn schedule(&self) -> Schedule {
 		self.schedule.clone()

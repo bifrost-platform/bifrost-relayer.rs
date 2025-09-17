@@ -1,6 +1,6 @@
 use crate::traits::PeriodicWorker;
 use alloy::{
-	network::AnyNetwork,
+	network::Network,
 	providers::{Provider, WalletProvider, fillers::TxFiller},
 };
 use bitcoincore_rpc::bitcoin::PublicKey;
@@ -32,12 +32,12 @@ use tokio::sync::RwLock;
 
 const SUB_LOG_TARGET: &str = "pubkey-presubmitter";
 
-pub struct PubKeyPreSubmitter<F, P>
+pub struct PubKeyPreSubmitter<F, P, N: Network>
 where
-	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
-	P: Provider<AnyNetwork>,
+	F: TxFiller<N> + WalletProvider<N>,
+	P: Provider<N>,
 {
-	pub bfc_client: Arc<EthClient<F, P>>,
+	pub bfc_client: Arc<EthClient<F, P, N>>,
 	/// The Bifrost client.
 	sub_client: Option<OnlineClient<CustomConfig>>,
 	/// The unsigned transaction message sender.
@@ -51,10 +51,10 @@ where
 }
 
 #[async_trait::async_trait]
-impl<F, P> PeriodicWorker for PubKeyPreSubmitter<F, P>
+impl<F, P, N: Network> PeriodicWorker for PubKeyPreSubmitter<F, P, N>
 where
-	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
-	P: Provider<AnyNetwork>,
+	F: TxFiller<N> + WalletProvider<N>,
+	P: Provider<N>,
 {
 	fn schedule(&self) -> Schedule {
 		self.schedule.clone()
@@ -88,14 +88,14 @@ where
 	}
 }
 
-impl<F, P> PubKeyPreSubmitter<F, P>
+impl<F, P, N: Network> PubKeyPreSubmitter<F, P, N>
 where
-	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
-	P: Provider<AnyNetwork>,
+	F: TxFiller<N> + WalletProvider<N>,
+	P: Provider<N>,
 {
 	/// Instantiates a new `PubKeyPreSubmitter` instance.
 	pub fn new(
-		bfc_client: Arc<EthClient<F, P>>,
+		bfc_client: Arc<EthClient<F, P, N>>,
 		xt_request_sender: Arc<XtRequestSender>,
 		keypair_storage: KeypairStorage,
 		migration_sequence: Arc<RwLock<MigrationSequence>>,
@@ -227,7 +227,7 @@ where
 	/// Verify whether the current relayer is an executive.
 	async fn is_relay_executive(&self) -> Result<bool> {
 		let relay_exec = self.bfc_client.protocol_contracts.relay_executive.as_ref().unwrap();
-		Ok(relay_exec.is_member(self.bfc_client.address().await).call().await?._0)
+		Ok(relay_exec.is_member(self.bfc_client.address().await).call().await?)
 	}
 
 	async fn get_latest_storage(&self) -> Storage<CustomConfig, OnlineClient<CustomConfig>> {

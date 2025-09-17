@@ -1,10 +1,10 @@
 use std::{sync::Arc, time::Duration};
 
 use alloy::{
-	network::{AnyNetwork, primitives::ReceiptResponse as _},
-	primitives::{Address, B256, PrimitiveSignature, U256},
+	network::{Network, primitives::ReceiptResponse as _},
+	primitives::{Address, B256, Signature, U256},
 	providers::{Provider, WalletProvider, fillers::TxFiller},
-	rpc::types::{Filter, Log, TransactionInput, TransactionRequest},
+	rpc::types::{Filter, Log},
 	sol_types::SolEvent as _,
 };
 use async_trait::async_trait;
@@ -39,17 +39,17 @@ use crate::eth::{
 const SUB_LOG_TARGET: &str = "roundup-handler";
 
 /// The essential task that handles `roundup relay` related events.
-pub struct RoundupRelayHandler<F, P>
+pub struct RoundupRelayHandler<F, P, N: Network>
 where
-	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
-	P: Provider<AnyNetwork>,
+	F: TxFiller<N> + WalletProvider<N>,
+	P: Provider<N>,
 {
 	/// The `EthClient` to interact with the bifrost network.
-	pub client: Arc<EthClient<F, P>>,
+	pub client: Arc<EthClient<F, P, N>>,
 	/// The receiver that consumes new events from the block channel.
 	event_stream: BroadcastStream<EventMessage>,
 	/// `EthClient`s to interact with provided networks except bifrost network.
-	external_clients: Arc<ClientMap<F, P>>,
+	external_clients: Arc<ClientMap<F, P, N>>,
 	/// The bootstrap shared data.
 	bootstrap_shared_data: Arc<BootstrapSharedData>,
 	/// The handle to spawn tasks.
@@ -59,10 +59,10 @@ where
 }
 
 #[async_trait]
-impl<F, P> Handler for RoundupRelayHandler<F, P>
+impl<F, P, N: Network> Handler for RoundupRelayHandler<F, P, N>
 where
-	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork> + 'static,
-	P: Provider<AnyNetwork> + 'static,
+	F: TxFiller<N> + WalletProvider<N> + 'static,
+	P: Provider<N> + 'static,
 {
 	async fn run(&mut self) -> Result<()> {
 		let should_bootstrap = self.is_before_bootstrap_state(BootstrapState::NormalStart).await;
@@ -95,7 +95,7 @@ where
 		if let Some(receipt) =
 			self.client.get_transaction_receipt(log.transaction_hash.unwrap()).await?
 		{
-			if !receipt.inner.status() {
+			if !receipt.status() {
 				return Ok(());
 			}
 			match self.decode_log(log.clone()).await {
@@ -164,16 +164,16 @@ where
 	}
 }
 
-impl<F, P> RoundupRelayHandler<F, P>
+impl<F, P, N: Network> RoundupRelayHandler<F, P, N>
 where
-	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork> + 'static,
-	P: Provider<AnyNetwork> + 'static,
+	F: TxFiller<N> + WalletProvider<N> + 'static,
+	P: Provider<N> + 'static,
 {
 	/// Instantiates a new `RoundupRelayHandler` instance.
 	pub fn new(
-		client: Arc<EthClient<F, P>>,
+		client: Arc<EthClient<F, P, N>>,
 		event_receiver: Receiver<EventMessage>,
-		clients: Arc<ClientMap<F, P>>,
+		clients: Arc<ClientMap<F, P, N>>,
 		bootstrap_shared_data: Arc<BootstrapSharedData>,
 		handle: SpawnTaskHandle,
 		debug_mode: bool,
@@ -184,7 +184,7 @@ where
 				.filter_map(|(id, client)| {
 					if !client.metadata.is_native { Some((*id, client.clone())) } else { None }
 				})
-				.collect::<ClientMap<F, P>>(),
+				.collect::<ClientMap<F, P, N>>(),
 		);
 
 		Self {
@@ -208,16 +208,10 @@ where
 		round: U256,
 		new_relayers: &[Address],
 	) -> Result<Signatures> {
-		let signatures = self
-			.client
-			.protocol_contracts
-			.socket
-			.get_round_signatures(round)
-			.call()
-			.await?
-			._0;
+		let signatures =
+			self.client.protocol_contracts.socket.get_round_signatures(round).call().await?;
 
-		let mut signature_vec = Vec::<PrimitiveSignature>::from(signatures);
+		let mut signature_vec = Vec::<Signature>::from(signatures);
 		signature_vec
 			.sort_by_key(|k| recover_message(*k, &encode_roundup_param(round, new_relayers)));
 
@@ -230,14 +224,13 @@ where
 		Ok(relayer_manager
 			.is_previous_selected_relayer(round, relayer, true)
 			.call()
-			.await?
-			._0)
+			.await?)
 	}
 
 	async fn relay_as(&self, round: U256) -> Address {
 		let relayer_manager = self.client.protocol_contracts.relayer_manager.as_ref().unwrap();
 		let prev_relayers =
-			relayer_manager.previous_selected_relayers(round, true).call().await.unwrap()._0;
+			relayer_manager.previous_selected_relayers(round, true).call().await.unwrap();
 		let signers = self.client.signers();
 
 		signers.into_iter().find(|s| prev_relayers.contains(s)).unwrap_or_default()
@@ -257,15 +250,14 @@ where
 	/// Build `round_control_relay` method call transaction.
 	fn build_transaction_request(
 		&self,
-		target_socket: &SocketInstance<F, P>,
+		target_socket: &SocketInstance<F, P, N>,
 		roundup_submit: &Round_Up_Submit,
 		from: Address,
-	) -> TransactionRequest {
-		TransactionRequest::default().to(*target_socket.address()).from(from).input(
-			TransactionInput::new(
-				target_socket.round_control_relay(roundup_submit.clone()).calldata().clone(),
-			),
-		)
+	) -> N::TransactionRequest {
+		target_socket
+			.round_control_relay(roundup_submit.clone())
+			.from(from)
+			.into_transaction_request()
 	}
 
 	/// Check roundup submitted before. If not, call `round_control_relay`.
@@ -283,7 +275,7 @@ where
 		while let Some((dst_chain_id, target_client)) = stream.next().await {
 			// Check roundup submitted to target chain before.
 			let latest_round =
-				target_client.protocol_contracts.authority.latest_round().call().await?._0;
+				target_client.protocol_contracts.authority.latest_round().call().await?;
 			if roundup_submit.round > latest_round {
 				let transaction_request = self.build_transaction_request(
 					&target_client.protocol_contracts.socket,
@@ -337,8 +329,8 @@ where
 			let target_authority = target_client.protocol_contracts.authority.clone();
 
 			tokio::spawn(async move {
-				while target_authority.latest_round().call().await.unwrap()._0
-					< bifrost_authority.latest_round().call().await.unwrap()._0
+				while target_authority.latest_round().call().await.unwrap()
+					< bifrost_authority.latest_round().call().await.unwrap()
 				{
 					tokio::time::sleep(Duration::from_millis(DEFAULT_CALL_RETRY_INTERVAL_MS)).await;
 				}
@@ -352,10 +344,10 @@ where
 }
 
 #[async_trait]
-impl<F, P> BootstrapHandler for RoundupRelayHandler<F, P>
+impl<F, P, N: Network> BootstrapHandler for RoundupRelayHandler<F, P, N>
 where
-	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork> + 'static,
-	P: Provider<AnyNetwork> + 'static,
+	F: TxFiller<N> + WalletProvider<N> + 'static,
+	P: Provider<N> + 'static,
 {
 	fn get_chain_id(&self) -> u64 {
 		self.client.metadata.id
@@ -414,7 +406,7 @@ where
 				.client
 				.get_bootstrap_offset_height_based_on_block_time(
 					bootstrap_config.round_offset.unwrap_or(DEFAULT_BOOTSTRAP_ROUND_OFFSET),
-					self.client.protocol_contracts.authority.round_info().call().await?._0,
+					self.client.protocol_contracts.authority.round_info().call().await?,
 				)
 				.await?;
 
