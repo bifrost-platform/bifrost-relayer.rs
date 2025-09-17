@@ -95,32 +95,48 @@ where
 							}
 							break (lt_fee_rate, final_fee_rate);
 						},
-						Err(e) => {
-							if let Ok(fallback) = self.fallback_estimate_fee().await {
+						Err(e) => match self.fallback_estimate_fee().await {
+							Ok(fallback) => {
+								log::info!(
+									target: LOG_TARGET,
+									"-[{}] Using fallback fee rate after decode error: {:?}",
+									sub_display_format(SUB_LOG_TARGET),
+									e
+								);
 								break fallback;
-							}
-
-							log::warn!(
+							},
+							Err(fallback_err) => {
+								log::warn!(
+									target: LOG_TARGET,
+									"-[{}] Failed to decode fee rate: {:?}, fallback also failed: {:?}. Retrying in 5 seconds...",
+									sub_display_format(SUB_LOG_TARGET),
+									e,
+									fallback_err
+								);
+								sleep(Duration::from_secs(5)).await;
+							},
+						},
+					},
+					Err(e) => match self.fallback_estimate_fee().await {
+						Ok(fallback) => {
+							log::info!(
 								target: LOG_TARGET,
-								"-[{}] Failed to decode fee rate: {:?}. Retrying...",
+								"-[{}] Using fallback fee rate after fetch error: {:?}",
 								sub_display_format(SUB_LOG_TARGET),
 								e
 							);
+							break fallback;
+						},
+						Err(fallback_err) => {
+							log::warn!(
+								target: LOG_TARGET,
+								"-[{}] Failed to fetch fee rate: {:?}, fallback also failed: {:?}. Retrying in 5 seconds...",
+								sub_display_format(SUB_LOG_TARGET),
+								e,
+								fallback_err
+							);
 							sleep(Duration::from_secs(5)).await;
 						},
-					},
-					Err(e) => {
-						if let Ok(fallback) = self.fallback_estimate_fee().await {
-							break fallback;
-						}
-
-						log::warn!(
-							target: LOG_TARGET,
-							"-[{}] Failed to fetch fee rate: {:?}. Retrying...",
-							sub_display_format(SUB_LOG_TARGET),
-							e
-						);
-						sleep(Duration::from_secs(5)).await;
 					},
 				}
 			} else {
@@ -165,10 +181,17 @@ where
 
 	/// Fallback method to estimate fee rate if the mempool.space API is not available.
 	async fn fallback_estimate_fee(&self) -> Result<(u64, u64)> {
-		let st_fee_rate =
-			self.btc_client.estimate_smart_fee(1, None).await?.fee_rate.unwrap().to_sat() / 1000;
-		let lt_fee_rate =
-			self.btc_client.estimate_smart_fee(6, None).await?.fee_rate.unwrap().to_sat() / 1000;
+		let st_fee_result = self.btc_client.estimate_smart_fee(1, None).await?;
+		let lt_fee_result = self.btc_client.estimate_smart_fee(6, None).await?;
+
+		let st_fee_rate = st_fee_result
+			.fee_rate
+			.ok_or_else(|| eyre::eyre!("Failed to get short-term fee rate from Bitcoin node"))?
+			.to_sat() / 1000;
+		let lt_fee_rate = lt_fee_result
+			.fee_rate
+			.ok_or_else(|| eyre::eyre!("Failed to get long-term fee rate from Bitcoin node"))?
+			.to_sat() / 1000;
 
 		if self.debug_mode {
 			log::info!(
