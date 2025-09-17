@@ -19,7 +19,7 @@ where
 	pub fn new(
 		config: &Configuration,
 		manager_deps: &ManagerDeps<F, P, N>,
-		substrate_deps: &SubstrateDeps<F, P>,
+		substrate_deps: &SubstrateDeps<F, P, N>,
 		bootstrap_shared_data: BootstrapSharedData,
 		bfc_client: Arc<EthClient<F, P, N>>,
 		rollback_senders: Arc<BTreeMap<ChainId, Arc<UnboundedSender<Socket_Message>>>>,

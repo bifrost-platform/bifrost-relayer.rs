@@ -8,7 +8,6 @@ pub use outbound::*;
 
 use crate::{btc::LOG_TARGET, eth::EthClient};
 
-use super::block::EventMessage;
 use alloy::{
 	network::Network,
 	primitives::ChainId,

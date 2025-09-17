@@ -88,14 +88,14 @@ where
 	}
 
 	#[inline]
-	fn blaze(&self) -> &BlazeInstance<F, P> {
+	fn blaze(&self) -> &BlazeInstance<F, P, N> {
 		self.bfc_client.protocol_contracts.blaze.as_ref().unwrap()
 	}
 
 	/// Check if the transaction was originated by CCCP. If true, returns the composed socket messages.
 	async fn check_socket_queue(&self, txid: Txid) -> Result<Vec<Socket_Message>> {
 		let socket_messages =
-			self.socket_queue().outbound_tx(txid.to_byte_array().into()).call().await?._0;
+			self.socket_queue().outbound_tx(txid.to_byte_array().into()).call().await?;
 
 		socket_messages
 			.iter()
@@ -110,7 +110,6 @@ where
 			.is_tx_broadcastable(txid.to_byte_array().into(), self.bfc_client.address().await)
 			.call()
 			.await?
-			._0
 		{
 			let (call, metadata) = self.build_unsigned_tx(txid).await?;
 			self.request_send_transaction(call, metadata).await;
@@ -297,7 +296,7 @@ where
 }
 
 #[async_trait::async_trait]
-impl<F, P, N: Network> XtRequester<F, P> for OutboundHandler<F, P, N>
+impl<F, P, N: Network> XtRequester<F, P, N> for OutboundHandler<F, P, N>
 where
 	F: TxFiller<N> + WalletProvider<N>,
 	P: Provider<N>,

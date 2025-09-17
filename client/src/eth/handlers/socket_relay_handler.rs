@@ -640,7 +640,7 @@ where
 }
 
 #[async_trait::async_trait]
-impl<F, P, N: Network> XtRequester<F, P> for SocketRelayHandler<F, P, N>
+impl<F, P, N: Network> XtRequester<F, P, N> for SocketRelayHandler<F, P, N>
 where
 	F: TxFiller<N> + WalletProvider<N>,
 	P: Provider<N>,

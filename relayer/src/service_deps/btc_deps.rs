@@ -21,7 +21,7 @@ where
 	/// The Bitcoin PSBT signer.
 	pub psbt_signer: PsbtSigner<F, P, N>,
 	/// The Bitcoin PSBT broadcaster.
-	pub psbt_broadcaster: PsbtBroadcaster<F, P>,
+	pub psbt_broadcaster: PsbtBroadcaster<F, P, N>,
 	/// The Bitcoin vault public key submitter.
 	pub pub_key_submitter: PubKeySubmitter<F, P, N>,
 	/// The Bitcoin rollback verifier.

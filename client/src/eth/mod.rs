@@ -219,7 +219,7 @@ where
 	/// Check the blaze activation state
 	pub async fn blaze_activation(&self) -> Result<bool> {
 		if let Some(blaze) = self.protocol_contracts.blaze.as_ref() {
-			Ok(blaze.is_activated().call().await?._0)
+			Ok(blaze.is_activated().call().await?)
 		} else {
 			Ok(false)
 		}
@@ -423,63 +423,6 @@ where
 				Ok(())
 			},
 		}
-	}
-
-	/// Flush stalled transactions from the txpool.
-	pub async fn flush_stalled_transactions(&self) -> Result<()> {
-		let _lock = self.martial_law.lock().await;
-
-		// if the chain is native or txpool is not enabled, do nothing
-		if self.metadata.is_native || self.txpool_status().await.is_err() {
-			return Ok(());
-		}
-
-		// possibility of txpool being flushed automatically. wait for 2 blocks.
-		tokio::time::sleep(Duration::from_millis(self.metadata.call_interval * 2)).await;
-
-		let pending = self.txpool_content().await?.remove_from(&self.address()).pending;
-		let mut transactions = pending.into_iter().map(|(_, tx)| tx).collect::<VecDeque<_>>();
-		transactions.make_contiguous().sort_by(|a, b| a.nonce().cmp(&b.nonce()));
-
-		while let Some(tx) = transactions.pop_front() {
-			if self.get_transaction_receipt(tx.tx_hash()).await.unwrap().is_some() {
-				continue;
-			}
-
-			let mut tx_request = tx.clone().into_request();
-
-			// RBF
-			if tx.is_legacy_gas() {
-				let new_gas_price = ((tx_request.gas_price.unwrap() as f64) * 1.1).ceil() as u128;
-				let current_gas_price = self.get_gas_price().await.unwrap();
-
-				tx_request.gas_price = Some(max(new_gas_price, current_gas_price));
-			} else {
-				let current_gas_price = self.estimate_eip1559_fees(None).await.unwrap();
-
-				let new_max_fee_per_gas =
-					(tx_request.max_fee_per_gas.unwrap() as f64 * 1.1).ceil() as u128;
-				let new_max_priority_fee_per_gas =
-					(tx_request.max_priority_fee_per_gas.unwrap() as f64 * 1.1).ceil() as u128;
-
-				tx_request.max_fee_per_gas =
-					Some(max(new_max_fee_per_gas, current_gas_price.max_fee_per_gas));
-				tx_request.max_priority_fee_per_gas = Some(max(
-					new_max_priority_fee_per_gas,
-					current_gas_price.max_priority_fee_per_gas,
-				));
-			}
-
-			let pending = self
-				.send_transaction(tx_request)
-				.await?
-				.with_timeout(Some(Duration::from_millis(self.metadata.call_interval * 3)));
-			if pending.watch().await.is_err() {
-				transactions.push_front(tx);
-			}
-		}
-
-		Ok(())
 	}
 }
 

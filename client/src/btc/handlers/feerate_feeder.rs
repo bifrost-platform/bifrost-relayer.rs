@@ -1,7 +1,7 @@
 use super::{Event, EventMessage, EventType, Handler, LOG_TARGET, XtRequester};
 use crate::eth::EthClient;
 use alloy::{
-	network::AnyNetwork,
+	network::Network,
 	providers::{Provider, WalletProvider, fillers::TxFiller},
 };
 use bitcoincore_rpc::{Client as BtcClient, RpcApi};
@@ -25,13 +25,13 @@ use tokio_stream::{StreamExt, wrappers::BroadcastStream};
 
 pub const SUB_LOG_TARGET: &str = "btc-feerate-feeder";
 
-pub struct FeeRateFeeder<F, P>
+pub struct FeeRateFeeder<F, P, N: Network>
 where
-	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
-	P: Provider<AnyNetwork>,
+	F: TxFiller<N> + WalletProvider<N>,
+	P: Provider<N>,
 {
 	/// `EthClient` to interact with Bifrost network.
-	pub bfc_client: Arc<EthClient<F, P>>,
+	pub bfc_client: Arc<EthClient<F, P, N>>,
 	/// `Client` to interact with bitcoin core RPC.
 	btc_client: BtcClient,
 	/// The substrate client.
@@ -46,13 +46,13 @@ where
 	debug_mode: bool,
 }
 
-impl<F, P> FeeRateFeeder<F, P>
+impl<F, P, N: Network> FeeRateFeeder<F, P, N>
 where
-	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
-	P: Provider<AnyNetwork>,
+	F: TxFiller<N> + WalletProvider<N>,
+	P: Provider<N>,
 {
 	pub fn new(
-		bfc_client: Arc<EthClient<F, P>>,
+		bfc_client: Arc<EthClient<F, P, N>>,
 		btc_client: BtcClient,
 		xt_request_sender: Arc<XtRequestSender>,
 		event_receiver: Receiver<EventMessage>,
@@ -250,10 +250,10 @@ where
 }
 
 #[async_trait::async_trait]
-impl<F, P> Handler for FeeRateFeeder<F, P>
+impl<F, P, N: Network> Handler for FeeRateFeeder<F, P, N>
 where
-	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
-	P: Provider<AnyNetwork>,
+	F: TxFiller<N> + WalletProvider<N>,
+	P: Provider<N>,
 {
 	async fn run(&mut self) -> Result<()> {
 		self.initialize().await;
@@ -283,16 +283,16 @@ where
 }
 
 #[async_trait::async_trait]
-impl<F, P> XtRequester<F, P> for FeeRateFeeder<F, P>
+impl<F, P, N: Network> XtRequester<F, P, N> for FeeRateFeeder<F, P, N>
 where
-	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
-	P: Provider<AnyNetwork>,
+	F: TxFiller<N> + WalletProvider<N>,
+	P: Provider<N>,
 {
 	fn xt_request_sender(&self) -> Arc<XtRequestSender> {
 		self.xt_request_sender.clone()
 	}
 
-	fn bfc_client(&self) -> Arc<EthClient<F, P>> {
+	fn bfc_client(&self) -> Arc<EthClient<F, P, N>> {
 		self.bfc_client.clone()
 	}
 }

@@ -38,7 +38,7 @@ where
 	P: Provider<N>,
 {
 	/// `EthClient` to interact with Bifrost network.
-    pub bfc_client: Arc<EthClient<F, P, N>>,
+	pub bfc_client: Arc<EthClient<F, P, N>>,
 	/// The unsigned transaction message sender.
 	xt_request_sender: Arc<XtRequestSender>,
 	/// The receiver that consumes new events from the block channel.
@@ -220,7 +220,7 @@ where
 	}
 
 	#[inline]
-	fn blaze(&self) -> &BlazeInstance<F, P> {
+	fn blaze(&self) -> &BlazeInstance<F, P, N> {
 		self.bfc_client.protocol_contracts.blaze.as_ref().unwrap()
 	}
 
@@ -235,7 +235,6 @@ where
 			)
 			.call()
 			.await?
-			._0
 		{
 			let (call, metadata) = self.build_unsigned_tx(event).await?;
 			self.request_send_transaction(call, metadata).await;
@@ -341,7 +340,7 @@ where
 }
 
 #[async_trait::async_trait]
-impl<F, P, N: Network> XtRequester<F, P> for InboundHandler<F, P, N>
+impl<F, P, N: Network> XtRequester<F, P, N> for InboundHandler<F, P, N>
 where
 	F: TxFiller<N> + WalletProvider<N>,
 	P: Provider<N>,

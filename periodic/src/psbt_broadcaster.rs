@@ -1,7 +1,7 @@
 use std::{str::FromStr, sync::Arc};
 
 use alloy::{
-	network::AnyNetwork,
+	network::Network,
 	primitives::{Bytes, keccak256},
 	providers::{Provider, WalletProvider, fillers::TxFiller},
 };
@@ -23,13 +23,13 @@ use crate::traits::PeriodicWorker;
 const SUB_LOG_TARGET: &str = "psbt-broadcaster";
 
 /// The essential task that broadcast finalized PSBT's.
-pub struct PsbtBroadcaster<F, P>
+pub struct PsbtBroadcaster<F, P, N: Network>
 where
-	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
-	P: Provider<AnyNetwork>,
+	F: TxFiller<N> + WalletProvider<N>,
+	P: Provider<N>,
 {
 	/// The Bifrost client.
-	pub bfc_client: Arc<EthClient<F, P>>,
+	pub bfc_client: Arc<EthClient<F, P, N>>,
 	/// The Bitcoin client.
 	btc_client: BtcClient,
 	/// The unsigned transaction message sender.
@@ -38,13 +38,13 @@ where
 	schedule: Schedule,
 }
 
-impl<F, P> PsbtBroadcaster<F, P>
+impl<F, P, N: Network> PsbtBroadcaster<F, P, N>
 where
-	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
-	P: Provider<AnyNetwork>,
+	F: TxFiller<N> + WalletProvider<N>,
+	P: Provider<N>,
 {
 	pub fn new(
-		bfc_client: Arc<EthClient<F, P>>,
+		bfc_client: Arc<EthClient<F, P, N>>,
 		btc_client: BtcClient,
 		xt_request_sender: Arc<XtRequestSender>,
 	) -> Self {
@@ -60,8 +60,7 @@ where
 	/// Get the finalized PSBT's (in bytes)
 	async fn get_finalized_psbts(&self) -> Result<Vec<Bytes>> {
 		let socket_queue = self.bfc_client.protocol_contracts.socket_queue.as_ref().unwrap();
-		let res = socket_queue.finalized_psbts().call().await?._0;
-		Ok(res)
+		Ok(socket_queue.finalized_psbts().call().await?)
 	}
 
 	/// Check if the transaction is already broadcasted
@@ -153,10 +152,10 @@ where
 }
 
 #[async_trait::async_trait]
-impl<F, P> PeriodicWorker for PsbtBroadcaster<F, P>
+impl<F, P, N: Network> PeriodicWorker for PsbtBroadcaster<F, P, N>
 where
-	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
-	P: Provider<AnyNetwork>,
+	F: TxFiller<N> + WalletProvider<N>,
+	P: Provider<N>,
 {
 	fn schedule(&self) -> Schedule {
 		self.schedule.clone()
@@ -201,16 +200,16 @@ where
 }
 
 #[async_trait::async_trait]
-impl<F, P> XtRequester<F, P> for PsbtBroadcaster<F, P>
+impl<F, P, N: Network> XtRequester<F, P, N> for PsbtBroadcaster<F, P, N>
 where
-	F: TxFiller<AnyNetwork> + WalletProvider<AnyNetwork>,
-	P: Provider<AnyNetwork>,
+	F: TxFiller<N> + WalletProvider<N>,
+	P: Provider<N>,
 {
 	fn xt_request_sender(&self) -> Arc<XtRequestSender> {
 		self.xt_request_sender.clone()
 	}
 
-	fn bfc_client(&self) -> Arc<EthClient<F, P>> {
+	fn bfc_client(&self) -> Arc<EthClient<F, P, N>> {
 		self.bfc_client.clone()
 	}
 }
