@@ -3,6 +3,7 @@ use alloy::{
 	primitives::{Address, Bytes},
 	providers::{Provider, WalletProvider, fillers::TxFiller},
 };
+use array_bytes::Hexify;
 use bitcoincore_rpc::bitcoin::PublicKey;
 use br_client::{
 	btc::storage::keypair::{KeypairStorage, KeypairStorageT},
@@ -166,8 +167,7 @@ where
 		let signature = self
 			.client
 			.sign_message(
-				format!("{}:{}", pool_round, array_bytes::bytes2hex("0x", converted_pub_key))
-					.as_bytes(),
+				format!("{}:{}", pool_round, converted_pub_key.hexify_prefixed()).as_bytes(),
 			)
 			.await?
 			.into();

@@ -9,6 +9,7 @@ use alloy::{
 	primitives::{Address as EthAddress, B256, ChainId, U256, keccak256},
 	providers::{Provider, WalletProvider, fillers::TxFiller},
 };
+use array_bytes::Hexify;
 use bitcoincore_rpc::bitcoin::Txid;
 use br_primitives::{
 	bootstrap::BootstrapSharedData,
@@ -137,11 +138,7 @@ where
 		let signature = self
 			.bfc_client
 			.sign_message(
-				&[
-					keccak256("UtxosSubmission").as_slice(),
-					array_bytes::bytes2hex("", utxo_hash).as_bytes(),
-				]
-				.concat(),
+				&[keccak256("UtxosSubmission").as_slice(), utxo_hash.hexify().as_bytes()].concat(),
 			)
 			.await?
 			.into();

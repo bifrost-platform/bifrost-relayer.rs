@@ -7,6 +7,7 @@ use alloy::{
 	rpc::types::{Filter, Log},
 	sol_types::SolEvent,
 };
+use array_bytes::Hexify;
 use eyre::Result;
 use sc_service::SpawnTaskHandle;
 use subxt::ext::subxt_core::utils::AccountId20;
@@ -501,11 +502,8 @@ where
 				return Ok(());
 			}
 			let encoded_msg = self.encode_socket_message(msg);
-			let signature = self
-				.client
-				.sign_message(array_bytes::bytes2hex("0x", encoded_msg.clone()).as_bytes())
-				.await?
-				.into();
+			let signature =
+				self.client.sign_message(encoded_msg.hexify_prefixed().as_bytes()).await?.into();
 			let call = XtRequest::from(bifrost_runtime::tx().blaze().submit_outbound_requests(
 				SocketMessagesSubmission {
 					authority_id: AccountId20(self.client.address().await.0.0),
@@ -728,25 +726,20 @@ mod tests {
 
 	#[test]
 	fn test_socket_msg_decode() {
-		let req_id_chain = array_bytes::bytes2hex("0x", [0, 0, 39, 18]);
-		let ins_code_chain = array_bytes::bytes2hex("0x", [0, 0, 191, 192]);
-		let ins_code_method =
-			array_bytes::bytes2hex("0x", [3, 1, 1, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+		let req_id_chain = [0, 0, 39, 18].hexify_prefixed();
+		let ins_code_chain = [0, 0, 191, 192].hexify_prefixed();
+		let ins_code_method = [3, 1, 1, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0].hexify_prefixed();
 
-		let params_tokenidx0 = array_bytes::bytes2hex(
-			"0x",
-			[
-				0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-				0, 0, 0, 0,
-			],
-		);
-		let params_tokenidx1 = array_bytes::bytes2hex(
-			"0x",
-			[
-				0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-				0, 0, 0, 0,
-			],
-		);
+		let params_tokenidx0 = [
+			0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+			0, 0, 0,
+		]
+		.hexify_prefixed();
+		let params_tokenidx1 = [
+			0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+			0, 0, 0,
+		]
+		.hexify_prefixed();
 
 		println!("req_id_chain -> {:?}", req_id_chain);
 		println!("ins_code_chain -> {:?}", ins_code_chain);

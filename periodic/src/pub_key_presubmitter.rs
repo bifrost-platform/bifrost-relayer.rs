@@ -3,6 +3,7 @@ use alloy::{
 	network::Network,
 	providers::{Provider, WalletProvider, fillers::TxFiller},
 };
+use array_bytes::Hexify;
 use bitcoincore_rpc::bitcoin::PublicKey;
 use br_client::{
 	btc::storage::keypair::{KeypairStorage, KeypairStorageT},
@@ -157,7 +158,7 @@ where
 					pool_round,
 					converted_pub_keys
 						.iter()
-						.map(|x| array_bytes::bytes2hex("0x", *x))
+						.map(|x| x.hexify_prefixed())
 						.collect::<Vec<String>>()
 						.concat()
 				)
