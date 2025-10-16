@@ -1,10 +1,9 @@
-use std::{str::FromStr, sync::Arc, time::Duration};
-
 use alloy::{
 	network::Network,
 	primitives::{Address, Bytes},
 	providers::{Provider, WalletProvider, fillers::TxFiller},
 };
+use array_bytes::Hexify;
 use bitcoincore_rpc::bitcoin::PublicKey;
 use br_client::{
 	btc::storage::keypair::{KeypairStorage, KeypairStorageT},
@@ -24,9 +23,9 @@ use br_primitives::{
 };
 use cron::Schedule;
 use eyre::Result;
+use std::{str::FromStr, sync::Arc, time::Duration};
 use subxt::ext::subxt_core::utils::AccountId20;
 use tokio::{sync::RwLock, time::sleep};
-use tokio_stream::StreamExt;
 
 use crate::traits::PeriodicWorker;
 
@@ -68,8 +67,6 @@ where
 				{
 					self.get_current_round().await?
 				} else {
-					// wait for 9 seconds to ensure the migration sequence is updated. (at least finalization time)
-					sleep(Duration::from_secs(9)).await;
 					self.get_current_round().await?.saturating_add(1)
 				};
 
@@ -82,8 +79,7 @@ where
 					pending_registrations.len()
 				);
 
-				let mut stream = tokio_stream::iter(pending_registrations);
-				while let Some(who) = stream.next().await {
+				for who in pending_registrations {
 					// Skip the registration if the service is in maintenance mode. (Only system vaults are allowed to register in maintenance mode.)
 					if *self.migration_sequence.read().await != ServiceState::Normal
 						&& !self.is_system_vault(who)
@@ -106,7 +102,16 @@ where
 						continue;
 					}
 
-					let pub_key = self.keypair_storage.create_new_keypair().await;
+					let pub_key = {
+						loop {
+							if self.keypair_storage.loaded_round().await == target_round {
+								break;
+							}
+							sleep(Duration::from_secs(1)).await;
+						}
+
+						self.keypair_storage.create_new_keypair().await
+					};
 					let (call, metadata) = self.build_unsigned_tx(who, pub_key).await?;
 					self.request_send_transaction(call, metadata).await;
 				}
@@ -162,8 +167,7 @@ where
 		let signature = self
 			.client
 			.sign_message(
-				format!("{}:{}", pool_round, array_bytes::bytes2hex("0x", converted_pub_key))
-					.as_bytes(),
+				format!("{}:{}", pool_round, converted_pub_key.hexify_prefixed()).as_bytes(),
 			)
 			.await?
 			.into();

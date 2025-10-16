@@ -1,32 +1,35 @@
 use crate::{
-	btc::{
-		block::{Event, EventMessage as BTCEventMessage, EventType},
-		handlers::{Handler, LOG_TARGET},
-	},
+	btc::handlers::{Handler, LOG_TARGET},
 	eth::{EthClient, send_transaction},
 };
 
+use super::{BootstrapHandler, XtRequester};
 use alloy::{
 	network::Network,
-	primitives::{Address as EthAddress, B256, ChainId, U256},
+	primitives::{Address as EthAddress, B256, ChainId, U256, keccak256},
 	providers::{Provider, WalletProvider, fillers::TxFiller},
 };
+use array_bytes::Hexify;
 use bitcoincore_rpc::bitcoin::Txid;
 use br_primitives::{
 	bootstrap::BootstrapSharedData,
-	contracts::bitcoin_socket::BitcoinSocketInstance,
-	tx::{BitcoinRelayMetadata, TxRequestMetadata},
+	btc::{Event, EventMessage as BTCEventMessage, EventType},
+	contracts::{bitcoin_socket::BitcoinSocketInstance, blaze::BlazeInstance},
+	substrate::{BoundedVec, EthereumSignature, UtxoInfo, UtxoSubmission, bifrost_runtime},
+	tx::{
+		BitcoinRelayMetadata, SubmitUtxoMetadata, TxRequestMetadata, XtRequest, XtRequestMessage,
+		XtRequestMetadata, XtRequestSender,
+	},
 	utils::sub_display_format,
 };
 use eyre::Result;
-
 use miniscript::bitcoin::{Address as BtcAddress, address::NetworkUnchecked, hashes::Hash};
+use parity_scale_codec::Encode;
 use sc_service::SpawnTaskHandle;
 use std::sync::Arc;
+use subxt::ext::subxt_core::utils::AccountId20;
 use tokio::sync::broadcast::Receiver;
 use tokio_stream::{StreamExt, wrappers::BroadcastStream};
-
-use super::{BootstrapHandler, EventMessage};
 
 const SUB_LOG_TARGET: &str = "inbound-handler";
 
@@ -35,8 +38,10 @@ where
 	F: TxFiller<N> + WalletProvider<N>,
 	P: Provider<N>,
 {
-	/// `EthClient` for interact with Bifrost network.
+	/// `EthClient` to interact with Bifrost network.
 	pub bfc_client: Arc<EthClient<F, P, N>>,
+	/// The unsigned transaction message sender.
+	xt_request_sender: Arc<XtRequestSender>,
 	/// The receiver that consumes new events from the block channel.
 	event_stream: BroadcastStream<BTCEventMessage>,
 	/// Event type which this handler should handle.
@@ -56,6 +61,7 @@ where
 {
 	pub fn new(
 		bfc_client: Arc<EthClient<F, P, N>>,
+		xt_request_sender: Arc<XtRequestSender>,
 		event_receiver: Receiver<BTCEventMessage>,
 		bootstrap_shared_data: Arc<BootstrapSharedData>,
 		handle: SpawnTaskHandle,
@@ -63,6 +69,7 @@ where
 	) -> Self {
 		Self {
 			bfc_client,
+			xt_request_sender,
 			event_stream: BroadcastStream::new(event_receiver),
 			target_event: EventType::Inbound,
 			bootstrap_shared_data,
@@ -79,10 +86,11 @@ where
 			self.bfc_client.protocol_contracts.registration_pool.as_ref().unwrap();
 
 		let vault_address = vault_address.clone().assume_checked().to_string();
-		let round = self.get_current_round().await?;
-		let user_address = registration_pool.user_address(vault_address, round).call().await?;
+		let user_address = registration_pool.user_address(vault_address, 0).call().await?;
 
-		if user_address == EthAddress::ZERO { Ok(None) } else { Ok(Some(user_address)) }
+		// if system vault address, return None.
+		// otherwise, return Some(user address).
+		if user_address == *registration_pool.address() { Ok(None) } else { Ok(Some(user_address)) }
 	}
 
 	async fn is_rollback_output(&self, txid: Txid, index: u32) -> Result<bool> {
@@ -108,6 +116,70 @@ where
 				U256::from(event.amount.to_sat()),
 			)
 			.into_transaction_request()
+	}
+
+	/// Build the payload for the unsigned transaction. (`submit_utxos()`)
+	async fn build_payload(
+		&self,
+		event: &Event,
+	) -> Result<(UtxoSubmission<AccountId20>, EthereumSignature)> {
+		let txid: subxt::utils::H256 = event.txid.to_byte_array().into();
+		let msg = UtxoSubmission {
+			authority_id: AccountId20(self.bfc_client.address().await.0.0),
+			utxos: vec![UtxoInfo {
+				txid,
+				vout: event.index,
+				amount: event.amount.to_sat(),
+				address: BoundedVec(event.address.assume_checked_ref().to_string().into_bytes()),
+			}],
+		};
+		let utxo_hash = keccak256(Encode::encode(&(txid, event.index, event.amount.to_sat())));
+
+		let signature = self
+			.bfc_client
+			.sign_message(
+				&[keccak256("UtxosSubmission").as_slice(), utxo_hash.hexify().as_bytes()].concat(),
+			)
+			.await?
+			.into();
+
+		Ok((msg, signature))
+	}
+
+	/// Build the calldata for the unsigned transaction. (`submit_utxos()`)
+	async fn build_unsigned_tx(&self, event: &Event) -> Result<(XtRequest, SubmitUtxoMetadata)> {
+		let (msg, signature) = self.build_payload(event).await?;
+		let metadata = SubmitUtxoMetadata::new(event);
+		Ok((XtRequest::from(bifrost_runtime::tx().blaze().submit_utxos(msg, signature)), metadata))
+	}
+
+	/// Send the transaction request message to the channel.
+	async fn request_send_transaction(&self, call: XtRequest, metadata: SubmitUtxoMetadata) {
+		match self
+			.xt_request_sender
+			.send(XtRequestMessage::new(call, XtRequestMetadata::SubmitUtxos(metadata.clone())))
+		{
+			Ok(_) => log::info!(
+				target: &self.bfc_client.get_chain_name(),
+				"-[{}] 🔖 Request unsigned transaction: {}",
+				sub_display_format(SUB_LOG_TARGET),
+				metadata
+			),
+			Err(error) => {
+				let log_msg = format!(
+					"-[{}]-[{}] ❗️ Failed to send unsigned transaction: {}, Error: {}",
+					sub_display_format(SUB_LOG_TARGET),
+					self.bfc_client.address().await,
+					metadata,
+					error
+				);
+				log::error!(target: &self.bfc_client.get_chain_name(), "{log_msg}");
+				sentry::capture_message(
+					&format!("[{}]{log_msg}", &self.bfc_client.get_chain_name()),
+					sentry::Level::Error,
+				);
+			},
+		}
 	}
 
 	/// Checks if the vote for a request has already finished.
@@ -139,15 +211,32 @@ where
 			.await?)
 	}
 
-	async fn get_current_round(&self) -> Result<u32> {
-		let registration_pool =
-			self.bfc_client.protocol_contracts.registration_pool.as_ref().unwrap();
-		Ok(registration_pool.current_round().call().await?)
-	}
-
 	#[inline]
 	fn bitcoin_socket(&self) -> &BitcoinSocketInstance<F, P, N> {
 		self.bfc_client.protocol_contracts.bitcoin_socket.as_ref().unwrap()
+	}
+
+	#[inline]
+	fn blaze(&self) -> &BlazeInstance<F, P, N> {
+		self.bfc_client.protocol_contracts.blaze.as_ref().unwrap()
+	}
+
+	async fn submit_utxo(&self, event: &Event) -> Result<()> {
+		if self
+			.blaze()
+			.is_submittable_utxo(
+				event.txid.to_byte_array().into(),
+				U256::from(event.index),
+				U256::from(event.amount.to_sat()),
+				self.bfc_client().address().await,
+			)
+			.call()
+			.await?
+		{
+			let (call, metadata) = self.build_unsigned_tx(event).await?;
+			self.request_send_transaction(call, metadata).await;
+		}
+		Ok(())
 	}
 }
 
@@ -174,24 +263,25 @@ where
 				msg.events.len()
 			);
 
-			let mut stream = tokio_stream::iter(msg.events);
-			while let Some(event) = stream.next().await {
-				self.process_event(event).await?;
+			for mut event in msg.events {
+				event.txid = {
+					let mut slice: [u8; 32] = event.txid.to_byte_array();
+					slice.reverse();
+					Txid::from_slice(&slice)?
+				};
+				self.process_event(&event).await?;
 			}
 		}
 
 		Ok(())
 	}
 
-	async fn process_event(&self, mut event: Event) -> Result<()> {
-		if let Some(user_bfc_address) = self.get_user_bfc_address(&event.address).await? {
-			// txid from event is in little endian, convert it to big endian
-			event.txid = {
-				let mut slice: [u8; 32] = event.txid.to_byte_array();
-				slice.reverse();
-				Txid::from_slice(&slice).unwrap()
-			};
+	async fn process_event(&self, event: &Event) -> Result<()> {
+		if self.bfc_client.blaze_activation().await? {
+			self.submit_utxo(&event).await?;
+		}
 
+		if let Some(user_bfc_address) = self.get_user_bfc_address(&event.address).await? {
 			// check if transaction has been submitted to be rollbacked
 			if self.is_rollback_output(event.txid, event.index).await? {
 				return Ok(());
@@ -202,8 +292,7 @@ where
 			}
 
 			let tx_request = self.build_transaction(&event, user_bfc_address);
-			let metadata =
-				BitcoinRelayMetadata::new(event.address, user_bfc_address, event.txid, event.index);
+			let metadata = BitcoinRelayMetadata::new(&event, user_bfc_address);
 
 			send_transaction(
 				self.bfc_client.clone(),
@@ -242,7 +331,22 @@ where
 		unreachable!("unimplemented")
 	}
 
-	async fn get_bootstrap_events(&self) -> Result<(EventMessage, EventMessage)> {
+	async fn get_bootstrap_events(&self) -> Result<(BTCEventMessage, BTCEventMessage)> {
 		unreachable!("unimplemented")
+	}
+}
+
+#[async_trait::async_trait]
+impl<F, P, N: Network> XtRequester<F, P, N> for InboundHandler<F, P, N>
+where
+	F: TxFiller<N> + WalletProvider<N>,
+	P: Provider<N>,
+{
+	fn xt_request_sender(&self) -> Arc<XtRequestSender> {
+		self.xt_request_sender.clone()
+	}
+
+	fn bfc_client(&self) -> Arc<EthClient<F, P, N>> {
+		self.bfc_client.clone()
 	}
 }

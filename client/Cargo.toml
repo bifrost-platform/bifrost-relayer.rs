@@ -39,6 +39,7 @@ reqwest = { workspace = true }
 sc-keystore = { workspace = true }
 sp-core = { workspace = true }
 sp-application-crypto = { workspace = true }
+parity-scale-codec = { workspace = true }
 
 # Bifrost Relayer
 br-primitives = { path = "../primitives", default-features = false }

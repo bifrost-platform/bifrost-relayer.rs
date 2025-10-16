@@ -19,6 +19,7 @@ use crate::{
 	contracts::{
 		authority::{AuthorityContract, AuthorityInstance},
 		bitcoin_socket::{BitcoinSocketContract, BitcoinSocketInstance},
+		blaze::{BlazeContract, BlazeInstance},
 		chainlink_aggregator::{ChainlinkContract, ChainlinkInstance},
 		registration_pool::{RegistrationPoolContract, RegistrationPoolInstance},
 		relay_executive::{RelayExecutiveContract, RelayExecutiveInstance},
@@ -193,6 +194,8 @@ where
 	pub registration_pool: Option<RegistrationPoolInstance<F, P, N>>,
 	/// RelayExecutiveContract (Bifrost only)
 	pub relay_executive: Option<RelayExecutiveInstance<F, P, N>>,
+	/// BlazeContract (Bifrost only)
+	pub blaze: Option<BlazeInstance<F, P, N>>,
 }
 
 impl<F, P, N: Network> ProtocolContracts<F, P, N>
@@ -219,6 +222,7 @@ where
 			socket_queue: None,
 			registration_pool: None,
 			relay_executive: None,
+			blaze: None,
 		};
 		if is_native {
 			contracts.relayer_manager = Some(RelayerManagerContract::new(
@@ -254,6 +258,11 @@ where
 					&evm_provider.relay_executive_address.expect(MISSING_CONTRACT_ADDRESS),
 				)
 				.expect(INVALID_CONTRACT_ADDRESS),
+				provider.clone(),
+			));
+			contracts.blaze = Some(BlazeContract::new(
+				Address::from_str(&evm_provider.blaze_address.expect(MISSING_CONTRACT_ADDRESS))
+					.expect(INVALID_CONTRACT_ADDRESS),
 				provider.clone(),
 			));
 		}

@@ -1,5 +1,6 @@
 pub mod authority;
 pub mod bitcoin_socket;
+pub mod blaze;
 pub mod chainlink_aggregator;
 pub mod registration_pool;
 pub mod relay_executive;

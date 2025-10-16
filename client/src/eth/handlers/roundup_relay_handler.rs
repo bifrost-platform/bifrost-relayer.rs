@@ -80,8 +80,7 @@ where
 				msg.event_logs.len(),
 			);
 
-			let mut stream = tokio_stream::iter(msg.event_logs);
-			while let Some(log) = stream.next().await {
+			for log in msg.event_logs {
 				if self.is_target_contract(&log) && self.is_target_event(log.topic0()) {
 					self.process_confirmed_log(&log, false).await?;
 				}
@@ -271,8 +270,7 @@ where
 			return Ok(());
 		}
 
-		let mut stream = tokio_stream::iter(self.external_clients.iter());
-		while let Some((dst_chain_id, target_client)) = stream.next().await {
+		for (dst_chain_id, target_client) in self.external_clients.iter() {
 			// Check roundup submitted to target chain before.
 			let latest_round =
 				target_client.protocol_contracts.authority.latest_round().call().await?;

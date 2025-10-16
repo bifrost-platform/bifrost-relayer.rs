@@ -5,7 +5,7 @@ use alloy::{
 use k256::{ecdsa::VerifyingKey, elliptic_curve::sec1::ToEncodedPoint};
 use sha3::{Digest, Keccak256};
 
-use crate::substrate::{EthereumSignature, Signature};
+use crate::substrate::EthereumSignature;
 
 pub fn sub_display_format(log_target: &str) -> String {
 	format!("{:<019}", log_target)
@@ -25,7 +25,7 @@ pub fn encode_roundup_param(round: U256, new_relayers: &[Address]) -> Vec<u8> {
 impl From<PrimitiveSignature> for EthereumSignature {
 	fn from(signature: PrimitiveSignature) -> Self {
 		let sig: [u8; 65] = signature.into();
-		EthereumSignature(Signature(sig))
+		EthereumSignature(sig)
 	}
 }
 

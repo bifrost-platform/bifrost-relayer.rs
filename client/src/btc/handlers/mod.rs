@@ -1,19 +1,13 @@
+mod feerate_feeder;
 mod inbound;
 mod outbound;
 
+pub use feerate_feeder::*;
 pub use inbound::*;
 pub use outbound::*;
-use tokio::time::sleep;
 
-use crate::{
-	btc::{
-		LOG_TARGET,
-		block::{Event, EventType},
-	},
-	eth::EthClient,
-};
+use crate::{btc::LOG_TARGET, eth::EthClient};
 
-use super::block::EventMessage;
 use alloy::{
 	network::Network,
 	primitives::ChainId,
@@ -21,12 +15,20 @@ use alloy::{
 };
 use br_primitives::{
 	bootstrap::BootstrapSharedData,
+	btc::{Event, EventMessage, EventType},
 	eth::BootstrapState,
 	tx::{XtRequest, XtRequestMessage, XtRequestMetadata, XtRequestSender},
 	utils::sub_display_format,
 };
 use eyre::Result;
 use std::{sync::Arc, time::Duration};
+use tokio::time::sleep;
+
+macro_rules! create_xt_request_message {
+	($xt_request:expr, $metadata:expr) => {
+		XtRequestMessage::new($xt_request.into(), $metadata.clone())
+	};
+}
 
 #[async_trait::async_trait]
 pub trait XtRequester<F, P, N: Network>
@@ -44,30 +46,7 @@ where
 		metadata: XtRequestMetadata,
 		sub_log_target: &str,
 	) {
-		let msg = match xt_request {
-			XtRequest::SubmitSignedPsbt(call) => {
-				XtRequestMessage::new(call.into(), metadata.clone())
-			},
-			XtRequest::SubmitVaultKey(call) => XtRequestMessage::new(call.into(), metadata.clone()),
-			XtRequest::SubmitUnsignedPsbt(call) => {
-				XtRequestMessage::new(call.into(), metadata.clone())
-			},
-			XtRequest::SubmitExecutedRequest(call) => {
-				XtRequestMessage::new(call.into(), metadata.clone())
-			},
-			XtRequest::SubmitSystemVaultKey(call) => {
-				XtRequestMessage::new(call.into(), metadata.clone())
-			},
-			XtRequest::SubmitRollbackPoll(call) => {
-				XtRequestMessage::new(call.into(), metadata.clone())
-			},
-			XtRequest::VaultKeyPresubmission(call) => {
-				XtRequestMessage::new(call.into(), metadata.clone())
-			},
-			XtRequest::ApproveSetRefunds(call) => {
-				XtRequestMessage::new(call.into(), metadata.clone())
-			},
-		};
+		let msg = create_xt_request_message!(xt_request, metadata);
 		match self.xt_request_sender().send(msg) {
 			Ok(_) => log::info!(
 				target: &self.bfc_client().get_chain_name(),
@@ -97,7 +76,7 @@ where
 pub trait Handler {
 	async fn run(&mut self) -> Result<()>;
 
-	async fn process_event(&self, event_tx: Event) -> Result<()>;
+	async fn process_event(&self, event_tx: &Event) -> Result<()>;
 
 	fn is_target_event(&self, event_type: EventType) -> bool;
 }

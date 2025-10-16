@@ -100,6 +100,8 @@ pub struct EVMProvider {
 	pub registration_pool_address: Option<String>,
 	/// Relay Executive contract address (Bifrost only)
 	pub relay_executive_address: Option<String>,
+	/// Blaze contract address (Bifrost only)
+	pub blaze_address: Option<String>,
 	/// Chainlink usdc/usd aggregator
 	pub chainlink_usdc_usd_address: Option<String>,
 	/// Chainlink usdt/usd aggregator

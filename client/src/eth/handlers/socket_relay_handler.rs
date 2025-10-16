@@ -7,8 +7,10 @@ use alloy::{
 	rpc::types::{Filter, Log},
 	sol_types::SolEvent,
 };
+use array_bytes::Hexify;
 use eyre::Result;
 use sc_service::SpawnTaskHandle;
+use subxt::ext::subxt_core::utils::AccountId20;
 use tokio::sync::{broadcast::Receiver, mpsc::UnboundedSender};
 use tokio_stream::{StreamExt, wrappers::BroadcastStream};
 
@@ -24,15 +26,22 @@ use br_primitives::{
 		SocketContract::Socket,
 	},
 	eth::{BootstrapState, BuiltRelayTransaction, RelayDirection, SocketEventStatus},
-	tx::{SocketRelayMetadata, TxRequestMetadata},
+	substrate::{SocketMessagesSubmission, bifrost_runtime},
+	tx::{
+		SocketRelayMetadata, TxRequestMetadata, XtRequest, XtRequestMessage, XtRequestMetadata,
+		XtRequestSender,
+	},
 	utils::sub_display_format,
 };
 
-use crate::eth::{
-	ClientMap, EthClient,
-	events::EventMessage,
-	send_transaction,
-	traits::{BootstrapHandler, Handler, SocketRelayBuilder},
+use crate::{
+	btc::handlers::XtRequester,
+	eth::{
+		ClientMap, EthClient,
+		events::EventMessage,
+		send_transaction,
+		traits::{BootstrapHandler, Handler, SocketRelayBuilder},
+	},
 };
 
 const SUB_LOG_TARGET: &str = "socket-handler";
@@ -45,6 +54,8 @@ where
 {
 	/// The `EthClient` to interact with the connected blockchain.
 	pub client: Arc<EthClient<F, P, N>>,
+	/// The unsigned transaction message sender.
+	xt_request_sender: Arc<XtRequestSender>,
 	/// The receiver that consumes new events from the block channel.
 	event_stream: BroadcastStream<EventMessage>,
 	/// The entire clients instantiated in the system. <chain_id, Arc<EthClient>>
@@ -83,10 +94,9 @@ where
 				msg.event_logs.len(),
 			);
 
-			let mut stream = tokio_stream::iter(msg.event_logs);
-			while let Some(log) = stream.next().await {
-				if self.is_target_contract(&log) && self.is_target_event(log.topic0()) {
-					self.process_confirmed_log(&log, false).await?;
+			for log in &msg.event_logs {
+				if self.is_target_contract(log) && self.is_target_event(log.topic0()) {
+					self.process_confirmed_log(log, false).await?;
 				}
 			}
 		}
@@ -118,6 +128,7 @@ where
 					// do nothing if protocol sequence ended
 					return Ok(());
 				}
+				self.submit_brp_outbound_request(msg.clone(), metadata.clone()).await?;
 
 				self.send_socket_message(msg.clone(), metadata.clone(), metadata.is_inbound)
 					.await?;
@@ -257,6 +268,7 @@ where
 		event_receiver: Receiver<EventMessage>,
 		system_clients: Arc<ClientMap<F, P, N>>,
 		bifrost_client: Arc<EthClient<F, P, N>>,
+		xt_request_sender: Arc<XtRequestSender>,
 		rollback_senders: Arc<BTreeMap<ChainId, Arc<UnboundedSender<Socket_Message>>>>,
 		handle: SpawnTaskHandle,
 		bootstrap_shared_data: Arc<BootstrapSharedData>,
@@ -269,6 +281,7 @@ where
 			client,
 			system_clients,
 			bifrost_client,
+			xt_request_sender,
 			rollback_senders,
 			handle,
 			bootstrap_shared_data,
@@ -393,7 +406,7 @@ where
 		)
 	}
 
-	/// Verifies whether the socket event is on a executable(=rollbackable) state.
+	/// Verifies whether the socket event is on an executable(=rollbackable) state.
 	fn is_executable(&self, is_inbound: bool, status: SocketEventStatus) -> bool {
 		matches!(
 			(is_inbound, status),
@@ -470,6 +483,62 @@ where
 			}
 		}
 	}
+
+	async fn submit_brp_outbound_request(
+		&self,
+		msg: Socket_Message,
+		metadata: SocketRelayMetadata,
+	) -> Result<()> {
+		let dst = Into::<u32>::into(msg.ins_code.ChainIndex) as ChainId;
+		let status = SocketEventStatus::from(msg.status);
+
+		if let Some(bitcoin_chain_id) = self.client.get_bitcoin_chain_id() {
+			// it should be a BRP outbound request (bifrost to bitcoin)
+			if self.is_inbound_sequence(dst) || dst != bitcoin_chain_id {
+				return Ok(());
+			}
+			// we only submit the request if the status is accepted
+			if status != SocketEventStatus::Accepted {
+				return Ok(());
+			}
+			let encoded_msg = self.encode_socket_message(msg);
+			let signature =
+				self.client.sign_message(encoded_msg.hexify_prefixed().as_bytes()).await?.into();
+			let call = XtRequest::from(bifrost_runtime::tx().blaze().submit_outbound_requests(
+				SocketMessagesSubmission {
+					authority_id: AccountId20(self.client.address().await.0.0),
+					messages: vec![encoded_msg],
+				},
+				signature,
+			));
+			match self.xt_request_sender.send(XtRequestMessage::new(
+				call,
+				XtRequestMetadata::SubmitOutboundRequests(metadata.clone()),
+			)) {
+				Ok(_) => log::info!(
+					target: &self.client.get_chain_name(),
+					"-[{}] 🔖 Request unsigned transaction: {}",
+					sub_display_format(SUB_LOG_TARGET),
+					metadata
+				),
+				Err(error) => {
+					let log_msg = format!(
+						"-[{}]-[{}] ❗️ Failed to send unsigned transaction: {}, Error: {}",
+						sub_display_format(SUB_LOG_TARGET),
+						self.client.address().await,
+						metadata,
+						error
+					);
+					log::error!(target: &self.client.get_chain_name(), "{log_msg}");
+					sentry::capture_message(
+						&format!("[{}]{log_msg}", &self.client.get_chain_name()),
+						sentry::Level::Error,
+					);
+				},
+			}
+		}
+		Ok(())
+	}
 }
 
 #[async_trait::async_trait]
@@ -490,9 +559,7 @@ where
 		self.wait_for_bootstrap_state(BootstrapState::BootstrapSocketRelay).await?;
 
 		let logs = self.get_bootstrap_events().await?;
-
-		let mut stream = tokio_stream::iter(logs);
-		while let Some(log) = stream.next().await {
+		for log in logs {
 			self.process_confirmed_log(&log, true).await?;
 		}
 
@@ -570,6 +637,21 @@ where
 	}
 }
 
+#[async_trait::async_trait]
+impl<F, P, N: Network> XtRequester<F, P, N> for SocketRelayHandler<F, P, N>
+where
+	F: TxFiller<N> + WalletProvider<N>,
+	P: Provider<N>,
+{
+	fn xt_request_sender(&self) -> Arc<XtRequestSender> {
+		self.xt_request_sender.clone()
+	}
+
+	fn bfc_client(&self) -> Arc<EthClient<F, P, N>> {
+		self.client.clone()
+	}
+}
+
 #[cfg(test)]
 mod tests {
 	use alloy::{
@@ -644,25 +726,20 @@ mod tests {
 
 	#[test]
 	fn test_socket_msg_decode() {
-		let req_id_chain = array_bytes::bytes2hex("0x", [0, 0, 39, 18]);
-		let ins_code_chain = array_bytes::bytes2hex("0x", [0, 0, 191, 192]);
-		let ins_code_method =
-			array_bytes::bytes2hex("0x", [3, 1, 1, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+		let req_id_chain = [0, 0, 39, 18].hexify_prefixed();
+		let ins_code_chain = [0, 0, 191, 192].hexify_prefixed();
+		let ins_code_method = [3, 1, 1, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0].hexify_prefixed();
 
-		let params_tokenidx0 = array_bytes::bytes2hex(
-			"0x",
-			[
-				0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-				0, 0, 0, 0,
-			],
-		);
-		let params_tokenidx1 = array_bytes::bytes2hex(
-			"0x",
-			[
-				0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-				0, 0, 0, 0,
-			],
-		);
+		let params_tokenidx0 = [
+			0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+			0, 0, 0,
+		]
+		.hexify_prefixed();
+		let params_tokenidx1 = [
+			0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+			0, 0, 0,
+		]
+		.hexify_prefixed();
 
 		println!("req_id_chain -> {:?}", req_id_chain);
 		println!("ins_code_chain -> {:?}", ins_code_chain);

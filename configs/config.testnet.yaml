@@ -35,6 +35,7 @@ evm_providers:
     socket_queue_address: "0x0000000000000000000000000000000000000101"
     registration_pool_address: "0x0000000000000000000000000000000000000100"
     relay_executive_address: "0x0000000000000000000000000000000000000803"
+    blaze_address: "0x0000000000000000000000000000000000000102"
   - name: "sepolia"
     id: 11155111
     provider: "<YOUR_SEPOLIA_RPC_ENDPOINT>"

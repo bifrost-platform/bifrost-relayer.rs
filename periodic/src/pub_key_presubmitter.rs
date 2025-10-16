@@ -3,20 +3,20 @@ use alloy::{
 	network::Network,
 	providers::{Provider, WalletProvider, fillers::TxFiller},
 };
+use array_bytes::Hexify;
 use bitcoincore_rpc::bitcoin::PublicKey;
 use br_client::{
 	btc::storage::keypair::{KeypairStorage, KeypairStorageT},
 	eth::EthClient,
 };
 use br_primitives::{
-	constants::{
-		errors::INVALID_PROVIDER_URL, schedule::PRESUBMISSION_SCHEDULE,
-		tx::DEFAULT_CALL_RETRY_INTERVAL_MS,
-	},
+	constants::{schedule::PRESUBMISSION_SCHEDULE, tx::DEFAULT_CALL_RETRY_INTERVAL_MS},
 	substrate::{
 		CustomConfig, EthereumSignature, MigrationSequence, Public, VaultKeyPreSubmission,
-		bifrost_runtime,
-		bifrost_runtime::btc_registration_pool::storage::types::service_state::ServiceState,
+		bifrost_runtime::{
+			self, btc_registration_pool::storage::types::service_state::ServiceState,
+		},
+		initialize_sub_client,
 	},
 	tx::{
 		VaultKeyPresubmissionMetadata, XtRequest, XtRequestMessage, XtRequestMetadata,
@@ -111,18 +111,7 @@ where
 	}
 
 	async fn initialize(&mut self) {
-		let mut url = self.bfc_client.get_url();
-		if url.scheme() == "https" {
-			url.set_scheme("wss").expect(INVALID_PROVIDER_URL);
-		} else {
-			url.set_scheme("ws").expect(INVALID_PROVIDER_URL);
-		}
-
-		self.sub_client = Some(
-			OnlineClient::<CustomConfig>::from_insecure_url(url.as_str())
-				.await
-				.expect(INVALID_PROVIDER_URL),
-		);
+		self.sub_client = Some(initialize_sub_client(self.bfc_client.get_url()).await);
 	}
 
 	async fn build_unsigned_tx(
@@ -169,7 +158,7 @@ where
 					pool_round,
 					converted_pub_keys
 						.iter()
-						.map(|x| array_bytes::bytes2hex("0x", *x))
+						.map(|x| x.hexify_prefixed())
 						.collect::<Vec<String>>()
 						.concat()
 				)

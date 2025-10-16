@@ -1,4 +1,5 @@
 use super::*;
+use miniscript::bitcoin::psbt::SigningKeysMap;
 
 #[derive(Clone)]
 /// A keystore for KMS-based keypairs.
@@ -39,8 +40,8 @@ impl KeypairStorageT for KmsKeypairStorage {
 	async fn sign_psbt_inner(
 		&self,
 		psbt: &mut Psbt,
-	) -> Result<SigningKeys, (SigningKeys, SigningErrors)> {
-		psbt.sign(self, &Secp256k1::signing_only())
+	) -> Result<SigningKeysMap, (SigningKeysMap, SigningErrors)> {
+		Ok(psbt.sign(self, &Secp256k1::new())?)
 	}
 
 	async fn keys(&self) -> Vec<Vec<u8>> {

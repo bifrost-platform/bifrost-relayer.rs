@@ -1,5 +1,8 @@
-use br_primitives::btc::{
-	MEMPOOL_SPACE_BLOCK_HEIGHT_ENDPOINT, MEMPOOL_SPACE_TESTNET_BLOCK_HEIGHT_ENDPOINT,
+use br_client::btc::handlers::FeeRateFeeder;
+use br_periodic::PsbtBroadcaster;
+use br_primitives::constants::btc::{
+	MEMPOOL_SPACE_BLOCK_HEIGHT_ENDPOINT, MEMPOOL_SPACE_FEE_RATE_ENDPOINT,
+	MEMPOOL_SPACE_TESTNET_BLOCK_HEIGHT_ENDPOINT, MEMPOOL_SPACE_TESTNET_FEE_RATE_ENDPOINT,
 };
 
 use super::*;
@@ -17,10 +20,14 @@ where
 	pub block_manager: BlockManager<F, P, N>,
 	/// The Bitcoin PSBT signer.
 	pub psbt_signer: PsbtSigner<F, P, N>,
+	/// The Bitcoin PSBT broadcaster.
+	pub psbt_broadcaster: PsbtBroadcaster<F, P, N>,
 	/// The Bitcoin vault public key submitter.
 	pub pub_key_submitter: PubKeySubmitter<F, P, N>,
 	/// The Bitcoin rollback verifier.
 	pub rollback_verifier: BitcoinRollbackVerifier<F, P, N>,
+	/// The Bitcoin fee rate feeder.
+	pub fee_rate_feeder: FeeRateFeeder<F, P, N>,
 }
 
 impl<F, P, N: AlloyNetwork> BtcDeps<F, P, N>
@@ -64,6 +71,7 @@ where
 		);
 		let inbound = InboundHandler::new(
 			bfc_client.clone(),
+			substrate_deps.xt_request_sender.clone(),
 			block_manager.subscribe(),
 			bootstrap_shared_data.clone(),
 			task_manager.spawn_handle(),
@@ -71,6 +79,7 @@ where
 		);
 		let outbound = OutboundHandler::new(
 			bfc_client.clone(),
+			substrate_deps.xt_request_sender.clone(),
 			block_manager.subscribe(),
 			bootstrap_shared_data.clone(),
 			task_manager.spawn_handle(),
@@ -84,6 +93,11 @@ where
 			migration_sequence.clone(),
 			network,
 		);
+		let psbt_broadcaster = PsbtBroadcaster::new(
+			bfc_client.clone(),
+			btc_client.clone(),
+			substrate_deps.xt_request_sender.clone(),
+		);
 		let pub_key_submitter = PubKeySubmitter::new(
 			bfc_client.clone(),
 			substrate_deps.xt_request_sender.clone(),
@@ -95,7 +109,30 @@ where
 			bfc_client.clone(),
 			substrate_deps.xt_request_sender.clone(),
 		);
+		let fee_rate_feeder = FeeRateFeeder::new(
+			bfc_client.clone(),
+			btc_client.clone(),
+			substrate_deps.xt_request_sender.clone(),
+			block_manager.subscribe(),
+			if network == Network::Bitcoin {
+				Some(MEMPOOL_SPACE_FEE_RATE_ENDPOINT)
+			} else if network == Network::Testnet {
+				Some(MEMPOOL_SPACE_TESTNET_FEE_RATE_ENDPOINT)
+			} else {
+				None // regtest
+			},
+			debug_mode,
+		);
 
-		Self { outbound, inbound, block_manager, psbt_signer, pub_key_submitter, rollback_verifier }
+		Self {
+			outbound,
+			inbound,
+			block_manager,
+			psbt_signer,
+			psbt_broadcaster,
+			pub_key_submitter,
+			rollback_verifier,
+			fee_rate_feeder,
+		}
 	}
 }

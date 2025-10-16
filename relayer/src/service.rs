@@ -206,6 +206,7 @@ pub async fn relay(config: Configuration) -> Result<TaskManager, ServiceError> {
 	let handler_deps = HandlerDeps::new(
 		&config,
 		&manager_deps,
+		&substrate_deps,
 		bootstrap_shared_data.clone(),
 		bfc_client.clone(),
 		periodic_deps.rollback_senders.clone(),
@@ -263,8 +264,10 @@ where
 		mut inbound,
 		mut block_manager,
 		mut psbt_signer,
+		mut psbt_broadcaster,
 		mut pub_key_submitter,
 		mut rollback_verifier,
+		mut fee_rate_feeder,
 	} = btc_deps;
 
 	// spawn migration detector
@@ -509,6 +512,22 @@ where
 		},
 	);
 	task_manager.spawn_essential_handle().spawn(
+		"bitcoin-psbt-broadcaster",
+		Some("psbt-broadcaster"),
+		async move {
+			loop {
+				let report = psbt_broadcaster.run().await;
+				let log_msg = format!(
+					"bitcoin psbt broadcaster({}) stopped: {:?}\nRestarting immediately...",
+					psbt_broadcaster.bfc_client.address().await,
+					report
+				);
+				log::error!("{log_msg}");
+				sentry::capture_message(&log_msg, sentry::Level::Error);
+			}
+		},
+	);
+	task_manager.spawn_essential_handle().spawn(
 		"bitcoin-public-key-submitter",
 		Some("pub-key-submitter"),
 		async move {
@@ -533,6 +552,22 @@ where
 				let log_msg = format!(
 					"bitcoin rollback verifier({}) stopped: {:?}\nRestarting immediately...",
 					rollback_verifier.bfc_client.address().await,
+					report
+				);
+				log::error!("{log_msg}");
+				sentry::capture_message(&log_msg, sentry::Level::Error);
+			}
+		},
+	);
+	task_manager.spawn_essential_handle().spawn(
+		"bitcoin-fee-rate-feeder",
+		Some("fee-rate-feeder"),
+		async move {
+			loop {
+				let report = fee_rate_feeder.run().await;
+				let log_msg = format!(
+					"bitcoin fee rate feeder({}) stopped: {:?}\nRestarting immediately...",
+					fee_rate_feeder.bfc_client.address().await,
 					report
 				);
 				log::error!("{log_msg}");
