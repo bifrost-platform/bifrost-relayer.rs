@@ -27,7 +27,7 @@ use br_primitives::{
 use eyre::Result;
 use miniscript::bitcoin::{
 	Network, Psbt,
-	psbt::{SigningErrors, SigningKeys},
+	psbt::{SigningErrors, SigningKeysMap},
 };
 use rand::Rng;
 use sc_keystore::{Keystore, LocalKeystore};
@@ -134,7 +134,7 @@ pub trait KeypairStorageT: Send + Sync {
 	async fn sign_psbt_inner(
 		&self,
 		psbt: &mut Psbt,
-	) -> Result<SigningKeys, (SigningKeys, SigningErrors)>;
+	) -> Result<SigningKeysMap, (SigningKeysMap, SigningErrors)>;
 
 	/// Create and store a new keypair.
 	async fn create_new_keypair(&self) -> PublicKey {
@@ -199,7 +199,7 @@ impl KeypairStorageT for KeypairStorage {
 	async fn sign_psbt_inner(
 		&self,
 		psbt: &mut Psbt,
-	) -> Result<SigningKeys, (SigningKeys, SigningErrors)> {
+	) -> Result<SigningKeysMap, (SigningKeysMap, SigningErrors)> {
 		self.0.read().await.sign_psbt_inner(psbt).await
 	}
 

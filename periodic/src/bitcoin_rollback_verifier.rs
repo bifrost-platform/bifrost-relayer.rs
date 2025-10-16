@@ -157,7 +157,7 @@ where
 
 				for raw_psbt in pending_rollback_psbts {
 					let psbt = Psbt::deserialize(&raw_psbt)?;
-					let txid = B256::from_str(&psbt.unsigned_tx.txid().to_string())?;
+					let txid = B256::from_str(&psbt.unsigned_tx.compute_txid().to_string())?;
 					let request = self.get_rollback_request(txid).await?;
 
 					// the request must exist
@@ -244,7 +244,7 @@ where
 		let output = tx.vout[request.vout].clone();
 		if let Some(to) = output.script_pub_key.address {
 			// output.to must match
-			if to != request.to {
+			if to != request.to.clone().into_unchecked() {
 				return false;
 			}
 			// output.amount must match

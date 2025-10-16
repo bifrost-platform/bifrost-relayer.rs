@@ -179,7 +179,7 @@ where
 
 					for finalized_psbt in finalized_psbts {
 						let psbt = Psbt::deserialize(&finalized_psbt)?;
-						let txid = psbt.unsigned_tx.txid();
+						let txid = psbt.unsigned_tx.compute_txid();
 						if self.is_transaction_broadcasted(txid).await? {
 							log::info!(
 								target: &self.bfc_client.get_chain_name(),
@@ -190,6 +190,7 @@ where
 						} else {
 							self.broadcast_transaction(psbt).await;
 						}
+
 						let (call, metadata) = self.build_payload(txid).await?;
 						self.request_send_transaction(call, metadata, SUB_LOG_TARGET).await;
 					}

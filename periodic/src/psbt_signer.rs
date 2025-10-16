@@ -122,7 +122,7 @@ where
 
 			if self
 				.is_signed_psbt_submitted(
-					B256::from_str(&psbt.unsigned_tx.txid().to_string()).unwrap(),
+					B256::from_str(&psbt.unsigned_tx.compute_txid().to_string()).unwrap(),
 					signed_psbt.clone(),
 				)
 				.await?
