@@ -295,7 +295,7 @@ where
 			if let Some(latest_block) = self
 				.client
 				.get_block(self.client.get_block_number().await?.into())
-				.full()
+				.hashes()
 				.await?
 			{
 				self.receive(latest_block.header().timestamp());
