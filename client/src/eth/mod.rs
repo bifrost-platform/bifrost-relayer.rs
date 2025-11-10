@@ -190,8 +190,8 @@ where
 		let prev_block_number = block_number.saturating_sub(BOOTSTRAP_BLOCK_OFFSET);
 		let block_diff = block_number.checked_sub(prev_block_number).unwrap();
 
-		let current_block = self.get_block(block_number.into()).full().await?;
-		let prev_block = self.get_block(prev_block_number.into()).full().await?;
+		let current_block = self.get_block(block_number.into()).hashes().await?;
+		let prev_block = self.get_block(prev_block_number.into()).hashes().await?;
 		match (current_block, prev_block) {
 			(Some(current_block), Some(prev_block)) => {
 				let current_timestamp = current_block.header().timestamp();
