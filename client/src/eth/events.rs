@@ -203,11 +203,11 @@ where
 	async fn wait_provider_sync(&self) -> Result<()> {
 		let mut is_first_check = true;
 		loop {
-			match self.client.syncing().await? {
-				SyncStatus::None => {
+			match self.client.syncing().await {
+				Ok(SyncStatus::None) => {
 					break;
 				},
-				SyncStatus::Info(status) => {
+				Ok(SyncStatus::Info(status)) => {
 					if is_first_check {
 						let msg = format!(
 							"⚙️  Syncing: #{:?}, Highest: #{:?} ({} relayer:{})",
@@ -226,6 +226,9 @@ where
 						status.current_block,
 						status.highest_block,
 					);
+				},
+				Err(_) => {
+					break;
 				},
 			}
 			sleep(Duration::from_millis(3000)).await;
