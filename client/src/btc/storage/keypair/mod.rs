@@ -235,6 +235,7 @@ impl KeypairStorageT for KeypairStorage {
 #[cfg(test)]
 mod tests {
 	use super::*;
+	use array_bytes::Hexify;
 	use miniscript::bitcoin::{Network, PublicKey, psbt::KeyRequest};
 	use sc_keystore::Keystore;
 	use sp_application_crypto::Pair;
@@ -410,7 +411,6 @@ mod tests {
 			128, 53, 132, 90, 165, 110, 159, 153, 213, 245, 90, 181, 155,
 		];
 		println!("a.len -> {:?}", a.len());
-		let b = array_bytes::bytes2hex("0x", a);
-		println!("b -> {:?}", b);
+		println!("b -> {:?}", a.hexify_prefixed());
 	}
 }

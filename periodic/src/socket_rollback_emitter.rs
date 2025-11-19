@@ -1,7 +1,7 @@
 use alloy::{
 	consensus::BlockHeader as _,
 	network::{BlockResponse, Network},
-	primitives::ChainId,
+	primitives::{ChainId, U256},
 	providers::{Provider, WalletProvider, fillers::TxFiller},
 };
 use cron::Schedule;
@@ -16,7 +16,9 @@ use br_primitives::{
 		errors::{INVALID_BIFROST_NATIVENESS, INVALID_PERIODIC_SCHEDULE},
 		schedule::{ROLLBACK_CHECK_MINIMUM_INTERVAL, ROLLBACK_CHECK_SCHEDULE},
 	},
-	contracts::socket::Socket_Struct::{RequestID, RequestInfo, Signatures, Socket_Message},
+	contracts::socket::Socket_Struct::{
+		Poll_Submit, RequestID, RequestInfo, Signatures, Socket_Message,
+	},
 	eth::{RelayDirection, SocketEventStatus},
 	periodic::{RawRequestID, RollbackableMessage},
 	tx::{RollbackMetadata, TxRequestMetadata},
@@ -190,10 +192,17 @@ where
 		// `socket_msg` is the origin message that will be used for signature builds.
 		let mut submit_sig = socket_msg.clone();
 		submit_sig.status = SocketEventStatus::Rejected.into();
-		let tx_request = self.build_poll_request(
-			submit_sig.clone(),
-			self.get_sorted_signatures(socket_msg.clone()).await?,
-		);
+
+		let tx_request = self
+			.client
+			.protocol_contracts
+			.socket
+			.poll(Poll_Submit {
+				msg: submit_sig.clone(),
+				sigs: self.get_sorted_signatures(socket_msg.clone()).await?,
+				option: U256::default(),
+			})
+			.into_transaction_request();
 
 		let metadata = RollbackMetadata::new(
 			false,
