@@ -89,6 +89,7 @@ impl CoingeckoPriceFetcher {
 			"wrapped-bitcoin".into(),
 			"binance-bitcoin".into(),
 			"coinbase-wrapped-btc".into(),
+			"jpy-coin".into(),
 		];
 
 		let client = Client::builder()
