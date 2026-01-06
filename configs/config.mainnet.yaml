@@ -51,6 +51,7 @@ evm_providers:
     chainlink_dai_usd_address: "0xAed0c38402a5d19df6E4c03F4E2DceD6e29c1ee9"
     chainlink_btc_usd_address: "0xf4030086522a5beea4988f8ca5b36dbc97bee88c"
     chainlink_cbbtc_usd_address: "0x2665701293fCbEB223D11A08D826563EDcCE423A"
+    chainlink_jpy_usd_address: "0xBcE206caE7f0ec07b545EddE332A47C2F75bbeb3"
   - name: "bsc"
     id: 56
     provider: "<YOUR_BSC_RPC_ENDPOINT>"
