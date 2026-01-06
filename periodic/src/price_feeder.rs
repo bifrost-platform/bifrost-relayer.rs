@@ -128,40 +128,77 @@ where
 	}
 
 	async fn try_with_primary(&self) {
+		let mut all_prices = BTreeMap::new();
+		let mut failed_modes = Vec::new();
+
+		// Collect prices from all primary sources
 		for fetcher in &self.primary_sources {
 			match fetcher.get_tickers().await {
-				// If primary source works well.
 				Ok(price_responses) => {
-					self.build_and_send_transaction(price_responses).await;
+					log::info!(
+						target: &self.client.get_chain_name(),
+						"-[{}] ✅ Fetched {} prices from primary source (mode: {:?})",
+						sub_display_format(SUB_LOG_TARGET),
+						price_responses.len(),
+						fetcher.mode()
+					);
+					all_prices.extend(price_responses);
 				},
-				// If primary source fails.
 				Err(_) => {
 					log::warn!(
 						target: &self.client.get_chain_name(),
-						"-[{}] ⚠️  Failed to fetch price feed data from the primary source. Retrying to fetch with secondary sources.",
+						"-[{}] ⚠️  Failed to fetch price feed data from primary source (mode: {:?}). Will retry with secondary sources.",
 						sub_display_format(SUB_LOG_TARGET),
+						fetcher.mode()
 					);
-
-					self.try_with_secondary(fetcher.mode()).await;
+					failed_modes.push(fetcher.mode());
 				},
 			};
 		}
-	}
 
-	async fn try_with_secondary(&self, mode: FetchMode) {
-		match self.fetch_from_secondary(mode).await {
-			Ok(price_responses) => {
-				self.build_and_send_transaction(price_responses).await;
-			},
-			Err(_) => {
-				br_primitives::log_and_capture!(
-					error,
-					&self.client.get_chain_name(),
-					SUB_LOG_TARGET,
-					self.client.address().await,
-					"❗️ Failed to fetch price feed data from secondary sources. First off, skip this feeding."
-				);
-			},
+		// Fetch from secondary sources for failed modes
+		for mode in failed_modes {
+			match self.fetch_from_secondary(mode.clone()).await {
+				Ok(secondary_prices) => {
+					log::info!(
+						target: &self.client.get_chain_name(),
+						"-[{}] ✅ Fetched {} prices from secondary sources (mode: {:?})",
+						sub_display_format(SUB_LOG_TARGET),
+						secondary_prices.len(),
+						mode
+					);
+					all_prices.extend(secondary_prices);
+				},
+				Err(_) => {
+					br_primitives::log_and_capture!(
+						error,
+						&self.client.get_chain_name(),
+						SUB_LOG_TARGET,
+						self.client.address().await,
+						"❗️ Failed to fetch prices from secondary sources (mode: {:?}). Skipping this feeding.",
+						mode
+					);
+				},
+			}
+		}
+
+		// Send single transaction with all collected prices
+		if all_prices.is_empty() {
+			br_primitives::log_and_capture!(
+				error,
+				&self.client.get_chain_name(),
+				SUB_LOG_TARGET,
+				self.client.address().await,
+				"❗️ Failed to fetch any price feed data from all sources. Skipping this feeding."
+			);
+		} else {
+			log::info!(
+				target: &self.client.get_chain_name(),
+				"-[{}] 📦 Sending single transaction with {} prices",
+				sub_display_format(SUB_LOG_TARGET),
+				all_prices.len()
+			);
+			self.build_and_send_transaction(all_prices).await;
 		}
 	}
 
