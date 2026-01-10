@@ -48,7 +48,7 @@ impl PriceFetcher for BinancePriceFetcher {
 
 		let mut ret = BTreeMap::new();
 		response.iter().for_each(|ticker| {
-			if ticker.symbol == "BTC" {
+			if ticker.symbol == "BTCUSDT" {
 				// BTC ticker from binance is BTCB ticker
 				ret.insert(
 					"BTCB".into(),
