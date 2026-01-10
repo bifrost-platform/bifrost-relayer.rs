@@ -128,6 +128,17 @@ impl CoingeckoPriceFetcher {
 					};
 				},
 				Err(e) => {
+					if retries_remaining == 0 {
+						log::error!(
+							target: LOG_TARGET,
+							"-[{}] ❗️ Failed to fetch support coin list after all retries: {}",
+							sub_display_format(SUB_LOG_TARGET),
+							e.to_string(),
+						);
+						sentry::capture_error(&e);
+						return Err(Error);
+					}
+
 					log::warn!(
 						target: LOG_TARGET,
 						"-[{}] ❗️ Error fetching support coin list: {}, Retry in {:?} secs... Retries left: {:?}",
