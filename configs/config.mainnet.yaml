@@ -50,7 +50,6 @@ evm_providers:
     chainlink_usdt_usd_address: "0x3E7d1eAB13ad0104d2750B8863b489D65364e32D"
     chainlink_dai_usd_address: "0xAed0c38402a5d19df6E4c03F4E2DceD6e29c1ee9"
     chainlink_btc_usd_address: "0xf4030086522a5beea4988f8ca5b36dbc97bee88c"
-    chainlink_wbtc_usd_address: "0xfdFD9C85aD200c506Cf9e21F1FD8dd01932FBB23"
     chainlink_cbbtc_usd_address: "0x2665701293fCbEB223D11A08D826563EDcCE423A"
   - name: "bsc"
     id: 56
@@ -79,6 +78,7 @@ evm_providers:
     eip1559: true
     socket_address: "0xAe172D8c5E428D4b7C70f9E593b207F9daC9BF3e"
     authority_address: "0x4C7a44F3FB37A53F33D3fe3cCdE97A444F105239"
+    chainlink_wbtc_usd_address: "0xCCADC697c55bbB68dc5bCdf8d3CBe83CdD4E071E"
   - name: "arbitrum"
     id: 42161
     provider: "<YOUR_ARBITRUM_ONE_RPC_ENDPOINT>"
