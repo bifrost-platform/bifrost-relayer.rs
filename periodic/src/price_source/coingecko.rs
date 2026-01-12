@@ -2,7 +2,7 @@ use std::{collections::BTreeMap, fmt::Error};
 
 use alloy::primitives::utils::parse_ether;
 use eyre::Result;
-use reqwest::{Response, Url};
+use reqwest::{Client, Response, Url};
 use serde::Deserialize;
 use tokio::time::{Duration, sleep};
 
@@ -23,6 +23,7 @@ pub struct CoingeckoPriceFetcher {
 	pub base_url: Url,
 	pub ids: Vec<String>,
 	pub supported_coins: Vec<SupportedCoin>,
+	client: Client,
 }
 
 #[async_trait::async_trait]
@@ -90,7 +91,12 @@ impl CoingeckoPriceFetcher {
 			"coinbase-wrapped-btc".into(),
 		];
 
-		let support_coin_list: Vec<SupportedCoin> = Self::get_all_coin_list()
+		let client = Client::builder()
+			.user_agent(format!("bifrost-relayer/br-periodic/{}", env!("CARGO_PKG_VERSION")))
+			.build()
+			.unwrap();
+
+		let support_coin_list: Vec<SupportedCoin> = Self::get_all_coin_list(&client)
 			.await?
 			.into_iter()
 			.filter(|coin| ids.contains(&coin.id))
@@ -100,15 +106,18 @@ impl CoingeckoPriceFetcher {
 			base_url: Url::parse("https://api.coingecko.com/api/v3/").unwrap(),
 			ids,
 			supported_coins: support_coin_list,
+			client,
 		})
 	}
 
-	async fn get_all_coin_list() -> Result<Vec<SupportedCoin>, Error> {
+	async fn get_all_coin_list(client: &Client) -> Result<Vec<SupportedCoin>, Error> {
 		let retry_interval = Duration::from_secs(60);
 		let mut retries_remaining = 2u8;
 
 		loop {
-			match reqwest::get("https://api.coingecko.com/api/v3/coins/list")
+			match client
+				.get("https://api.coingecko.com/api/v3/coins/list")
+				.send()
 				.await
 				.and_then(Response::error_for_status)
 			{
@@ -163,7 +172,7 @@ impl CoingeckoPriceFetcher {
 		let mut retries_remaining = 2u8;
 
 		loop {
-			match reqwest::get(url.clone()).await.and_then(Response::error_for_status) {
+			match self.client.get(url.clone()).send().await.and_then(Response::error_for_status) {
 				Ok(response) => {
 					return match response.json::<BTreeMap<String, BTreeMap<String, f64>>>().await {
 						Ok(result) => Ok(result),
@@ -206,5 +215,124 @@ impl CoingeckoPriceFetcher {
 			.expect("Cannot find symbol in support coin list")
 			.id
 			.as_str()
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	#[tokio::test]
+	async fn test_coingecko_request_methods() {
+		println!("\n=== Testing CoinGecko API Request Methods ===\n");
+
+		// Test 1: Current implementation - reqwest::get()
+		println!("Test 1: reqwest::get() [CURRENT CODE]");
+		match reqwest::get("https://api.coingecko.com/api/v3/coins/list")
+			.await
+			.and_then(Response::error_for_status)
+		{
+			Ok(resp) => {
+				println!("✅ Status: {}", resp.status());
+				let coins: Result<Vec<SupportedCoin>, _> = resp.json().await;
+				match coins {
+					Ok(c) => println!("   Got {} coins", c.len()),
+					Err(e) => println!("   JSON parse error: {}", e),
+				}
+			},
+			Err(e) => {
+				println!("❌ FAILED: {}", e);
+				if let Some(status) = e.status() {
+					println!("   HTTP Status: {}", status);
+				}
+			},
+		}
+
+		println!();
+
+		// Test 2: Client with explicit User-Agent
+		println!("Test 2: Client::new() with custom User-Agent");
+		let user_agent = format!("bifrost-relayer/br-periodic/{}", env!("CARGO_PKG_VERSION"));
+		println!("User-Agent: {}", user_agent);
+		let client = reqwest::Client::builder().user_agent(user_agent).build().unwrap();
+
+		match client
+			.get("https://api.coingecko.com/api/v3/coins/list")
+			.send()
+			.await
+			.and_then(Response::error_for_status)
+		{
+			Ok(resp) => {
+				println!("✅ Status: {}", resp.status());
+				let coins: Result<Vec<SupportedCoin>, _> = resp.json().await;
+				match coins {
+					Ok(c) => println!("   Got {} coins", c.len()),
+					Err(e) => println!("   JSON parse error: {}", e),
+				}
+			},
+			Err(e) => {
+				println!("❌ FAILED: {}", e);
+				if let Some(status) = e.status() {
+					println!("   HTTP Status: {}", status);
+				}
+			},
+		}
+
+		println!();
+
+		// Test 3: Client with Accept header
+		println!("Test 3: Client with Accept header");
+		let client = reqwest::Client::new();
+		match client
+			.get("https://api.coingecko.com/api/v3/coins/list")
+			.header("Accept", "*/*")
+			.send()
+			.await
+			.and_then(Response::error_for_status)
+		{
+			Ok(resp) => {
+				println!("✅ Status: {}", resp.status());
+				let coins: Result<Vec<SupportedCoin>, _> = resp.json().await;
+				match coins {
+					Ok(c) => println!("   Got {} coins", c.len()),
+					Err(e) => println!("   JSON parse error: {}", e),
+				}
+			},
+			Err(e) => {
+				println!("❌ FAILED: {}", e);
+				if let Some(status) = e.status() {
+					println!("   HTTP Status: {}", status);
+				}
+			},
+		}
+
+		println!();
+
+		// Test 4: Default Client::new() without any headers
+		println!("Test 4: Client::new() plain (no custom headers)");
+		let client = reqwest::Client::new();
+		match client
+			.get("https://api.coingecko.com/api/v3/coins/list")
+			.send()
+			.await
+			.and_then(Response::error_for_status)
+		{
+			Ok(resp) => {
+				println!("✅ Status: {}", resp.status());
+				let coins: Result<Vec<SupportedCoin>, _> = resp.json().await;
+				match coins {
+					Ok(c) => println!("   Got {} coins", c.len()),
+					Err(e) => println!("   JSON parse error: {}", e),
+				}
+			},
+			Err(e) => {
+				println!("❌ FAILED: {}", e);
+				if let Some(status) = e.status() {
+					println!("   HTTP Status: {}", status);
+				}
+			},
+		}
+
+		println!("\n=== Test Complete ===\n");
 	}
 }
