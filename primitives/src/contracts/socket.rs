@@ -68,6 +68,13 @@ impl From<Signatures> for Vec<Signature> {
 	}
 }
 
+pub struct Variants {
+	pub sender: Address,
+	pub receiver: Address,
+	pub max_tx_fee: U256,
+	pub message: Bytes,
+}
+
 use SocketContract::SocketContractInstance;
 
 pub type SocketInstance<F, P, N> = SocketContractInstance<Arc<FillProvider<F, P, N>>, N>;
