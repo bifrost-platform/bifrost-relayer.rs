@@ -21,6 +21,8 @@ use crate::{
 		bitcoin_socket::{BitcoinSocketContract, BitcoinSocketInstance},
 		blaze::{BlazeContract, BlazeInstance},
 		chainlink_aggregator::{ChainlinkContract, ChainlinkInstance},
+		hooks::{HooksContract, HooksInstance},
+		oracle::{OracleContract, OracleInstance},
 		registration_pool::{RegistrationPoolContract, RegistrationPoolInstance},
 		relay_executive::{RelayExecutiveContract, RelayExecutiveInstance},
 		relayer_manager::{RelayerManagerContract, RelayerManagerInstance},
@@ -194,6 +196,10 @@ where
 	pub socket: SocketInstance<F, P, N>,
 	/// AuthorityContract
 	pub authority: AuthorityInstance<F, P, N>,
+	/// HooksContract
+	pub hooks: HooksInstance<F, P, N>,
+	/// OracleContract (Bifrost only)
+	pub oracle: Option<OracleInstance<F, P, N>>,
 	/// RelayerManagerContract (Bifrost only)
 	pub relayer_manager: Option<RelayerManagerInstance<F, P, N>>,
 	/// BitcoinSocketContract (Bifrost only)
@@ -227,6 +233,11 @@ where
 				Address::from_str(&evm_provider.authority_address).expect(INVALID_CONTRACT_ADDRESS),
 				provider.clone(),
 			),
+			hooks: HooksContract::new(
+				Address::from_str(&evm_provider.hooks_address).expect(INVALID_CONTRACT_ADDRESS),
+				provider.clone(),
+			),
+			oracle: None,
 			relayer_manager: None,
 			bitcoin_socket: None,
 			socket_queue: None,
@@ -235,6 +246,11 @@ where
 			blaze: None,
 		};
 		if is_native {
+			contracts.oracle = Some(OracleContract::new(
+				Address::from_str(&evm_provider.oracle_address.expect(MISSING_CONTRACT_ADDRESS))
+					.expect(INVALID_CONTRACT_ADDRESS),
+				provider.clone(),
+			));
 			contracts.relayer_manager = Some(RelayerManagerContract::new(
 				Address::from_str(
 					&evm_provider.relayer_manager_address.expect(MISSING_CONTRACT_ADDRESS),
