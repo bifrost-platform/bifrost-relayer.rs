@@ -467,17 +467,14 @@ where
 					metadata
 				),
 				Err(error) => {
-					let msg = format!(
-						"-[{}]-[{}] ❗️ Failed to store rollbackable socket message: {}, Error: {}",
-						sub_display_format(SUB_LOG_TARGET),
+					br_primitives::log_and_capture!(
+						error,
+						&self.client.get_chain_name(),
+						SUB_LOG_TARGET,
 						self.client.address().await,
+						"❗️ Failed to store rollbackable socket message: {}, Error: {}",
 						metadata,
 						error
-					);
-					log::error!(target: &self.client.get_chain_name(), "{msg}");
-					sentry::capture_message(
-						&format!("[{}]{msg}", &self.client.get_chain_name()),
-						sentry::Level::Error,
 					);
 				},
 			}
@@ -522,17 +519,14 @@ where
 					metadata
 				),
 				Err(error) => {
-					let log_msg = format!(
-						"-[{}]-[{}] ❗️ Failed to send unsigned transaction: {}, Error: {}",
-						sub_display_format(SUB_LOG_TARGET),
+					br_primitives::log_and_capture!(
+						error,
+						&self.client.get_chain_name(),
+						SUB_LOG_TARGET,
 						self.client.address().await,
+						"❗️ Failed to send unsigned transaction: {}, Error: {}",
 						metadata,
 						error
-					);
-					log::error!(target: &self.client.get_chain_name(), "{log_msg}");
-					sentry::capture_message(
-						&format!("[{}]{log_msg}", &self.client.get_chain_name()),
-						sentry::Level::Error,
 					);
 				},
 			}

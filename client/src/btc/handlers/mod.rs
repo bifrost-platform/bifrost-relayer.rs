@@ -17,8 +17,8 @@ use br_primitives::{
 	bootstrap::BootstrapSharedData,
 	btc::{Event, EventMessage, EventType},
 	eth::BootstrapState,
+	log_and_capture,
 	tx::{XtRequest, XtRequestMessage, XtRequestMetadata, XtRequestSender},
-	utils::sub_display_format,
 };
 use eyre::Result;
 use std::{sync::Arc, time::Duration};
@@ -48,24 +48,22 @@ where
 	) {
 		let msg = create_xt_request_message!(xt_request, metadata);
 		match self.xt_request_sender().send(msg) {
-			Ok(_) => log::info!(
-				target: &self.bfc_client().get_chain_name(),
-				"-[{}] 🔖 Request unsigned transaction: {}",
-				sub_display_format(sub_log_target),
+			Ok(_) => log_and_capture!(
+				info,
+				&self.bfc_client().get_chain_name(),
+				sub_log_target,
+				"🔖 Request unsigned transaction: {}",
 				metadata
 			),
 			Err(error) => {
-				let log_msg = format!(
-					"-[{}]-[{}] ❗️ Failed to send unsigned transaction: {}, Error: {}",
-					sub_display_format(sub_log_target),
+				log_and_capture!(
+					error,
+					&self.bfc_client().get_chain_name(),
+					sub_log_target,
 					self.bfc_client().address().await,
+					"❗️ Failed to send unsigned transaction: {}, Error: {}",
 					metadata,
 					error
-				);
-				log::error!(target: &self.bfc_client().get_chain_name(), "{log_msg}");
-				sentry::capture_message(
-					&format!("[{}]{log_msg}", &self.bfc_client().get_chain_name()),
-					sentry::Level::Error,
 				);
 			},
 		}

@@ -156,17 +156,14 @@ where
 				metadata
 			),
 			Err(error) => {
-				let log_msg = format!(
-					"-[{}]-[{}] ❗️ Failed to send unsigned transaction: {}, Error: {}",
-					sub_display_format(SUB_LOG_TARGET),
+				br_primitives::log_and_capture!(
+					error,
+					&self.bfc_client.get_chain_name(),
+					SUB_LOG_TARGET,
 					self.bfc_client.address().await,
+					"❗️ Failed to send unsigned transaction: {}, Error: {}",
 					metadata,
 					error
-				);
-				log::error!(target: &self.bfc_client.get_chain_name(), "{log_msg}");
-				sentry::capture_message(
-					&format!("[{}]{log_msg}", &self.bfc_client.get_chain_name()),
-					sentry::Level::Error,
 				);
 			},
 		}

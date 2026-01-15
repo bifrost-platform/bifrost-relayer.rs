@@ -16,8 +16,8 @@ use br_primitives::{
 };
 use eyre::Result;
 
-use alloy::network::Network;
 use super::handlers::BootstrapHandler;
+use alloy::network::Network;
 use bitcoincore_rpc::{
 	Client as BtcClient, RpcApi, bitcoincore_rpc_json::GetRawTransactionResultVout,
 };
@@ -165,14 +165,14 @@ where
 			match info.initial_block_download {
 				true => {
 					if is_first_check {
-						let msg = format!(
+						br_primitives::log_and_capture_simple!(
+							warn,
 							"⚙️  Syncing: #{:?}, Highest: #{:?} ({} relayer:{})",
 							info.blocks,
 							self.fetch_block_height().await,
 							LOG_TARGET,
-							self.bfc_client.address().await,
+							self.bfc_client.address().await
 						);
-						sentry::capture_message(&msg, sentry::Level::Warning);
 						is_first_check = false;
 					}
 					log::info!(
@@ -258,12 +258,8 @@ where
 			self.bfc_client.protocol_contracts.registration_pool.as_ref().unwrap();
 
 		let mut vault_addresses = registration_pool.vault_addresses(0).call().await?;
-		vault_addresses.push(
-			registration_pool
-				.vault_address(*registration_pool.address(), 0)
-				.call()
-				.await?
-		);
+		vault_addresses
+			.push(registration_pool.vault_address(*registration_pool.address(), 0).call().await?);
 
 		Ok(vault_addresses)
 	}
@@ -315,11 +311,12 @@ where
 			// difference is greater than 100 blocks
 			// if it suddenly rollbacked to an old block
 			if self.waiting_block > latest_block_num + 100 {
-				let msg = format!(
+				br_primitives::log_and_capture_simple!(
+					warn,
 					"⚠️ [Bitcoin] Block rollbacked. From #{:?} to #{:?}",
-					self.waiting_block, latest_block_num,
+					self.waiting_block,
+					latest_block_num
 				);
-				sentry::capture_message(&msg, sentry::Level::Warning);
 			}
 			return false;
 		}

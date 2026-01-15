@@ -1,5 +1,8 @@
 #![warn(unused_crate_dependencies)]
 
+#[macro_use]
+pub mod macros;
+
 pub mod bootstrap;
 pub mod btc;
 pub mod cli;

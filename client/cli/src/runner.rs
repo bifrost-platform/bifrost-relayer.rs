@@ -4,7 +4,7 @@ use sc_cli::Signals;
 use sc_service::{Error as ServiceError, TaskManager};
 use sc_utils::metrics::{TOKIO_THREADS_ALIVE, TOKIO_THREADS_TOTAL};
 
-use futures::{future, future::FutureExt, pin_mut, select, Future};
+use futures::{Future, future, future::FutureExt, pin_mut, select};
 use sentry::ClientInitGuard;
 use std::time::Duration;
 
@@ -14,7 +14,7 @@ where
 	F: Future<Output = Result<(), E>> + future::FusedFuture,
 	E: std::error::Error + Send + Sync + 'static + From<ServiceError>,
 {
-	use tokio::signal::unix::{signal, SignalKind};
+	use tokio::signal::unix::{SignalKind, signal};
 
 	let mut stream_int = signal(SignalKind::interrupt()).map_err(ServiceError::Io)?;
 	let mut stream_term = signal(SignalKind::terminate()).map_err(ServiceError::Io)?;

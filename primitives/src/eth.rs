@@ -154,6 +154,16 @@ where
 			chainlink_cbbtc_usd: chainlink_cbbtc_usd_address.map(create_contract_instance),
 		}
 	}
+
+	/// Returns true if any chainlink price feed is configured.
+	pub fn has_any_feeds(&self) -> bool {
+		self.chainlink_usdc_usd.is_some()
+			|| self.chainlink_usdt_usd.is_some()
+			|| self.chainlink_dai_usd.is_some()
+			|| self.chainlink_btc_usd.is_some()
+			|| self.chainlink_wbtc_usd.is_some()
+			|| self.chainlink_cbbtc_usd.is_some()
+	}
 }
 
 impl<F, P, N: Network> Default for AggregatorContracts<F, P, N>

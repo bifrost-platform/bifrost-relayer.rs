@@ -75,18 +75,15 @@ where
 			_ => {},
 		};
 
-		let log_msg = format!(
-			"-[{}]-[{}] ♻️  Unknown error while requesting a transaction request: {}, Retries left: {:?}, Error: {}",
-			sub_display_format(sub_target),
+		br_primitives::log_and_capture!(
+			error,
+			&self.get_bfc_client().get_chain_name(),
+			sub_target,
 			self.get_bfc_client().address().await,
+			"♻️  Unknown error while requesting a transaction request: {}, Retries left: {:?}, Error: {}",
 			msg.metadata,
 			msg.retries_remaining - 1,
-			error_str,
-		);
-		log::error!(target: &self.get_bfc_client().get_chain_name(), "{log_msg}");
-		sentry::capture_message(
-			&format!("[{}]{log_msg}", &self.get_bfc_client().get_chain_name()),
-			sentry::Level::Error,
+			error_str
 		);
 
 		self.retry_transaction(msg).await;
@@ -97,18 +94,15 @@ where
 	where
 		E: Error + Sync + ?Sized,
 	{
-		let log_msg = format!(
-			"-[{}]-[{}] ♻️  Unknown error while creating a tx request: {}, Retries left: {:?}, Error: {}",
-			sub_display_format(sub_target),
+		br_primitives::log_and_capture!(
+			error,
+			&self.get_bfc_client().get_chain_name(),
+			sub_target,
 			self.get_bfc_client().address().await,
+			"♻️  Unknown error while creating a tx request: {}, Retries left: {:?}, Error: {}",
 			msg.metadata,
 			msg.retries_remaining - 1,
-			error,
-		);
-		log::error!(target: &self.get_bfc_client().get_chain_name(), "{log_msg}");
-		sentry::capture_message(
-			&format!("[{}]{log_msg}", &self.get_bfc_client().get_chain_name()),
-			sentry::Level::Error,
+			error
 		);
 
 		self.retry_transaction(msg).await;

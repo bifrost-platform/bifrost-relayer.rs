@@ -4,7 +4,7 @@ use alloy::{
 	network::{Network, primitives::ReceiptResponse as _},
 	primitives::{Address, B256, Signature, U256},
 	providers::{Provider, WalletProvider, fillers::TxFiller},
-	rpc::types::{Filter, Log},
+	rpc::types::Log,
 	sol_types::SolEvent as _,
 };
 use async_trait::async_trait;
@@ -134,16 +134,13 @@ where
 					}
 				},
 				Err(e) => {
-					let log_msg = format!(
-						"-[{}] Error on decoding RoundUp event ({:?}):{}",
-						sub_display_format(SUB_LOG_TARGET),
+					br_primitives::log_and_capture!(
+						error,
+						&self.client.get_chain_name(),
+						SUB_LOG_TARGET,
+						"Error on decoding RoundUp event ({:?}):{}",
 						log.transaction_hash,
-						e,
-					);
-					log::error!(target: &self.client.get_chain_name(), "{log_msg}");
-					sentry::capture_message(
-						&format!("[{}]{log_msg}", &self.client.get_chain_name()),
-						sentry::Level::Error,
+						e
 					);
 				},
 			}
@@ -397,39 +394,17 @@ where
 	}
 
 	async fn get_bootstrap_events(&self) -> Result<Vec<Log>> {
-		let mut logs = vec![];
-
 		if let Some(bootstrap_config) = &self.bootstrap_shared_data.bootstrap_config {
-			let bootstrap_offset_height = self
-				.client
-				.get_bootstrap_offset_height_based_on_block_time(
+			self.client
+				.get_historical_logs(
 					bootstrap_config.round_offset.unwrap_or(DEFAULT_BOOTSTRAP_ROUND_OFFSET),
-					self.client.protocol_contracts.authority.round_info().call().await?,
+					vec![*self.client.protocol_contracts.socket.address()],
+					RoundUp::SIGNATURE_HASH,
+					BOOTSTRAP_BLOCK_CHUNK_SIZE,
 				)
-				.await?;
-
-			let latest_block_number = self.client.get_block_number().await?;
-			let mut from_block = latest_block_number.saturating_sub(bootstrap_offset_height);
-			let to_block = latest_block_number;
-
-			// Split from_block into smaller chunks
-			while from_block <= to_block {
-				let chunk_to_block =
-					std::cmp::min(from_block + BOOTSTRAP_BLOCK_CHUNK_SIZE - 1, to_block);
-
-				let filter = Filter::new()
-					.address(*self.client.protocol_contracts.socket.address())
-					.event_signature(RoundUp::SIGNATURE_HASH)
-					.from_block(from_block)
-					.to_block(chunk_to_block);
-
-				let chunk_logs = self.client.get_logs(&filter).await?;
-				logs.extend(chunk_logs);
-
-				from_block = chunk_to_block + 1;
-			}
+				.await
+		} else {
+			Ok(vec![])
 		}
-
-		Ok(logs)
 	}
 }

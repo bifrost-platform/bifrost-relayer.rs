@@ -11,8 +11,8 @@ use miniscript::bitcoin::Network;
 use sc_cli::Error as CliError;
 use secrecy::SecretString;
 use sp_application_crypto::{
-	ecdsa::{AppPair, AppPublic},
 	ByteArray,
+	ecdsa::{AppPair, AppPublic},
 };
 use std::{process::Command, sync::Arc};
 

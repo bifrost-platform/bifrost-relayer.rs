@@ -186,13 +186,13 @@ where
 			// difference is greater than 100 blocks
 			// if it suddenly rollbacked to an old block
 			if self.waiting_block > latest_block + 100 {
-				let msg = format!(
+				br_primitives::log_and_capture_simple!(
+					warn,
 					"⚠️ [{}] Block rollbacked. From #{:?} to #{:?}",
 					self.client.get_chain_name(),
 					self.waiting_block,
-					latest_block,
+					latest_block
 				);
-				sentry::capture_message(&msg, sentry::Level::Warning);
 			}
 			return false;
 		}
@@ -209,14 +209,14 @@ where
 				},
 				Ok(SyncStatus::Info(status)) => {
 					if is_first_check {
-						let msg = format!(
+						br_primitives::log_and_capture_simple!(
+							warn,
 							"⚙️  Syncing: #{:?}, Highest: #{:?} ({} relayer:{})",
 							status.current_block,
 							status.highest_block,
 							self.client.get_chain_name(),
-							self.client.address().await,
+							self.client.address().await
 						);
-						sentry::capture_message(&msg, sentry::Level::Warning);
 						is_first_check = false;
 					}
 					log::info!(

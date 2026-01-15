@@ -225,6 +225,59 @@ where
 		}
 	}
 
+	/// Fetches historical logs for bootstrap operations with automatic chunking.
+	///
+	/// This helper method reduces boilerplate in bootstrap handlers by:
+	/// 1. Calculating the bootstrap offset height based on round configuration
+	/// 2. Splitting the block range into chunks to avoid RPC limits
+	/// 3. Fetching and aggregating logs from all chunks
+	///
+	/// # Arguments
+	/// * `bootstrap_config` - Optional bootstrap configuration with round offset
+	/// * `addresses` - Contract addresses to filter logs
+	/// * `event_signature` - Event signature hash to filter
+	/// * `chunk_size` - Number of blocks per chunk (use BOOTSTRAP_BLOCK_CHUNK_SIZE)
+	///
+	/// # Returns
+	/// A vector of logs matching the filter criteria
+	pub async fn get_historical_logs(
+		&self,
+		round_offset: u64,
+		addresses: Vec<Address>,
+		event_signature: alloy::primitives::B256,
+		chunk_size: u64,
+	) -> Result<Vec<alloy::rpc::types::Log>> {
+		use alloy::rpc::types::Filter;
+
+		let round_info = self.protocol_contracts.authority.round_info().call().await?;
+		let bootstrap_offset_height = self
+			.get_bootstrap_offset_height_based_on_block_time(round_offset, round_info)
+			.await?;
+
+		let latest_block_number = self.get_block_number().await?;
+		let mut from_block = latest_block_number.saturating_sub(bootstrap_offset_height);
+		let to_block = latest_block_number;
+
+		let mut logs = vec![];
+
+		while from_block <= to_block {
+			let chunk_to_block = std::cmp::min(from_block + chunk_size - 1, to_block);
+
+			let filter = Filter::new()
+				.address(addresses.clone())
+				.event_signature(event_signature)
+				.from_block(from_block)
+				.to_block(chunk_to_block);
+
+			let chunk_logs = self.get_logs(&filter).await?;
+			logs.extend(chunk_logs);
+
+			from_block = chunk_to_block + 1;
+		}
+
+		Ok(logs)
+	}
+
 	/// Flush stalled transactions from the txpool.
 	pub async fn flush_stalled_transactions(&self) -> Result<()> {
 		let _lock = self.martial_law.lock().await;
@@ -328,15 +381,13 @@ where
 					);
 				},
 				Err(err) => {
-					let msg = format!(
+					br_primitives::log_and_capture_simple!(
+						error,
 						" ❗️ Failed to send transaction ({} address:{}): Flush, Error: {}",
 						self.get_chain_name(),
 						address,
 						err
 					);
-					log::warn!(target: &self.get_chain_name(), "{msg}");
-
-					sentry::capture_message(&msg, sentry::Level::Error);
 					transactions.push_front(tx_request);
 				},
 			}
@@ -390,15 +441,14 @@ where
 		let pending = match self.send_transaction(request).await {
 			Ok(pending) => pending,
 			Err(err) => {
-				let msg = format!(
+				br_primitives::log_and_capture_simple!(
+					error,
 					" ❗️ Failed to send transaction ({} address:{}): {}, Error: {}",
 					self.get_chain_name(),
 					self.address().await,
 					metadata,
 					err
 				);
-				log::error!(target: &requester, "{msg}");
-				sentry::capture_message(&msg, sentry::Level::Error);
 
 				eyre::bail!(err)
 			},
@@ -516,30 +566,28 @@ pub fn send_transaction<F, P, N: Network>(
 						);
 					},
 					Err(err) => {
-						let msg = format!(
+						br_primitives::log_and_capture_simple!(
+							error,
 							" ❗️ Transaction failed to register ({} address:{}): {}, Error: {}",
 							client.get_chain_name(),
 							client.address().await,
 							metadata,
 							err
 						);
-						log::error!(target: &requester, "{msg}");
-						sentry::capture_message(&msg, sentry::Level::Error);
 
 						client.flush_stalled_transactions().await.unwrap();
 					},
 				}
 			},
 			Err(err) => {
-				let msg = format!(
+				br_primitives::log_and_capture_simple!(
+					error,
 					" ❗️ Failed to send transaction ({} address:{}): {}, Error: {}",
 					client.get_chain_name(),
 					client.address().await,
 					metadata,
 					err
 				);
-				log::error!(target: &requester, "{msg}");
-				sentry::capture_message(&msg, sentry::Level::Error);
 
 				if err.to_string().to_lowercase().contains("nonce too low") {
 					client.flush_stalled_transactions().await.unwrap();

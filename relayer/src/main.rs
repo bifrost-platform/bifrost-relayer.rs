@@ -1,3 +1,4 @@
+#[macro_use]
 mod cli;
 mod commands;
 mod service;
@@ -8,7 +9,7 @@ use std::io::Write;
 
 use br_cli::{
 	create_configuration,
-	runner::{build_runtime, Runner},
+	runner::{Runner, build_runtime},
 };
 use chrono::Local;
 use env_logger::fmt::Color;
