@@ -5,7 +5,7 @@ use alloy::{
 	primitives::{B256, ChainId, U256},
 	providers::{Provider, WalletProvider, fillers::TxFiller},
 	rpc::types::{Filter, Log},
-	sol_types::SolEvent,
+	sol_types::{SolEvent, SolValue},
 };
 use array_bytes::Hexify;
 use eyre::Result;
@@ -21,9 +21,13 @@ use br_primitives::{
 		config::BOOTSTRAP_BLOCK_CHUNK_SIZE,
 		errors::{INVALID_BIFROST_NATIVENESS, INVALID_CHAIN_ID},
 	},
-	contracts::socket::{
-		Socket_Struct::{Instruction, RequestID, Signatures, Socket_Message},
-		SocketContract::Socket,
+	contracts::{
+		oracle::OracleContract,
+		socket::{
+			Socket_Struct::{Instruction, RequestID, Signatures, Socket_Message},
+			SocketContract::Socket,
+			Variants,
+		},
 	},
 	eth::{BootstrapState, BuiltRelayTransaction, RelayDirection, SocketEventStatus},
 	substrate::{SocketMessagesSubmission, bifrost_runtime},
@@ -125,6 +129,11 @@ where
 					// do nothing if protocol sequence ended
 					return Ok(());
 				}
+				// Check if we should call hooks execute (Executed status with valid requirements)
+				if let Some(variants) = self.should_call_hooks_execute(&msg).await? {
+					self.execute_hook(&msg, variants).await?;
+				}
+
 				self.submit_brp_outbound_request(msg.clone(), metadata.clone()).await?;
 
 				self.send_socket_message(msg.clone(), metadata.clone(), metadata.is_inbound)
@@ -528,6 +537,219 @@ where
 				},
 			}
 		}
+		Ok(())
+	}
+
+	/// Validates if hooks execute should be called for this socket message.
+	/// Requirements:
+	/// 1. Status must be Executed
+	/// 2. msg.params.refund must match source chain hooks contract address
+	/// 3. msg.params.variants must be valid and decodable
+	///
+	/// Returns: Option<Variants> - Some(variants) if should execute, None otherwise
+	async fn should_call_hooks_execute(&self, msg: &Socket_Message) -> Result<Option<Variants>> {
+		let status = SocketEventStatus::from(msg.status);
+
+		// Requirement 1: Check if status is Executed
+		if status != SocketEventStatus::Executed {
+			return Ok(None);
+		}
+
+		let src_chain_id = Into::<u32>::into(msg.req_id.ChainIndex) as ChainId;
+		let dst_chain_id = Into::<u32>::into(msg.ins_code.ChainIndex) as ChainId;
+
+		// Get source chain client and hooks contract address
+		if let Some(src_client) = self.system_clients.get(&src_chain_id) {
+			let hooks_address = src_client.protocol_contracts.hooks.address();
+
+			// Requirement 2: msg.params.refund must match source chain hooks contract address
+			if msg.params.refund != *hooks_address {
+				log::debug!(
+					target: &self.client.get_chain_name(),
+					"-[{}] ⏭️  Skipping hooks execute: refund address {:?} != hooks address {:?}",
+					sub_display_format(SUB_LOG_TARGET),
+					msg.params.refund,
+					hooks_address
+				);
+				return Ok(None);
+			}
+
+			// Requirement 3: Decode variants and extract max_tx_fee
+			match Variants::abi_decode(&msg.params.variants) {
+				Ok(variants) => {
+					log::debug!(
+						target: &self.client.get_chain_name(),
+						"-[{}] ✅ Decoded variants: sender={:?}, receiver={:?}, max_tx_fee={}, message_len={}",
+						sub_display_format(SUB_LOG_TARGET),
+						variants.sender,
+						variants.receiver,
+						variants.max_tx_fee,
+						variants.message.len()
+					);
+
+					if let Some(dst_client) = self.system_clients.get(&dst_chain_id) {
+						let dst_hooks = dst_client.protocol_contracts.hooks.clone();
+						let is_processed =
+							dst_hooks.processedRequests(msg.req_id.clone().into()).call().await?;
+						let is_rollbacked =
+							dst_hooks.rolledbackRequests(msg.req_id.clone().into()).call().await?;
+
+						if !is_processed && !is_rollbacked {
+							return Ok(Some(variants));
+						}
+					}
+				},
+				Err(e) => {
+					log::warn!(
+						target: &self.client.get_chain_name(),
+						"-[{}] ⚠️  Failed to decode variants, skipping hooks execute: {}",
+						sub_display_format(SUB_LOG_TARGET),
+						e
+					);
+					return Ok(None);
+				},
+			}
+		}
+
+		Ok(None)
+	}
+
+	async fn estimate_hook_fee(
+		&self,
+		msg: &Socket_Message,
+		variants: Variants,
+		tx_request: &mut N::TransactionRequest,
+	) -> Result<U256> {
+		let dst_chain_id = Into::<u32>::into(msg.req_id.ChainIndex) as ChainId;
+		if let Some(dst_client) = self.system_clients.get(&dst_chain_id) {
+			// Estimate gas and fee on destination chain
+			let gas = dst_client.estimate_gas(tx_request.clone()).await?;
+			let gas_price = dst_client.get_gas_price().await?;
+			let estimated_fee_on_dst = U256::from(gas as u128 * gas_price);
+
+			if let Some((_id, native_client)) =
+				self.system_clients.iter().find(|(_id, client)| client.metadata.is_native)
+			{
+				let relay_queue = native_client.protocol_contracts.relay_queue.as_ref().unwrap();
+
+				// Fetch destination chain native currency price oracle
+				let dst_native_oracle_address =
+					relay_queue.get_native_currency_oracle(dst_chain_id as u32).call().await?;
+				let dst_native_oracle =
+					OracleContract::new(dst_native_oracle_address, native_client.clone());
+				let dst_oracle_decimals = dst_native_oracle.decimals().call().await?;
+				let dst_latest_round_data = dst_native_oracle.latestRoundData().call().await?;
+
+				// Get destination native currency price per full unit in USD
+				let dst_native_currency_price = U256::from(dst_latest_round_data.answer)
+					.checked_div(U256::from(10u128.pow(dst_oracle_decimals as u32)))
+					.ok_or(eyre::eyre!("Failed to calculate destination native currency price"))?;
+
+				// Fetch bridged asset price oracle
+				let bridged_asset_oracle = OracleContract::new(
+					relay_queue.get_asset_oracle_by_hash(msg.params.tokenIDX0).call().await?,
+					native_client.clone(),
+				);
+				let bridged_oracle_decimals = bridged_asset_oracle.decimals().call().await?;
+				let bridged_latest_round_data =
+					bridged_asset_oracle.latestRoundData().call().await?;
+
+				// Get bridged asset price per full unit in USD
+				let bridged_asset_price_usd = U256::from(bridged_latest_round_data.answer)
+					.checked_div(U256::from(10u128.pow(bridged_oracle_decimals as u32)))
+					.ok_or(eyre::eyre!("Failed to calculate bridged asset price"))?;
+
+				// Assume both destination chain and bridged asset use 18 decimals (standard EVM)
+				// estimated_fee_on_dst is in wei (10^-18 of dst native currency)
+				// bridged_asset_price_usd is in USD per full unit of bridged asset
+				// dst_native_currency_price is in USD per full unit of dst native currency
+				//
+				// Conversion formula:
+				// fee_in_bridged_asset_wei = (estimated_fee_wei × dst_price_usd) / bridged_asset_price_usd
+				// Since both have 18 decimals, the decimal places cancel out
+				let fee_in_bridged_asset = estimated_fee_on_dst
+					.checked_mul(dst_native_currency_price)
+					.ok_or(eyre::eyre!("Fee multiplication overflow"))?
+					.checked_div(bridged_asset_price_usd)
+					.ok_or(eyre::eyre!("Failed to convert fee to bridged asset units"))?;
+
+				// Check if converted fee is within the max_tx_fee budget
+				if fee_in_bridged_asset > variants.max_tx_fee {
+					return Err(eyre::eyre!(
+						"Estimated fee ({}) exceeds max_tx_fee ({})",
+						fee_in_bridged_asset,
+						variants.max_tx_fee
+					));
+				}
+
+				log::info!(
+					target: &self.client.get_chain_name(),
+					"-[{}] 💰 Hook fee estimate: {} (bridged asset wei) <= max_tx_fee: {}. dst_price: ${}, bridged_price: ${}",
+					sub_display_format(SUB_LOG_TARGET),
+					fee_in_bridged_asset,
+					variants.max_tx_fee,
+					dst_native_currency_price,
+					bridged_asset_price_usd
+				);
+
+				return Ok(fee_in_bridged_asset);
+			}
+		}
+		Ok(U256::from(0))
+	}
+
+	async fn execute_hook(&self, msg: &Socket_Message, variants: Variants) -> Result<()> {
+		let dst_chain_id = Into::<u32>::into(msg.req_id.ChainIndex) as ChainId;
+
+		if let Some(dst_client) = self.system_clients.get(&dst_chain_id) {
+			log::info!(
+				target: &self.client.get_chain_name(),
+				"-[{}] 🪝 Calling hooks execute on chain {} with txFee: {} for sequence: {}",
+				sub_display_format(SUB_LOG_TARGET),
+				dst_chain_id,
+				variants.max_tx_fee,
+				msg.req_id.sequence
+			);
+
+			// Build the hooks execute call
+			let hooks = &dst_client.protocol_contracts.hooks;
+			let tx_request = hooks
+				.execute_0(variants.max_tx_fee, msg.clone().into())
+				.into_transaction_request()
+				.with_from(self.client.address().await);
+
+			// Send the transaction
+			let metadata = TxRequestMetadata::Hook(HookMetadata::new(
+				variants.sender,
+				variants.receiver,
+				variants.max_tx_fee,
+				variants.message,
+			));
+
+			send_transaction(
+				dst_client.clone(),
+				tx_request,
+				format!("{} (hooks-execute)", SUB_LOG_TARGET),
+				metadata,
+				self.debug_mode,
+				self.handle.clone(),
+			);
+
+			log::info!(
+				target: &self.client.get_chain_name(),
+				"-[{}] ✅ Hooks execute transaction submitted for sequence: {}",
+				sub_display_format(SUB_LOG_TARGET),
+				msg.req_id.sequence
+			);
+		} else {
+			log::error!(
+				target: &self.client.get_chain_name(),
+				"-[{}] ❌ Destination chain client not found for chain ID: {}",
+				sub_display_format(SUB_LOG_TARGET),
+				dst_chain_id
+			);
+		}
+
 		Ok(())
 	}
 }

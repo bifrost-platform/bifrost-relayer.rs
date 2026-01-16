@@ -22,9 +22,9 @@ use crate::{
 		blaze::{BlazeContract, BlazeInstance},
 		chainlink_aggregator::{ChainlinkContract, ChainlinkInstance},
 		hooks::{HooksContract, HooksInstance},
-		oracle::{OracleContract, OracleInstance},
 		registration_pool::{RegistrationPoolContract, RegistrationPoolInstance},
 		relay_executive::{RelayExecutiveContract, RelayExecutiveInstance},
+		relay_queue::{RelayQueueContract, RelayQueueInstance},
 		relayer_manager::{RelayerManagerContract, RelayerManagerInstance},
 		socket::{SocketContract, SocketInstance},
 		socket_queue::{SocketQueueContract, SocketQueueInstance},
@@ -198,10 +198,10 @@ where
 	pub authority: AuthorityInstance<F, P, N>,
 	/// HooksContract
 	pub hooks: HooksInstance<F, P, N>,
-	/// OracleContract (Bifrost only)
-	pub oracle: Option<OracleInstance<F, P, N>>,
 	/// RelayerManagerContract (Bifrost only)
 	pub relayer_manager: Option<RelayerManagerInstance<F, P, N>>,
+	/// RelayQueueContract (Bifrost only)
+	pub relay_queue: Option<RelayQueueInstance<F, P, N>>,
 	/// BitcoinSocketContract (Bifrost only)
 	pub bitcoin_socket: Option<BitcoinSocketInstance<F, P, N>>,
 	/// SocketQueueContract (Bifrost only)
@@ -237,8 +237,8 @@ where
 				Address::from_str(&evm_provider.hooks_address).expect(INVALID_CONTRACT_ADDRESS),
 				provider.clone(),
 			),
-			oracle: None,
 			relayer_manager: None,
+			relay_queue: None,
 			bitcoin_socket: None,
 			socket_queue: None,
 			registration_pool: None,
@@ -246,14 +246,16 @@ where
 			blaze: None,
 		};
 		if is_native {
-			contracts.oracle = Some(OracleContract::new(
-				Address::from_str(&evm_provider.oracle_address.expect(MISSING_CONTRACT_ADDRESS))
-					.expect(INVALID_CONTRACT_ADDRESS),
-				provider.clone(),
-			));
 			contracts.relayer_manager = Some(RelayerManagerContract::new(
 				Address::from_str(
 					&evm_provider.relayer_manager_address.expect(MISSING_CONTRACT_ADDRESS),
+				)
+				.expect(INVALID_CONTRACT_ADDRESS),
+				provider.clone(),
+			));
+			contracts.relay_queue = Some(RelayQueueContract::new(
+				Address::from_str(
+					&evm_provider.relay_queue_address.expect(MISSING_CONTRACT_ADDRESS),
 				)
 				.expect(INVALID_CONTRACT_ADDRESS),
 				provider.clone(),
