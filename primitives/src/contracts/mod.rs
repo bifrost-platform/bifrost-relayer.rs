@@ -6,12 +6,13 @@ pub mod hooks;
 pub mod oracle;
 pub mod registration_pool;
 pub mod relay_executive;
+pub mod relay_queue;
 pub mod relayer_manager;
 pub mod socket;
 pub mod socket_queue;
 
 use alloy::{
-	primitives::{Address, B256, Bytes, Signature, U256, b256},
+	primitives::{B256, Bytes, FixedBytes, Signature, b256},
 	providers::fillers::FillProvider,
 	sol,
 };

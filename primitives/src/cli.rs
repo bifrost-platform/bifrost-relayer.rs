@@ -92,10 +92,10 @@ pub struct EVMProvider {
 	pub authority_address: String,
 	/// Hooks contract address
 	pub hooks_address: String,
-	/// Oracle contract address (Bifrost only)
-	pub oracle_address: Option<String>,
 	/// Relayer manager contract address (Bifrost only)
 	pub relayer_manager_address: Option<String>,
+	/// Relay Queue contract address (Bifrost only)
+	pub relay_queue_address: Option<String>,
 	/// Bitcoin socket contract address (Bifrost only)
 	pub bitcoin_socket_address: Option<String>,
 	/// Socket Queue contract address (Bifrost only)
