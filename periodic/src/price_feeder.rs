@@ -24,7 +24,7 @@ use br_primitives::{
 	contracts::socket::get_asset_oids,
 	eth::AggregatorContracts,
 	periodic::{PriceResponse, PriceSource},
-	tx::{PriceFeedMetadata, TxRequestMetadata},
+	tx::PriceFeedMetadata,
 	utils::sub_display_format,
 };
 
@@ -441,7 +441,7 @@ where
 			self.client.clone(),
 			tx_request,
 			SUB_LOG_TARGET.to_string(),
-			TxRequestMetadata::PriceFeed(metadata),
+			Arc::new(metadata),
 			self.debug_mode,
 			self.handle.clone(),
 		);

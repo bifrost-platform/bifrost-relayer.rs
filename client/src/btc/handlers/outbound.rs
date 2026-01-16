@@ -20,8 +20,8 @@ use br_primitives::{
 	eth::{BuiltRelayTransaction, SocketEventStatus},
 	substrate::{BroadcastSubmission, EthereumSignature, bifrost_runtime},
 	tx::{
-		BroadcastPollMetadata, SocketRelayMetadata, TxRequestMetadata, XtRequest, XtRequestMessage,
-		XtRequestMetadata, XtRequestSender,
+		BroadcastPollMetadata, SocketRelayMetadata, XtRequest, XtRequestMessage, XtRequestMetadata,
+		XtRequestSender,
 	},
 	utils::sub_display_format,
 };
@@ -137,10 +137,7 @@ where
 	async fn build_unsigned_tx(&self, txid: Txid) -> Result<(XtRequest, BroadcastPollMetadata)> {
 		let (msg, signature) = self.build_payload(txid).await?;
 		let metadata = BroadcastPollMetadata::new(txid);
-		Ok((
-			XtRequest::from(bifrost_runtime::tx().blaze().broadcast_poll(msg, signature)),
-			metadata,
-		))
+		Ok((Arc::new(bifrost_runtime::tx().blaze().broadcast_poll(msg, signature)), metadata))
 	}
 
 	/// Send the transaction request message to the channel.
@@ -219,7 +216,7 @@ where
 					self.bfc_client.clone(),
 					built_transaction.tx_request,
 					format!("{} ({})", SUB_LOG_TARGET, self.bfc_client.get_chain_name()),
-					TxRequestMetadata::SocketRelay(SocketRelayMetadata::new(
+					Arc::new(SocketRelayMetadata::new(
 						false,
 						SocketEventStatus::from(msg.status),
 						msg.req_id.sequence,

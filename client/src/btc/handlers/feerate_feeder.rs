@@ -230,10 +230,7 @@ where
 	) -> Result<(XtRequest, SubmitFeeRateMetadata)> {
 		let (msg, signature) = self.build_payload(lt_fee_rate, fee_rate).await?;
 		let metadata = SubmitFeeRateMetadata::new(lt_fee_rate, fee_rate);
-		Ok((
-			XtRequest::from(bifrost_runtime::tx().blaze().submit_fee_rate(msg, signature)),
-			metadata,
-		))
+		Ok((Arc::new(bifrost_runtime::tx().blaze().submit_fee_rate(msg, signature)), metadata))
 	}
 
 	async fn submit_fee_rate(&self, lt_fee_rate: u64, fee_rate: u64) -> Result<()> {
