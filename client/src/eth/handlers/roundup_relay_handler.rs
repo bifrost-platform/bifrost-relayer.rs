@@ -25,7 +25,7 @@ use br_primitives::{
 		SocketInstance,
 	},
 	eth::{BootstrapState, RoundUpEventStatus},
-	tx::{TxRequestMetadata, VSPPhase2Metadata},
+	tx::VSPPhase2Metadata,
 	utils::{encode_roundup_param, recover_message, sub_display_format},
 };
 
@@ -277,10 +277,8 @@ where
 					roundup_submit,
 					from,
 				);
-				let metadata = TxRequestMetadata::VSPPhase2(VSPPhase2Metadata::new(
-					roundup_submit.round,
-					*dst_chain_id,
-				));
+				let metadata =
+					Arc::new(VSPPhase2Metadata::new(roundup_submit.round, *dst_chain_id));
 
 				if is_bootstrap {
 					while let Err(e) = target_client
