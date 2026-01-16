@@ -27,10 +27,7 @@ use br_primitives::{
 	},
 	eth::{BootstrapState, BuiltRelayTransaction, RelayDirection, SocketEventStatus},
 	substrate::{SocketMessagesSubmission, bifrost_runtime},
-	tx::{
-		SocketRelayMetadata, TxRequestMetadata, XtRequest, XtRequestMessage, XtRequestMetadata,
-		XtRequestSender,
-	},
+	tx::{SocketRelayMetadata, XtRequestMessage, XtRequestMetadata, XtRequestSender},
 	utils::sub_display_format,
 };
 
@@ -438,7 +435,7 @@ where
 				self.send_rollbackable_request(chain_id, metadata.clone(), socket_msg).await;
 			}
 
-			let metadata = TxRequestMetadata::SocketRelay(metadata);
+			let metadata = Arc::new(metadata);
 			send_transaction(
 				client.clone(),
 				tx_request,
@@ -501,7 +498,7 @@ where
 			let encoded_msg = self.encode_socket_message(msg);
 			let signature =
 				self.client.sign_message(encoded_msg.hexify_prefixed().as_bytes()).await?.into();
-			let call = XtRequest::from(bifrost_runtime::tx().blaze().submit_outbound_requests(
+			let call = Arc::new(bifrost_runtime::tx().blaze().submit_outbound_requests(
 				SocketMessagesSubmission {
 					authority_id: AccountId20(self.client.address().await.0.0),
 					messages: vec![encoded_msg],
