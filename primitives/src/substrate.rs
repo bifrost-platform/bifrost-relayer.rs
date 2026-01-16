@@ -5,7 +5,11 @@
 		path = "bounded_collections::bounded_vec::BoundedVec",
 		derive = "Ord, PartialOrd, Eq, PartialEq"
 	),
-	derive_for_type(path = "bp_btc_relay::MigrationSequence", derive = "Eq, PartialEq")
+	derive_for_type(path = "bp_btc_relay::MigrationSequence", derive = "Eq, PartialEq"),
+	derive_for_type(
+		path = "fp_account::EthereumSignature",
+		derive = "::subxt::ext::codec::Encode, ::subxt::ext::codec::Decode"
+	)
 )]
 pub mod bifrost_runtime {}
 
@@ -50,7 +54,6 @@ use url::Url;
 pub enum CustomConfig {}
 
 impl Config for CustomConfig {
-	type Hash = <SubstrateConfig as Config>::Hash;
 	type AccountId = <SubstrateConfig as Config>::AccountId;
 	type Address = Self::AccountId;
 	type Signature = EthereumSignature;

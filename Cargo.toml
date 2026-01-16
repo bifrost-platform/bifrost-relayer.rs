@@ -77,7 +77,7 @@ bitcoincore-rpc = { git = "https://github.com/bifrost-platform/rust-bitcoincore-
 tokio = "1.43.0"
 tokio-stream = "0.1.17"
 
-subxt = "0.39.0"
+subxt = "0.44.2"
 
 # Substrate Clients
 sc-cli = { git = "https://github.com/bifrost-platform/polkadot-sdk", default-features = false, branch = "bifrost-polkadot-stable2506" }
