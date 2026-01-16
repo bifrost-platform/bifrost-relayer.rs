@@ -31,7 +31,7 @@ use br_primitives::{
 	},
 	eth::{BootstrapState, BuiltRelayTransaction, RelayDirection, SocketEventStatus},
 	substrate::{SocketMessagesSubmission, bifrost_runtime},
-	tx::{SocketRelayMetadata, XtRequestMessage, XtRequestMetadata, XtRequestSender},
+	tx::{HookMetadata, SocketRelayMetadata, XtRequestMessage, XtRequestMetadata, XtRequestSender},
 	utils::sub_display_format,
 };
 
@@ -719,18 +719,18 @@ where
 				.with_from(self.client.address().await);
 
 			// Send the transaction
-			let metadata = TxRequestMetadata::Hook(HookMetadata::new(
+			let metadata = HookMetadata::new(
 				variants.sender,
 				variants.receiver,
 				variants.max_tx_fee,
 				variants.message,
-			));
+			);
 
 			send_transaction(
 				dst_client.clone(),
 				tx_request,
 				format!("{} (hooks-execute)", SUB_LOG_TARGET),
-				metadata,
+				Arc::new(metadata),
 				self.debug_mode,
 				self.handle.clone(),
 			);
