@@ -1,0 +1,40 @@
+[
+  {
+    "inputs": [
+      {
+        "internalType": "bytes32",
+        "name": "asset_index_hash",
+        "type": "bytes32"
+      }
+    ],
+    "name": "get_asset_oracle_by_hash",
+    "outputs": [
+      {
+        "internalType": "address",
+        "name": "",
+        "type": "address"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint32",
+        "name": "chain_id",
+        "type": "uint32"
+      }
+    ],
+    "name": "get_native_currency_oracle",
+    "outputs": [
+      {
+        "internalType": "address",
+        "name": "",
+        "type": "address"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  }
+]

@@ -28,6 +28,18 @@ sol!(
 	"../abi/abi.socket.merged.json"
 );
 
+sol!(
+	#[derive(serde::Serialize, serde::Deserialize)]
+	/// Variants structure for socket message parameters.
+	/// Follows Solidity ABI encoding: (address sender, address receiver, uint256 max_tx_fee, bytes message)
+	struct Variants {
+		address sender;
+		address receiver;
+		uint256 max_tx_fee;
+		bytes message;
+	}
+);
+
 impl From<Signature> for Signatures {
 	fn from(signature: Signature) -> Self {
 		let r = signature.r().into();
@@ -68,11 +80,14 @@ impl From<Signatures> for Vec<Signature> {
 	}
 }
 
-pub struct Variants {
-	pub sender: Address,
-	pub receiver: Address,
-	pub max_tx_fee: U256,
-	pub message: Bytes,
+impl From<RequestID> for FixedBytes<32> {
+	fn from(req_id: RequestID) -> Self {
+		let mut bytes = [0u8; 32];
+		bytes[0..4].copy_from_slice(&req_id.ChainIndex.0);
+		bytes[4..12].copy_from_slice(&req_id.round_id.to_be_bytes());
+		bytes[12..28].copy_from_slice(&req_id.sequence.to_be_bytes());
+		Self::from(bytes)
+	}
 }
 
 use SocketContract::SocketContractInstance;
