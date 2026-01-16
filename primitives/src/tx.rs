@@ -4,7 +4,7 @@ use std::{
 	sync::Arc,
 };
 
-use alloy::primitives::{Address, B256, ChainId, U256};
+use alloy::primitives::{Address, B256, Bytes, ChainId, U256};
 use bitcoincore_rpc::bitcoin::PublicKey;
 use miniscript::bitcoin::{Address as BtcAddress, Amount, Txid, address::NetworkUnchecked};
 use subxt::tx::Payload;
@@ -420,6 +420,30 @@ impl RemoveOutboundMessagesMetadata {
 impl Display for RemoveOutboundMessagesMetadata {
 	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
 		write!(f, "RemoveOutboundMessages({})", self.len)
+	}
+}
+
+#[derive(Clone, Debug)]
+pub struct HookMetadata {
+	pub sender: Address,
+	pub receiver: Address,
+	pub max_tx_fee: U256,
+	pub message: Bytes,
+}
+
+impl HookMetadata {
+	pub fn new(sender: Address, receiver: Address, max_tx_fee: U256, message: Bytes) -> Self {
+		Self { sender, receiver, max_tx_fee, message }
+	}
+}
+
+impl Display for HookMetadata {
+	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		write!(
+			f,
+			"Hook({:?}, {:?}, {:?}, {:?})",
+			self.sender, self.receiver, self.max_tx_fee, self.message
+		)
 	}
 }
 
