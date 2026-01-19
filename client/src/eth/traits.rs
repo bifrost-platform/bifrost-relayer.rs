@@ -11,6 +11,7 @@ use alloy::{
 };
 use br_primitives::{
 	bootstrap::BootstrapSharedData,
+	constants::cccp,
 	contracts::{
 		erc20::Erc20Contract,
 		oracle::OracleContract,
@@ -324,7 +325,6 @@ where
 			.as_ref()
 			.unwrap()
 			.clone();
-		let vault = self.get_client().protocol_contracts.vault.clone();
 
 		// Fetch destination chain native currency price oracle
 		let dst_native_oracle_address = relay_queue
@@ -365,15 +365,21 @@ where
 			.ok_or(eyre::eyre!("Failed to calculate destination native currency price"))?;
 
 		// Fetch bridged asset decimals
-		let bridged_asset = vault.assets_config(msg.params.tokenIDX0).call().await?.target;
-		let bridged_asset_decimals = if bridged_asset
-			== Address::from_str("0xffffffffffffffffffffffffffffffffffffffff").unwrap()
-		{
-			18 // Native currency has 18 decimals (e.g. BFC, BNB, ETH, etc.)
-		} else {
-			let erc20 = Erc20Contract::new(bridged_asset, self.get_client().clone());
-			erc20.decimals().call().await?
-		};
+		let bridged_asset = self
+			.get_client()
+			.protocol_contracts
+			.vault
+			.assets_config(msg.params.tokenIDX0)
+			.call()
+			.await?
+			.target;
+		let bridged_asset_decimals =
+			if bridged_asset == Address::from_str(cccp::NATIVE_CURRENCY_ADDRESS).unwrap() {
+				18 // Native currency has 18 decimals (e.g. BFC, BNB, ETH, etc.)
+			} else {
+				let erc20 = Erc20Contract::new(bridged_asset, self.get_client().clone());
+				erc20.decimals().call().await?
+			};
 
 		// Fetch bridged asset price oracle
 		let bridged_asset_oracle = OracleContract::new(
