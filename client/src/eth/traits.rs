@@ -1,9 +1,9 @@
-use std::{str::FromStr, sync::Arc, time::Duration};
+use std::{sync::Arc, time::Duration};
 
 use alloy::{
 	dyn_abi::DynSolValue,
 	network::{Network, TransactionBuilder},
-	primitives::{Address, B256, ChainId, FixedBytes, U256},
+	primitives::{B256, ChainId, FixedBytes, U256},
 	providers::{Provider, WalletProvider, fillers::TxFiller},
 	rpc::types::Log,
 	signers::Signature,
@@ -230,12 +230,18 @@ where
 	fn get_system_client(&self, chain_id: &ChainId) -> Option<Arc<EthClient<F, P, N>>>;
 
 	/// Validates if hooks execute should be called for this socket message.
-	/// Requirements:
-	/// 1. Status must be Executed
-	/// 2. msg.params.refund must match source chain hooks contract address
-	/// 3. msg.params.variants must be valid and decodable
 	///
-	/// Returns: Option<Variants> - Some(variants) if should execute, None otherwise
+	/// This method performs several critical checks to ensure the safety and validity of the hook execution:
+	/// 1. **Status Check**: Verifies that the socket message status is `Executed`.
+	/// 2. **Refund Address Validation**: Ensures `msg.params.refund` matches the source chain's hooks contract address.
+	///    This prevents unauthorized contracts from triggering hooks.
+	/// 3. **Variant Decoding**: Attempts to decode `msg.params.variants` into `Variants` struct.
+	/// 4. **Idempotency Check**: Verifies that the request has not already been processed or rollbacked on the destination chain.
+	///
+	/// # Returns
+	/// * `Ok(Some(Variants))` - If all checks pass and the hook should be executed.
+	/// * `Ok(None)` - If any check fails (e.g., status mismatch, invalid refund address), indicating execution should be skipped.
+	/// * `Err(_)` - If an RPC error occurs during verification.
 	async fn should_execute_hook(&self, msg: &Socket_Message) -> Result<Option<Variants>> {
 		let status = SocketEventStatus::from(msg.status);
 
@@ -303,6 +309,25 @@ where
 		Ok(None)
 	}
 
+	/// Estimates the gas required for hook execution and calculates the fee in the bridged asset.
+	///
+	/// This method performs the following steps:
+	/// 1. **Gas Estimation**: Estimates the gas limit for the `Hooks.execute()` transaction on the destination chain.
+	/// 2. **Fee Calculation (DNC)**: Calculates the estimated fee in the Destination Native Currency (DNC).
+	/// 3. **Price Fetching**: Fetches the current prices of the DNC and the bridged asset in USD using cached oracles.
+	/// 4. **Fee Conversion**: Converts the estimated DNC fee into the bridged asset amount, handling decimal differences
+	///    (e.g., 18 decimals for DNC vs 6 decimals for USDC).
+	/// 5. **Validation**: Checks if the calculated fee exceeds the `max_tx_fee` authorized by the user, and if `max_tx_fee`
+	///    exceeds the total bridged amount.
+	///
+	/// # Arguments
+	/// * `msg` - The socket message containing the transfer details.
+	/// * `max_tx_fee` - The maximum fee authorized by the user (in bridged asset units).
+	/// * `tx_request` - The transaction request to be updated with gas limit.
+	///
+	/// # Returns
+	/// * `Ok(())` - If gas estimation and fee calculation succeed.
+	/// * `Err(_)` - If any step fails (e.g., oracle failure, fee exceeds limit).
 	async fn fill_hook_gas(
 		&self,
 		msg: &Socket_Message,
@@ -353,20 +378,13 @@ where
 		};
 
 		// Fetch bridged asset decimals
-		let bridged_asset = self
-			.get_client()
-			.protocol_contracts
-			.vault
-			.assets_config(msg.params.tokenIDX0)
-			.call()
-			.await?
-			.target;
-		let bridged_asset_decimals =
-			if bridged_asset == Address::from_str(cccp::NATIVE_CURRENCY_ADDRESS).unwrap() {
-				18 // Native currency has 18 decimals (e.g. BFC, BNB, ETH, etc.)
-			} else {
-				self.get_client().get_erc20_decimals(bridged_asset).await?
-			};
+		let bridged_asset =
+			self.get_client().get_asset_address_by_index(msg.params.tokenIDX0).await?;
+		let bridged_asset_decimals = if bridged_asset == cccp::NATIVE_CURRENCY_ADDRESS {
+			18 // Native currency has 18 decimals (e.g. BFC, BNB, ETH, etc.)
+		} else {
+			self.get_client().get_erc20_decimals(bridged_asset).await?
+		};
 
 		// Fetch bridged asset price oracle
 		let bridged_asset_oracle_address = self
@@ -466,7 +484,24 @@ where
 		Ok(())
 	}
 
-	/// Execute the hook.
+	/// Executes the hook on the destination chain.
+	///
+	/// This method constructs and sends the `Hooks.execute()` transaction.
+	/// It performs the following checks and operations:
+	/// 1. **Context Check**: Ensures the `Hooks` contract is configured for the client.
+	/// 2. **Transaction Building**: Creates the initial `Hooks.execute()` transaction request.
+	/// 3. **Gas Filling**: Calls `fill_hook_gas()` to estimate gas and validate fees.
+	///    If `fill_hook_gas` fails or determines execution should be skipped (e.g., oracle revert),
+	///    the transaction is not sent.
+	/// 4. **Submission**: Sends the transaction using `send_transaction()`.
+	///
+	/// # Arguments
+	/// * `msg` - The socket message containing details of the cross-chain transfer.
+	/// * `variants` - The decoded variants containing execution parameters (sender, receiver, max_tx_fee, message).
+	///
+	/// # Returns
+	/// * `Ok(())` - If the transaction is successfully submitted or correctly skipped.
+	/// * `Err(_)` - If an error occurs during transaction building or gas estimation.
 	async fn execute_hook(&self, msg: &Socket_Message, variants: Variants) -> Result<()> {
 		match &self.get_client().protocol_contracts.hooks {
 			Some(hooks) => {

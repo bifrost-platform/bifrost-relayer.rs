@@ -528,6 +528,35 @@ where
 		erc20
 	}
 
+	/// Get asset address with caching.
+	pub async fn get_asset_address_by_index(
+		&self,
+		asset_index_hash: FixedBytes<32>,
+	) -> Result<Address> {
+		// Check cache first
+		{
+			let cache = self.contract_cache.asset_addresses.read().await;
+			if let Some(&address) = cache.get(&asset_index_hash) {
+				return Ok(address);
+			}
+		}
+
+		// Fetch from vault and cache
+		let address = self
+			.protocol_contracts
+			.vault
+			.assets_config(asset_index_hash)
+			.call()
+			.await?
+			.target;
+		self.contract_cache
+			.asset_addresses
+			.write()
+			.await
+			.insert(asset_index_hash, address);
+		Ok(address)
+	}
+
 	/// Get asset oracle address with caching.
 	pub async fn get_oracle_address_by_asset_index(
 		&self,
