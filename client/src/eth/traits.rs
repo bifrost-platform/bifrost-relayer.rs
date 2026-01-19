@@ -12,13 +12,9 @@ use alloy::{
 use br_primitives::{
 	bootstrap::BootstrapSharedData,
 	constants::cccp,
-	contracts::{
-		erc20::Erc20Contract,
-		oracle::OracleContract,
-		socket::{
-			Socket_Struct::{Poll_Submit, Signatures, Socket_Message},
-			Variants,
-		},
+	contracts::socket::{
+		Socket_Struct::{Poll_Submit, Signatures, Socket_Message},
+		Variants,
 	},
 	eth::{BootstrapState, BuiltRelayTransaction, SocketEventStatus},
 	tx::HookMetadata,
@@ -316,53 +312,45 @@ where
 		// Estimate gas and fee on destination chain
 		let gas = self.get_client().estimate_gas(tx_request.clone()).await?;
 		let gas_price = self.get_client().get_gas_price().await?;
-		let estimated_fee_on_dst = U256::from(gas as u128 * gas_price);
-
-		let relay_queue = self
-			.get_bifrost_client()
-			.protocol_contracts
-			.relay_queue
-			.as_ref()
-			.unwrap()
-			.clone();
+		// DNC: Destination Chain's Native Currency
+		let estimated_fee_in_dnc = U256::from(gas as u128 * gas_price);
 
 		// Fetch destination chain native currency price oracle
-		let dst_native_oracle_address = relay_queue
-			.get_native_currency_oracle(self.get_client().metadata.id as u32)
-			.call()
+		let dnc_oracle_address = self
+			.get_bifrost_client()
+			.get_oracle_address_by_chain(self.get_client().metadata.id)
 			.await?;
-		let dst_native_oracle =
-			OracleContract::new(dst_native_oracle_address, self.get_bifrost_client().clone());
-		let dst_oracle_decimals = dst_native_oracle.decimals().call().await?;
-		let dst_latest_round_data = match dst_native_oracle.latestRoundData().call().await {
-			Ok(data) => data,
+		let dnc_oracle_decimals =
+			self.get_bifrost_client().get_oracle_decimals(dnc_oracle_address).await?;
+		let dnc_native_oracle = self.get_bifrost_client().get_oracle(dnc_oracle_address).await;
+		// Get destination native currency price per full unit in USD
+		let dnc_price_in_usd = match dnc_native_oracle.latestRoundData().call().await {
+			Ok(data) => U256::from(data.answer)
+				.checked_div(U256::from(10u128.pow(dnc_oracle_decimals as u32)))
+				.ok_or(eyre::eyre!("Failed to calculate destination native currency price"))?,
 			Err(e) => {
 				// Check if the error is a revert (on-chain oracle failure)
+				// Revert means the oracle is stale or not working, skip execution
 				if let Some(_revert_data) = e.as_revert_data() {
 					log::warn!(
 						target: &self.get_client().get_chain_name(),
 						"-[{}] ⚠️  Destination native oracle reverted (oracle: {:?}). Skipping hook execution.",
 						sub_display_format(SUB_LOG_TARGET),
-						dst_native_oracle_address
+						dnc_oracle_address
 					);
-					return Ok(()); // Skip execution, don't submit transaction
+					return Ok(());
 				}
 				// Not a revert - this is an RPC/network error, propagate it
 				log::error!(
 					target: &self.get_client().get_chain_name(),
 					"-[{}] ❌ RPC error fetching destination native oracle price (oracle: {:?}): {}",
 					sub_display_format(SUB_LOG_TARGET),
-					dst_native_oracle_address,
+					dnc_oracle_address,
 					e
 				);
 				return Err(e.into());
 			},
 		};
-
-		// Get destination native currency price per full unit in USD
-		let dst_native_currency_price = U256::from(dst_latest_round_data.answer)
-			.checked_div(U256::from(10u128.pow(dst_oracle_decimals as u32)))
-			.ok_or(eyre::eyre!("Failed to calculate destination native currency price"))?;
 
 		// Fetch bridged asset decimals
 		let bridged_asset = self
@@ -377,18 +365,25 @@ where
 			if bridged_asset == Address::from_str(cccp::NATIVE_CURRENCY_ADDRESS).unwrap() {
 				18 // Native currency has 18 decimals (e.g. BFC, BNB, ETH, etc.)
 			} else {
-				let erc20 = Erc20Contract::new(bridged_asset, self.get_client().clone());
-				erc20.decimals().call().await?
+				self.get_client().get_erc20_decimals(bridged_asset).await?
 			};
 
 		// Fetch bridged asset price oracle
-		let bridged_asset_oracle = OracleContract::new(
-			relay_queue.get_asset_oracle_by_hash(msg.params.tokenIDX0).call().await?,
-			self.get_bifrost_client().clone(),
-		);
-		let bridged_oracle_decimals = bridged_asset_oracle.decimals().call().await?;
-		let bridged_latest_round_data = match bridged_asset_oracle.latestRoundData().call().await {
-			Ok(data) => data,
+		let bridged_asset_oracle_address = self
+			.get_bifrost_client()
+			.get_oracle_address_by_asset_index(msg.params.tokenIDX0)
+			.await?;
+		let bridged_asset_oracle_decimals = self
+			.get_bifrost_client()
+			.get_oracle_decimals(bridged_asset_oracle_address)
+			.await?;
+		let bridged_asset_oracle =
+			self.get_bifrost_client().get_oracle(bridged_asset_oracle_address).await;
+		// Get bridged asset price per full unit in USD
+		let bridged_asset_price_in_usd = match bridged_asset_oracle.latestRoundData().call().await {
+			Ok(data) => U256::from(data.answer)
+				.checked_div(U256::from(10u128.pow(bridged_asset_oracle_decimals as u32)))
+				.ok_or(eyre::eyre!("Failed to calculate bridged asset price"))?,
 			Err(e) => {
 				// Check if the error is a revert (on-chain oracle failure)
 				if let Some(_revert_data) = e.as_revert_data() {
@@ -412,11 +407,6 @@ where
 			},
 		};
 
-		// Get bridged asset price per full unit in USD
-		let bridged_asset_price_usd = U256::from(bridged_latest_round_data.answer)
-			.checked_div(U256::from(10u128.pow(bridged_oracle_decimals as u32)))
-			.ok_or(eyre::eyre!("Failed to calculate bridged asset price"))?;
-
 		// Calculate fee in bridged asset with proper decimal handling
 		//
 		// Conversion formula:
@@ -434,12 +424,12 @@ where
 		// - USDC (6 decimals): If fee is 0.001 ETH ($3), it correctly converts to ~3,000,000 USDC units (6 decimals)
 		// - WBTC (8 decimals): If fee is 0.001 ETH ($3), it correctly converts to ~0.00005000 BTC units (8 decimals)
 		// - Standard ERC20 (18 decimals): Works as before
-		let fee_in_bridged_asset = estimated_fee_on_dst
-			.checked_mul(dst_native_currency_price)
+		let fee_in_bridged_asset = estimated_fee_in_dnc
+			.checked_mul(dnc_price_in_usd)
 			.ok_or(eyre::eyre!("Fee multiplication overflow"))?
 			.checked_mul(U256::from(10u128.pow(bridged_asset_decimals as u32)))
 			.ok_or(eyre::eyre!("Decimal adjustment overflow"))?
-			.checked_div(bridged_asset_price_usd)
+			.checked_div(bridged_asset_price_in_usd)
 			.ok_or(eyre::eyre!("Price division failed"))?
 			.checked_div(U256::from(10u128.pow(18)))
 			.ok_or(eyre::eyre!("Failed to convert fee to bridged asset units"))?;
@@ -468,8 +458,8 @@ where
 			sub_display_format(SUB_LOG_TARGET),
 			fee_in_bridged_asset,
 			max_tx_fee,
-			dst_native_currency_price,
-			bridged_asset_price_usd
+			dnc_price_in_usd,
+			bridged_asset_price_in_usd
 		);
 
 		tx_request.set_gas_limit(gas);
