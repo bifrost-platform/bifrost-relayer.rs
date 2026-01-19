@@ -1,9 +1,9 @@
-use std::{sync::Arc, time::Duration};
+use std::{str::FromStr, sync::Arc, time::Duration};
 
 use alloy::{
 	dyn_abi::DynSolValue,
 	network::{Network, TransactionBuilder},
-	primitives::{B256, ChainId, FixedBytes, U256},
+	primitives::{Address, B256, ChainId, FixedBytes, U256},
 	providers::{Provider, WalletProvider, fillers::TxFiller},
 	rpc::types::Log,
 	signers::Signature,
@@ -366,8 +366,14 @@ where
 
 		// Fetch bridged asset decimals
 		let bridged_asset = vault.assets_config(msg.params.tokenIDX0).call().await?.target;
-		let erc20 = Erc20Contract::new(bridged_asset, self.get_client().clone());
-		let bridged_asset_decimals = erc20.decimals().call().await?;
+		let bridged_asset_decimals = if bridged_asset
+			== Address::from_str("0xffffffffffffffffffffffffffffffffffffffff").unwrap()
+		{
+			18 // Native currency has 18 decimals (e.g. BFC, BNB, ETH, etc.)
+		} else {
+			let erc20 = Erc20Contract::new(bridged_asset, self.get_client().clone());
+			erc20.decimals().call().await?
+		};
 
 		// Fetch bridged asset price oracle
 		let bridged_asset_oracle = OracleContract::new(
