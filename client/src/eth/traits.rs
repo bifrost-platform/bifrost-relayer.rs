@@ -259,7 +259,7 @@ where
 			if msg.params.refund != *hooks_address {
 				log::debug!(
 					target: &self.get_client().get_chain_name(),
-					"-[{}] ⏭️  Skipping hooks execute: refund address {:?} != hooks address {:?}",
+					"-[{}] ⏭️  Skipping Hooks.execute(): refund address {:?} != hooks address {:?}",
 					sub_display_format(SUB_LOG_TARGET),
 					msg.params.refund,
 					hooks_address
@@ -294,7 +294,7 @@ where
 				Err(e) => {
 					log::warn!(
 						target: &self.get_client().get_chain_name(),
-						"-[{}] ⚠️  Failed to decode variants, skipping hooks execute: {}",
+						"-[{}] ⚠️  Failed to decode variants, skipping Hooks.execute(): {}",
 						sub_display_format(SUB_LOG_TARGET),
 						e
 					);
@@ -424,14 +424,14 @@ where
 			Some(hooks) => {
 				log::info!(
 					target: &self.get_client().get_chain_name(),
-					"-[{}] 🪝 Calling hooks execute on chain {} with txFee: {} for sequence: {}",
+					"-[{}] 🪝 Calling Hooks.execute() on chain {} with txFee: {} for sequence: {}",
 					sub_display_format(SUB_LOG_TARGET),
 					self.get_client().metadata.id,
 					variants.max_tx_fee,
 					msg.req_id.sequence
 				);
 
-				// Build the hooks execute call
+				// Build the Hooks.execute() call
 				let mut tx_request = hooks
 					.execute_0(variants.max_tx_fee, msg.clone().into())
 					.into_transaction_request()
@@ -439,7 +439,6 @@ where
 
 				self.fill_hook_gas(&msg, variants.max_tx_fee, &mut tx_request).await?;
 
-				// Send the transaction
 				let metadata = HookMetadata::new(
 					variants.sender,
 					variants.receiver,
@@ -447,11 +446,10 @@ where
 					variants.message,
 				);
 
-				// TODO: skip gas estimation and filling gas limit (since we already filled it)
 				send_transaction(
 					self.get_client().clone(),
 					tx_request,
-					format!("{} (hooks-execute)", SUB_LOG_TARGET),
+					format!("{} (Hooks.execute())", SUB_LOG_TARGET),
 					Arc::new(metadata),
 					self.debug_mode(),
 					self.handle(),
@@ -459,7 +457,7 @@ where
 
 				log::info!(
 					target: &self.get_client().get_chain_name(),
-					"-[{}] ✅ Hooks execute transaction submitted for sequence: {}",
+					"-[{}] ✅ Hooks.execute() transaction submitted for sequence: {}",
 					sub_display_format(SUB_LOG_TARGET),
 					msg.req_id.sequence
 				);
