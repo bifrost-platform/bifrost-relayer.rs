@@ -1,4 +1,5 @@
 pub mod btc;
+pub mod cccp;
 pub mod cli;
 pub mod config;
 pub mod errors;
