@@ -1,13 +1,14 @@
 use alloy::{
 	network::Network,
-	primitives::{Address, ChainId, map::AddressHashMap},
+	primitives::{Address, ChainId, FixedBytes, map::AddressHashMap},
 	providers::{
 		Provider, WalletProvider,
 		fillers::{FillProvider, TxFiller},
 	},
 	signers::Signer,
 };
-use std::{str::FromStr, sync::Arc};
+use std::{collections::HashMap, str::FromStr, sync::Arc};
+use tokio::sync::RwLock;
 use url::Url;
 
 use crate::{
@@ -21,7 +22,9 @@ use crate::{
 		bitcoin_socket::{BitcoinSocketContract, BitcoinSocketInstance},
 		blaze::{BlazeContract, BlazeInstance},
 		chainlink_aggregator::{ChainlinkContract, ChainlinkInstance},
+		erc20::Erc20Instance,
 		hooks::{HooksContract, HooksInstance},
+		oracle::OracleInstance,
 		registration_pool::{RegistrationPoolContract, RegistrationPoolInstance},
 		relay_executive::{RelayExecutiveContract, RelayExecutiveInstance},
 		relay_queue::{RelayQueueContract, RelayQueueInstance},
@@ -46,6 +49,53 @@ impl Signers {
 
 	pub fn signers_address(&self) -> Vec<Address> {
 		self.0.keys().cloned().collect()
+	}
+}
+
+/// Cache for contract instances and immutable metadata to avoid repeated instantiation and RPC calls.
+pub struct ContractCache<F, P, N: Network>
+where
+	F: TxFiller<N> + WalletProvider<N>,
+	P: Provider<N>,
+{
+	/// Cached oracle contract instances by address
+	pub oracles: RwLock<HashMap<Address, Arc<OracleInstance<F, P, N>>>>,
+	/// Cached ERC20 contract instances by address
+	pub erc20s: RwLock<HashMap<Address, Arc<Erc20Instance<F, P, N>>>>,
+	/// Cached oracle decimals
+	pub oracle_decimals: RwLock<HashMap<Address, u8>>,
+	/// Cached ERC20 token decimals
+	pub erc20_decimals: RwLock<HashMap<Address, u8>>,
+	/// Cached asset oracle addresses by asset_index_hash to oracle_address
+	pub asset_oracle_addresses: RwLock<HashMap<FixedBytes<32>, Address>>,
+	/// Cached native currency oracle addresses by chain_id to oracle_address
+	pub native_oracle_addresses: RwLock<HashMap<ChainId, Address>>,
+}
+
+impl<F, P, N: Network> Default for ContractCache<F, P, N>
+where
+	F: TxFiller<N> + WalletProvider<N>,
+	P: Provider<N>,
+{
+	fn default() -> Self {
+		Self {
+			oracles: RwLock::new(HashMap::new()),
+			erc20s: RwLock::new(HashMap::new()),
+			oracle_decimals: RwLock::new(HashMap::new()),
+			erc20_decimals: RwLock::new(HashMap::new()),
+			asset_oracle_addresses: RwLock::new(HashMap::new()),
+			native_oracle_addresses: RwLock::new(HashMap::new()),
+		}
+	}
+}
+
+impl<F, P, N: Network> ContractCache<F, P, N>
+where
+	F: TxFiller<N> + WalletProvider<N>,
+	P: Provider<N>,
+{
+	pub fn new() -> Self {
+		Self::default()
 	}
 }
 
