@@ -197,7 +197,7 @@ where
 	/// AuthorityContract
 	pub authority: AuthorityInstance<F, P, N>,
 	/// HooksContract
-	pub hooks: HooksInstance<F, P, N>,
+	pub hooks: Option<HooksInstance<F, P, N>>,
 	/// RelayerManagerContract (Bifrost only)
 	pub relayer_manager: Option<RelayerManagerInstance<F, P, N>>,
 	/// RelayQueueContract (Bifrost only)
@@ -233,10 +233,12 @@ where
 				Address::from_str(&evm_provider.authority_address).expect(INVALID_CONTRACT_ADDRESS),
 				provider.clone(),
 			),
-			hooks: HooksContract::new(
-				Address::from_str(&evm_provider.hooks_address).expect(INVALID_CONTRACT_ADDRESS),
-				provider.clone(),
-			),
+			hooks: evm_provider.hooks_address.map(|address| {
+				HooksContract::new(
+					Address::from_str(&address).expect(INVALID_CONTRACT_ADDRESS),
+					provider.clone(),
+				)
+			}),
 			relayer_manager: None,
 			relay_queue: None,
 			bitcoin_socket: None,

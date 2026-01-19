@@ -17,9 +17,8 @@ use tokio_stream::{StreamExt, wrappers::BroadcastStream};
 use br_primitives::{
 	bootstrap::BootstrapSharedData,
 	constants::{
-		cli::DEFAULT_BOOTSTRAP_ROUND_OFFSET,
-		config::BOOTSTRAP_BLOCK_CHUNK_SIZE,
-		errors::{INVALID_BIFROST_NATIVENESS, INVALID_CHAIN_ID},
+		cli::DEFAULT_BOOTSTRAP_ROUND_OFFSET, config::BOOTSTRAP_BLOCK_CHUNK_SIZE,
+		errors::INVALID_CHAIN_ID,
 	},
 	contracts::{
 		oracle::OracleContract,
@@ -130,7 +129,7 @@ where
 					return Ok(());
 				}
 				// Check if we should call hooks execute (Executed status with valid requirements)
-				if let Some(variants) = self.should_call_hooks_execute(&msg).await? {
+				if let Some(variants) = self.should_execute_hook(&msg).await? {
 					self.execute_hook(&msg, variants).await?;
 				}
 
@@ -547,7 +546,7 @@ where
 	/// 3. msg.params.variants must be valid and decodable
 	///
 	/// Returns: Option<Variants> - Some(variants) if should execute, None otherwise
-	async fn should_call_hooks_execute(&self, msg: &Socket_Message) -> Result<Option<Variants>> {
+	async fn should_execute_hook(&self, msg: &Socket_Message) -> Result<Option<Variants>> {
 		let status = SocketEventStatus::from(msg.status);
 
 		// Requirement 1: Check if status is Executed
@@ -560,7 +559,10 @@ where
 
 		// Get source chain client and hooks contract address
 		if let Some(src_client) = self.system_clients.get(&src_chain_id) {
-			let hooks_address = src_client.protocol_contracts.hooks.address();
+			let hooks_address = match &src_client.protocol_contracts.hooks {
+				Some(hooks) => hooks.address(),
+				None => return Ok(None),
+			};
 
 			// Requirement 2: msg.params.refund must match source chain hooks contract address
 			if msg.params.refund != *hooks_address {
@@ -588,14 +590,19 @@ where
 					);
 
 					if let Some(dst_client) = self.system_clients.get(&dst_chain_id) {
-						let dst_hooks = dst_client.protocol_contracts.hooks.clone();
-						let is_processed =
-							dst_hooks.processedRequests(msg.req_id.clone().into()).call().await?;
-						let is_rollbacked =
-							dst_hooks.rolledbackRequests(msg.req_id.clone().into()).call().await?;
+						if let Some(dst_hooks) = dst_client.protocol_contracts.hooks.clone() {
+							let is_processed = dst_hooks
+								.processedRequests(msg.req_id.clone().into())
+								.call()
+								.await?;
+							let is_rollbacked = dst_hooks
+								.rolledbackRequests(msg.req_id.clone().into())
+								.call()
+								.await?;
 
-						if !is_processed && !is_rollbacked {
-							return Ok(Some(variants));
+							if !is_processed && !is_rollbacked {
+								return Ok(Some(variants));
+							}
 						}
 					}
 				},
@@ -614,12 +621,12 @@ where
 		Ok(None)
 	}
 
-	async fn estimate_hook_fee(
+	async fn fill_hook_gas(
 		&self,
 		msg: &Socket_Message,
-		variants: Variants,
+		max_tx_fee: U256,
 		tx_request: &mut N::TransactionRequest,
-	) -> Result<U256> {
+	) -> Result<()> {
 		let dst_chain_id = Into::<u32>::into(msg.req_id.ChainIndex) as ChainId;
 		if let Some(dst_client) = self.system_clients.get(&dst_chain_id) {
 			// Estimate gas and fee on destination chain
@@ -627,127 +634,131 @@ where
 			let gas_price = dst_client.get_gas_price().await?;
 			let estimated_fee_on_dst = U256::from(gas as u128 * gas_price);
 
-			if let Some((_id, native_client)) =
-				self.system_clients.iter().find(|(_id, client)| client.metadata.is_native)
-			{
-				let relay_queue = native_client.protocol_contracts.relay_queue.as_ref().unwrap();
+			let relay_queue = self.bifrost_client.protocol_contracts.relay_queue.as_ref().unwrap();
 
-				// Fetch destination chain native currency price oracle
-				let dst_native_oracle_address =
-					relay_queue.get_native_currency_oracle(dst_chain_id as u32).call().await?;
-				let dst_native_oracle =
-					OracleContract::new(dst_native_oracle_address, native_client.clone());
-				let dst_oracle_decimals = dst_native_oracle.decimals().call().await?;
-				let dst_latest_round_data = dst_native_oracle.latestRoundData().call().await?;
+			// Fetch destination chain native currency price oracle
+			let dst_native_oracle_address =
+				relay_queue.get_native_currency_oracle(dst_chain_id as u32).call().await?;
+			let dst_native_oracle =
+				OracleContract::new(dst_native_oracle_address, self.bifrost_client.clone());
+			let dst_oracle_decimals = dst_native_oracle.decimals().call().await?;
+			let dst_latest_round_data = dst_native_oracle.latestRoundData().call().await?;
 
-				// Get destination native currency price per full unit in USD
-				let dst_native_currency_price = U256::from(dst_latest_round_data.answer)
-					.checked_div(U256::from(10u128.pow(dst_oracle_decimals as u32)))
-					.ok_or(eyre::eyre!("Failed to calculate destination native currency price"))?;
+			// Get destination native currency price per full unit in USD
+			let dst_native_currency_price = U256::from(dst_latest_round_data.answer)
+				.checked_div(U256::from(10u128.pow(dst_oracle_decimals as u32)))
+				.ok_or(eyre::eyre!("Failed to calculate destination native currency price"))?;
 
-				// Fetch bridged asset price oracle
-				let bridged_asset_oracle = OracleContract::new(
-					relay_queue.get_asset_oracle_by_hash(msg.params.tokenIDX0).call().await?,
-					native_client.clone(),
-				);
-				let bridged_oracle_decimals = bridged_asset_oracle.decimals().call().await?;
-				let bridged_latest_round_data =
-					bridged_asset_oracle.latestRoundData().call().await?;
+			// Fetch bridged asset price oracle
+			let bridged_asset_oracle = OracleContract::new(
+				relay_queue.get_asset_oracle_by_hash(msg.params.tokenIDX0).call().await?,
+				self.bifrost_client.clone(),
+			);
+			let bridged_oracle_decimals = bridged_asset_oracle.decimals().call().await?;
+			let bridged_latest_round_data = bridged_asset_oracle.latestRoundData().call().await?;
 
-				// Get bridged asset price per full unit in USD
-				let bridged_asset_price_usd = U256::from(bridged_latest_round_data.answer)
-					.checked_div(U256::from(10u128.pow(bridged_oracle_decimals as u32)))
-					.ok_or(eyre::eyre!("Failed to calculate bridged asset price"))?;
+			// Get bridged asset price per full unit in USD
+			let bridged_asset_price_usd = U256::from(bridged_latest_round_data.answer)
+				.checked_div(U256::from(10u128.pow(bridged_oracle_decimals as u32)))
+				.ok_or(eyre::eyre!("Failed to calculate bridged asset price"))?;
 
-				// Assume both destination chain and bridged asset use 18 decimals (standard EVM)
-				// estimated_fee_on_dst is in wei (10^-18 of dst native currency)
-				// bridged_asset_price_usd is in USD per full unit of bridged asset
-				// dst_native_currency_price is in USD per full unit of dst native currency
-				//
-				// Conversion formula:
-				// fee_in_bridged_asset_wei = (estimated_fee_wei × dst_price_usd) / bridged_asset_price_usd
-				// Since both have 18 decimals, the decimal places cancel out
-				let fee_in_bridged_asset = estimated_fee_on_dst
-					.checked_mul(dst_native_currency_price)
-					.ok_or(eyre::eyre!("Fee multiplication overflow"))?
-					.checked_div(bridged_asset_price_usd)
-					.ok_or(eyre::eyre!("Failed to convert fee to bridged asset units"))?;
+			// Assume both destination chain and bridged asset use 18 decimals (standard EVM)
+			// estimated_fee_on_dst is in wei (10^-18 of dst native currency)
+			// bridged_asset_price_usd is in USD per full unit of bridged asset
+			// dst_native_currency_price is in USD per full unit of dst native currency
+			//
+			// Conversion formula:
+			// fee_in_bridged_asset_wei = (estimated_fee_wei × dst_price_usd) / bridged_asset_price_usd
+			// Since both have 18 decimals, the decimal places cancel out
+			let fee_in_bridged_asset = estimated_fee_on_dst
+				.checked_mul(dst_native_currency_price)
+				.ok_or(eyre::eyre!("Fee multiplication overflow"))?
+				.checked_div(bridged_asset_price_usd)
+				.ok_or(eyre::eyre!("Failed to convert fee to bridged asset units"))?;
 
-				// Check if converted fee is within the max_tx_fee budget
-				if fee_in_bridged_asset > variants.max_tx_fee {
-					return Err(eyre::eyre!(
-						"Estimated fee ({}) exceeds max_tx_fee ({})",
-						fee_in_bridged_asset,
-						variants.max_tx_fee
-					));
-				}
-
-				log::info!(
-					target: &self.client.get_chain_name(),
-					"-[{}] 💰 Hook fee estimate: {} (bridged asset wei) <= max_tx_fee: {}. dst_price: ${}, bridged_price: ${}",
-					sub_display_format(SUB_LOG_TARGET),
+			// Validate: fee_in_bridged_asset <= maxTxFee
+			if fee_in_bridged_asset > max_tx_fee {
+				return Err(eyre::eyre!(
+					"Estimated fee ({}) exceeds max_tx_fee ({})",
 					fee_in_bridged_asset,
-					variants.max_tx_fee,
-					dst_native_currency_price,
-					bridged_asset_price_usd
-				);
-
-				return Ok(fee_in_bridged_asset);
+					max_tx_fee
+				));
 			}
+
+			// Validate: maxTxFee must not exceed the bridged amount
+			if max_tx_fee > msg.params.amount {
+				return Err(eyre::eyre!(
+					"max_tx_fee ({}) exceeds bridged amount ({})",
+					max_tx_fee,
+					msg.params.amount
+				));
+			}
+
+			log::info!(
+				target: &self.client.get_chain_name(),
+				"-[{}] 💰 Hook fee estimate: {} (bridged asset wei) <= max_tx_fee: {}. dst_price: ${}, bridged_price: ${}",
+				sub_display_format(SUB_LOG_TARGET),
+				fee_in_bridged_asset,
+				max_tx_fee,
+				dst_native_currency_price,
+				bridged_asset_price_usd
+			);
+
+			tx_request.set_gas_limit(gas);
 		}
-		Ok(U256::from(0))
+		Ok(())
 	}
 
 	async fn execute_hook(&self, msg: &Socket_Message, variants: Variants) -> Result<()> {
 		let dst_chain_id = Into::<u32>::into(msg.req_id.ChainIndex) as ChainId;
 
 		if let Some(dst_client) = self.system_clients.get(&dst_chain_id) {
-			log::info!(
-				target: &self.client.get_chain_name(),
-				"-[{}] 🪝 Calling hooks execute on chain {} with txFee: {} for sequence: {}",
-				sub_display_format(SUB_LOG_TARGET),
-				dst_chain_id,
-				variants.max_tx_fee,
-				msg.req_id.sequence
-			);
+			match &dst_client.protocol_contracts.hooks {
+				Some(hooks) => {
+					log::info!(
+						target: &self.client.get_chain_name(),
+						"-[{}] 🪝 Calling hooks execute on chain {} with txFee: {} for sequence: {}",
+						sub_display_format(SUB_LOG_TARGET),
+						dst_chain_id,
+						variants.max_tx_fee,
+						msg.req_id.sequence
+					);
 
-			// Build the hooks execute call
-			let hooks = &dst_client.protocol_contracts.hooks;
-			let tx_request = hooks
-				.execute_0(variants.max_tx_fee, msg.clone().into())
-				.into_transaction_request()
-				.with_from(self.client.address().await);
+					// Build the hooks execute call
+					let mut tx_request = hooks
+						.execute_0(variants.max_tx_fee, msg.clone().into())
+						.into_transaction_request()
+						.with_from(self.client.address().await);
 
-			// Send the transaction
-			let metadata = HookMetadata::new(
-				variants.sender,
-				variants.receiver,
-				variants.max_tx_fee,
-				variants.message,
-			);
+					self.fill_hook_gas(&msg, variants.max_tx_fee, &mut tx_request).await?;
 
-			send_transaction(
-				dst_client.clone(),
-				tx_request,
-				format!("{} (hooks-execute)", SUB_LOG_TARGET),
-				Arc::new(metadata),
-				self.debug_mode,
-				self.handle.clone(),
-			);
+					// Send the transaction
+					let metadata = HookMetadata::new(
+						variants.sender,
+						variants.receiver,
+						variants.max_tx_fee,
+						variants.message,
+					);
 
-			log::info!(
-				target: &self.client.get_chain_name(),
-				"-[{}] ✅ Hooks execute transaction submitted for sequence: {}",
-				sub_display_format(SUB_LOG_TARGET),
-				msg.req_id.sequence
-			);
-		} else {
-			log::error!(
-				target: &self.client.get_chain_name(),
-				"-[{}] ❌ Destination chain client not found for chain ID: {}",
-				sub_display_format(SUB_LOG_TARGET),
-				dst_chain_id
-			);
+					// TODO: skip gas estimation and filling gas limit (since we already filled it)
+					send_transaction(
+						dst_client.clone(),
+						tx_request,
+						format!("{} (hooks-execute)", SUB_LOG_TARGET),
+						Arc::new(metadata),
+						self.debug_mode,
+						self.handle.clone(),
+					);
+
+					log::info!(
+						target: &self.client.get_chain_name(),
+						"-[{}] ✅ Hooks execute transaction submitted for sequence: {}",
+						sub_display_format(SUB_LOG_TARGET),
+						msg.req_id.sequence
+					);
+				},
+				None => return Ok(()),
+			}
 		}
 
 		Ok(())
@@ -792,19 +803,7 @@ where
 			let round_info = if self.client.metadata.is_native {
 				self.client.protocol_contracts.authority.round_info().call().await?
 			} else {
-				match self.system_clients.iter().find(|(_id, client)| client.metadata.is_native) {
-					Some((_id, native_client)) => {
-						native_client.protocol_contracts.authority.round_info().call().await?
-					},
-					_ => {
-						panic!(
-							"[{}]-[{}] {}",
-							self.client.get_chain_name(),
-							SUB_LOG_TARGET,
-							INVALID_BIFROST_NATIVENESS,
-						);
-					},
-				}
+				self.bifrost_client.protocol_contracts.authority.round_info().call().await?
 			};
 
 			let bootstrap_offset_height = self
