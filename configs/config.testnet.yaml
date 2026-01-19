@@ -30,6 +30,7 @@ evm_providers:
     is_relay_target: true
     socket_address: "0x0218371b18340aBD460961bdF3Bd5F01858dAB53"
     authority_address: "0x0000000000000000000000000000000000000400"
+    vault_address: "0x90381bB369D4F8069fdA9246b23637a78c5d1c83"
     hooks_address: "TODO"
     relayer_manager_address: "0x0000000000000000000000000000000000002000"
     relay_queue_address: "0x0000000000000000000000000000000000002001"
@@ -47,6 +48,7 @@ evm_providers:
     eip1559: true
     socket_address: "0xdAcc4aeea580F782bB991eA862e1a57827Ea9D68"
     authority_address: "0xff95B9861eE5d44eC0b489B0DCB73932c7C7074B"
+    vault_address: "0x9070e3a291B96D156f361A850410d656880540D2"
     hooks_address: "TODO"
   - name: "bsc-testnet"
     id: 97
@@ -57,6 +59,7 @@ evm_providers:
     eip1559: true
     socket_address: "0x8039c3AD8ED55509fD3f6Daa78867923fDe6E61c"
     authority_address: "0xCf9f6428A309b6652a1dfaA4d8aB8B61C9c7E8CF"
+    vault_address: "0x27C66cb5caa07C9B332939c357c789C606f5054C"
     hooks_address: "TODO"
     chainlink_usdc_usd_address: "0x90c069C4538adAc136E051052E14c1cD799C41B7"
     chainlink_usdt_usd_address: "0xEca2605f0BCF2BA5966372C99837b1F182d3D620"
@@ -72,6 +75,7 @@ evm_providers:
     eip1559: true
     socket_address: "0xdAcc4aeea580F782bB991eA862e1a57827Ea9D68"
     authority_address: "0x15EDC0c65004548fa787Bc01e533366674946C5F"
+    vault_address: "0x9070e3a291B96D156f361A850410d656880540D2"
     hooks_address: "TODO"
   - name: "arbitrum-sepolia"
     id: 421614
@@ -83,6 +87,7 @@ evm_providers:
     eip1559: true
     socket_address: "0xd1E060FD930B75DA9A709c91E6Ad03B330Fb2950"
     authority_address: "0x4dA97eCD85d4EE00E26C5f3aF21e6Da7bc3F71e2"
+    vault_address: "0x6EeE91b7c69e3576C13cE7a9C7C0E305dF6996F9"
     hooks_address: "TODO"
 
 handler_configs:

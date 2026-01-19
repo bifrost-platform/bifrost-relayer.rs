@@ -28,6 +28,7 @@ use crate::{
 		relayer_manager::{RelayerManagerContract, RelayerManagerInstance},
 		socket::{SocketContract, SocketInstance},
 		socket_queue::{SocketQueueContract, SocketQueueInstance},
+		vault::{VaultContract, VaultInstance},
 	},
 };
 
@@ -196,6 +197,8 @@ where
 	pub socket: SocketInstance<F, P, N>,
 	/// AuthorityContract
 	pub authority: AuthorityInstance<F, P, N>,
+	/// VaultContract
+	pub vault: VaultInstance<F, P, N>,
 	/// HooksContract
 	pub hooks: Option<HooksInstance<F, P, N>>,
 	/// RelayerManagerContract (Bifrost only)
@@ -231,6 +234,10 @@ where
 			),
 			authority: AuthorityContract::new(
 				Address::from_str(&evm_provider.authority_address).expect(INVALID_CONTRACT_ADDRESS),
+				provider.clone(),
+			),
+			vault: VaultContract::new(
+				Address::from_str(&evm_provider.vault_address).expect(INVALID_CONTRACT_ADDRESS),
 				provider.clone(),
 			),
 			hooks: evm_provider.hooks_address.map(|address| {

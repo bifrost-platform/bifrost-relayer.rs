@@ -31,6 +31,7 @@ evm_providers:
     is_relay_target: true
     socket_address: "0xd551F33Ca8eCb0Be83d8799D9C68a368BA36Dd52"
     authority_address: "0x0000000000000000000000000000000000000400"
+    vault_address: "0xD85EB87caB9041ad00764b95796702b1104F42D7"
     relayer_manager_address: "0x0000000000000000000000000000000000002000"
     bitcoin_socket_address: "0x73A9E443F51eE40C1469A740D9CCf0118e8FD9ca"
     socket_queue_address: "0x0000000000000000000000000000000000000101"
@@ -46,6 +47,7 @@ evm_providers:
     eip1559: true
     socket_address: "0x4A31FfeAc276CC5e508cAC0568d932d398C4DD84"
     authority_address: "0xAdcaa90cabDc730855064d5b0f5242c16A9B7E10"
+    vault_address: "0x2F95C102Cc26875406BC689Fb01aE382B82AA535"
     chainlink_usdc_usd_address: "0x8fFfFfd4AfB6115b954Bd326cbe7B4BA576818f6"
     chainlink_usdt_usd_address: "0x3E7d1eAB13ad0104d2750B8863b489D65364e32D"
     chainlink_dai_usd_address: "0xAed0c38402a5d19df6E4c03F4E2DceD6e29c1ee9"
@@ -60,6 +62,7 @@ evm_providers:
     eip1559: true
     socket_address: "0xb5Fa48E8B9b89760a9f9176388D1B64A8D4968dF"
     authority_address: "0xF0500d77d5446665314722b963ab1F71872063E9"
+    vault_address: "0x78ae4c0FD4f02CA79A2d8738d3369A4Bc5D4E323"
   - name: "polygon"
     id: 137
     provider: "<YOUR_POLYGON_RPC_ENDPOINT>"
@@ -69,6 +72,7 @@ evm_providers:
     eip1559: true
     socket_address: "0x050606CC2Bcd9504991Be2c309D6c6c832Bb5bd0"
     authority_address: "0x7F48909fBd1E38f1e05B5E326A44175fc2462B13"
+    vault_address: "0x5fA7fe5F94f2D15585a3134C1C5d3019c8c1645d"
   - name: "base"
     id: 8453
     provider: "<YOUR_BASE_RPC_ENDPOINT>"
@@ -78,6 +82,7 @@ evm_providers:
     eip1559: true
     socket_address: "0xAe172D8c5E428D4b7C70f9E593b207F9daC9BF3e"
     authority_address: "0x4C7a44F3FB37A53F33D3fe3cCdE97A444F105239"
+    vault_address: "0x4F7aB59b5AC112970F5dD66D8a7ac505c8E5e08B"
     chainlink_wbtc_usd_address: "0xCCADC697c55bbB68dc5bCdf8d3CBe83CdD4E071E"
   - name: "arbitrum"
     id: 42161
@@ -89,6 +94,7 @@ evm_providers:
     eip1559: true
     socket_address: "0xac1552e30857A814a225BAa81145bcB071B46DDd"
     authority_address: "0xA069a57426Cd4c53925c1847Bec01aAB832A5118"
+    vault_address: "0xf549E4B5B4Cb7fd4e83b8AA047C742C06D527429"
   - name: "core"
     id: 1116
     provider: "<YOUR_CORE_RPC_ENDPOINT>"
@@ -98,6 +104,7 @@ evm_providers:
     eip1559: false
     socket_address: "0x4C7a44F3FB37A53F33D3fe3cCdE97A444F105239"
     authority_address: "0xA069a57426Cd4c53925c1847Bec01aAB832A5118"
+    vault_address: "0x872b347cd764d46c127ffefbcaB605FFF3f3a48C"
   - name: "oasys"
     id: 248
     provider: "<YOUR_OASYS_RPC_ENDPOINT>"
@@ -107,6 +114,7 @@ evm_providers:
     eip1559: true
     socket_address: "0x4C7a44F3FB37A53F33D3fe3cCdE97A444F105239"
     authority_address: "0x48820089C1d4f5d768f6800CF647b4f5b8675CFA"
+    vault_address: "0x872b347cd764d46c127ffefbcaB605FFF3f3a48C"
 
 handler_configs:
   - handler_type: Socket
