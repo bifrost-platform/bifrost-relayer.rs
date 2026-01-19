@@ -334,7 +334,30 @@ where
 		let dst_native_oracle =
 			OracleContract::new(dst_native_oracle_address, self.get_bifrost_client().clone());
 		let dst_oracle_decimals = dst_native_oracle.decimals().call().await?;
-		let dst_latest_round_data = dst_native_oracle.latestRoundData().call().await?;
+		let dst_latest_round_data = match dst_native_oracle.latestRoundData().call().await {
+			Ok(data) => data,
+			Err(e) => {
+				// Check if the error is a revert (on-chain oracle failure)
+				if let Some(_revert_data) = e.as_revert_data() {
+					log::warn!(
+						target: &self.get_client().get_chain_name(),
+						"-[{}] ⚠️  Destination native oracle reverted (oracle: {:?}). Skipping hook execution.",
+						sub_display_format(SUB_LOG_TARGET),
+						dst_native_oracle_address
+					);
+					return Ok(()); // Skip execution, don't submit transaction
+				}
+				// Not a revert - this is an RPC/network error, propagate it
+				log::error!(
+					target: &self.get_client().get_chain_name(),
+					"-[{}] ❌ RPC error fetching destination native oracle price (oracle: {:?}): {}",
+					sub_display_format(SUB_LOG_TARGET),
+					dst_native_oracle_address,
+					e
+				);
+				return Err(e.into());
+			},
+		};
 
 		// Get destination native currency price per full unit in USD
 		let dst_native_currency_price = U256::from(dst_latest_round_data.answer)
@@ -352,7 +375,30 @@ where
 			self.get_bifrost_client().clone(),
 		);
 		let bridged_oracle_decimals = bridged_asset_oracle.decimals().call().await?;
-		let bridged_latest_round_data = bridged_asset_oracle.latestRoundData().call().await?;
+		let bridged_latest_round_data = match bridged_asset_oracle.latestRoundData().call().await {
+			Ok(data) => data,
+			Err(e) => {
+				// Check if the error is a revert (on-chain oracle failure)
+				if let Some(_revert_data) = e.as_revert_data() {
+					log::warn!(
+						target: &self.get_client().get_chain_name(),
+						"-[{}] ⚠️  Bridged asset oracle reverted (token: {:?}). Skipping hook execution.",
+						sub_display_format(SUB_LOG_TARGET),
+						msg.params.tokenIDX0
+					);
+					return Ok(()); // Skip execution, don't submit transaction
+				}
+				// Not a revert - this is an RPC/network error, propagate it
+				log::error!(
+					target: &self.get_client().get_chain_name(),
+					"-[{}] ❌ RPC error fetching bridged asset oracle price (token: {:?}): {}",
+					sub_display_format(SUB_LOG_TARGET),
+					msg.params.tokenIDX0,
+					e
+				);
+				return Err(e.into());
+			},
+		};
 
 		// Get bridged asset price per full unit in USD
 		let bridged_asset_price_usd = U256::from(bridged_latest_round_data.answer)
@@ -438,6 +484,10 @@ where
 					.with_from(self.get_client().address().await);
 
 				self.fill_hook_gas(&msg, variants.max_tx_fee, &mut tx_request).await?;
+				if tx_request.gas_limit().is_none() {
+					// Skip execution, don't submit transaction
+					return Ok(());
+				}
 
 				let metadata = HookMetadata::new(
 					variants.sender,
