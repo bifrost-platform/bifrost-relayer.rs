@@ -12,6 +12,8 @@ sol!(
 
 use HooksContract::HooksContractInstance;
 
+pub type HooksInstance<F, P, N> = HooksContractInstance<Arc<FillProvider<F, P, N>>, N>;
+
 impl From<contracts::socket::Socket_Struct::Socket_Message>
 	for contracts::hooks::Socket_Struct::Socket_Message
 {
@@ -38,5 +40,3 @@ impl From<contracts::socket::Socket_Struct::Socket_Message>
 		}
 	}
 }
-
-pub type HooksInstance<F, P, N> = HooksContractInstance<Arc<FillProvider<F, P, N>>, N>;
