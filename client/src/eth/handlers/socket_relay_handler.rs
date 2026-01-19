@@ -120,13 +120,13 @@ where
 					// do nothing if not selected
 					return Ok(());
 				}
+				// Check if we should execute the hook (Executed status with valid requirements)
+				if let Some(variants) = self.should_execute_hook(&msg).await? {
+					self.execute_hook(&msg, variants).await?;
+				}
 				if self.is_sequence_ended(&msg.req_id, &msg.ins_code, metadata.status).await? {
 					// do nothing if protocol sequence ended
 					return Ok(());
-				}
-				// Check if we should call hooks execute (Executed status with valid requirements)
-				if let Some(variants) = self.should_execute_hook(&msg).await? {
-					self.execute_hook(&msg, variants).await?;
 				}
 
 				self.submit_brp_outbound_request(msg.clone(), metadata.clone()).await?;

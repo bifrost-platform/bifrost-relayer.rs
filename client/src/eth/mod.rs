@@ -399,15 +399,26 @@ where
 	}
 
 	/// Fill the gas-related fields for the given transaction.
+	/// Skips gas estimation if gas limit is already set (e.g., for hook execution).
 	async fn fill_gas(&self, request: &mut N::TransactionRequest) -> Result<()> {
 		if request.from().is_none() {
 			request.set_from(self.address().await);
 		}
 
-		let gas = self.estimate_gas(request.clone()).await?;
-		let coefficient: f64 = GasCoefficient::from(self.metadata.is_native).into();
-		let estimated_gas = gas as f64 * coefficient;
-		request.set_gas_limit(estimated_gas.ceil() as u64);
+		// Skip gas estimation if gas limit is already set (pre-filled by caller)
+		if request.gas_limit().is_some() {
+			log::debug!(
+				target: &self.get_chain_name(),
+				"-[{}] ⏭️  Skipping gas estimation - gas limit already set: {}",
+				sub_display_format(SUB_LOG_TARGET),
+				request.gas_limit().unwrap()
+			);
+		} else {
+			let gas = self.estimate_gas(request.clone()).await?;
+			let coefficient: f64 = GasCoefficient::from(self.metadata.is_native).into();
+			let estimated_gas = gas as f64 * coefficient;
+			request.set_gas_limit(estimated_gas.ceil() as u64);
+		}
 
 		if self.metadata.is_native {
 			// gas price is fixed to 1000 Gwei on bifrost network
