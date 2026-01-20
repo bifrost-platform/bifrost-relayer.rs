@@ -39,6 +39,7 @@ pub use runtime_types::{
 	pallet_cccp_relay_queue::SocketMessageSubmission,
 };
 
+#[allow(ambiguous_glob_reexports)]
 pub use bifrost_runtime::{
 	blaze::calls::types::*, btc_registration_pool::calls::types::*,
 	btc_socket_queue::calls::types::*, cccp_relay_queue::calls::types::*,
