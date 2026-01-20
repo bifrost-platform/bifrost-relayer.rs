@@ -54,9 +54,9 @@ where
 	/// The Bifrost client for on-chain queries.
 	pub bifrost_client: Arc<EthClient<F, P, N>>,
 	/// The substrate client for storage queries.
-	sub_client: Option<OnlineClient<CustomConfig>>,
+	sub_client: OnlineClient<CustomConfig>,
 	/// The legacy RPC methods for querying best block.
-	sub_rpc: Option<LegacyRpcMethods<CustomConfig>>,
+	sub_rpc: LegacyRpcMethods<CustomConfig>,
 	/// The unsigned transaction message sender.
 	xt_request_sender: Arc<XtRequestSender>,
 	/// The receiver that consumes new events from the block channel.
@@ -73,19 +73,14 @@ where
 	pub async fn new(
 		client: Arc<EthClient<F, P, N>>,
 		bifrost_client: Arc<EthClient<F, P, N>>,
-		sub_client: Option<OnlineClient<CustomConfig>>,
-		sub_rpc_url: Option<String>,
+		sub_client: OnlineClient<CustomConfig>,
+		sub_rpc_url: String,
 		xt_request_sender: Arc<XtRequestSender>,
 		event_receiver: Receiver<EventMessage>,
 		bootstrap_shared_data: Arc<BootstrapSharedData>,
 	) -> Result<Self> {
-		let sub_rpc = match sub_rpc_url {
-			Some(url) => {
-				let rpc_client = RpcClient::from_url(&url).await?;
-				Some(LegacyRpcMethods::<CustomConfig>::new(rpc_client))
-			},
-			None => None,
-		};
+		let rpc_client = RpcClient::from_url(&sub_rpc_url).await?;
+		let sub_rpc = LegacyRpcMethods::<CustomConfig>::new(rpc_client);
 
 		Ok(Self {
 			client,
@@ -131,12 +126,9 @@ where
 		asset_index_hash: B256,
 		sequence_id: u128,
 	) -> Result<bool> {
-		let sub_client = self.sub_client.as_ref().expect("Substrate client not initialized");
-		let sub_rpc = self.sub_rpc.as_ref().expect("Substrate RPC not initialized");
-
 		// Query at best block (including unfinalized) instead of latest finalized
-		let best_hash = sub_rpc.chain_get_block_hash(None).await?.unwrap_or_default();
-		let storage = sub_client.storage().at(best_hash);
+		let best_hash = self.sub_rpc.chain_get_block_hash(None).await?.unwrap_or_default();
+		let storage = self.sub_client.storage().at(best_hash);
 
 		let transfer = storage
 			.fetch(&bifrost_runtime::storage().cccp_relay_queue().on_flight_transfers(
