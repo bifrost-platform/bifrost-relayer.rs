@@ -36,11 +36,12 @@ pub use runtime_types::{
 		ExecutedPsbtMessage, RollbackPollMessage, SignedPsbtMessage,
 		pallet::pallet::Call::submit_unsigned_psbt,
 	},
+	pallet_cccp_relay_queue::SocketMessageSubmission,
 };
 
 pub use bifrost_runtime::{
 	blaze::calls::types::*, btc_registration_pool::calls::types::*,
-	btc_socket_queue::calls::types::*,
+	btc_socket_queue::calls::types::*, cccp_relay_queue::calls::types::*,
 };
 
 use super::constants::errors::INVALID_PROVIDER_URL;
