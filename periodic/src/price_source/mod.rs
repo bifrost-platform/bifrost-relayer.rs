@@ -1,13 +1,11 @@
-use std::{collections::BTreeMap, fmt::Error, ops::Mul, sync::Arc};
+use std::{collections::BTreeMap, sync::Arc};
 
 use alloy::{
 	network::Network,
-	primitives::U256,
 	providers::{Provider, WalletProvider, fillers::TxFiller},
 };
 use async_trait::async_trait;
 use eyre::Result;
-use serde::Deserialize;
 
 use br_client::eth::EthClient;
 use br_primitives::periodic::{PriceResponse, PriceSource};
@@ -15,8 +13,8 @@ use br_primitives::periodic::{PriceResponse, PriceSource};
 use crate::{
 	price_source::{
 		binance::BinancePriceFetcher, chainlink::ChainlinkPriceFetcher,
-		coingecko::CoingeckoPriceFetcher, gateio::GateioPriceFetcher, kucoin::KucoinPriceFetcher,
-		upbit::UpbitPriceFetcher,
+		coingecko::CoingeckoPriceFetcher, exchange_rate::ExchangeRatePriceFetcher,
+		gateio::GateioPriceFetcher, kucoin::KucoinPriceFetcher, upbit::UpbitPriceFetcher,
 	},
 	traits::PriceFetcher,
 };
@@ -24,11 +22,20 @@ use crate::{
 mod binance;
 mod chainlink;
 mod coingecko;
+mod exchange_rate;
 mod gateio;
 mod kucoin;
 mod upbit;
 
 const LOG_TARGET: &str = "price-fetcher";
+
+#[derive(Clone, PartialEq, Debug)]
+pub enum FetchMode {
+	/// Standard source for all tokens.
+	Standard,
+	/// Dedicated source for a specific token. (e.g. "JPYC")
+	Dedicated(String),
+}
 
 #[derive(Clone)]
 pub enum PriceFetchers<F, P, N: Network>
@@ -42,44 +49,7 @@ where
 	Gateio(GateioPriceFetcher),
 	Kucoin(KucoinPriceFetcher),
 	Upbit(UpbitPriceFetcher),
-}
-
-#[derive(Deserialize)]
-struct CurrencyResponse {
-	usd: f64,
-}
-
-/// Outputs the `usd * 10**18 price` of the `krw * 10**18 price` entered.
-pub async fn krw_to_usd(krw_amount: U256) -> Result<U256, Error> {
-	match reqwest::get(
-		"https://cdn.jsdelivr.net/gh/fawazahmed0/currency-api@1/latest/currencies/krw/usd.min.json",
-	)
-	.await
-	{
-		Ok(response) => match response.json::<CurrencyResponse>().await {
-			Ok(exchange_rate_float) => {
-				let exchange_rate_decimal: u32 = {
-					let rate_str = exchange_rate_float.usd.to_string();
-					if let Some(decimal_index) = rate_str.find('.') {
-						(rate_str.len() - decimal_index - 1) as u32
-					} else {
-						0
-					}
-				};
-
-				let exchange_rate = U256::from(
-					exchange_rate_float.usd.mul((10u64.pow(exchange_rate_decimal)) as f64) as u64,
-				);
-
-				Ok(krw_amount
-					.mul(exchange_rate)
-					.checked_div(U256::from(10u64.pow(exchange_rate_decimal)))
-					.unwrap())
-			},
-			Err(_) => Err(Error),
-		},
-		Err(_) => Err(Error),
-	}
+	ExchangeRate(ExchangeRatePriceFetcher),
 }
 
 impl<F, P, N: Network> PriceFetchers<F, P, N>
@@ -90,11 +60,12 @@ where
 	pub async fn new(
 		exchange: PriceSource,
 		client: Option<Arc<EthClient<F, P, N>>>,
+		mode: FetchMode,
 	) -> Result<Self> {
 		match exchange {
 			PriceSource::Binance => Ok(PriceFetchers::Binance(BinancePriceFetcher::new().await?)),
 			PriceSource::Chainlink => {
-				Ok(PriceFetchers::Chainlink(ChainlinkPriceFetcher::new(client).await))
+				Ok(PriceFetchers::Chainlink(ChainlinkPriceFetcher::new(client, mode).await))
 			},
 			PriceSource::Coingecko => {
 				Ok(PriceFetchers::CoinGecko(CoingeckoPriceFetcher::new().await?))
@@ -102,6 +73,21 @@ where
 			PriceSource::Gateio => Ok(PriceFetchers::Gateio(GateioPriceFetcher::new().await?)),
 			PriceSource::Kucoin => Ok(PriceFetchers::Kucoin(KucoinPriceFetcher::new().await?)),
 			PriceSource::Upbit => Ok(PriceFetchers::Upbit(UpbitPriceFetcher::new().await?)),
+			PriceSource::ExchangeRate => {
+				Ok(PriceFetchers::ExchangeRate(ExchangeRatePriceFetcher::new(mode)))
+			},
+		}
+	}
+
+	pub fn mode(&self) -> FetchMode {
+		match self {
+			PriceFetchers::Binance(_) => FetchMode::Standard,
+			PriceFetchers::Chainlink(fetcher) => fetcher.mode.clone(),
+			PriceFetchers::CoinGecko(_) => FetchMode::Standard,
+			PriceFetchers::Gateio(_) => FetchMode::Standard,
+			PriceFetchers::Kucoin(_) => FetchMode::Standard,
+			PriceFetchers::Upbit(_) => FetchMode::Standard,
+			PriceFetchers::ExchangeRate(fetcher) => fetcher.mode.clone(),
 		}
 	}
 }
@@ -120,6 +106,7 @@ where
 			PriceFetchers::Gateio(fetcher) => fetcher.get_ticker_with_symbol(symbol).await,
 			PriceFetchers::Kucoin(fetcher) => fetcher.get_ticker_with_symbol(symbol).await,
 			PriceFetchers::Upbit(fetcher) => fetcher.get_ticker_with_symbol(symbol).await,
+			PriceFetchers::ExchangeRate(fetcher) => fetcher.get_ticker_with_symbol(symbol).await,
 		}
 	}
 
@@ -131,19 +118,7 @@ where
 			PriceFetchers::Gateio(fetcher) => fetcher.get_tickers().await,
 			PriceFetchers::Kucoin(fetcher) => fetcher.get_tickers().await,
 			PriceFetchers::Upbit(fetcher) => fetcher.get_tickers().await,
+			PriceFetchers::ExchangeRate(fetcher) => fetcher.get_tickers().await,
 		}
-	}
-}
-
-#[cfg(test)]
-mod tests {
-	use alloy::primitives::utils::parse_ether;
-
-	use super::*;
-
-	#[tokio::test]
-	async fn krw_to_usd_exchange() {
-		let res = krw_to_usd(parse_ether("1").unwrap()).await;
-		println!("{:?}", res);
 	}
 }

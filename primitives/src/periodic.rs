@@ -19,6 +19,7 @@ pub enum PriceSource {
 	Gateio,
 	Kucoin,
 	Upbit,
+	ExchangeRate,
 }
 
 #[derive(Clone, Debug)]

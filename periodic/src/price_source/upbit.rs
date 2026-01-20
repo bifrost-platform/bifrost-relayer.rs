@@ -7,7 +7,7 @@ use serde::Deserialize;
 
 use br_primitives::periodic::PriceResponse;
 
-use crate::{price_source::krw_to_usd, traits::PriceFetcher};
+use crate::{price_source::exchange_rate::convert_currency_to_usd, traits::PriceFetcher};
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct UpbitResponse {
@@ -83,7 +83,7 @@ impl UpbitPriceFetcher {
 	) -> Result<(String, PriceResponse), Error> {
 		if response.market.contains("KRW-") {
 			let amount = parse_ether(&response.trade_price.to_string()).unwrap();
-			match krw_to_usd(amount).await {
+			match convert_currency_to_usd("krw", amount).await {
 				Ok(usd_price) => Ok((
 					response.market.replace("KRW-", ""),
 					PriceResponse {
@@ -97,7 +97,7 @@ impl UpbitPriceFetcher {
 			}
 		} else if response.market.contains("BTC-") {
 			match self.btc_to_krw(response.trade_price).await {
-				Ok(krw_price) => match krw_to_usd(krw_price).await {
+				Ok(krw_price) => match convert_currency_to_usd("krw", krw_price).await {
 					Ok(usd_price) => Ok((
 						response.market.replace("BTC-", ""),
 						PriceResponse {

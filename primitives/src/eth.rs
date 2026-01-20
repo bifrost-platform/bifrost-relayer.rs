@@ -122,6 +122,8 @@ where
 	pub chainlink_wbtc_usd: Option<ChainlinkInstance<F, P, N>>,
 	/// Chainlink cbbtc/usd aggregator
 	pub chainlink_cbbtc_usd: Option<ChainlinkInstance<F, P, N>>,
+	/// Chainlink jpy/usd aggregator
+	pub chainlink_jpy_usd: Option<ChainlinkInstance<F, P, N>>,
 }
 
 impl<F, P, N: Network> AggregatorContracts<F, P, N>
@@ -137,6 +139,7 @@ where
 		chainlink_btc_usd_address: Option<String>,
 		chainlink_wbtc_usd_address: Option<String>,
 		chainlink_cbbtc_usd_address: Option<String>,
+		chainlink_jpy_usd_address: Option<String>,
 	) -> Self {
 		let create_contract_instance = |address: String| {
 			ChainlinkContract::new(
@@ -152,6 +155,7 @@ where
 			chainlink_btc_usd: chainlink_btc_usd_address.map(create_contract_instance),
 			chainlink_wbtc_usd: chainlink_wbtc_usd_address.map(create_contract_instance),
 			chainlink_cbbtc_usd: chainlink_cbbtc_usd_address.map(create_contract_instance),
+			chainlink_jpy_usd: chainlink_jpy_usd_address.map(create_contract_instance),
 		}
 	}
 
@@ -179,6 +183,7 @@ where
 			chainlink_btc_usd: None,
 			chainlink_wbtc_usd: None,
 			chainlink_cbbtc_usd: None,
+			chainlink_jpy_usd: None,
 		}
 	}
 }
