@@ -233,12 +233,15 @@ where
 	///
 	/// This private helper method performs the following checks:
 	/// 1. **Status Check**: Verifies that the socket message status matches the expected status.
-	/// 2. **Source Client Validation**: Ensures the source chain client is configured.
-	/// 3. **Hooks Contract Validation**: Ensures the source chain has a hooks contract.
-	/// 4. **Refund Address Validation**: Ensures `msg.params.refund` matches the source chain's hooks contract address.
+	/// 2. **Bitcoin Chain Check**: Skips hook processing for Bitcoin chains (not supported).
+	/// 3. **Source Client Validation**: Ensures the source chain client is configured.
+	/// 4. **Hooks Contract Validation**: Ensures the source chain has a hooks contract.
+	/// 5. **Refund Address Validation**: Ensures `msg.params.refund` matches the source chain's hooks contract address.
 	///    This prevents unauthorized contracts from triggering hooks.
-	/// 5. **Variant Decoding**: Attempts to decode `msg.params.variants` into `Variants` struct.
-	/// 6. **Idempotency Check**: Verifies that the request has not already been processed or rollbacked on the destination chain.
+	/// 6. **Variant Decoding**: Attempts to decode `msg.params.variants` into `Variants` struct.
+	///
+	/// **Note**: Idempotency checks are NOT performed here. They are handled by the calling methods
+	/// (`should_execute_hook` and `should_rollback_hook`) to allow context-specific validation.
 	///
 	/// # Arguments
 	/// * `msg` - The socket message to validate.
@@ -310,7 +313,7 @@ where
 		}
 
 		// Decode variants
-		let variants = match Variants::abi_decode(&msg.params.variants) {
+		match Variants::abi_decode(&msg.params.variants) {
 			Ok(variants) => {
 				log::debug!(
 					target: &self.get_client().get_chain_name(),
@@ -321,7 +324,7 @@ where
 					variants.max_tx_fee,
 					variants.message.len()
 				);
-				variants
+				return Ok(Some(variants));
 			},
 			Err(e) => {
 				log::warn!(
@@ -332,33 +335,43 @@ where
 				);
 				return Ok(None);
 			},
-		};
-
-		// Idempotency check on destination chain
-		if let Some(dst_hooks) = self.get_client().protocol_contracts.hooks.clone() {
-			let is_processed =
-				dst_hooks.processedRequests(msg.req_id.clone().into()).call().await?;
-			let is_rollbacked =
-				dst_hooks.rolledbackRequests(msg.req_id.clone().into()).call().await?;
-
-			if !is_processed && !is_rollbacked {
-				return Ok(Some(variants));
-			}
 		}
-
-		Ok(None)
 	}
 
 	/// Validates if hooks execute should be called for this socket message.
 	///
-	/// This method delegates to `should_process_hook()` for all validation checks.
+	/// This method delegates to `should_process_hook()` for common validation checks,
+	/// then performs execute-specific idempotency verification.
+	///
+	/// # Idempotency Check
+	/// Verifies that the request has not already been processed on the destination chain
+	/// by checking `Hooks.processedRequests(req_id)`.
 	///
 	/// # Returns
 	/// * `Ok(Some(Variants))` - If all checks pass and the hook should be executed.
 	/// * `Ok(None)` - If any check fails, indicating execution should be skipped.
 	/// * `Err(_)` - If an RPC error occurs during verification.
 	async fn should_execute_hook(&self, msg: &Socket_Message) -> Result<Option<Variants>> {
-		self.should_process_hook(msg, SocketEventStatus::Executed).await
+		let variants = self.should_process_hook(msg, SocketEventStatus::Executed).await?;
+
+		// Early return if common validation failed
+		let variants = match variants {
+			Some(v) => v,
+			None => return Ok(None),
+		};
+
+		// Idempotency check on destination chain
+		if let Some(hooks) = &self.get_client().protocol_contracts.hooks {
+			let is_processed = hooks.processedRequests(msg.req_id.clone().into()).call().await?;
+
+			if !is_processed {
+				return Ok(Some(variants));
+			}
+			return Ok(None); // Already processed
+		}
+
+		// No hooks contract - skip execution
+		Ok(None)
 	}
 
 	/// Estimates the gas required for hook execution and calculates the fee in the bridged asset.
@@ -550,14 +563,38 @@ where
 
 	/// Validates if hooks rollback should be called for this socket message.
 	///
-	/// This method delegates to `should_process_hook()` for all validation checks.
+	/// This method delegates to `should_process_hook()` for common validation checks,
+	/// then performs rollback-specific idempotency verification.
+	///
+	/// # Idempotency Check
+	/// Verifies that the request has not already been rolled back on the source chain
+	/// by checking `Hooks.rolledbackRequests(req_id)`.
 	///
 	/// # Returns
 	/// * `Ok(Some(Variants))` - If all checks pass and the rollback should be executed.
 	/// * `Ok(None)` - If any check fails, indicating rollback should be skipped.
 	/// * `Err(_)` - If an RPC error occurs during verification.
 	async fn should_rollback_hook(&self, msg: &Socket_Message) -> Result<Option<Variants>> {
-		self.should_process_hook(msg, SocketEventStatus::Rollbacked).await
+		let variants = self.should_process_hook(msg, SocketEventStatus::Rollbacked).await?;
+
+		// Early return if common validation failed
+		let variants = match variants {
+			Some(v) => v,
+			None => return Ok(None),
+		};
+
+		// Idempotency check on source chain
+		if let Some(hooks) = &self.get_client().protocol_contracts.hooks {
+			let is_rollbacked = hooks.rolledbackRequests(msg.req_id.clone().into()).call().await?;
+
+			if !is_rollbacked {
+				return Ok(Some(variants));
+			}
+			return Ok(None); // Already rolled back
+		}
+
+		// No hooks contract - skip rollback
+		Ok(None)
 	}
 
 	/// Executes the rollback hook on the destination chain.
