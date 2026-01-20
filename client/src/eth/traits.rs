@@ -229,93 +229,128 @@ where
 	/// Get the `EthClient` of the system chain by chain id.
 	fn get_system_client(&self, chain_id: &ChainId) -> Option<Arc<EthClient<F, P, N>>>;
 
-	/// Validates if hooks execute should be called for this socket message.
+	/// Validates common hook prerequisites for both execute and rollback operations.
 	///
-	/// This method performs several critical checks to ensure the safety and validity of the hook execution:
-	/// 1. **Status Check**: Verifies that the socket message status is `Executed`.
-	/// 2. **Refund Address Validation**: Ensures `msg.params.refund` matches the source chain's hooks contract address.
+	/// This private helper method performs the following checks:
+	/// 1. **Status Check**: Verifies that the socket message status matches the expected status.
+	/// 2. **Source Client Validation**: Ensures the source chain client is configured.
+	/// 3. **Hooks Contract Validation**: Ensures the source chain has a hooks contract.
+	/// 4. **Refund Address Validation**: Ensures `msg.params.refund` matches the source chain's hooks contract address.
 	///    This prevents unauthorized contracts from triggering hooks.
-	/// 3. **Variant Decoding**: Attempts to decode `msg.params.variants` into `Variants` struct.
-	/// 4. **Idempotency Check**: Verifies that the request has not already been processed or rollbacked on the destination chain.
+	/// 5. **Variant Decoding**: Attempts to decode `msg.params.variants` into `Variants` struct.
+	/// 6. **Idempotency Check**: Verifies that the request has not already been processed or rollbacked on the destination chain.
+	///
+	/// # Arguments
+	/// * `msg` - The socket message to validate.
+	/// * `expected_status` - The expected socket event status (Executed or Rollbacked).
 	///
 	/// # Returns
-	/// * `Ok(Some(Variants))` - If all checks pass and the hook should be executed.
-	/// * `Ok(None)` - If any check fails (e.g., status mismatch, invalid refund address), indicating execution should be skipped.
+	/// * `Ok(Some(Variants))` - If all checks pass.
+	/// * `Ok(None)` - If any check fails, indicating the operation should be skipped.
 	/// * `Err(_)` - If an RPC error occurs during verification.
-	async fn should_execute_hook(&self, msg: &Socket_Message) -> Result<Option<Variants>> {
+	async fn should_process_hook(
+		&self,
+		msg: &Socket_Message,
+		expected_status: SocketEventStatus,
+	) -> Result<Option<Variants>> {
 		let status = SocketEventStatus::from(msg.status);
 
-		// Requirement 1: Check if status is Executed
-		if status != SocketEventStatus::Executed {
+		// Check if status matches expected
+		if status != expected_status {
 			return Ok(None);
 		}
 
 		// Get source chain client and hooks contract address
 		let src_chain_id = Into::<u32>::into(msg.req_id.ChainIndex) as ChainId;
-		if let Some(src_client) = self.get_system_client(&src_chain_id) {
-			let hooks_address = match &src_client.protocol_contracts.hooks {
-				Some(hooks) => hooks.address(),
-				None => return Ok(None),
-			};
-
-			// Requirement 2: msg.params.refund must match source chain hooks contract address
-			if msg.params.refund != *hooks_address {
-				log::debug!(
-					target: &self.get_client().get_chain_name(),
-					"-[{}] ⏭️  Skipping Hooks.execute(): refund address {:?} != hooks address {:?}",
-					sub_display_format(SUB_LOG_TARGET),
-					msg.params.refund,
-					hooks_address
+		let src_client = match self.get_system_client(&src_chain_id) {
+			Some(client) => client,
+			None => {
+				br_primitives::log_and_capture!(
+					warn,
+					&self.get_client().get_chain_name(),
+					SUB_LOG_TARGET,
+					self.get_client().address().await,
+					"⚠️  Source chain client not found for chain id: {}. Skipping hook processing.",
+					src_chain_id
 				);
 				return Ok(None);
-			}
+			},
+		};
 
-			// Requirement 3: Decode variants and verify if the request is not processed or rollbacked
-			match Variants::abi_decode(&msg.params.variants) {
-				Ok(variants) => {
-					log::debug!(
-						target: &self.get_client().get_chain_name(),
-						"-[{}] ✅ Decoded variants: sender={:?}, receiver={:?}, max_tx_fee={}, message_len={}",
-						sub_display_format(SUB_LOG_TARGET),
-						variants.sender,
-						variants.receiver,
-						variants.max_tx_fee,
-						variants.message.len()
-					);
+		let hooks_address = match &src_client.protocol_contracts.hooks {
+			Some(hooks) => hooks.address(),
+			None => {
+				log::debug!(
+					target: &self.get_client().get_chain_name(),
+					"-[{}] ⏭️  Skipping hook processing: source chain has no hooks contract",
+					sub_display_format(SUB_LOG_TARGET)
+				);
+				return Ok(None);
+			},
+		};
 
-					if let Some(dst_hooks) = self.get_client().protocol_contracts.hooks.clone() {
-						let is_processed =
-							dst_hooks.processedRequests(msg.req_id.clone().into()).call().await?;
-						let is_rollbacked =
-							dst_hooks.rolledbackRequests(msg.req_id.clone().into()).call().await?;
-
-						if !is_processed && !is_rollbacked {
-							return Ok(Some(variants));
-						}
-					}
-				},
-				Err(e) => {
-					log::warn!(
-						target: &self.get_client().get_chain_name(),
-						"-[{}] ⚠️  Failed to decode variants, skipping Hooks.execute(): {}",
-						sub_display_format(SUB_LOG_TARGET),
-						e
-					);
-					return Ok(None);
-				},
-			}
-		} else {
-			br_primitives::log_and_capture!(
-				warn,
-				&self.get_client().get_chain_name(),
-				SUB_LOG_TARGET,
-				self.get_client().address().await,
-				"⚠️  Source chain client not found for chain id: {}. Skipping Hooks.execute().",
-				src_chain_id
+		// Validate refund address matches source chain hooks contract address
+		if msg.params.refund != *hooks_address {
+			log::debug!(
+				target: &self.get_client().get_chain_name(),
+				"-[{}] ⏭️  Skipping hook processing: refund address {:?} != hooks address {:?}",
+				sub_display_format(SUB_LOG_TARGET),
+				msg.params.refund,
+				hooks_address
 			);
+			return Ok(None);
+		}
+
+		// Decode variants
+		let variants = match Variants::abi_decode(&msg.params.variants) {
+			Ok(variants) => {
+				log::debug!(
+					target: &self.get_client().get_chain_name(),
+					"-[{}] ✅ Decoded variants: sender={:?}, receiver={:?}, max_tx_fee={}, message_len={}",
+					sub_display_format(SUB_LOG_TARGET),
+					variants.sender,
+					variants.receiver,
+					variants.max_tx_fee,
+					variants.message.len()
+				);
+				variants
+			},
+			Err(e) => {
+				log::warn!(
+					target: &self.get_client().get_chain_name(),
+					"-[{}] ⚠️  Failed to decode variants, skipping hook processing: {}",
+					sub_display_format(SUB_LOG_TARGET),
+					e
+				);
+				return Ok(None);
+			},
+		};
+
+		// Idempotency check on destination chain
+		if let Some(dst_hooks) = self.get_client().protocol_contracts.hooks.clone() {
+			let is_processed =
+				dst_hooks.processedRequests(msg.req_id.clone().into()).call().await?;
+			let is_rollbacked =
+				dst_hooks.rolledbackRequests(msg.req_id.clone().into()).call().await?;
+
+			if !is_processed && !is_rollbacked {
+				return Ok(Some(variants));
+			}
 		}
 
 		Ok(None)
+	}
+
+	/// Validates if hooks execute should be called for this socket message.
+	///
+	/// This method delegates to `should_process_hook()` for all validation checks.
+	///
+	/// # Returns
+	/// * `Ok(Some(Variants))` - If all checks pass and the hook should be executed.
+	/// * `Ok(None)` - If any check fails, indicating execution should be skipped.
+	/// * `Err(_)` - If an RPC error occurs during verification.
+	async fn should_execute_hook(&self, msg: &Socket_Message) -> Result<Option<Variants>> {
+		self.should_process_hook(msg, SocketEventStatus::Executed).await
 	}
 
 	/// Estimates the gas required for hook execution and calculates the fee in the bridged asset.
@@ -502,6 +537,82 @@ where
 		);
 
 		tx_request.set_gas_limit(gas);
+		Ok(())
+	}
+
+	/// Validates if hooks rollback should be called for this socket message.
+	///
+	/// This method delegates to `should_process_hook()` for all validation checks.
+	///
+	/// # Returns
+	/// * `Ok(Some(Variants))` - If all checks pass and the rollback should be executed.
+	/// * `Ok(None)` - If any check fails, indicating rollback should be skipped.
+	/// * `Err(_)` - If an RPC error occurs during verification.
+	async fn should_rollback_hook(&self, msg: &Socket_Message) -> Result<Option<Variants>> {
+		self.should_process_hook(msg, SocketEventStatus::Rollbacked).await
+	}
+
+	/// Executes the rollback hook on the destination chain.
+	///
+	/// This method constructs and sends the `Hooks.rollback()` transaction.
+	/// Unlike execute, rollback doesn't require fee estimation or oracle calls
+	/// as it's a simpler state update operation.
+	///
+	/// # Arguments
+	/// * `msg` - The socket message containing details of the failed cross-chain transfer.
+	/// * `variants` - The decoded variants containing execution parameters (sender, receiver, max_tx_fee, message).
+	///
+	/// # Returns
+	/// * `Ok(())` - If the transaction is successfully submitted or correctly skipped.
+	/// * `Err(_)` - If an error occurs during transaction building.
+	async fn rollback_hook(&self, msg: &Socket_Message, variants: Variants) -> Result<()> {
+		match &self.get_client().protocol_contracts.hooks {
+			Some(hooks) => {
+				log::info!(
+					target: &self.get_client().get_chain_name(),
+					"-[{}] 🔄 Calling Hooks.rollback() on chain {} for sequence: {}",
+					sub_display_format(SUB_LOG_TARGET),
+					self.get_client().metadata.id,
+					msg.req_id.sequence
+				);
+
+				// Build the Hooks.rollback() call
+				let tx_request = hooks
+					.rollback(msg.clone().into())
+					.into_transaction_request()
+					.with_from(self.get_client().address().await);
+
+				let metadata = HookMetadata::new(
+					variants.sender,
+					variants.receiver,
+					variants.max_tx_fee,
+					variants.message,
+				);
+
+				send_transaction(
+					self.get_client().clone(),
+					tx_request,
+					format!("{} (Hooks.rollback())", SUB_LOG_TARGET),
+					Arc::new(metadata),
+					self.debug_mode(),
+					self.handle(),
+				);
+
+				log::info!(
+					target: &self.get_client().get_chain_name(),
+					"-[{}] ✅ Hooks.rollback() transaction submitted for sequence: {}",
+					sub_display_format(SUB_LOG_TARGET),
+					msg.req_id.sequence
+				);
+			},
+			None => {
+				log::debug!(
+					target: &self.get_client().get_chain_name(),
+					"-[{}] ⏭️  Skipping Hooks.rollback(): no hooks contract configured",
+					sub_display_format(SUB_LOG_TARGET)
+				);
+			},
+		}
 		Ok(())
 	}
 

@@ -137,6 +137,24 @@ where
 						},
 					}
 				}
+				// Check if we should rollback the hook (Rollbacked status with valid requirements)
+				if let Some(variants) = self.should_rollback_hook(&msg).await? {
+					match self.rollback_hook(&msg, variants).await {
+						Ok(()) => (),
+						Err(error) => {
+							// we don't propagate the error to prevent hook rollback errors fail the entire relay process
+							br_primitives::log_and_capture!(
+								error,
+								&self.client.get_chain_name(),
+								SUB_LOG_TARGET,
+								self.client.address().await,
+								"❗️ Failed to rollback hook: {:?}",
+								error
+							);
+						},
+					}
+				}
+
 				if self.is_sequence_ended(&msg.req_id, &msg.ins_code, metadata.status).await? {
 					// do nothing if protocol sequence ended
 					return Ok(());
