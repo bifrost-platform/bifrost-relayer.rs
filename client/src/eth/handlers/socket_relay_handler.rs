@@ -1,24 +1,18 @@
 use std::{collections::BTreeMap, sync::Arc};
-use tokio::sync::RwLock;
 
 use alloy::{
 	network::{Network, TransactionBuilder},
 	primitives::{B256, ChainId, U256},
 	providers::{Provider, WalletProvider, fillers::TxFiller},
 	rpc::types::{Filter, Log},
-	sol_types::{SolEvent, SolType},
+	sol_types::SolEvent,
 };
 use array_bytes::Hexify;
 use eyre::Result;
 use sc_service::SpawnTaskHandle;
 use subxt::ext::subxt_core::utils::AccountId20;
-use subxt::{
-	OnlineClient, backend::legacy::LegacyRpcMethods, backend::rpc::RpcClient, utils::H256,
-};
 use tokio::sync::{broadcast::Receiver, mpsc::UnboundedSender};
 use tokio_stream::{StreamExt, wrappers::BroadcastStream};
-
-use bifrost_runtime::runtime_types::primitive_types::U256 as RuntimeU256;
 
 use br_primitives::{
 	bootstrap::BootstrapSharedData,
@@ -27,11 +21,11 @@ use br_primitives::{
 		errors::INVALID_CHAIN_ID,
 	},
 	contracts::socket::{
-		Socket_Struct::{Instruction, RequestID, Signatures, Socket_Message, Task_Params},
+		Socket_Struct::{Instruction, RequestID, Signatures, Socket_Message},
 		SocketContract::Socket,
 	},
 	eth::{BootstrapState, BuiltRelayTransaction, RelayDirection, SocketEventStatus},
-	substrate::{CustomConfig, SocketMessagesSubmission, bifrost_runtime},
+	substrate::{SocketMessagesSubmission, bifrost_runtime},
 	tx::{SocketRelayMetadata, XtRequestMessage, XtRequestMetadata, XtRequestSender},
 	utils::sub_display_format,
 };
@@ -41,6 +35,7 @@ use crate::{
 	eth::{
 		ClientMap, EthClient,
 		events::EventMessage,
+		handlers::SocketOnflightReceiver,
 		send_transaction,
 		traits::{BootstrapHandler, Handler, HookExecutor, SocketRelayBuilder},
 	},
@@ -48,21 +43,10 @@ use crate::{
 
 const SUB_LOG_TARGET: &str = "socket-handler";
 
-/// Represents a Standard transfer pending block confirmations.
-#[derive(Clone, Debug)]
-struct PendingStandardTransfer {
-	/// The asset index hash.
-	asset_index_hash: H256,
-	/// The sequence ID.
-	sequence_id: u128,
-	/// The Substrate block number when this transfer was received.
-	received_at_block: u64,
-}
-
 /// The essential task that handles `socket relay` related events.
 ///
 /// This handler listens for:
-/// 1. Substrate `TransferPolled` events from cccp-relay-queue pallet → triggers Accepted relay
+/// 1. TransferPolled messages from TransferPolledHandler → triggers Accepted relay
 /// 2. EVM Socket events (Executed, Accepted, etc.) → continues the relay sequence
 pub struct SocketRelayHandler<F, P, N: Network>
 where
@@ -71,14 +55,12 @@ where
 {
 	/// The `EthClient` to interact with the connected blockchain.
 	pub client: Arc<EthClient<F, P, N>>,
-	/// The Substrate client for storage queries and event subscription.
-	sub_client: OnlineClient<CustomConfig>,
-	/// The legacy RPC methods for querying best block.
-	sub_rpc: LegacyRpcMethods<CustomConfig>,
 	/// The unsigned transaction message sender.
 	xt_request_sender: Arc<XtRequestSender>,
 	/// The receiver that consumes new events from the block channel.
 	event_stream: BroadcastStream<EventMessage>,
+	/// The receiver for TransferPolled messages from SocketOnflightHandler.
+	onflight_receiver: SocketOnflightReceiver,
 	/// The entire clients instantiated in the system. <chain_id, Arc<EthClient>>
 	system_clients: Arc<ClientMap<F, P, N>>,
 	/// The bifrost client.
@@ -91,8 +73,6 @@ where
 	bootstrap_shared_data: Arc<BootstrapSharedData>,
 	/// Whether to enable debug mode.
 	debug_mode: bool,
-	/// Pending Standard transfers waiting for block confirmations.
-	pending_standard_transfers: Arc<RwLock<Vec<PendingStandardTransfer>>>,
 }
 
 #[async_trait::async_trait]
@@ -107,9 +87,6 @@ where
 			self.bootstrap().await?;
 		}
 		self.wait_for_all_chains_bootstrapped().await?;
-
-		// Subscribe to Substrate blocks for TransferPolled events
-		let mut sub_block_stream = self.sub_client.blocks().subscribe_best().await?;
 
 		loop {
 			tokio::select! {
@@ -158,16 +135,18 @@ where
 						},
 					}
 				},
-				// Handle Substrate events (TransferPolled)
-				sub_block = sub_block_stream.next() => {
-					if let Some(Ok(block)) = sub_block {
-						if let Err(e) = self.process_substrate_block(block).await {
+				// Handle TransferPolled messages from SocketOnflightHandler
+				onflight_msg = self.onflight_receiver.recv() => {
+					if let Some(msg) = onflight_msg {
+						if let Err(e) = self.process_onflight_message(msg.socket_message).await {
 							br_primitives::log_and_capture!(
 								error,
 								&self.client.get_chain_name(),
 								SUB_LOG_TARGET,
 								self.client.address().await,
-								"❗️ Error processing Substrate block: {:?}",
+								"❗️ Error processing TransferPolled: asset={}, seq={}, {:?}",
+								msg.asset_index_hash,
+								msg.sequence_id,
 								e
 							);
 						}
@@ -387,29 +366,24 @@ where
 	P: Provider<N> + 'static,
 {
 	/// Instantiates a new `SocketRelayHandler` instance.
-	pub async fn new(
+	pub fn new(
 		id: ChainId,
 		event_receiver: Receiver<EventMessage>,
+		onflight_receiver: SocketOnflightReceiver,
 		system_clients: Arc<ClientMap<F, P, N>>,
 		bifrost_client: Arc<EthClient<F, P, N>>,
-		sub_client: OnlineClient<CustomConfig>,
-		sub_rpc_url: String,
 		xt_request_sender: Arc<XtRequestSender>,
 		rollback_senders: Arc<BTreeMap<ChainId, Arc<UnboundedSender<Socket_Message>>>>,
 		handle: SpawnTaskHandle,
 		bootstrap_shared_data: Arc<BootstrapSharedData>,
 		debug_mode: bool,
-	) -> Result<Self> {
+	) -> Self {
 		let client = system_clients.get(&id).expect(INVALID_CHAIN_ID).clone();
 
-		let rpc_client = RpcClient::from_url(&sub_rpc_url).await?;
-		let sub_rpc = LegacyRpcMethods::<CustomConfig>::new(rpc_client);
-
-		Ok(Self {
+		Self {
 			event_stream: BroadcastStream::new(event_receiver),
 			client,
-			sub_client,
-			sub_rpc,
+			onflight_receiver,
 			system_clients,
 			bifrost_client,
 			xt_request_sender,
@@ -417,370 +391,12 @@ where
 			handle,
 			bootstrap_shared_data,
 			debug_mode,
-			pending_standard_transfers: Arc::new(RwLock::new(Vec::new())),
-		})
-	}
-
-	/// Process a Substrate block for TransferPolled events.
-	///
-	/// Only processes events where status is `OnFlight`, indicating the transfer
-	/// has reached quorum consensus and is ready for the next relay step.
-	///
-	/// For Fast transfers: process immediately.
-	/// For Standard transfers: wait for `block_confirmations` blocks before processing.
-	async fn process_substrate_block(
-		&self,
-		block: subxt::blocks::Block<CustomConfig, OnlineClient<CustomConfig>>,
-	) -> Result<()> {
-		use bifrost_runtime::runtime_types::pallet_cccp_relay_queue::{
-			TransferOption, TransferStatus,
-		};
-
-		let current_block_number = block.number() as u64;
-
-		// First, process any pending Standard transfers that have been confirmed
-		self.process_pending_standard_transfers(current_block_number).await;
-
-		let events = block.events().await?;
-
-		for event in events.iter() {
-			let event = match event {
-				Ok(e) => e,
-				Err(_) => continue,
-			};
-
-			// Check if this is a TransferPolled event from cccp_relay_queue pallet
-			if event.pallet_name() == "CccpRelayQueue" && event.variant_name() == "TransferPolled" {
-				// Decode the event
-				if let Ok(transfer_polled) =
-					event
-						.as_root_event::<bifrost_runtime::cccp_relay_queue::events::TransferPolled>(
-						) {
-					// Only process if status is OnFlight (quorum reached)
-					// Skip Pending status (still waiting for more votes)
-					let is_on_flight = matches!(transfer_polled.status, TransferStatus::OnFlight);
-					if !is_on_flight {
-						log::debug!(
-							target: &self.client.get_chain_name(),
-							"-[{}] TransferPolled with status {:?}, waiting for quorum (seq={:?})",
-							sub_display_format(SUB_LOG_TARGET),
-							transfer_polled.status,
-							transfer_polled.sequence_id,
-						);
-						continue;
-					}
-
-					let asset_index_hash = H256(transfer_polled.asset_index_hash.0);
-					let sequence_id = {
-						let u256 = transfer_polled.sequence_id;
-						u256.0[0] as u128 | ((u256.0[1] as u128) << 64)
-					};
-
-					// Check TransferOption: Fast or Standard
-					let is_fast = matches!(transfer_polled.option, TransferOption::Fast);
-
-					if is_fast {
-						// Fast transfer: process immediately
-						log::info!(
-							target: &self.client.get_chain_name(),
-							"-[{}] ⚡ TransferPolled (Fast) reached quorum: asset={}, seq={}",
-							sub_display_format(SUB_LOG_TARGET),
-							asset_index_hash,
-							sequence_id,
-						);
-
-						if let Err(e) =
-							self.process_transfer_polled(asset_index_hash, sequence_id).await
-						{
-							br_primitives::log_and_capture!(
-								error,
-								&self.client.get_chain_name(),
-								SUB_LOG_TARGET,
-								self.client.address().await,
-								"❗️ Error processing Fast TransferPolled: {:?}",
-								e
-							);
-						}
-					} else {
-						// Standard transfer: add to pending and wait for block confirmations
-						log::info!(
-							target: &self.client.get_chain_name(),
-							"-[{}] 📋 TransferPolled (Standard) reached quorum: asset={}, seq={}, waiting for {} block confirmations",
-							sub_display_format(SUB_LOG_TARGET),
-							asset_index_hash,
-							sequence_id,
-							self.client.metadata.block_confirmations,
-						);
-
-						let pending_transfer = PendingStandardTransfer {
-							asset_index_hash,
-							sequence_id,
-							received_at_block: current_block_number,
-						};
-
-						self.pending_standard_transfers.write().await.push(pending_transfer);
-					}
-				}
-			}
-		}
-
-		Ok(())
-	}
-
-	/// Process pending Standard transfers that have received enough block confirmations.
-	async fn process_pending_standard_transfers(&self, current_block_number: u64) {
-		let block_confirmations = self.client.metadata.block_confirmations;
-
-		// Collect transfers that are ready to be processed
-		let ready_transfers: Vec<PendingStandardTransfer> = {
-			let pending = self.pending_standard_transfers.read().await;
-			pending
-				.iter()
-				.filter(|t| {
-					current_block_number.saturating_sub(t.received_at_block) >= block_confirmations
-				})
-				.cloned()
-				.collect()
-		};
-
-		if ready_transfers.is_empty() {
-			return;
-		}
-
-		// Remove ready transfers from pending list
-		{
-			let mut pending = self.pending_standard_transfers.write().await;
-			pending.retain(|t| {
-				current_block_number.saturating_sub(t.received_at_block) < block_confirmations
-			});
-		}
-
-		// Process each ready transfer
-		for transfer in ready_transfers {
-			log::info!(
-				target: &self.client.get_chain_name(),
-				"-[{}] ✅ Standard transfer confirmed after {} blocks: asset={}, seq={}",
-				sub_display_format(SUB_LOG_TARGET),
-				current_block_number.saturating_sub(transfer.received_at_block),
-				transfer.asset_index_hash,
-				transfer.sequence_id,
-			);
-
-			if let Err(e) = self
-				.process_transfer_polled(transfer.asset_index_hash, transfer.sequence_id)
-				.await
-			{
-				br_primitives::log_and_capture!(
-					error,
-					&self.client.get_chain_name(),
-					SUB_LOG_TARGET,
-					self.client.address().await,
-					"❗️ Error processing Standard TransferPolled: {:?}",
-					e
-				);
-			}
 		}
 	}
 
-	/// Query OnFlightTransfers storage to get TransferInfo.
-	async fn query_on_flight_transfer(
-		&self,
-		asset_index_hash: H256,
-		sequence_id: u128,
-	) -> Result<Option<Vec<u8>>> {
-		// Query at best block
-		let best_hash = self.sub_rpc.chain_get_block_hash(None).await?.unwrap_or_default();
-		let storage = self.sub_client.storage().at(best_hash);
-
-		let transfer_info = storage
-			.fetch(&bifrost_runtime::storage().cccp_relay_queue().on_flight_transfers(
-				asset_index_hash,
-				RuntimeU256([sequence_id as u64, (sequence_id >> 64) as u64, 0, 0]),
-			))
-			.await?;
-
-		Ok(transfer_info.map(|info| info.socket_message))
-	}
-
-	/// Recover pending Standard transfers from OnFlightTransfers storage during bootstrap.
-	///
-	/// This ensures that Standard transfers waiting for block confirmations are not lost
-	/// if the relayer restarts. It queries all OnFlightTransfers with:
-	/// - status = OnFlight (quorum reached)
-	/// - option = Standard (requires block confirmations)
-	async fn recover_pending_standard_transfers(&self) -> Result<()> {
-		use bifrost_runtime::runtime_types::pallet_cccp_relay_queue::{
-			TransferOption, TransferStatus,
-		};
-
-		// Get best block hash and number
-		let best_hash = self.sub_rpc.chain_get_block_hash(None).await?.unwrap_or_default();
-		let best_block = self.sub_client.blocks().at(best_hash).await?;
-		let current_block_number = best_block.number() as u64;
-
-		let storage = self.sub_client.storage().at(best_hash);
-
-		// Iterate over all OnFlightTransfers
-		let storage_query =
-			bifrost_runtime::storage().cccp_relay_queue().on_flight_transfers_iter();
-		let mut iter = storage.iter(storage_query).await?;
-
-		let mut recovered_count = 0u32;
-
-		while let Some(Ok(kv)) = iter.next().await {
-			let transfer_info = kv.value;
-
-			// Only process Standard transfers that are OnFlight
-			let is_standard = matches!(transfer_info.option, TransferOption::Standard);
-			let is_on_flight = matches!(transfer_info.status, TransferStatus::OnFlight);
-
-			if !is_standard || !is_on_flight {
-				continue;
-			}
-
-			// Decode the socket message to extract asset_index_hash and sequence_id
-			let msg = match self.decode_socket_message(&transfer_info.socket_message) {
-				Ok(msg) => msg,
-				Err(e) => {
-					log::warn!(
-						target: &self.client.get_chain_name(),
-						"-[{}] Failed to decode socket message during recovery: {:?}",
-						sub_display_format(SUB_LOG_TARGET),
-						e,
-					);
-					continue;
-				},
-			};
-
-			let asset_index_hash = H256(msg.params.tokenIDX0.0);
-			let sequence_id = msg.req_id.sequence;
-
-			log::info!(
-				target: &self.client.get_chain_name(),
-				"-[{}] 🔄 Recovering Standard transfer: asset={}, seq={}, block={}",
-				sub_display_format(SUB_LOG_TARGET),
-				asset_index_hash,
-				sequence_id,
-				current_block_number,
-			);
-
-			// Add to pending_standard_transfers
-			// Use current block as received_at_block since we don't know the original block
-			let pending_transfer = PendingStandardTransfer {
-				asset_index_hash,
-				sequence_id,
-				received_at_block: current_block_number,
-			};
-
-			self.pending_standard_transfers.write().await.push(pending_transfer);
-			recovered_count += 1;
-		}
-
-		if recovered_count > 0 {
-			log::info!(
-				target: &self.client.get_chain_name(),
-				"-[{}] ✅ Recovered {} pending Standard transfers from storage",
-				sub_display_format(SUB_LOG_TARGET),
-				recovered_count,
-			);
-		}
-
-		Ok(())
-	}
-
-	/// Decode socket message bytes to Socket_Message struct.
-	fn decode_socket_message(&self, bytes: &[u8]) -> Result<Socket_Message> {
-		use alloy::sol_types::sol_data;
-
-		// Socket_Message ABI structure:
-		// tuple(tuple(bytes4,uint64,uint128), uint8, tuple(bytes4,bytes16), tuple(bytes32,bytes32,address,address,uint256,bytes))
-		type SocketMessageTuple = (
-			(sol_data::FixedBytes<4>, sol_data::Uint<64>, sol_data::Uint<128>), // RequestID
-			sol_data::Uint<8>,                                                  // status
-			(sol_data::FixedBytes<4>, sol_data::FixedBytes<16>),                // Instruction
-			(
-				sol_data::FixedBytes<32>,
-				sol_data::FixedBytes<32>,
-				sol_data::Address,
-				sol_data::Address,
-				sol_data::Uint<256>,
-				sol_data::Bytes,
-			), // Params
-		);
-
-		let decoded = <SocketMessageTuple as SolType>::abi_decode(bytes)
-			.map_err(|e| eyre::eyre!("Failed to decode socket message: {}", e))?;
-
-		let (req_id_tuple, status, ins_code_tuple, params_tuple) = decoded;
-
-		let req_id = RequestID {
-			ChainIndex: req_id_tuple.0.into(),
-			round_id: req_id_tuple.1.try_into().unwrap_or(0),
-			sequence: req_id_tuple.2,
-		};
-
-		let ins_code =
-			Instruction { ChainIndex: ins_code_tuple.0.into(), RBCmethod: ins_code_tuple.1.into() };
-
-		let params = Task_Params {
-			tokenIDX0: params_tuple.0,
-			tokenIDX1: params_tuple.1,
-			refund: params_tuple.2,
-			to: params_tuple.3,
-			amount: params_tuple.4,
-			variants: params_tuple.5.into(),
-		};
-
-		Ok(Socket_Message { req_id, status: status.try_into().unwrap_or(0), ins_code, params })
-	}
-
-	/// Process TransferPolled event from cccp-relay-queue pallet.
+	/// Process onflight message from SocketOnflightHandler.
 	/// This triggers the Accepted relay after on_flight_poll succeeds.
-	async fn process_transfer_polled(
-		&self,
-		asset_index_hash: H256,
-		sequence_id: u128,
-	) -> Result<()> {
-		log::info!(
-			target: &self.client.get_chain_name(),
-			"-[{}] 📡 TransferPolled event detected: asset={}, seq={}",
-			sub_display_format(SUB_LOG_TARGET),
-			asset_index_hash,
-			sequence_id,
-		);
-
-		// Query storage to get the socket message
-		let socket_message_bytes =
-			match self.query_on_flight_transfer(asset_index_hash, sequence_id).await? {
-				Some(bytes) => bytes,
-				None => {
-					log::warn!(
-						target: &self.client.get_chain_name(),
-						"-[{}] Transfer not found in OnFlightTransfers: asset={}, seq={}",
-						sub_display_format(SUB_LOG_TARGET),
-						asset_index_hash,
-						sequence_id,
-					);
-					return Ok(());
-				},
-			};
-
-		// Decode the socket message
-		let msg = match self.decode_socket_message(&socket_message_bytes) {
-			Ok(msg) => msg,
-			Err(e) => {
-				br_primitives::log_and_capture!(
-					error,
-					&self.client.get_chain_name(),
-					SUB_LOG_TARGET,
-					self.client.address().await,
-					"❗️ Failed to decode socket message: {:?}",
-					e
-				);
-				return Ok(());
-			},
-		};
-
+	async fn process_onflight_message(&self, msg: Socket_Message) -> Result<()> {
 		let src_chain_id = Into::<u32>::into(msg.req_id.ChainIndex) as ChainId;
 		let dst_chain_id = Into::<u32>::into(msg.ins_code.ChainIndex) as ChainId;
 		let is_inbound = self.is_inbound_sequence(dst_chain_id);
@@ -1098,16 +714,6 @@ where
 			self.process_confirmed_log(&log, true).await?;
 		}
 
-		// Recover pending Standard transfers from OnFlightTransfers storage
-		if let Err(e) = self.recover_pending_standard_transfers().await {
-			log::warn!(
-				target: &self.client.get_chain_name(),
-				"-[{}] Failed to recover pending Standard transfers: {:?}",
-				sub_display_format(SUB_LOG_TARGET),
-				e,
-			);
-		}
-
 		self.set_bootstrap_state(BootstrapState::NormalStart).await;
 		log::info!(
 			target: &self.client.get_chain_name(),
@@ -1219,10 +825,12 @@ mod tests {
 		providers::ProviderBuilder,
 		sol_types::SolEvent,
 	};
-	use br_primitives::contracts::socket::SocketContract::{self, Socket};
+	use array_bytes::Hexify;
+	use br_primitives::contracts::socket::{
+		Socket_Struct::RequestID,
+		SocketContract::{self, Socket},
+	};
 	use std::sync::Arc;
-
-	use super::*;
 
 	#[tokio::test]
 	async fn test_is_already_done() {
