@@ -344,7 +344,27 @@ where
 		}
 
 		// Estimate gas and fee on destination chain
-		let gas = self.get_client().estimate_gas(tx_request.clone()).await?;
+		let gas = match self.get_client().estimate_gas(tx_request.clone()).await {
+			Ok(gas) => gas,
+			Err(e) => match e.as_error_resp() {
+				Some(error_resp) => {
+					if let Some(_revert_data) = error_resp.as_revert_data() {
+						// we don't propagate the error if a contract reverted the estimated gas request
+						br_primitives::log_and_capture!(
+							warn,
+							&self.get_client().get_chain_name(),
+							SUB_LOG_TARGET,
+							self.get_client().address().await,
+							"⚠️  Hook.execute() estimated gas reverted: {}",
+							e.to_string()
+						);
+						return Ok(());
+					}
+					return Err(e.into());
+				},
+				None => return Err(e.into()),
+			},
+		};
 		let gas_price = self.get_client().get_gas_price().await?;
 		// DNC: Destination Chain's Native Currency
 		let estimated_fee_in_dnc = U256::from(gas as u128 * gas_price);
@@ -366,22 +386,18 @@ where
 				// Check if the error is a revert (on-chain oracle failure)
 				// Revert means the oracle is stale or not working, skip execution
 				if let Some(_revert_data) = e.as_revert_data() {
-					log::warn!(
-						target: &self.get_client().get_chain_name(),
-						"-[{}] ⚠️  Destination native oracle reverted (oracle: {:?}). Skipping hook execution.",
-						sub_display_format(SUB_LOG_TARGET),
-						dnc_oracle_address
+					br_primitives::log_and_capture!(
+						warn,
+						&self.get_client().get_chain_name(),
+						SUB_LOG_TARGET,
+						self.get_client().address().await,
+						"⚠️  Destination native oracle reverted (oracle: {:?}). Skipping hook execution. Error: {}",
+						dnc_oracle_address,
+						e.to_string()
 					);
 					return Ok(());
 				}
 				// Not a revert - this is an RPC/network error, propagate it
-				log::error!(
-					target: &self.get_client().get_chain_name(),
-					"-[{}] ❌ RPC error fetching destination native oracle price (oracle: {:?}): {}",
-					sub_display_format(SUB_LOG_TARGET),
-					dnc_oracle_address,
-					e
-				);
 				return Err(e.into());
 			},
 		};
@@ -414,22 +430,18 @@ where
 			Err(e) => {
 				// Check if the error is a revert (on-chain oracle failure)
 				if let Some(_revert_data) = e.as_revert_data() {
-					log::warn!(
-						target: &self.get_client().get_chain_name(),
-						"-[{}] ⚠️  Bridged asset oracle reverted (token: {:?}). Skipping hook execution.",
-						sub_display_format(SUB_LOG_TARGET),
-						msg.params.tokenIDX0
+					br_primitives::log_and_capture!(
+						warn,
+						&self.get_client().get_chain_name(),
+						SUB_LOG_TARGET,
+						self.get_client().address().await,
+						"⚠️  Bridged asset oracle reverted (token: {:?}). Skipping hook execution. Error: {}",
+						msg.params.tokenIDX0,
+						e.to_string()
 					);
 					return Ok(()); // Skip execution, don't submit transaction
 				}
 				// Not a revert - this is an RPC/network error, propagate it
-				log::error!(
-					target: &self.get_client().get_chain_name(),
-					"-[{}] ❌ RPC error fetching bridged asset oracle price (token: {:?}): {}",
-					sub_display_format(SUB_LOG_TARGET),
-					msg.params.tokenIDX0,
-					e
-				);
 				return Err(e.into());
 			},
 		};

@@ -122,7 +122,20 @@ where
 				}
 				// Check if we should execute the hook (Executed status with valid requirements)
 				if let Some(variants) = self.should_execute_hook(&msg).await? {
-					self.execute_hook(&msg, variants).await?;
+					match self.execute_hook(&msg, variants).await {
+						Ok(()) => (),
+						Err(error) => {
+							// we don't propagate the error to prevent hook execution errors fail the entire relay process
+							br_primitives::log_and_capture!(
+								error,
+								&self.client.get_chain_name(),
+								SUB_LOG_TARGET,
+								self.client.address().await,
+								"❗️ Failed to execute hook: {:?}",
+								error
+							);
+						},
+					}
 				}
 				if self.is_sequence_ended(&msg.req_id, &msg.ins_code, metadata.status).await? {
 					// do nothing if protocol sequence ended
