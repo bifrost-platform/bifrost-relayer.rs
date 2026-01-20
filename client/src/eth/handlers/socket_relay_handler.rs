@@ -60,9 +60,9 @@ where
 	/// The `EthClient` to interact with the connected blockchain.
 	pub client: Arc<EthClient<F, P, N>>,
 	/// The Substrate client for storage queries and event subscription.
-	sub_client: Option<OnlineClient<CustomConfig>>,
+	sub_client: OnlineClient<CustomConfig>,
 	/// The legacy RPC methods for querying best block.
-	sub_rpc: Option<LegacyRpcMethods<CustomConfig>>,
+	sub_rpc: LegacyRpcMethods<CustomConfig>,
 	/// The unsigned transaction message sender.
 	xt_request_sender: Arc<XtRequestSender>,
 	/// The receiver that consumes new events from the block channel.
@@ -95,11 +95,7 @@ where
 		self.wait_for_all_chains_bootstrapped().await?;
 
 		// Subscribe to Substrate blocks for TransferPolled events
-		let mut sub_block_stream = if let Some(sub_client) = &self.sub_client {
-			Some(sub_client.blocks().subscribe_best().await?)
-		} else {
-			None
-		};
+		let mut sub_block_stream = self.sub_client.blocks().subscribe_best().await?;
 
 		loop {
 			tokio::select! {
@@ -149,12 +145,7 @@ where
 					}
 				},
 				// Handle Substrate events (TransferPolled)
-				sub_block = async {
-					match &mut sub_block_stream {
-						Some(stream) => stream.next().await,
-						None => std::future::pending().await,
-					}
-				} => {
+				sub_block = sub_block_stream.next() => {
 					if let Some(Ok(block)) = sub_block {
 						if let Err(e) = self.process_substrate_block(block).await {
 							br_primitives::log_and_capture!(
@@ -387,8 +378,8 @@ where
 		event_receiver: Receiver<EventMessage>,
 		system_clients: Arc<ClientMap<F, P, N>>,
 		bifrost_client: Arc<EthClient<F, P, N>>,
-		sub_client: Option<OnlineClient<CustomConfig>>,
-		sub_rpc_url: Option<String>,
+		sub_client: OnlineClient<CustomConfig>,
+		sub_rpc_url: String,
 		xt_request_sender: Arc<XtRequestSender>,
 		rollback_senders: Arc<BTreeMap<ChainId, Arc<UnboundedSender<Socket_Message>>>>,
 		handle: SpawnTaskHandle,
@@ -397,13 +388,8 @@ where
 	) -> Result<Self> {
 		let client = system_clients.get(&id).expect(INVALID_CHAIN_ID).clone();
 
-		let sub_rpc = match sub_rpc_url {
-			Some(url) => {
-				let rpc_client = RpcClient::from_url(&url).await?;
-				Some(LegacyRpcMethods::<CustomConfig>::new(rpc_client))
-			},
-			None => None,
-		};
+		let rpc_client = RpcClient::from_url(&sub_rpc_url).await?;
+		let sub_rpc = LegacyRpcMethods::<CustomConfig>::new(rpc_client);
 
 		Ok(Self {
 			event_stream: BroadcastStream::new(event_receiver),
