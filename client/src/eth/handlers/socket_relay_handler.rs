@@ -5,14 +5,19 @@ use alloy::{
 	primitives::{B256, ChainId, U256},
 	providers::{Provider, WalletProvider, fillers::TxFiller},
 	rpc::types::{Filter, Log},
-	sol_types::SolEvent,
+	sol_types::{SolEvent, SolType},
 };
 use array_bytes::Hexify;
 use eyre::Result;
 use sc_service::SpawnTaskHandle;
 use subxt::ext::subxt_core::utils::AccountId20;
+use subxt::{
+	OnlineClient, backend::legacy::LegacyRpcMethods, backend::rpc::RpcClient, utils::H256,
+};
 use tokio::sync::{broadcast::Receiver, mpsc::UnboundedSender};
 use tokio_stream::{StreamExt, wrappers::BroadcastStream};
+
+use bifrost_runtime::runtime_types::primitive_types::U256 as RuntimeU256;
 
 use br_primitives::{
 	bootstrap::BootstrapSharedData,
@@ -21,11 +26,11 @@ use br_primitives::{
 		errors::INVALID_CHAIN_ID,
 	},
 	contracts::socket::{
-		Socket_Struct::{Instruction, RequestID, Signatures, Socket_Message},
+		Socket_Struct::{Instruction, RequestID, Signatures, Socket_Message, Task_Params},
 		SocketContract::Socket,
 	},
 	eth::{BootstrapState, BuiltRelayTransaction, RelayDirection, SocketEventStatus},
-	substrate::{SocketMessagesSubmission, bifrost_runtime},
+	substrate::{CustomConfig, SocketMessagesSubmission, bifrost_runtime},
 	tx::{SocketRelayMetadata, XtRequestMessage, XtRequestMetadata, XtRequestSender},
 	utils::sub_display_format,
 };
@@ -43,6 +48,10 @@ use crate::{
 const SUB_LOG_TARGET: &str = "socket-handler";
 
 /// The essential task that handles `socket relay` related events.
+///
+/// This handler listens for:
+/// 1. Substrate `TransferPolled` events from cccp-relay-queue pallet → triggers Accepted relay
+/// 2. EVM Socket events (Executed, Accepted, etc.) → continues the relay sequence
 pub struct SocketRelayHandler<F, P, N: Network>
 where
 	F: TxFiller<N> + WalletProvider<N> + 'static,
@@ -50,6 +59,10 @@ where
 {
 	/// The `EthClient` to interact with the connected blockchain.
 	pub client: Arc<EthClient<F, P, N>>,
+	/// The Substrate client for storage queries and event subscription.
+	sub_client: Option<OnlineClient<CustomConfig>>,
+	/// The legacy RPC methods for querying best block.
+	sub_rpc: Option<LegacyRpcMethods<CustomConfig>>,
 	/// The unsigned transaction message sender.
 	xt_request_sender: Arc<XtRequestSender>,
 	/// The receiver that consumes new events from the block channel.
@@ -81,19 +94,76 @@ where
 		}
 		self.wait_for_all_chains_bootstrapped().await?;
 
-		while let Some(Ok(msg)) = self.event_stream.next().await {
-			log::info!(
-				target: &self.client.get_chain_name(),
-				"-[{}] 📦 Imported #{:?} with target logs({:?})",
-				sub_display_format(SUB_LOG_TARGET),
-				msg.block_number,
-				msg.event_logs.len(),
-			);
+		// Subscribe to Substrate blocks for TransferPolled events
+		let mut sub_block_stream = if let Some(sub_client) = &self.sub_client {
+			Some(sub_client.blocks().subscribe_best().await?)
+		} else {
+			None
+		};
 
-			for log in &msg.event_logs {
-				if self.is_target_contract(log) && self.is_target_event(log.topic0()) {
-					self.process_confirmed_log(log, false).await?;
-				}
+		loop {
+			tokio::select! {
+				// Handle EVM events
+				evm_msg = self.event_stream.next() => {
+					match evm_msg {
+						Some(Ok(msg)) => {
+							log::info!(
+								target: &self.client.get_chain_name(),
+								"-[{}] 📦 Imported #{:?} with target logs({:?})",
+								sub_display_format(SUB_LOG_TARGET),
+								msg.block_number,
+								msg.event_logs.len(),
+							);
+
+							for log in &msg.event_logs {
+								if self.is_target_contract(log) && self.is_target_event(log.topic0()) {
+									if let Err(e) = self.process_confirmed_log(log, false).await {
+										log::error!(
+											target: &self.client.get_chain_name(),
+											"-[{}] Error processing EVM log: {:?}",
+											sub_display_format(SUB_LOG_TARGET),
+											e,
+										);
+									}
+								}
+							}
+						},
+						Some(Err(e)) => {
+							log::warn!(
+								target: &self.client.get_chain_name(),
+								"-[{}] EVM event stream error: {:?}",
+								sub_display_format(SUB_LOG_TARGET),
+								e,
+							);
+						},
+						None => {
+							log::info!(
+								target: &self.client.get_chain_name(),
+								"-[{}] EVM event stream ended",
+								sub_display_format(SUB_LOG_TARGET),
+							);
+							break;
+						},
+					}
+				},
+				// Handle Substrate events (TransferPolled)
+				sub_block = async {
+					match &mut sub_block_stream {
+						Some(stream) => stream.next().await,
+						None => std::future::pending().await,
+					}
+				} => {
+					if let Some(Ok(block)) = sub_block {
+						if let Err(e) = self.process_substrate_block(block).await {
+							log::error!(
+								target: &self.client.get_chain_name(),
+								"-[{}] Error processing Substrate block: {:?}",
+								sub_display_format(SUB_LOG_TARGET),
+								e,
+							);
+						}
+					}
+				},
 			}
 		}
 
@@ -106,9 +176,22 @@ where
 				let decoded_socket = decoded_log.inner.data;
 
 				let msg = decoded_socket.msg.clone();
+				let status = SocketEventStatus::from(msg.status);
+
+				// Skip Requested status - now handled by TransferPolled from Substrate
+				if status == SocketEventStatus::Requested {
+					log::debug!(
+						target: &self.client.get_chain_name(),
+						"-[{}] Skipping Requested status (handled by TransferPolled): seq={}",
+						sub_display_format(SUB_LOG_TARGET),
+						msg.req_id.sequence,
+					);
+					return Ok(());
+				}
+
 				let metadata = SocketRelayMetadata::new(
 					self.is_inbound_sequence(Into::<u32>::into(msg.ins_code.ChainIndex) as ChainId),
-					SocketEventStatus::from(msg.status),
+					status,
 					msg.req_id.sequence,
 					Into::<u32>::into(msg.req_id.ChainIndex) as ChainId,
 					Into::<u32>::into(msg.ins_code.ChainIndex) as ChainId,
@@ -295,22 +378,34 @@ where
 	P: Provider<N> + 'static,
 {
 	/// Instantiates a new `SocketRelayHandler` instance.
-	pub fn new(
+	pub async fn new(
 		id: ChainId,
 		event_receiver: Receiver<EventMessage>,
 		system_clients: Arc<ClientMap<F, P, N>>,
 		bifrost_client: Arc<EthClient<F, P, N>>,
+		sub_client: Option<OnlineClient<CustomConfig>>,
+		sub_rpc_url: Option<String>,
 		xt_request_sender: Arc<XtRequestSender>,
 		rollback_senders: Arc<BTreeMap<ChainId, Arc<UnboundedSender<Socket_Message>>>>,
 		handle: SpawnTaskHandle,
 		bootstrap_shared_data: Arc<BootstrapSharedData>,
 		debug_mode: bool,
-	) -> Self {
+	) -> Result<Self> {
 		let client = system_clients.get(&id).expect(INVALID_CHAIN_ID).clone();
 
-		Self {
+		let sub_rpc = match sub_rpc_url {
+			Some(url) => {
+				let rpc_client = RpcClient::from_url(&url).await?;
+				Some(LegacyRpcMethods::<CustomConfig>::new(rpc_client))
+			},
+			None => None,
+		};
+
+		Ok(Self {
 			event_stream: BroadcastStream::new(event_receiver),
 			client,
+			sub_client,
+			sub_rpc,
 			system_clients,
 			bifrost_client,
 			xt_request_sender,
@@ -318,7 +413,219 @@ where
 			handle,
 			bootstrap_shared_data,
 			debug_mode,
+		})
+	}
+
+	/// Process a Substrate block for TransferPolled events.
+	async fn process_substrate_block(
+		&self,
+		block: subxt::blocks::Block<CustomConfig, OnlineClient<CustomConfig>>,
+	) -> Result<()> {
+		let events = block.events().await?;
+
+		for event in events.iter() {
+			let event = match event {
+				Ok(e) => e,
+				Err(_) => continue,
+			};
+
+			// Check if this is a TransferPolled event from cccp_relay_queue pallet
+			if event.pallet_name() == "CccpRelayQueue" && event.variant_name() == "TransferPolled" {
+				// Decode the event
+				if let Ok(transfer_polled) =
+					event
+						.as_root_event::<bifrost_runtime::cccp_relay_queue::events::TransferPolled>(
+						) {
+					let asset_index_hash = H256(transfer_polled.asset_index_hash.0);
+					let sequence_id = {
+						let u256 = transfer_polled.sequence_id;
+						u256.0[0] as u128 | ((u256.0[1] as u128) << 64)
+					};
+
+					if let Err(e) =
+						self.process_transfer_polled(asset_index_hash, sequence_id).await
+					{
+						log::error!(
+							target: &self.client.get_chain_name(),
+							"-[{}] Error processing TransferPolled: {:?}",
+							sub_display_format(SUB_LOG_TARGET),
+							e,
+						);
+					}
+				}
+			}
 		}
+
+		Ok(())
+	}
+
+	/// Query OnFlightTransfers storage to get TransferInfo.
+	async fn query_on_flight_transfer(
+		&self,
+		asset_index_hash: H256,
+		sequence_id: u128,
+	) -> Result<Option<Vec<u8>>> {
+		let sub_client = match self.sub_client.as_ref() {
+			Some(client) => client,
+			None => return Ok(None),
+		};
+		let sub_rpc = match self.sub_rpc.as_ref() {
+			Some(rpc) => rpc,
+			None => return Ok(None),
+		};
+
+		// Query at best block
+		let best_hash = sub_rpc.chain_get_block_hash(None).await?.unwrap_or_default();
+		let storage = sub_client.storage().at(best_hash);
+
+		let transfer_info = storage
+			.fetch(&bifrost_runtime::storage().cccp_relay_queue().on_flight_transfers(
+				asset_index_hash,
+				RuntimeU256([sequence_id as u64, (sequence_id >> 64) as u64, 0, 0]),
+			))
+			.await?;
+
+		Ok(transfer_info.map(|info| info.socket_message))
+	}
+
+	/// Decode socket message bytes to Socket_Message struct.
+	fn decode_socket_message(&self, bytes: &[u8]) -> Result<Socket_Message> {
+		use alloy::sol_types::sol_data;
+
+		// Socket_Message ABI structure:
+		// tuple(tuple(bytes4,uint64,uint128), uint8, tuple(bytes4,bytes16), tuple(bytes32,bytes32,address,address,uint256,bytes))
+		type SocketMessageTuple = (
+			(sol_data::FixedBytes<4>, sol_data::Uint<64>, sol_data::Uint<128>), // RequestID
+			sol_data::Uint<8>,                                                  // status
+			(sol_data::FixedBytes<4>, sol_data::FixedBytes<16>),                // Instruction
+			(
+				sol_data::FixedBytes<32>,
+				sol_data::FixedBytes<32>,
+				sol_data::Address,
+				sol_data::Address,
+				sol_data::Uint<256>,
+				sol_data::Bytes,
+			), // Params
+		);
+
+		let decoded = <SocketMessageTuple as SolType>::abi_decode(bytes)
+			.map_err(|e| eyre::eyre!("Failed to decode socket message: {}", e))?;
+
+		let (req_id_tuple, status, ins_code_tuple, params_tuple) = decoded;
+
+		let req_id = RequestID {
+			ChainIndex: req_id_tuple.0.into(),
+			round_id: req_id_tuple.1.try_into().unwrap_or(0),
+			sequence: req_id_tuple.2,
+		};
+
+		let ins_code =
+			Instruction { ChainIndex: ins_code_tuple.0.into(), RBCmethod: ins_code_tuple.1.into() };
+
+		let params = Task_Params {
+			tokenIDX0: params_tuple.0,
+			tokenIDX1: params_tuple.1,
+			refund: params_tuple.2,
+			to: params_tuple.3,
+			amount: params_tuple.4,
+			variants: params_tuple.5.into(),
+		};
+
+		Ok(Socket_Message { req_id, status: status.try_into().unwrap_or(0), ins_code, params })
+	}
+
+	/// Process TransferPolled event from cccp-relay-queue pallet.
+	/// This triggers the Accepted relay after on_flight_poll succeeds.
+	async fn process_transfer_polled(
+		&self,
+		asset_index_hash: H256,
+		sequence_id: u128,
+	) -> Result<()> {
+		log::info!(
+			target: &self.client.get_chain_name(),
+			"-[{}] 📡 TransferPolled event detected: asset={}, seq={}",
+			sub_display_format(SUB_LOG_TARGET),
+			asset_index_hash,
+			sequence_id,
+		);
+
+		// Query storage to get the socket message
+		let socket_message_bytes =
+			match self.query_on_flight_transfer(asset_index_hash, sequence_id).await? {
+				Some(bytes) => bytes,
+				None => {
+					log::warn!(
+						target: &self.client.get_chain_name(),
+						"-[{}] Transfer not found in OnFlightTransfers: asset={}, seq={}",
+						sub_display_format(SUB_LOG_TARGET),
+						asset_index_hash,
+						sequence_id,
+					);
+					return Ok(());
+				},
+			};
+
+		// Decode the socket message
+		let msg = match self.decode_socket_message(&socket_message_bytes) {
+			Ok(msg) => msg,
+			Err(e) => {
+				log::error!(
+					target: &self.client.get_chain_name(),
+					"-[{}] Failed to decode socket message: {:?}",
+					sub_display_format(SUB_LOG_TARGET),
+					e,
+				);
+				return Ok(());
+			},
+		};
+
+		let src_chain_id = Into::<u32>::into(msg.req_id.ChainIndex) as ChainId;
+		let dst_chain_id = Into::<u32>::into(msg.ins_code.ChainIndex) as ChainId;
+		let is_inbound = self.is_inbound_sequence(dst_chain_id);
+
+		let metadata = SocketRelayMetadata::new(
+			is_inbound,
+			SocketEventStatus::Requested, // Original status was Requested
+			msg.req_id.sequence,
+			src_chain_id,
+			dst_chain_id,
+			msg.params.to,
+			false,
+		);
+
+		// Check if selected relayer
+		if !self.is_selected_relayer(&U256::from(msg.req_id.round_id)).await? {
+			log::debug!(
+				target: &self.client.get_chain_name(),
+				"-[{}] Not selected relayer for round {}, skipping",
+				sub_display_format(SUB_LOG_TARGET),
+				msg.req_id.round_id,
+			);
+			return Ok(());
+		}
+
+		// Check if sequence already ended
+		if self.is_sequence_ended(&msg.req_id, &msg.ins_code, metadata.status).await? {
+			log::debug!(
+				target: &self.client.get_chain_name(),
+				"-[{}] Sequence already ended, skipping",
+				sub_display_format(SUB_LOG_TARGET),
+			);
+			return Ok(());
+		}
+
+		log::info!(
+			target: &self.client.get_chain_name(),
+			"-[{}] 🚀 Processing TransferPolled relay: {}",
+			sub_display_format(SUB_LOG_TARGET),
+			metadata,
+		);
+
+		// Submit BRP outbound request if applicable
+		self.submit_brp_outbound_request(msg.clone(), metadata.clone()).await?;
+
+		// Send socket message (build and send Accepted transaction)
+		self.send_socket_message(msg, metadata, is_inbound).await
 	}
 
 	/// Sends the `SocketMessage` to the target chain channel.

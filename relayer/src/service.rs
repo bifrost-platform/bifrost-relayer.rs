@@ -193,7 +193,7 @@ pub async fn relay(config: Configuration) -> Result<TaskManager, ServiceError> {
 
 	let debug_mode =
 		if let Some(system) = system { system.debug_mode.unwrap_or(false) } else { false };
-	let substrate_deps = SubstrateDeps::new(bfc_client.clone(), &task_manager);
+	let substrate_deps = SubstrateDeps::new(bfc_client.clone(), &task_manager).await;
 	let periodic_deps = PeriodicDeps::new(
 		bootstrap_shared_data.clone(),
 		migration_sequence.clone(),
@@ -213,7 +213,8 @@ pub async fn relay(config: Configuration) -> Result<TaskManager, ServiceError> {
 		periodic_deps.rollback_senders.clone(),
 		&task_manager,
 		debug_mode,
-	);
+	)
+	.await;
 	let btc_deps = BtcDeps::new(
 		&config,
 		keypair_storage.clone(),
@@ -258,7 +259,8 @@ where
 		mut presubmitter,
 		..
 	} = periodic_deps;
-	let HandlerDeps { socket_relay_handlers, roundup_relay_handlers } = handler_deps;
+	let HandlerDeps { socket_relay_handlers, socket_queue_pollers, roundup_relay_handlers } =
+		handler_deps;
 	let SubstrateDeps { mut unsigned_tx_manager, .. } = substrate_deps;
 	let BtcDeps {
 		mut outbound,
@@ -389,6 +391,28 @@ where
 					let report = handler.run().await;
 					let log_msg = format!(
 						"socket relay handler({}) stopped: {:?}\nRestarting immediately...",
+						handler.client.get_chain_name(),
+						report
+					);
+					log::error!("{log_msg}");
+					sentry::capture_message(&log_msg, sentry::Level::Error);
+				}
+			},
+		);
+	});
+
+	// spawn socket queue pollers
+	socket_queue_pollers.into_iter().for_each(|mut handler| {
+		task_manager.spawn_essential_handle().spawn(
+			Box::leak(
+				format!("{}-socket-queue-poller", handler.client.get_chain_name()).into_boxed_str(),
+			),
+			Some("handlers"),
+			async move {
+				loop {
+					let report = handler.run().await;
+					let log_msg = format!(
+						"socket queue poller({}) stopped: {:?}\nRestarting immediately...",
 						handler.client.get_chain_name(),
 						report
 					);
