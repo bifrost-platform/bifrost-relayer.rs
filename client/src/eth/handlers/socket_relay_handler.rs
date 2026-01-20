@@ -118,13 +118,15 @@ where
 							for log in &msg.event_logs {
 								if self.is_target_contract(log) && self.is_target_event(log.topic0()) {
 									if let Err(e) = self.process_confirmed_log(log, false).await {
-										log::error!(
-											target: &self.client.get_chain_name(),
-											"-[{}] Error processing EVM log: {:?}",
-											sub_display_format(SUB_LOG_TARGET),
-											e,
-										);
-									}
+									br_primitives::log_and_capture!(
+										error,
+										&self.client.get_chain_name(),
+										SUB_LOG_TARGET,
+										self.client.address().await,
+										"❗️ Error processing EVM log: {:?}",
+										e
+									);
+								}
 								}
 							}
 						},
@@ -155,11 +157,13 @@ where
 				} => {
 					if let Some(Ok(block)) = sub_block {
 						if let Err(e) = self.process_substrate_block(block).await {
-							log::error!(
-								target: &self.client.get_chain_name(),
-								"-[{}] Error processing Substrate block: {:?}",
-								sub_display_format(SUB_LOG_TARGET),
-								e,
+							br_primitives::log_and_capture!(
+								error,
+								&self.client.get_chain_name(),
+								SUB_LOG_TARGET,
+								self.client.address().await,
+								"❗️ Error processing Substrate block: {:?}",
+								e
 							);
 						}
 					}
@@ -459,24 +463,70 @@ where
 		Ok(())
 	}
 
+	/// Process pending Standard transfers that have received enough block confirmations.
+	async fn process_pending_standard_transfers(&self, current_block_number: u64) {
+		let block_confirmations = self.client.metadata.block_confirmations;
+
+		// Collect transfers that are ready to be processed
+		let ready_transfers: Vec<PendingStandardTransfer> = {
+			let pending = self.pending_standard_transfers.read().await;
+			pending
+				.iter()
+				.filter(|t| {
+					current_block_number.saturating_sub(t.received_at_block) >= block_confirmations
+				})
+				.cloned()
+				.collect()
+		};
+
+		if ready_transfers.is_empty() {
+			return;
+		}
+
+		// Remove ready transfers from pending list
+		{
+			let mut pending = self.pending_standard_transfers.write().await;
+			pending.retain(|t| {
+				current_block_number.saturating_sub(t.received_at_block) < block_confirmations
+			});
+		}
+
+		// Process each ready transfer
+		for transfer in ready_transfers {
+			log::info!(
+				target: &self.client.get_chain_name(),
+				"-[{}] ✅ Standard transfer confirmed after {} blocks: asset={}, seq={}",
+				sub_display_format(SUB_LOG_TARGET),
+				current_block_number.saturating_sub(transfer.received_at_block),
+				transfer.asset_index_hash,
+				transfer.sequence_id,
+			);
+
+			if let Err(e) = self
+				.process_transfer_polled(transfer.asset_index_hash, transfer.sequence_id)
+				.await
+			{
+				br_primitives::log_and_capture!(
+					error,
+					&self.client.get_chain_name(),
+					SUB_LOG_TARGET,
+					self.client.address().await,
+					"❗️ Error processing Standard TransferPolled: {:?}",
+					e
+				);
+			}
+		}
+	}
+
 	/// Query OnFlightTransfers storage to get TransferInfo.
 	async fn query_on_flight_transfer(
 		&self,
 		asset_index_hash: H256,
 		sequence_id: u128,
 	) -> Result<Option<Vec<u8>>> {
-		let sub_client = match self.sub_client.as_ref() {
-			Some(client) => client,
-			None => return Ok(None),
-		};
-		let sub_rpc = match self.sub_rpc.as_ref() {
-			Some(rpc) => rpc,
-			None => return Ok(None),
-		};
-
 		// Query at best block
-		let best_hash = sub_rpc.chain_get_block_hash(None).await?.unwrap_or_default();
-		let storage = sub_client.storage().at(best_hash);
+		let best_hash = self.sub_rpc.chain_get_block_hash(None).await?.unwrap_or_default();
+		let storage = self.sub_client.storage().at(best_hash);
 
 		let transfer_info = storage
 			.fetch(&bifrost_runtime::storage().cccp_relay_queue().on_flight_transfers(
@@ -486,6 +536,92 @@ where
 			.await?;
 
 		Ok(transfer_info.map(|info| info.socket_message))
+	}
+
+	/// Recover pending Standard transfers from OnFlightTransfers storage during bootstrap.
+	///
+	/// This ensures that Standard transfers waiting for block confirmations are not lost
+	/// if the relayer restarts. It queries all OnFlightTransfers with:
+	/// - status = OnFlight (quorum reached)
+	/// - option = Standard (requires block confirmations)
+	async fn recover_pending_standard_transfers(&self) -> Result<()> {
+		use bifrost_runtime::runtime_types::pallet_cccp_relay_queue::{
+			TransferOption, TransferStatus,
+		};
+
+		// Get best block hash and number
+		let best_hash = self.sub_rpc.chain_get_block_hash(None).await?.unwrap_or_default();
+		let best_block = self.sub_client.blocks().at(best_hash).await?;
+		let current_block_number = best_block.number() as u64;
+
+		let storage = self.sub_client.storage().at(best_hash);
+
+		// Iterate over all OnFlightTransfers
+		let storage_query =
+			bifrost_runtime::storage().cccp_relay_queue().on_flight_transfers_iter();
+		let mut iter = storage.iter(storage_query).await?;
+
+		let mut recovered_count = 0u32;
+
+		while let Some(Ok(kv)) = iter.next().await {
+			let transfer_info = kv.value;
+
+			// Only process Standard transfers that are OnFlight
+			let is_standard = matches!(transfer_info.option, TransferOption::Standard);
+			let is_on_flight = matches!(transfer_info.status, TransferStatus::OnFlight);
+
+			if !is_standard || !is_on_flight {
+				continue;
+			}
+
+			// Decode the socket message to extract asset_index_hash and sequence_id
+			let msg = match self.decode_socket_message(&transfer_info.socket_message) {
+				Ok(msg) => msg,
+				Err(e) => {
+					log::warn!(
+						target: &self.client.get_chain_name(),
+						"-[{}] Failed to decode socket message during recovery: {:?}",
+						sub_display_format(SUB_LOG_TARGET),
+						e,
+					);
+					continue;
+				},
+			};
+
+			let asset_index_hash = H256(msg.params.tokenIDX0.0);
+			let sequence_id = msg.req_id.sequence;
+
+			log::info!(
+				target: &self.client.get_chain_name(),
+				"-[{}] 🔄 Recovering Standard transfer: asset={}, seq={}, block={}",
+				sub_display_format(SUB_LOG_TARGET),
+				asset_index_hash,
+				sequence_id,
+				current_block_number,
+			);
+
+			// Add to pending_standard_transfers
+			// Use current block as received_at_block since we don't know the original block
+			let pending_transfer = PendingStandardTransfer {
+				asset_index_hash,
+				sequence_id,
+				received_at_block: current_block_number,
+			};
+
+			self.pending_standard_transfers.write().await.push(pending_transfer);
+			recovered_count += 1;
+		}
+
+		if recovered_count > 0 {
+			log::info!(
+				target: &self.client.get_chain_name(),
+				"-[{}] ✅ Recovered {} pending Standard transfers from storage",
+				sub_display_format(SUB_LOG_TARGET),
+				recovered_count,
+			);
+		}
+
+		Ok(())
 	}
 
 	/// Decode socket message bytes to Socket_Message struct.
@@ -569,11 +705,13 @@ where
 		let msg = match self.decode_socket_message(&socket_message_bytes) {
 			Ok(msg) => msg,
 			Err(e) => {
-				log::error!(
-					target: &self.client.get_chain_name(),
-					"-[{}] Failed to decode socket message: {:?}",
-					sub_display_format(SUB_LOG_TARGET),
-					e,
+				br_primitives::log_and_capture!(
+					error,
+					&self.client.get_chain_name(),
+					SUB_LOG_TARGET,
+					self.client.address().await,
+					"❗️ Failed to decode socket message: {:?}",
+					e
 				);
 				return Ok(());
 			},

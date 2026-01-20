@@ -190,11 +190,13 @@ where
 				}
 			},
 			Err(error) => {
-				log::error!(
-					target: &self.client.get_chain_name(),
-					"-[{}] Failed to decode Socket event: {:?}",
-					sub_display_format(SUB_LOG_TARGET),
+				br_primitives::log_and_capture!(
 					error,
+					&self.client.get_chain_name(),
+					SUB_LOG_TARGET,
+					self.client.address().await,
+					"❗️ Failed to decode Socket event: {:?}",
+					error
 				);
 			},
 		}
@@ -368,10 +370,12 @@ where
 				metadata
 			),
 			Err(error) => {
-				log::error!(
-					target: &self.client.get_chain_name(),
-					"-[{}] ❗️ Failed to send unsigned transaction: {}, Error: {}",
-					sub_display_format(SUB_LOG_TARGET),
+				br_primitives::log_and_capture!(
+					error,
+					&self.client.get_chain_name(),
+					SUB_LOG_TARGET,
+					self.client.address().await,
+					"❗️ Failed to send unsigned transaction: {}, Error: {}",
 					metadata,
 					error
 				);
@@ -410,10 +414,12 @@ where
 				metadata
 			),
 			Err(error) => {
-				log::error!(
-					target: &self.client.get_chain_name(),
-					"-[{}] ❗️ Failed to send unsigned transaction: {}, Error: {}",
-					sub_display_format(SUB_LOG_TARGET),
+				br_primitives::log_and_capture!(
+					error,
+					&self.client.get_chain_name(),
+					SUB_LOG_TARGET,
+					self.client.address().await,
+					"❗️ Failed to send unsigned transaction: {}, Error: {}",
 					metadata,
 					error
 				);
