@@ -259,8 +259,12 @@ where
 		mut presubmitter,
 		..
 	} = periodic_deps;
-	let HandlerDeps { socket_relay_handlers, socket_queue_pollers, roundup_relay_handlers } =
-		handler_deps;
+	let HandlerDeps {
+		socket_relay_handlers,
+		socket_queue_pollers,
+		roundup_relay_handlers,
+		socket_onflight_handler,
+	} = handler_deps;
 	let SubstrateDeps { mut unsigned_tx_manager, .. } = substrate_deps;
 	let BtcDeps {
 		mut outbound,
@@ -400,6 +404,25 @@ where
 			},
 		);
 	});
+
+	// spawn socket onflight handler (single instance for Bifrost chain)
+	if let Some(mut handler) = socket_onflight_handler {
+		task_manager.spawn_essential_handle().spawn(
+			"socket-onflight-handler",
+			Some("handlers"),
+			async move {
+				loop {
+					let report = handler.run().await;
+					let log_msg = format!(
+						"socket onflight handler stopped: {:?}\nRestarting immediately...",
+						report
+					);
+					log::error!("{log_msg}");
+					sentry::capture_message(&log_msg, sentry::Level::Error);
+				}
+			},
+		);
+	}
 
 	// spawn socket queue pollers
 	socket_queue_pollers.into_iter().for_each(|mut handler| {

@@ -1,5 +1,6 @@
 use super::*;
-use br_client::eth::handlers::SocketQueuePoller;
+use br_client::eth::handlers::{SocketOnflightHandler, SocketOnflightSender, SocketQueuePoller};
+use tokio::sync::mpsc;
 
 pub struct HandlerDeps<F, P, N: AlloyNetwork>
 where
@@ -12,6 +13,8 @@ where
 	pub socket_queue_pollers: Vec<SocketQueuePoller<F, P, N>>,
 	/// The `RoundupRelayHandler`'s for each specified chain.
 	pub roundup_relay_handlers: Vec<RoundupRelayHandler<F, P, N>>,
+	/// The `SocketOnflightHandler` (single instance for Bifrost chain).
+	pub socket_onflight_handler: Option<SocketOnflightHandler<F, P, N>>,
 }
 
 impl<F, P, N: AlloyNetwork> HandlerDeps<F, P, N>
@@ -32,28 +35,30 @@ where
 		let mut socket_relay_handlers = vec![];
 		let mut socket_queue_pollers = vec![];
 		let mut roundup_relay_handlers = vec![];
+		let mut onflight_senders: BTreeMap<ChainId, SocketOnflightSender> = BTreeMap::new();
 		let ManagerDeps { bifrost_client, clients, event_managers } = manager_deps;
 
 		for handler_config in config.relayer_config.handler_configs.iter() {
 			match handler_config.handler_type {
 				HandlerType::Socket => {
 					for target in handler_config.watch_list.iter() {
-						// Create SocketRelayHandler with Substrate client
+						// Create channel for onflight messages
+						let (onflight_sender, onflight_receiver) = mpsc::unbounded_channel();
+						onflight_senders.insert(*target, onflight_sender);
+
+						// Create SocketRelayHandler with channel receiver
 						let socket_relay_handler = SocketRelayHandler::new(
 							*target,
 							event_managers.get(target).expect(INVALID_CHAIN_ID).sender.subscribe(),
+							onflight_receiver,
 							clients.clone(),
 							bifrost_client.clone(),
-							substrate_deps.sub_client.clone(),
-							substrate_deps.sub_rpc_url.clone(),
 							substrate_deps.xt_request_sender.clone(),
 							rollback_senders.clone(),
 							task_manager.spawn_handle(),
 							Arc::new(bootstrap_shared_data.clone()),
 							debug_mode,
-						)
-						.await
-						.expect("Failed to create SocketRelayHandler");
+						);
 						socket_relay_handlers.push(socket_relay_handler);
 
 						// Create SocketQueuePoller
@@ -88,6 +93,33 @@ where
 			}
 		}
 
-		Self { socket_relay_handlers, socket_queue_pollers, roundup_relay_handlers }
+		// Create SocketOnflightHandler if there are any socket handlers
+		let socket_onflight_handler = if !onflight_senders.is_empty() {
+			match SocketOnflightHandler::new(
+				bifrost_client.clone(),
+				clients.clone(),
+				substrate_deps.sub_client.clone(),
+				substrate_deps.sub_rpc_url.clone(),
+				Arc::new(onflight_senders),
+				Arc::new(bootstrap_shared_data.clone()),
+			)
+			.await
+			{
+				Ok(handler) => Some(handler),
+				Err(e) => {
+					log::error!("Failed to create SocketOnflightHandler: {:?}", e);
+					None
+				},
+			}
+		} else {
+			None
+		};
+
+		Self {
+			socket_relay_handlers,
+			socket_queue_pollers,
+			roundup_relay_handlers,
+			socket_onflight_handler,
+		}
 	}
 }
