@@ -1,4 +1,5 @@
 use std::{collections::BTreeMap, sync::Arc};
+use tokio::sync::RwLock;
 
 use alloy::{
 	network::{Network, TransactionBuilder},
@@ -47,6 +48,17 @@ use crate::{
 
 const SUB_LOG_TARGET: &str = "socket-handler";
 
+/// Represents a Standard transfer pending block confirmations.
+#[derive(Clone, Debug)]
+struct PendingStandardTransfer {
+	/// The asset index hash.
+	asset_index_hash: H256,
+	/// The sequence ID.
+	sequence_id: u128,
+	/// The Substrate block number when this transfer was received.
+	received_at_block: u64,
+}
+
 /// The essential task that handles `socket relay` related events.
 ///
 /// This handler listens for:
@@ -79,6 +91,8 @@ where
 	bootstrap_shared_data: Arc<BootstrapSharedData>,
 	/// Whether to enable debug mode.
 	debug_mode: bool,
+	/// Pending Standard transfers waiting for block confirmations.
+	pending_standard_transfers: Arc<RwLock<Vec<PendingStandardTransfer>>>,
 }
 
 #[async_trait::async_trait]
@@ -403,14 +417,30 @@ where
 			handle,
 			bootstrap_shared_data,
 			debug_mode,
+			pending_standard_transfers: Arc::new(RwLock::new(Vec::new())),
 		})
 	}
 
 	/// Process a Substrate block for TransferPolled events.
+	///
+	/// Only processes events where status is `OnFlight`, indicating the transfer
+	/// has reached quorum consensus and is ready for the next relay step.
+	///
+	/// For Fast transfers: process immediately.
+	/// For Standard transfers: wait for `block_confirmations` blocks before processing.
 	async fn process_substrate_block(
 		&self,
 		block: subxt::blocks::Block<CustomConfig, OnlineClient<CustomConfig>>,
 	) -> Result<()> {
+		use bifrost_runtime::runtime_types::pallet_cccp_relay_queue::{
+			TransferOption, TransferStatus,
+		};
+
+		let current_block_number = block.number() as u64;
+
+		// First, process any pending Standard transfers that have been confirmed
+		self.process_pending_standard_transfers(current_block_number).await;
+
 		let events = block.events().await?;
 
 		for event in events.iter() {
@@ -426,21 +456,69 @@ where
 					event
 						.as_root_event::<bifrost_runtime::cccp_relay_queue::events::TransferPolled>(
 						) {
+					// Only process if status is OnFlight (quorum reached)
+					// Skip Pending status (still waiting for more votes)
+					let is_on_flight = matches!(transfer_polled.status, TransferStatus::OnFlight);
+					if !is_on_flight {
+						log::debug!(
+							target: &self.client.get_chain_name(),
+							"-[{}] TransferPolled with status {:?}, waiting for quorum (seq={:?})",
+							sub_display_format(SUB_LOG_TARGET),
+							transfer_polled.status,
+							transfer_polled.sequence_id,
+						);
+						continue;
+					}
+
 					let asset_index_hash = H256(transfer_polled.asset_index_hash.0);
 					let sequence_id = {
 						let u256 = transfer_polled.sequence_id;
 						u256.0[0] as u128 | ((u256.0[1] as u128) << 64)
 					};
 
-					if let Err(e) =
-						self.process_transfer_polled(asset_index_hash, sequence_id).await
-					{
-						log::error!(
+					// Check TransferOption: Fast or Standard
+					let is_fast = matches!(transfer_polled.option, TransferOption::Fast);
+
+					if is_fast {
+						// Fast transfer: process immediately
+						log::info!(
 							target: &self.client.get_chain_name(),
-							"-[{}] Error processing TransferPolled: {:?}",
+							"-[{}] ⚡ TransferPolled (Fast) reached quorum: asset={}, seq={}",
 							sub_display_format(SUB_LOG_TARGET),
-							e,
+							asset_index_hash,
+							sequence_id,
 						);
+
+						if let Err(e) =
+							self.process_transfer_polled(asset_index_hash, sequence_id).await
+						{
+							br_primitives::log_and_capture!(
+								error,
+								&self.client.get_chain_name(),
+								SUB_LOG_TARGET,
+								self.client.address().await,
+								"❗️ Error processing Fast TransferPolled: {:?}",
+								e
+							);
+						}
+					} else {
+						// Standard transfer: add to pending and wait for block confirmations
+						log::info!(
+							target: &self.client.get_chain_name(),
+							"-[{}] 📋 TransferPolled (Standard) reached quorum: asset={}, seq={}, waiting for {} block confirmations",
+							sub_display_format(SUB_LOG_TARGET),
+							asset_index_hash,
+							sequence_id,
+							self.client.metadata.block_confirmations,
+						);
+
+						let pending_transfer = PendingStandardTransfer {
+							asset_index_hash,
+							sequence_id,
+							received_at_block: current_block_number,
+						};
+
+						self.pending_standard_transfers.write().await.push(pending_transfer);
 					}
 				}
 			}
@@ -1018,6 +1096,16 @@ where
 		let logs = self.get_bootstrap_events().await?;
 		for log in logs {
 			self.process_confirmed_log(&log, true).await?;
+		}
+
+		// Recover pending Standard transfers from OnFlightTransfers storage
+		if let Err(e) = self.recover_pending_standard_transfers().await {
+			log::warn!(
+				target: &self.client.get_chain_name(),
+				"-[{}] Failed to recover pending Standard transfers: {:?}",
+				sub_display_format(SUB_LOG_TARGET),
+				e,
+			);
 		}
 
 		self.set_bootstrap_state(BootstrapState::NormalStart).await;
