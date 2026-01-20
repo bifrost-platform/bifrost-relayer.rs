@@ -304,6 +304,15 @@ where
 					return Ok(None);
 				},
 			}
+		} else {
+			br_primitives::log_and_capture!(
+				warn,
+				&self.get_client().get_chain_name(),
+				SUB_LOG_TARGET,
+				self.get_client().address().await,
+				"⚠️  Source chain client not found for chain id: {}. Skipping Hooks.execute().",
+				src_chain_id
+			);
 		}
 
 		Ok(None)
