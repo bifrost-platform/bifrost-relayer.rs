@@ -334,6 +334,15 @@ where
 		max_tx_fee: U256,
 		tx_request: &mut N::TransactionRequest,
 	) -> Result<()> {
+		// Validate: maxTxFee must not exceed the bridged amount
+		if max_tx_fee > msg.params.amount {
+			return Err(eyre::eyre!(
+				"max_tx_fee ({}) exceeds bridged amount ({})",
+				max_tx_fee,
+				msg.params.amount
+			));
+		}
+
 		// Estimate gas and fee on destination chain
 		let gas = self.get_client().estimate_gas(tx_request.clone()).await?;
 		let gas_price = self.get_client().get_gas_price().await?;
@@ -458,15 +467,6 @@ where
 				"Estimated fee ({}) exceeds max_tx_fee ({})",
 				fee_in_bridged_asset,
 				max_tx_fee
-			));
-		}
-
-		// Validate: maxTxFee must not exceed the bridged amount
-		if max_tx_fee > msg.params.amount {
-			return Err(eyre::eyre!(
-				"max_tx_fee ({}) exceeds bridged amount ({})",
-				max_tx_fee,
-				msg.params.amount
 			));
 		}
 
