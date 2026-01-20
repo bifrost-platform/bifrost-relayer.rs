@@ -260,8 +260,16 @@ where
 			return Ok(None);
 		}
 
-		// Get source chain client and hooks contract address
+		// We don't support hooks on Bitcoin
 		let src_chain_id = Into::<u32>::into(msg.req_id.ChainIndex) as ChainId;
+		let dst_chain_id = Into::<u32>::into(msg.ins_code.ChainIndex) as ChainId;
+		if let Some(bitcoin_chain_id) = self.get_bifrost_client().get_bitcoin_chain_id() {
+			if src_chain_id == bitcoin_chain_id || dst_chain_id == bitcoin_chain_id {
+				return Ok(None);
+			}
+		}
+
+		// Get source chain client and hooks contract address
 		let src_client = match self.get_system_client(&src_chain_id) {
 			Some(client) => client,
 			None => {
