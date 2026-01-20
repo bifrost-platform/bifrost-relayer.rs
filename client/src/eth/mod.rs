@@ -404,10 +404,10 @@ where
 			request.set_from(self.address().await);
 		}
 
-		let gas = self.estimate_gas(request.clone()).await?;
-		let coefficient: f64 = GasCoefficient::from(self.metadata.is_native).into();
-		let estimated_gas = gas as f64 * coefficient;
-		request.set_gas_limit(estimated_gas.ceil() as u64);
+		// let gas = self.estimate_gas(request.clone()).await?;
+		// let coefficient: f64 = GasCoefficient::from(self.metadata.is_native).into();
+		// let estimated_gas = gas as f64 * coefficient;
+		// request.set_gas_limit(estimated_gas.ceil() as u64);
 
 		if self.metadata.is_native {
 			// gas price is fixed to 1000 Gwei on bifrost network
