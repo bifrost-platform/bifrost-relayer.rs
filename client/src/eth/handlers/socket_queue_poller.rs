@@ -5,7 +5,7 @@ use alloy::{
 	network::Network,
 	primitives::{B256, ChainId, FixedBytes, U256},
 	providers::{Provider, WalletProvider, fillers::TxFiller},
-	rpc::types::Log,
+	rpc::types::{Filter, Log},
 	sol_types::SolEvent,
 };
 use array_bytes::Hexify;
@@ -19,6 +19,7 @@ use tokio_stream::{StreamExt, wrappers::BroadcastStream};
 
 use br_primitives::{
 	bootstrap::BootstrapSharedData,
+	constants::{cli::DEFAULT_BOOTSTRAP_ROUND_OFFSET, config::BOOTSTRAP_BLOCK_CHUNK_SIZE},
 	contracts::socket::{Socket_Struct::Socket_Message, SocketContract::Socket},
 	eth::{BootstrapState, SocketEventStatus},
 	substrate::{CustomConfig, SocketMessageSubmission, bifrost_runtime},
@@ -429,10 +430,10 @@ where
 	P: Provider<N>,
 {
 	async fn run(&mut self) -> Result<()> {
-		// Wait for bootstrap to complete
-		if self.is_before_bootstrap_state(BootstrapState::NormalStart).await {
-			// TODO: Implement bootstrap if needed
-			self.set_bootstrap_state(BootstrapState::NormalStart).await;
+		// Run bootstrap to catch up on historical Requested/Committed/Rollbacked events
+		let should_bootstrap = self.is_before_bootstrap_state(BootstrapState::NormalStart).await;
+		if should_bootstrap {
+			self.bootstrap().await?;
 		}
 		self.wait_for_all_chains_bootstrapped().await?;
 
@@ -485,12 +486,100 @@ where
 	}
 
 	async fn bootstrap(&self) -> Result<()> {
-		// No bootstrap needed for on-flight handler
+		// Wait for BootstrapSocketRelayQueue phase
+		self.wait_for_bootstrap_state(BootstrapState::BootstrapSocketRelayQueue).await?;
+
+		log::info!(
+			target: &self.client.get_chain_name(),
+			"-[{}] ⚙️  [Bootstrap mode] Starting SocketQueuePoller bootstrap...",
+			sub_display_format(SUB_LOG_TARGET),
+		);
+
+		let logs = self.get_bootstrap_events().await?;
+		let total_logs = logs.len();
+
+		for log in logs {
+			if let Err(e) = self.process_confirmed_log(&log, true).await {
+				br_primitives::log_and_capture!(
+					error,
+					&self.client.get_chain_name(),
+					SUB_LOG_TARGET,
+					self.client.address().await,
+					"❗️ Error processing bootstrap log: {:?}",
+					e
+				);
+			}
+		}
+
+		// Transition to BootstrapSocketRelay for SocketRelayHandler
+		self.set_bootstrap_state(BootstrapState::BootstrapSocketRelay).await;
+		log::info!(
+			target: &self.client.get_chain_name(),
+			"-[{}] ⚙️  [Bootstrap mode] BootstrapSocketRelayQueue → BootstrapSocketRelay (processed {} events)",
+			sub_display_format(SUB_LOG_TARGET),
+			total_logs,
+		);
+
 		Ok(())
 	}
 
 	async fn get_bootstrap_events(&self) -> Result<Vec<Log>> {
-		// No bootstrap events needed
-		Ok(vec![])
+		let mut logs = vec![];
+
+		if let Some(bootstrap_config) = &self.bootstrap_shared_data.bootstrap_config {
+			// Get round info from Bifrost chain for calculating bootstrap offset
+			let round_info = if self.client.metadata.is_native {
+				self.client.protocol_contracts.authority.round_info().call().await?
+			} else {
+				// Bifrost client should always have authority contract
+				self.bifrost_client.protocol_contracts.authority.round_info().call().await?
+			};
+
+			let bootstrap_offset_height = self
+				.client
+				.get_bootstrap_offset_height_based_on_block_time(
+					bootstrap_config.round_offset.unwrap_or(DEFAULT_BOOTSTRAP_ROUND_OFFSET),
+					round_info,
+				)
+				.await?;
+
+			let latest_block_number = self.client.get_block_number().await?;
+			let mut from_block = latest_block_number.saturating_sub(bootstrap_offset_height);
+			let to_block = latest_block_number;
+
+			log::info!(
+				target: &self.client.get_chain_name(),
+				"-[{}] ⚙️  [Bootstrap mode] Fetching Socket events from block {} to {}",
+				sub_display_format(SUB_LOG_TARGET),
+				from_block,
+				to_block,
+			);
+
+			// Split into smaller chunks to avoid RPC limits
+			while from_block <= to_block {
+				let chunk_to_block =
+					std::cmp::min(from_block + BOOTSTRAP_BLOCK_CHUNK_SIZE - 1, to_block);
+
+				let filter = Filter::new()
+					.address(*self.client.protocol_contracts.socket.address())
+					.event_signature(Socket::SIGNATURE_HASH)
+					.from_block(from_block)
+					.to_block(chunk_to_block);
+
+				let target_logs_chunk = self.client.get_logs(&filter).await?;
+				logs.extend(target_logs_chunk);
+
+				from_block = chunk_to_block + 1;
+			}
+
+			log::info!(
+				target: &self.client.get_chain_name(),
+				"-[{}] ⚙️  [Bootstrap mode] Found {} Socket events for queue poller",
+				sub_display_format(SUB_LOG_TARGET),
+				logs.len(),
+			);
+		}
+
+		Ok(logs)
 	}
 }

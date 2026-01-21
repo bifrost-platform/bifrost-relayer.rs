@@ -485,7 +485,9 @@ pub enum BootstrapState {
 	BootstrapRoundUpPhase1,
 	/// phase 1-2. bootstrap for RoundUp event
 	BootstrapRoundUpPhase2,
-	/// phase 2. bootstrap for Socket event
+	/// phase 2-1. bootstrap for Socket queue (on_flight_poll / finalize_poll)
+	BootstrapSocketRelayQueue,
+	/// phase 2-2. bootstrap for Socket relay event
 	BootstrapSocketRelay,
 	/// phase 3. process for latest block as normal
 	NormalStart,
