@@ -3,7 +3,7 @@ use tokio::sync::RwLock;
 
 use alloy::{
 	network::Network,
-	primitives::ChainId,
+	primitives::{B256, ChainId},
 	providers::{Provider, WalletProvider, fillers::TxFiller},
 	sol_types::SolType,
 };
@@ -41,6 +41,11 @@ pub type SocketOnflightSender = UnboundedSender<SocketOnflightMessage>;
 /// Receiver type for SocketOnflight messages.
 pub type SocketOnflightReceiver = UnboundedReceiver<SocketOnflightMessage>;
 
+/// Transfer info result from OnFlightTransfers storage query.
+struct TransferInfoResult {
+	socket_message: Vec<u8>,
+}
+
 /// Represents a Standard transfer pending block confirmations.
 #[derive(Clone, Debug)]
 struct PendingStandardTransfer {
@@ -50,10 +55,14 @@ struct PendingStandardTransfer {
 	asset_index_hash: H256,
 	/// The sequence ID.
 	sequence_id: u128,
-	/// The Substrate block number when this transfer was received.
-	received_at_block: u64,
+	/// The source chain ID (for block confirmation checks).
+	src_chain_id: ChainId,
 	/// The destination chain ID (for routing to correct SocketRelayHandler).
 	dst_chain_id: ChainId,
+	/// The source transaction hash (for reorg verification).
+	src_tx_id: B256,
+	/// The source block number when Requested event was emitted (for reorg verification).
+	src_block_number: u64,
 }
 
 /// The handler that processes `TransferPolled` events from Bifrost Substrate chain.
@@ -190,27 +199,34 @@ where
 						continue;
 					}
 
+					// Extract event fields
 					let asset_index_hash = H256(transfer_polled.asset_index_hash.0);
+					let src_chain_id = transfer_polled.src_chain_id as ChainId;
+					let dst_chain_id = transfer_polled.dst_chain_id as ChainId;
+					let src_tx_id = B256::from_slice(&transfer_polled.src_tx_id.0);
 					let sequence_id = {
 						let u256 = transfer_polled.sequence_id;
 						u256.0[0] as u128 | ((u256.0[1] as u128) << 64)
 					};
 
 					// Query the socket message from storage
-					let socket_message_bytes =
-						match self.query_on_flight_transfer(asset_index_hash, sequence_id).await? {
-							Some(bytes) => bytes,
-							None => {
-								log::warn!(
-									target: &self.bifrost_client.get_chain_name(),
-									"-[{}] Transfer not found in OnFlightTransfers: asset={}, seq={}",
-									sub_display_format(SUB_LOG_TARGET),
-									asset_index_hash,
-									sequence_id,
-								);
-								continue;
-							},
-						};
+					// Storage key: (src_chain_id, src_tx_id)
+					let socket_message_bytes = match self
+						.query_on_flight_transfer(src_chain_id as u32, H256(src_tx_id.0))
+						.await?
+					{
+						Some(info) => info.socket_message,
+						None => {
+							log::warn!(
+								target: &self.bifrost_client.get_chain_name(),
+								"-[{}] Transfer not found in OnFlightTransfers: src_chain={}, src_tx={}",
+								sub_display_format(SUB_LOG_TARGET),
+								src_chain_id,
+								src_tx_id,
+							);
+							continue;
+						},
+					};
 
 					// Decode the socket message
 					let socket_message = match self.decode_socket_message(&socket_message_bytes) {
@@ -227,10 +243,6 @@ where
 							continue;
 						},
 					};
-
-					// Determine the destination chain
-					let dst_chain_id =
-						Into::<u32>::into(socket_message.ins_code.ChainIndex) as ChainId;
 
 					// Check TransferOption: Fast or Standard
 					let is_fast = matches!(transfer_polled.option, TransferOption::Fast);
@@ -254,16 +266,34 @@ where
 						)
 						.await;
 					} else {
-						// Standard transfer: add to pending and wait for block confirmations
-						let block_confirmations = self.get_block_confirmations(dst_chain_id);
+						// Standard transfer: add to pending and wait for source chain block confirmations
+						let block_confirmations = self.get_block_confirmations(src_chain_id);
+
+						// Get current block number from source chain
+						let src_block_number =
+							match self.get_src_chain_block_number(src_chain_id).await {
+								Ok(block) => block,
+								Err(e) => {
+									log::warn!(
+										target: &self.bifrost_client.get_chain_name(),
+										"-[{}] Failed to get source chain block number: {:?}",
+										sub_display_format(SUB_LOG_TARGET),
+										e,
+									);
+									continue;
+								},
+							};
 
 						log::info!(
 							target: &self.bifrost_client.get_chain_name(),
-							"-[{}] 📋 OnFlight (Standard) reached quorum: asset={}, seq={}, dst_chain={}, waiting for {} block confirmations",
+							"-[{}] 📋 OnFlight (Standard) reached quorum: asset={}, seq={}, src_chain={}, dst_chain={}, src_tx={}, src_block={}, waiting for {} block confirmations",
 							sub_display_format(SUB_LOG_TARGET),
 							asset_index_hash,
 							sequence_id,
+							src_chain_id,
 							dst_chain_id,
+							src_tx_id,
+							src_block_number,
 							block_confirmations,
 						);
 
@@ -271,8 +301,10 @@ where
 							socket_message,
 							asset_index_hash,
 							sequence_id,
-							received_at_block: current_block_number,
+							src_chain_id,
 							dst_chain_id,
+							src_tx_id,
+							src_block_number,
 						};
 
 						self.pending_standard_transfers.write().await.push(pending_transfer);
@@ -284,44 +316,95 @@ where
 		Ok(())
 	}
 
-	/// Process pending Standard transfers that have received enough block confirmations.
-	async fn process_pending_standard_transfers(&self, current_block_number: u64) {
-		// Collect transfers that are ready to be processed
-		let ready_transfers: Vec<PendingStandardTransfer> = {
-			let pending = self.pending_standard_transfers.read().await;
-			pending
-				.iter()
-				.filter(|t| {
-					let block_confirmations = self.get_block_confirmations(t.dst_chain_id);
-					current_block_number.saturating_sub(t.received_at_block) >= block_confirmations
-				})
-				.cloned()
-				.collect()
-		};
+	/// Process pending Standard transfers that have received enough block confirmations on the source chain.
+	async fn process_pending_standard_transfers(&self, _current_block_number: u64) {
+		// Get all pending transfers
+		let pending_transfers: Vec<PendingStandardTransfer> =
+			{ self.pending_standard_transfers.read().await.clone() };
 
-		if ready_transfers.is_empty() {
+		if pending_transfers.is_empty() {
 			return;
 		}
 
-		// Remove ready transfers from pending list
-		{
-			let mut pending = self.pending_standard_transfers.write().await;
-			pending.retain(|t| {
-				let block_confirmations = self.get_block_confirmations(t.dst_chain_id);
-				current_block_number.saturating_sub(t.received_at_block) < block_confirmations
-			});
+		let mut transfers_to_remove: Vec<usize> = Vec::new();
+		let mut transfers_to_process: Vec<PendingStandardTransfer> = Vec::new();
+
+		// Check each pending transfer
+		for (idx, transfer) in pending_transfers.iter().enumerate() {
+			let block_confirmations = self.get_block_confirmations(transfer.src_chain_id);
+
+			// Get current block number from source chain
+			let current_src_block =
+				match self.get_src_chain_block_number(transfer.src_chain_id).await {
+					Ok(block) => block,
+					Err(e) => {
+						log::warn!(
+							target: &self.bifrost_client.get_chain_name(),
+							"-[{}] Failed to get source chain {} block number: {:?}",
+							sub_display_format(SUB_LOG_TARGET),
+							transfer.src_chain_id,
+							e,
+						);
+						continue;
+					},
+				};
+
+			// Check if enough blocks have passed on the source chain
+			if current_src_block.saturating_sub(transfer.src_block_number) >= block_confirmations {
+				// Verify the source transaction is still valid
+				match self.verify_src_transaction(transfer.src_chain_id, transfer.src_tx_id).await {
+					Ok(true) => {
+						// Transaction is valid, process the transfer
+						transfers_to_process.push(transfer.clone());
+						transfers_to_remove.push(idx);
+					},
+					Ok(false) => {
+						// Transaction was reorged out, remove from pending
+						log::warn!(
+							target: &self.bifrost_client.get_chain_name(),
+							"-[{}] ⚠️ Standard transfer invalidated (reorged): asset={}, seq={}, src_tx={}",
+							sub_display_format(SUB_LOG_TARGET),
+							transfer.asset_index_hash,
+							transfer.sequence_id,
+							transfer.src_tx_id,
+						);
+						transfers_to_remove.push(idx);
+					},
+					Err(e) => {
+						log::warn!(
+							target: &self.bifrost_client.get_chain_name(),
+							"-[{}] Failed to verify source transaction: {:?}",
+							sub_display_format(SUB_LOG_TARGET),
+							e,
+						);
+						// Keep in pending list to retry later
+					},
+				}
+			}
 		}
 
-		// Process each ready transfer
-		for transfer in ready_transfers {
+		// Remove processed/invalidated transfers from pending list
+		if !transfers_to_remove.is_empty() {
+			let mut pending = self.pending_standard_transfers.write().await;
+			// Remove in reverse order to maintain indices
+			for idx in transfers_to_remove.into_iter().rev() {
+				if idx < pending.len() {
+					pending.remove(idx);
+				}
+			}
+		}
+
+		// Process confirmed and valid transfers
+		for transfer in transfers_to_process {
 			log::info!(
 				target: &self.bifrost_client.get_chain_name(),
-				"-[{}] ✅ Standard transfer confirmed after {} blocks: asset={}, seq={}, dst_chain={}",
+				"-[{}] ✅ Standard transfer confirmed and verified: asset={}, seq={}, src_chain={}, dst_chain={}, src_tx={}",
 				sub_display_format(SUB_LOG_TARGET),
-				current_block_number.saturating_sub(transfer.received_at_block),
 				transfer.asset_index_hash,
 				transfer.sequence_id,
+				transfer.src_chain_id,
 				transfer.dst_chain_id,
+				transfer.src_tx_id,
 			);
 
 			self.send_to_socket_relay_handler(
@@ -374,24 +457,60 @@ where
 	}
 
 	/// Query OnFlightTransfers storage to get TransferInfo.
+	/// Storage key: (src_chain_id, src_tx_id)
 	async fn query_on_flight_transfer(
 		&self,
-		asset_index_hash: H256,
-		sequence_id: u128,
-	) -> Result<Option<Vec<u8>>> {
-		use bifrost_runtime::runtime_types::primitive_types::U256 as RuntimeU256;
-
+		src_chain_id: u32,
+		src_tx_id: H256,
+	) -> Result<Option<TransferInfoResult>> {
 		let best_hash = self.sub_rpc.chain_get_block_hash(None).await?.unwrap_or_default();
 		let storage = self.sub_client.storage().at(best_hash);
 
 		let transfer_info = storage
-			.fetch(&bifrost_runtime::storage().cccp_relay_queue().on_flight_transfers(
-				asset_index_hash,
-				RuntimeU256([sequence_id as u64, (sequence_id >> 64) as u64, 0, 0]),
-			))
+			.fetch(
+				&bifrost_runtime::storage()
+					.cccp_relay_queue()
+					.on_flight_transfers(src_chain_id, src_tx_id),
+			)
 			.await?;
 
-		Ok(transfer_info.map(|info| info.socket_message))
+		Ok(transfer_info.map(|info| TransferInfoResult { socket_message: info.socket_message }))
+	}
+
+	/// Query the current block number from a source chain.
+	async fn get_src_chain_block_number(&self, src_chain_id: ChainId) -> Result<u64> {
+		let client = self
+			.system_clients
+			.get(&src_chain_id)
+			.ok_or_else(|| eyre::eyre!("Source chain client not found: {}", src_chain_id))?;
+		Ok(client.get_block_number().await?)
+	}
+
+	/// Verify that the source transaction is still valid on the source chain.
+	/// Returns true if the transaction receipt exists (i.e., not reorged out).
+	async fn verify_src_transaction(&self, src_chain_id: ChainId, src_tx_id: B256) -> Result<bool> {
+		let client = self
+			.system_clients
+			.get(&src_chain_id)
+			.ok_or_else(|| eyre::eyre!("Source chain client not found: {}", src_chain_id))?;
+
+		// Query the transaction receipt to verify it still exists
+		// If the receipt exists, the transaction is mined and valid
+		// If the transaction was reorged out, the receipt won't be found
+		match client.get_transaction_receipt(src_tx_id).await? {
+			Some(_receipt) => Ok(true),
+			None => {
+				// Transaction not found - likely reorged out
+				log::warn!(
+					target: &self.bifrost_client.get_chain_name(),
+					"-[{}] Transaction {} on chain {} not found (possibly reorged)",
+					sub_display_format(SUB_LOG_TARGET),
+					src_tx_id,
+					src_chain_id,
+				);
+				Ok(false)
+			},
+		}
 	}
 
 	/// Recover pending Standard transfers from OnFlightTransfers storage during startup.
@@ -401,9 +520,6 @@ where
 		};
 
 		let best_hash = self.sub_rpc.chain_get_block_hash(None).await?.unwrap_or_default();
-		let best_block = self.sub_client.blocks().at(best_hash).await?;
-		let current_block_number = best_block.number() as u64;
-
 		let storage = self.sub_client.storage().at(best_hash);
 
 		let storage_query =
@@ -439,24 +555,45 @@ where
 
 			let asset_index_hash = H256(socket_message.params.tokenIDX0.0);
 			let sequence_id = socket_message.req_id.sequence;
+			let src_chain_id = transfer_info.src_chain_id as ChainId;
 			let dst_chain_id = Into::<u32>::into(socket_message.ins_code.ChainIndex) as ChainId;
+			let src_tx_id = B256::from_slice(&transfer_info.src_tx_id.0);
+
+			// Get current block number from source chain
+			let src_block_number = match self.get_src_chain_block_number(src_chain_id).await {
+				Ok(block) => block,
+				Err(e) => {
+					log::warn!(
+						target: &self.bifrost_client.get_chain_name(),
+						"-[{}] Failed to get source chain {} block number during recovery: {:?}",
+						sub_display_format(SUB_LOG_TARGET),
+						src_chain_id,
+						e,
+					);
+					continue;
+				},
+			};
 
 			log::info!(
 				target: &self.bifrost_client.get_chain_name(),
-				"-[{}] 🔄 Recovering Standard transfer: asset={}, seq={}, dst_chain={}, block={}",
+				"-[{}] 🔄 Recovering Standard transfer: asset={}, seq={}, src_chain={}, dst_chain={}, src_tx={}, src_block={}",
 				sub_display_format(SUB_LOG_TARGET),
 				asset_index_hash,
 				sequence_id,
+				src_chain_id,
 				dst_chain_id,
-				current_block_number,
+				src_tx_id,
+				src_block_number,
 			);
 
 			let pending_transfer = PendingStandardTransfer {
 				socket_message,
 				asset_index_hash,
 				sequence_id,
-				received_at_block: current_block_number,
+				src_chain_id,
 				dst_chain_id,
+				src_tx_id,
+				src_block_number,
 			};
 
 			self.pending_standard_transfers.write().await.push(pending_transfer);

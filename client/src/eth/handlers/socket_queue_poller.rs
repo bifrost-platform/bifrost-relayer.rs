@@ -36,9 +36,6 @@ use crate::eth::{
 	traits::{BootstrapHandler, Handler},
 };
 
-// Re-export runtime U256 type for storage queries
-use bifrost_runtime::runtime_types::primitive_types::U256 as RuntimeU256;
-
 const SUB_LOG_TARGET: &str = "socket-queue-poller";
 
 /// The essential task that handles CCCP relay queue polling.
@@ -122,20 +119,22 @@ where
 	/// Query OnFlightTransfers storage to check if transfer already exists.
 	///
 	/// Returns `true` if transfer exists, `false` otherwise.
+	/// Storage key: (src_chain_id, src_tx_id)
 	async fn is_on_flight_transfer_exists(
 		&self,
-		asset_index_hash: B256,
-		sequence_id: u128,
+		src_chain_id: ChainId,
+		src_tx_id: B256,
 	) -> Result<bool> {
 		// Query at best block (including unfinalized) instead of latest finalized
 		let best_hash = self.sub_rpc.chain_get_block_hash(None).await?.unwrap_or_default();
 		let storage = self.sub_client.storage().at(best_hash);
 
 		let transfer = storage
-			.fetch(&bifrost_runtime::storage().cccp_relay_queue().on_flight_transfers(
-				H256(asset_index_hash.0),
-				RuntimeU256([sequence_id as u64, (sequence_id >> 64) as u64, 0, 0]),
-			))
+			.fetch(
+				&bifrost_runtime::storage()
+					.cccp_relay_queue()
+					.on_flight_transfers(src_chain_id as u32, H256(src_tx_id.0)),
+			)
 			.await?;
 
 		Ok(transfer.is_some())
@@ -153,6 +152,7 @@ where
 				let src_chain_id = self.get_src_chain_id(&msg);
 				let dst_chain_id = self.get_dst_chain_id(&msg);
 				let is_inbound = self.is_inbound(dst_chain_id);
+				let src_tx_id = log.transaction_hash.unwrap_or_default();
 
 				match status {
 					SocketEventStatus::Requested => {
@@ -163,6 +163,7 @@ where
 							src_chain_id,
 							dst_chain_id,
 							asset_index_hash,
+							src_tx_id,
 						)
 						.await?;
 					},
@@ -174,6 +175,7 @@ where
 							src_chain_id,
 							dst_chain_id,
 							status,
+							src_tx_id,
 						)
 						.await?;
 					},
@@ -206,6 +208,7 @@ where
 		src_chain_id: ChainId,
 		dst_chain_id: ChainId,
 		asset_index_hash: B256,
+		src_tx_id: B256,
 	) -> Result<()> {
 		log::info!(
 			target: &self.client.get_chain_name(),
@@ -219,8 +222,8 @@ where
 		);
 
 		// Query OnFlightTransfers storage to check current state
-		let transfer_exists =
-			self.is_on_flight_transfer_exists(asset_index_hash, sequence_id).await?;
+		// Storage key: (src_chain_id, src_tx_id)
+		let transfer_exists = self.is_on_flight_transfer_exists(src_chain_id, src_tx_id).await?;
 
 		if transfer_exists {
 			log::info!(
@@ -242,7 +245,7 @@ where
 			metadata,
 		);
 
-		self.submit_on_flight_poll(msg, metadata).await
+		self.submit_on_flight_poll(msg, metadata, src_tx_id).await
 	}
 
 	/// Process COMMITTED/ROLLBACKED status - submit finalize_poll.
@@ -254,6 +257,7 @@ where
 		src_chain_id: ChainId,
 		dst_chain_id: ChainId,
 		status: SocketEventStatus,
+		src_tx_id: B256,
 	) -> Result<()> {
 		let is_committed = status == SocketEventStatus::Committed;
 
@@ -283,7 +287,7 @@ where
 			metadata,
 		);
 
-		self.submit_finalize_poll(msg, metadata).await
+		self.submit_finalize_poll(msg, metadata, src_tx_id).await
 	}
 
 	/// Check if the log is from the target Socket contract.
@@ -339,6 +343,7 @@ where
 		&self,
 		msg: Socket_Message,
 		metadata: OnFlightPollMetadata,
+		src_tx_id: B256,
 	) -> Result<()> {
 		let encoded_msg = self.encode_socket_message(&msg);
 		let signature =
@@ -348,6 +353,7 @@ where
 			SocketMessageSubmission {
 				authority_id: AccountId20(self.client.address().await.0.0),
 				message: encoded_msg.into(),
+				src_tx_id: H256(src_tx_id.0),
 			},
 			signature,
 		));
@@ -383,6 +389,7 @@ where
 		&self,
 		msg: Socket_Message,
 		metadata: FinalizePollMetadata,
+		src_tx_id: B256,
 	) -> Result<()> {
 		let encoded_msg = self.encode_socket_message(&msg);
 		let signature =
@@ -392,6 +399,7 @@ where
 			SocketMessageSubmission {
 				authority_id: AccountId20(self.client.address().await.0.0),
 				message: encoded_msg.into(),
+				src_tx_id: H256(src_tx_id.0),
 			},
 			signature,
 		));
