@@ -6,8 +6,8 @@ use br_primitives::{
 	},
 	contracts::{
 		authority::BfcStaking::round_meta_data,
+		chainlink_aggregator::{ChainlinkContract, ChainlinkInstance},
 		erc20::{Erc20Contract, Erc20Instance},
-		oracle::{OracleContract, OracleInstance},
 	},
 	eth::{
 		AggregatorContracts, ContractCache, GasCoefficient, ProtocolContracts, ProviderMetadata,
@@ -497,7 +497,7 @@ where
 	}
 
 	/// Get or create an oracle contract instance from cache.
-	pub async fn get_oracle(&self, address: Address) -> Arc<OracleInstance<F, P, N>> {
+	pub async fn get_oracle(&self, address: Address) -> Arc<ChainlinkInstance<F, P, N>> {
 		// Check cache first
 		{
 			let cache = self.contract_cache.oracles.read().await;
@@ -507,7 +507,7 @@ where
 		}
 
 		// Create new instance and cache it
-		let oracle = Arc::new(OracleContract::new(address, self.inner.clone()));
+		let oracle = Arc::new(ChainlinkContract::new(address, self.inner.clone()));
 		self.contract_cache.oracles.write().await.insert(address, oracle.clone());
 		oracle
 	}

@@ -4,7 +4,6 @@ pub mod blaze;
 pub mod chainlink_aggregator;
 pub mod erc20;
 pub mod hooks;
-pub mod oracle;
 pub mod registration_pool;
 pub mod relay_executive;
 pub mod relay_queue;
