@@ -1,4 +1,5 @@
 use std::{collections::BTreeMap, sync::Arc};
+use tokio::sync::RwLock;
 
 use alloy::{
 	network::{Network, TransactionBuilder},
@@ -43,6 +44,15 @@ use crate::{
 
 const SUB_LOG_TARGET: &str = "socket-handler";
 
+/// A pending event waiting for block confirmations.
+#[derive(Clone, Debug)]
+struct PendingEvent {
+	/// The log event.
+	log: Log,
+	/// The block number when this event was received.
+	block_number: u64,
+}
+
 /// The essential task that handles `socket relay` related events.
 ///
 /// This handler listens for:
@@ -73,6 +83,8 @@ where
 	bootstrap_shared_data: Arc<BootstrapSharedData>,
 	/// Whether to enable debug mode.
 	debug_mode: bool,
+	/// Pending events waiting for block confirmations.
+	pending_events: Arc<RwLock<Vec<PendingEvent>>>,
 }
 
 #[async_trait::async_trait]
@@ -88,33 +100,34 @@ where
 		}
 		self.wait_for_all_chains_bootstrapped().await?;
 
+		// Interval for checking confirmed events
+		let check_interval = tokio::time::Duration::from_millis(self.client.metadata.call_interval);
+		let mut check_timer = tokio::time::interval(check_interval);
+
 		loop {
 			tokio::select! {
-				// Handle EVM events
+				// Handle EVM events - store as pending for confirmation
 				evm_msg = self.event_stream.next() => {
 					match evm_msg {
 						Some(Ok(msg)) => {
-							log::info!(
-								target: &self.client.get_chain_name(),
-								"-[{}] 📦 Imported #{:?} with target logs({:?})",
-								sub_display_format(SUB_LOG_TARGET),
-								msg.block_number,
-								msg.event_logs.len(),
-							);
-
-							for log in &msg.event_logs {
-								if self.is_target_contract(log) && self.is_target_event(log.topic0()) {
-									if let Err(e) = self.process_confirmed_log(log, false).await {
-									br_primitives::log_and_capture!(
-										error,
-										&self.client.get_chain_name(),
-										SUB_LOG_TARGET,
-										self.client.address().await,
-										"❗️ Error processing EVM log: {:?}",
-										e
-									);
+							let mut new_pending_count = 0u32;
+							for log in msg.event_logs {
+								if self.is_target_contract(&log) && self.is_target_event(log.topic0()) {
+									self.pending_events.write().await.push(PendingEvent {
+										log,
+										block_number: msg.block_number,
+									});
+									new_pending_count += 1;
 								}
-								}
+							}
+							if new_pending_count > 0 {
+								log::info!(
+									target: &self.client.get_chain_name(),
+									"-[{}] 📦 Queued {} events from #{:?} for confirmation",
+									sub_display_format(SUB_LOG_TARGET),
+									new_pending_count,
+									msg.block_number,
+								);
 							}
 						},
 						Some(Err(e)) => {
@@ -136,6 +149,7 @@ where
 					}
 				},
 				// Handle TransferPolled messages from SocketOnflightHandler
+				// These don't need confirmation - already validated through Substrate consensus
 				onflight_msg = self.onflight_receiver.recv() => {
 					if let Some(msg) = onflight_msg {
 						if let Err(e) = self.process_onflight_message(msg.socket_message).await {
@@ -150,6 +164,19 @@ where
 								e
 							);
 						}
+					}
+				},
+				// Periodically check for confirmed events
+				_ = check_timer.tick() => {
+					if let Err(e) = self.process_confirmed_pending_events().await {
+						br_primitives::log_and_capture!(
+							error,
+							&self.client.get_chain_name(),
+							SUB_LOG_TARGET,
+							self.client.address().await,
+							"❗️ Error processing confirmed events: {:?}",
+							e
+						);
 					}
 				},
 			}
@@ -391,7 +418,90 @@ where
 			handle,
 			bootstrap_shared_data,
 			debug_mode,
+			pending_events: Arc::new(RwLock::new(Vec::new())),
 		}
+	}
+
+	/// Process pending events that have received enough block confirmations.
+	/// Re-verifies each event on-chain before processing to handle potential reorgs.
+	async fn process_confirmed_pending_events(&self) -> Result<()> {
+		let latest_block = self.client.get_block_number().await?;
+		let block_confirmations = self.client.metadata.block_confirmations;
+
+		// Collect confirmed events
+		let confirmed_events: Vec<PendingEvent> = {
+			let pending = self.pending_events.read().await;
+			pending
+				.iter()
+				.filter(|e| latest_block.saturating_sub(e.block_number) >= block_confirmations)
+				.cloned()
+				.collect()
+		};
+
+		if confirmed_events.is_empty() {
+			return Ok(());
+		}
+
+		// Remove confirmed events from pending list
+		{
+			let mut pending = self.pending_events.write().await;
+			pending.retain(|e| latest_block.saturating_sub(e.block_number) < block_confirmations);
+		}
+
+		// Process each confirmed event after re-verification
+		for event in confirmed_events {
+			// Re-verify the event still exists on-chain (handle potential reorgs)
+			if self.verify_event_on_chain(&event).await? {
+				log::info!(
+					target: &self.client.get_chain_name(),
+					"-[{}] ✅ Event confirmed after {} blocks, processing (block #{})",
+					sub_display_format(SUB_LOG_TARGET),
+					latest_block.saturating_sub(event.block_number),
+					event.block_number,
+				);
+
+				if let Err(e) = self.process_confirmed_log(&event.log, false).await {
+					br_primitives::log_and_capture!(
+						error,
+						&self.client.get_chain_name(),
+						SUB_LOG_TARGET,
+						self.client.address().await,
+						"❗️ Error processing confirmed event: {:?}",
+						e
+					);
+				}
+			} else {
+				log::warn!(
+					target: &self.client.get_chain_name(),
+					"-[{}] ⚠️ Event from block #{} no longer exists on-chain (possible reorg), skipping",
+					sub_display_format(SUB_LOG_TARGET),
+					event.block_number,
+				);
+			}
+		}
+
+		Ok(())
+	}
+
+	/// Verify that an event still exists on-chain after confirmation.
+	/// Returns true if the event is still valid, false if it was reorged away.
+	async fn verify_event_on_chain(&self, event: &PendingEvent) -> Result<bool> {
+		let log = &event.log;
+
+		// Query logs for the specific block to verify the event still exists
+		let filter = Filter::new()
+			.address(log.address())
+			.from_block(event.block_number)
+			.to_block(event.block_number);
+
+		let logs = self.client.get_logs(&filter).await?;
+
+		// Check if our specific log still exists
+		// Match by transaction hash and log index
+		let tx_hash = log.transaction_hash;
+		let log_index = log.log_index;
+
+		Ok(logs.iter().any(|l| l.transaction_hash == tx_hash && l.log_index == log_index))
 	}
 
 	/// Process onflight message from SocketOnflightHandler.
