@@ -114,12 +114,14 @@ where
 
 	/// Run the handler main loop.
 	pub async fn run(&mut self) -> Result<()> {
-		// Bootstrap: recover pending Standard transfers
-		let should_bootstrap = self.is_before_bootstrap_state(BootstrapState::NormalStart).await;
-		if should_bootstrap {
-			self.bootstrap().await?;
-		}
-		self.wait_for_all_chains_bootstrapped().await?;
+		// Always run bootstrap - recovery should happen regardless of bootstrap setting
+		// This avoids race condition with SocketRelayHandler which shares the same chain_id
+		self.bootstrap().await?;
+
+		// Note: No wait_for_all_chains_bootstrapped() here
+		// Messages sent to SocketRelayHandler are buffered in the channel
+		// and processed once SocketRelayHandler finishes its bootstrap and starts main loop.
+		// This allows us to catch TransferPolled events that occur during other handlers' bootstrap.
 
 		// Subscribe to Substrate blocks for TransferPolled events
 		let mut sub_block_stream = self.sub_client.blocks().subscribe_best().await?;
@@ -533,16 +535,26 @@ where
 	}
 
 	async fn bootstrap(&self) -> Result<()> {
-		// Wait for SocketRelay bootstrap to complete first
-		self.wait_for_bootstrap_state(BootstrapState::BootstrapSocketRelay).await?;
+		let bootstrap_enabled = self
+			.bootstrap_shared_data
+			.bootstrap_config
+			.as_ref()
+			.map(|c| c.is_enabled)
+			.unwrap_or(false);
+
+		if bootstrap_enabled {
+			// Bootstrap enabled: wait for BootstrapSocketRelay phase
+			// This ensures RoundUp bootstrap is complete before recovery
+			self.wait_for_bootstrap_state(BootstrapState::BootstrapSocketRelay).await?;
+		}
 
 		log::info!(
 			target: &self.bifrost_client.get_chain_name(),
-			"-[{}] ⚙️  [Bootstrap mode] Recovering pending Standard transfers...",
+			"-[{}] 🔄 Recovering pending Standard transfers...",
 			sub_display_format(SUB_LOG_TARGET),
 		);
 
-		// Recover pending Standard transfers from storage
+		// Always recover pending Standard transfers (regardless of bootstrap setting)
 		if let Err(e) = self.recover_pending_standard_transfers().await {
 			log::warn!(
 				target: &self.bifrost_client.get_chain_name(),
@@ -554,7 +566,7 @@ where
 
 		log::info!(
 			target: &self.bifrost_client.get_chain_name(),
-			"-[{}] ⚙️  [Bootstrap mode] SocketOnflight bootstrap complete",
+			"-[{}] ✅ SocketOnflight bootstrap complete",
 			sub_display_format(SUB_LOG_TARGET),
 		);
 
