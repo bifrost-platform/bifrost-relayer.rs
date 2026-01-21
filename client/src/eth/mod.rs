@@ -528,88 +528,43 @@ where
 		erc20
 	}
 
-	/// Get asset address with caching.
+	/// Get asset address from Vault contract.
 	pub async fn get_asset_address_by_index(
 		&self,
 		asset_index_hash: FixedBytes<32>,
 	) -> Result<Address> {
-		// Check cache first
-		{
-			let cache = self.contract_cache.asset_addresses.read().await;
-			if let Some(&address) = cache.get(&asset_index_hash) {
-				return Ok(address);
-			}
-		}
-
-		// Fetch from vault and cache
-		let address = self
+		Ok(self
 			.protocol_contracts
 			.vault
 			.assets_config(asset_index_hash)
 			.call()
 			.await?
-			.target;
-		self.contract_cache
-			.asset_addresses
-			.write()
-			.await
-			.insert(asset_index_hash, address);
-		Ok(address)
+			.target)
 	}
 
-	/// Get asset oracle address with caching.
+	/// Get asset oracle address from RelayQueue contract.
 	pub async fn get_oracle_address_by_asset_index(
 		&self,
 		asset_index_hash: FixedBytes<32>,
 	) -> Result<Address> {
-		// Check cache first
-		{
-			let cache = self.contract_cache.asset_oracle_addresses.read().await;
-			if let Some(&address) = cache.get(&asset_index_hash) {
-				return Ok(address);
-			}
-		}
-
-		// Fetch from relay queue and cache
 		let relay_queue = self
 			.protocol_contracts
 			.relay_queue
 			.as_ref()
 			.ok_or(eyre::eyre!("RelayQueue contract not available"))?;
 
-		let address = relay_queue.get_asset_oracle_by_hash(asset_index_hash).call().await?;
-		self.contract_cache
-			.asset_oracle_addresses
-			.write()
-			.await
-			.insert(asset_index_hash, address);
-		Ok(address)
+		Ok(relay_queue.get_asset_oracle_by_hash(asset_index_hash).call().await?)
 	}
 
-	/// Get native currency oracle address with caching.
+	/// Get native currency oracle address from RelayQueue contract.
 	pub async fn get_oracle_address_by_chain(&self, chain_id: ChainId) -> Result<Address> {
-		// Check cache first
-		{
-			let cache = self.contract_cache.native_oracle_addresses.read().await;
-			if let Some(&address) = cache.get(&chain_id) {
-				return Ok(address);
-			}
-		}
-
-		// Fetch from relay queue and cache
 		let relay_queue = self
 			.protocol_contracts
 			.relay_queue
 			.as_ref()
 			.ok_or(eyre::eyre!("RelayQueue contract not available"))?;
 
-		let address = relay_queue.get_native_currency_oracle(chain_id as u32).call().await?;
-		self.contract_cache
-			.native_oracle_addresses
-			.write()
-			.await
-			.insert(chain_id, address);
-		Ok(address)
+		Ok(relay_queue.get_native_currency_oracle(chain_id as u32).call().await?)
 	}
 
 	/// Get oracle decimals from cache or fetch and cache if not present.
