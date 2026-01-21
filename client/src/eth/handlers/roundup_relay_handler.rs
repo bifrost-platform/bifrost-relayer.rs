@@ -379,13 +379,13 @@ where
 			let mut bootstrap_states = self.bootstrap_shared_data.bootstrap_states.write().await;
 			for chain_id in chain_ids {
 				*bootstrap_states.get_mut(&chain_id).unwrap() =
-					BootstrapState::BootstrapSocketRelay;
+					BootstrapState::BootstrapSocketRelayQueue;
 			}
 		}
 
 		log::info!(
 			target: &self.client.get_chain_name(),
-			"-[{}] ⚙️  [Bootstrap mode] BootstrapRoundUpPhase2 → BootstrapSocketRelay",
+			"-[{}] ⚙️  [Bootstrap mode] BootstrapRoundUpPhase2 → BootstrapSocketRelayQueue",
 			sub_display_format(SUB_LOG_TARGET),
 		);
 		Ok(())
