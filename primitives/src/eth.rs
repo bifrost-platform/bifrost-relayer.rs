@@ -1,6 +1,6 @@
 use alloy::{
 	network::Network,
-	primitives::{Address, ChainId, FixedBytes, map::AddressHashMap},
+	primitives::{Address, ChainId, map::AddressHashMap},
 	providers::{
 		Provider, WalletProvider,
 		fillers::{FillProvider, TxFiller},
@@ -66,16 +66,6 @@ where
 	pub oracle_decimals: RwLock<HashMap<Address, u8>>,
 	/// Cached ERC20 token decimals
 	pub erc20_decimals: RwLock<HashMap<Address, u8>>,
-	/// Cached asset addresses by asset_index_hash to asset_address
-	/// The actual bridged asset address on the destination chain
-	/// For Bifrost it will be the unified token address.
-	/// For external chains it will be the original token address. (e.g. USDC, USDT, DAI, etc.)
-	/// Native currency addresses are set to 0xffffffffffffffffffffffffffffffffffffffff
-	pub asset_addresses: RwLock<HashMap<FixedBytes<32>, Address>>,
-	/// Cached asset oracle addresses by asset_index_hash to oracle_address
-	pub asset_oracle_addresses: RwLock<HashMap<FixedBytes<32>, Address>>,
-	/// Cached native currency oracle addresses by chain_id to oracle_address
-	pub native_oracle_addresses: RwLock<HashMap<ChainId, Address>>,
 }
 
 impl<F, P, N: Network> Default for ContractCache<F, P, N>
@@ -89,9 +79,6 @@ where
 			erc20s: RwLock::new(HashMap::new()),
 			oracle_decimals: RwLock::new(HashMap::new()),
 			erc20_decimals: RwLock::new(HashMap::new()),
-			asset_addresses: RwLock::new(HashMap::new()),
-			asset_oracle_addresses: RwLock::new(HashMap::new()),
-			native_oracle_addresses: RwLock::new(HashMap::new()),
 		}
 	}
 }
