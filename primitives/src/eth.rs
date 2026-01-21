@@ -24,7 +24,6 @@ use crate::{
 		chainlink_aggregator::{ChainlinkContract, ChainlinkInstance},
 		erc20::Erc20Instance,
 		hooks::{HooksContract, HooksInstance},
-		oracle::OracleInstance,
 		registration_pool::{RegistrationPoolContract, RegistrationPoolInstance},
 		relay_executive::{RelayExecutiveContract, RelayExecutiveInstance},
 		relay_queue::{RelayQueueContract, RelayQueueInstance},
@@ -59,7 +58,7 @@ where
 	P: Provider<N>,
 {
 	/// Cached oracle contract instances by address
-	pub oracles: RwLock<HashMap<Address, Arc<OracleInstance<F, P, N>>>>,
+	pub oracles: RwLock<HashMap<Address, Arc<ChainlinkInstance<F, P, N>>>>,
 	/// Cached ERC20 contract instances by address
 	pub erc20s: RwLock<HashMap<Address, Arc<Erc20Instance<F, P, N>>>>,
 	/// Cached oracle decimals
