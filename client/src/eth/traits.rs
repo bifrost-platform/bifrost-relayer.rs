@@ -514,14 +514,14 @@ where
 		// Calculate fee in bridged asset with proper decimal handling
 		//
 		// Conversion formula:
-		// fee_in_bridged_asset = (estimated_fee_wei × dst_price_usd × 10^bridged_decimals) /
-		//                        (bridged_asset_price_usd × 10^18)
+		// fee_in_bridged_asset = (estimated_fee_in_dnc × dnc_price_in_usd × 10^bridged_asset_decimals) /
+		//                        (bridged_asset_price_in_usd × 10^18)
 		//
 		// How It Works:
-		// 1. estimated_fee_on_dst: Gas fee in wei (18 decimals) on destination chain
-		// 2. Multiply by dst_native_currency_price: Convert to USD value
-		// 3. Multiply by 10^bridged_decimals: Scale to bridged asset's decimal places
-		// 4. Divide by bridged_asset_price_usd: Convert USD to bridged asset units
+		// 1. estimated_fee_in_dnc: Gas fee in wei (18 decimals) on destination chain
+		// 2. Multiply by dnc_price_in_usd: Convert to USD value
+		// 3. Multiply by 10^bridged_asset_decimals: Scale to bridged asset's decimal places
+		// 4. Divide by bridged_asset_price_in_usd: Convert USD to bridged asset units
 		// 5. Divide by 10^18: Remove the destination chain's 18 decimal normalization
 		//
 		// Example Scenarios:
