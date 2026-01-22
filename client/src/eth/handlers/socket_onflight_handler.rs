@@ -267,6 +267,7 @@ where
 						);
 
 						self.send_to_socket_relay_handler(
+							src_chain_id,
 							dst_chain_id,
 							socket_message,
 							asset_index_hash,
@@ -468,6 +469,7 @@ where
 			);
 
 			self.send_to_socket_relay_handler(
+				transfer.src_chain_id,
 				transfer.dst_chain_id,
 				transfer.socket_message,
 				transfer.asset_index_hash,
@@ -486,14 +488,25 @@ where
 	}
 
 	/// Send the processed OnFlight message to the appropriate SocketRelayHandler.
+	/// - Inbound (External→Bifrost): send to dst_chain (Bifrost)
+	/// - Outbound (Bifrost→External): send to src_chain (Bifrost)
 	async fn send_to_socket_relay_handler(
 		&self,
+		src_chain_id: ChainId,
 		dst_chain_id: ChainId,
 		socket_message: Socket_Message,
 		asset_index_hash: H256,
 		sequence_id: u128,
 	) {
-		if let Some(sender) = self.onflight_senders.get(&dst_chain_id) {
+		let bifrost_chain_id = self.bifrost_client.chain_id();
+
+		// Determine target chain based on direction:
+		// - Outbound (src == Bifrost): relay tx goes to src_chain, so send to Bifrost's handler
+		// - Inbound (dst == Bifrost): relay tx goes to dst_chain, so send to Bifrost's handler
+		let is_outbound = src_chain_id == bifrost_chain_id;
+		let target_chain_id = if is_outbound { src_chain_id } else { dst_chain_id };
+
+		if let Some(sender) = self.onflight_senders.get(&target_chain_id) {
 			let msg = SocketOnflightMessage { socket_message, asset_index_hash, sequence_id };
 			if let Err(e) = sender.send(msg) {
 				br_primitives::log_and_capture!(
@@ -502,7 +515,7 @@ where
 					SUB_LOG_TARGET,
 					self.bifrost_client.address().await,
 					"❗️ Failed to send OnFlight message to chain {}: {:?}",
-					dst_chain_id,
+					target_chain_id,
 					e
 				);
 			}
@@ -511,7 +524,7 @@ where
 				target: &self.bifrost_client.get_chain_name(),
 				"-[{}] No SocketRelayHandler found for chain {}, skipping OnFlight message",
 				sub_display_format(SUB_LOG_TARGET),
-				dst_chain_id,
+				target_chain_id,
 			);
 		}
 	}
