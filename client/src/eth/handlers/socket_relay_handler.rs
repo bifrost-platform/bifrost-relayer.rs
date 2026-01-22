@@ -110,26 +110,52 @@ where
 				evm_msg = self.event_stream.next() => {
 					match evm_msg {
 						Some(Ok(msg)) => {
-							let mut new_pending_count = 0u32;
-							for log in msg.event_logs {
-								if self.is_target_contract(&log) && self.is_target_event(log.topic0()) {
-									self.pending_events.write().await.push(PendingEvent {
-										log,
-										block_number: msg.block_number,
-									});
-									new_pending_count += 1;
+								let mut new_pending_count = 0u32;
+								let mut immediate_count = 0u32;
+								for log in msg.event_logs {
+									if self.is_target_contract(&log) && self.is_target_event(log.topic0()) {
+										// Check if this event should be processed immediately
+										// Inbound + Executed or Outbound + Accepted don't need confirmations
+										if self.should_process_immediately(&log) == Some(true) {
+											if let Err(e) = self.process_confirmed_log(&log, false).await {
+												br_primitives::log_and_capture!(
+													error,
+													&self.client.get_chain_name(),
+													SUB_LOG_TARGET,
+													self.client.address().await,
+													"❗️ Error processing immediate event: {:?}",
+													e
+												);
+											}
+											immediate_count += 1;
+										} else {
+											self.pending_events.write().await.push(PendingEvent {
+												log,
+												block_number: msg.block_number,
+											});
+											new_pending_count += 1;
+										}
+									}
 								}
-							}
-							if new_pending_count > 0 {
-								log::info!(
-									target: &self.client.get_chain_name(),
-									"-[{}] 📦 Queued {} events from #{:?} for confirmation",
-									sub_display_format(SUB_LOG_TARGET),
-									new_pending_count,
-									msg.block_number,
-								);
-							}
-						},
+								if immediate_count > 0 {
+									log::info!(
+										target: &self.client.get_chain_name(),
+										"-[{}] ⚡ Processed {} events immediately from #{:?}",
+										sub_display_format(SUB_LOG_TARGET),
+										immediate_count,
+										msg.block_number,
+									);
+								}
+								if new_pending_count > 0 {
+									log::info!(
+										target: &self.client.get_chain_name(),
+										"-[{}] 📦 Queued {} events from #{:?} for confirmation",
+										sub_display_format(SUB_LOG_TARGET),
+										new_pending_count,
+										msg.block_number,
+									);
+								}
+							},
 						Some(Err(e)) => {
 							log::warn!(
 								target: &self.client.get_chain_name(),
@@ -736,6 +762,29 @@ where
 			(self.client.chain_id() == dst_chain_id, self.client.metadata.if_destination_chain),
 			(true, RelayDirection::Inbound) | (false, RelayDirection::Outbound)
 		)
+	}
+
+	/// Determines if an event should be processed immediately without waiting for confirmations.
+	/// Returns true for:
+	/// - Inbound + Executed: The transaction was executed on dst chain, no need to wait
+	/// - Outbound + Accepted: The transaction was accepted on src chain, no need to wait
+	fn should_process_immediately(&self, log: &Log) -> Option<bool> {
+		match log.log_decode::<Socket>() {
+			Ok(decoded_log) => {
+				let msg = &decoded_log.inner.data.msg;
+				let status = SocketEventStatus::from(msg.status);
+				let dst_chain_id = Into::<u32>::into(msg.ins_code.ChainIndex) as ChainId;
+				let is_inbound = self.is_inbound_sequence(dst_chain_id);
+
+				let should_skip_confirmation = matches!(
+					(is_inbound, status),
+					(true, SocketEventStatus::Executed) | (false, SocketEventStatus::Accepted)
+				);
+
+				Some(should_skip_confirmation)
+			},
+			Err(_) => None,
+		}
 	}
 
 	/// Verifies whether the socket event is on an executable(=rollbackable) state.
