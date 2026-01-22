@@ -9,7 +9,6 @@ pub fn get_asset_oids() -> BTreeMap<&'static str, B256> {
 		("ETH", b256!("0100010000000000000000000000000000000000000000000000000000000004")),
 		("BNB", b256!("0100010000000000000000000000000000000000000000000000000000000005")),
 		("POL", b256!("0100010000000000000000000000000000000000000000000000000000000006")),
-		("AVAX", b256!("0100010000000000000000000000000000000000000000000000000000000007")),
 		("USDC", b256!("0100010000000000000000000000000000000000000000000000000000000008")),
 		("BUSD", b256!("0100010000000000000000000000000000000000000000000000000000000009")),
 		("USDT", b256!("010001000000000000000000000000000000000000000000000000000000000a")),
@@ -26,6 +25,18 @@ sol!(
 	#[sol(rpc)]
 	SocketContract,
 	"../abi/abi.socket.merged.json"
+);
+
+sol!(
+	#[derive(serde::Serialize, serde::Deserialize)]
+	/// Variants structure for socket message parameters.
+	/// Follows Solidity ABI encoding: (address sender, address receiver, uint256 max_tx_fee, bytes message)
+	struct Variants {
+		address sender;
+		address receiver;
+		uint256 max_tx_fee;
+		bytes message;
+	}
 );
 
 impl From<Signature> for Signatures {
@@ -65,6 +76,16 @@ impl From<Signatures> for Vec<Signature> {
 		}
 
 		res
+	}
+}
+
+impl From<RequestID> for FixedBytes<32> {
+	fn from(req_id: RequestID) -> Self {
+		let mut bytes = [0u8; 32];
+		bytes[0..4].copy_from_slice(&req_id.ChainIndex.0);
+		bytes[4..12].copy_from_slice(&req_id.round_id.to_be_bytes());
+		bytes[12..28].copy_from_slice(&req_id.sequence.to_be_bytes());
+		Self::from(bytes)
 	}
 }
 

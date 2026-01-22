@@ -17,9 +17,8 @@ use tokio_stream::{StreamExt, wrappers::BroadcastStream};
 use br_primitives::{
 	bootstrap::BootstrapSharedData,
 	constants::{
-		cli::DEFAULT_BOOTSTRAP_ROUND_OFFSET,
-		config::BOOTSTRAP_BLOCK_CHUNK_SIZE,
-		errors::{INVALID_BIFROST_NATIVENESS, INVALID_CHAIN_ID},
+		cli::DEFAULT_BOOTSTRAP_ROUND_OFFSET, config::BOOTSTRAP_BLOCK_CHUNK_SIZE,
+		errors::INVALID_CHAIN_ID,
 	},
 	contracts::socket::{
 		Socket_Struct::{Instruction, RequestID, Signatures, Socket_Message},
@@ -37,7 +36,7 @@ use crate::{
 		ClientMap, EthClient,
 		events::EventMessage,
 		send_transaction,
-		traits::{BootstrapHandler, Handler, SocketRelayBuilder},
+		traits::{BootstrapHandler, Handler, HookExecutor, SocketRelayBuilder},
 	},
 };
 
@@ -121,10 +120,46 @@ where
 					// do nothing if not selected
 					return Ok(());
 				}
+				// Check if we should execute the hook (Executed status with valid requirements)
+				if let Some(variants) = self.should_execute_hook(&msg).await? {
+					match self.execute_hook(&msg, variants).await {
+						Ok(()) => (),
+						Err(error) => {
+							// we don't propagate the error to prevent hook execution errors fail the entire relay process
+							br_primitives::log_and_capture!(
+								error,
+								&self.client.get_chain_name(),
+								SUB_LOG_TARGET,
+								self.client.address().await,
+								"❗️ Failed to execute hook: {:?}",
+								error
+							);
+						},
+					}
+				}
+				// Check if we should rollback the hook (Rollbacked status with valid requirements)
+				if let Some(variants) = self.should_rollback_hook(&msg).await? {
+					match self.rollback_hook(&msg, variants).await {
+						Ok(()) => (),
+						Err(error) => {
+							// we don't propagate the error to prevent hook rollback errors fail the entire relay process
+							br_primitives::log_and_capture!(
+								error,
+								&self.client.get_chain_name(),
+								SUB_LOG_TARGET,
+								self.client.address().await,
+								"❗️ Failed to rollback hook: {:?}",
+								error
+							);
+						},
+					}
+				}
+
 				if self.is_sequence_ended(&msg.req_id, &msg.ins_code, metadata.status).await? {
 					// do nothing if protocol sequence ended
 					return Ok(());
 				}
+
 				self.submit_brp_outbound_request(msg.clone(), metadata.clone()).await?;
 
 				self.send_socket_message(msg.clone(), metadata.clone(), metadata.is_inbound)
@@ -570,19 +605,7 @@ where
 			let round_info = if self.client.metadata.is_native {
 				self.client.protocol_contracts.authority.round_info().call().await?
 			} else {
-				match self.system_clients.iter().find(|(_id, client)| client.metadata.is_native) {
-					Some((_id, native_client)) => {
-						native_client.protocol_contracts.authority.round_info().call().await?
-					},
-					_ => {
-						panic!(
-							"[{}]-[{}] {}",
-							self.client.get_chain_name(),
-							SUB_LOG_TARGET,
-							INVALID_BIFROST_NATIVENESS,
-						);
-					},
-				}
+				self.bifrost_client.protocol_contracts.authority.round_info().call().await?
 			};
 
 			let bootstrap_offset_height = self
@@ -640,6 +663,33 @@ where
 
 	fn bfc_client(&self) -> Arc<EthClient<F, P, N>> {
 		self.client.clone()
+	}
+}
+
+#[async_trait::async_trait]
+impl<F, P, N: Network> HookExecutor<F, P, N> for SocketRelayHandler<F, P, N>
+where
+	F: TxFiller<N> + WalletProvider<N> + 'static,
+	P: Provider<N> + 'static,
+{
+	fn debug_mode(&self) -> bool {
+		self.debug_mode
+	}
+
+	fn handle(&self) -> SpawnTaskHandle {
+		self.handle.clone()
+	}
+
+	fn get_client(&self) -> Arc<EthClient<F, P, N>> {
+		self.client.clone()
+	}
+
+	fn get_bifrost_client(&self) -> Arc<EthClient<F, P, N>> {
+		self.bifrost_client.clone()
+	}
+
+	fn get_system_client(&self, chain_id: &ChainId) -> Option<Arc<EthClient<F, P, N>>> {
+		self.system_clients.get(chain_id).cloned()
 	}
 }
 
