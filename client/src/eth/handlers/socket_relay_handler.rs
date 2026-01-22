@@ -617,9 +617,6 @@ where
 			metadata,
 		);
 
-		// Submit BRP outbound request if applicable
-		self.submit_brp_outbound_request(msg.clone(), metadata.clone()).await?;
-
 		// Send socket message (build and send Accepted transaction)
 		self.send_socket_message(msg, metadata, is_inbound).await
 	}
