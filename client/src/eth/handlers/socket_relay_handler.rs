@@ -428,80 +428,148 @@ where
 		let latest_block = self.client.get_block_number().await?;
 		let block_confirmations = self.client.metadata.block_confirmations;
 
-		// Collect confirmed events
-		let confirmed_events: Vec<PendingEvent> = {
+		// Collect confirmed events with their indices
+		let confirmed_indices: Vec<usize> = {
 			let pending = self.pending_events.read().await;
 			pending
 				.iter()
-				.filter(|e| latest_block.saturating_sub(e.block_number) >= block_confirmations)
-				.cloned()
+				.enumerate()
+				.filter(|(_, e)| latest_block.saturating_sub(e.block_number) >= block_confirmations)
+				.map(|(idx, _)| idx)
 				.collect()
 		};
 
-		if confirmed_events.is_empty() {
+		if confirmed_indices.is_empty() {
 			return Ok(());
 		}
 
-		// Remove confirmed events from pending list
-		{
-			let mut pending = self.pending_events.write().await;
-			pending.retain(|e| latest_block.saturating_sub(e.block_number) < block_confirmations);
-		}
+		// Track indices to remove and updates to apply
+		let mut indices_to_remove: Vec<usize> = Vec::new();
+		let mut block_updates: Vec<(usize, u64)> = Vec::new();
+
+		// Get events to check
+		let events_to_check: Vec<(usize, PendingEvent)> = {
+			let pending = self.pending_events.read().await;
+			confirmed_indices.iter().map(|&idx| (idx, pending[idx].clone())).collect()
+		};
 
 		// Process each confirmed event after re-verification
-		for event in confirmed_events {
-			// Re-verify the event still exists on-chain (handle potential reorgs)
-			if self.verify_event_on_chain(&event).await? {
-				log::info!(
-					target: &self.client.get_chain_name(),
-					"-[{}] ✅ Event confirmed after {} blocks, processing (block #{})",
-					sub_display_format(SUB_LOG_TARGET),
-					latest_block.saturating_sub(event.block_number),
-					event.block_number,
-				);
-
-				if let Err(e) = self.process_confirmed_log(&event.log, false).await {
-					br_primitives::log_and_capture!(
-						error,
-						&self.client.get_chain_name(),
-						SUB_LOG_TARGET,
-						self.client.address().await,
-						"❗️ Error processing confirmed event: {:?}",
-						e
+		for (idx, event) in events_to_check {
+			match self.verify_event_on_chain(&event).await {
+				Ok(Some(current_block)) if current_block == event.block_number => {
+					// Block number matches, no reorg, process the event
+					log::info!(
+						target: &self.client.get_chain_name(),
+						"-[{}] ✅ Event confirmed after {} blocks, processing (block #{})",
+						sub_display_format(SUB_LOG_TARGET),
+						latest_block.saturating_sub(event.block_number),
+						event.block_number,
 					);
+
+					indices_to_remove.push(idx);
+
+					if let Err(e) = self.process_confirmed_log(&event.log, false).await {
+						br_primitives::log_and_capture!(
+							error,
+							&self.client.get_chain_name(),
+							SUB_LOG_TARGET,
+							self.client.address().await,
+							"❗️ Error processing confirmed event: {:?}",
+							e
+						);
+					}
+				},
+				Ok(Some(current_block)) => {
+					// Block number changed due to reorg, update and wait for confirmations again
+					log::info!(
+						target: &self.client.get_chain_name(),
+						"-[{}] 🔄 Reorg detected for event: block {} -> {}, waiting for confirmations again",
+						sub_display_format(SUB_LOG_TARGET),
+						event.block_number,
+						current_block,
+					);
+					block_updates.push((idx, current_block));
+				},
+				Ok(None) => {
+					// Event no longer exists (reorged out completely)
+					log::warn!(
+						target: &self.client.get_chain_name(),
+						"-[{}] ⚠️ Event from block #{} no longer exists on-chain (reorged out), skipping",
+						sub_display_format(SUB_LOG_TARGET),
+						event.block_number,
+					);
+					indices_to_remove.push(idx);
+				},
+				Err(e) => {
+					log::warn!(
+						target: &self.client.get_chain_name(),
+						"-[{}] Failed to verify event on-chain: {:?}, keeping in pending",
+						sub_display_format(SUB_LOG_TARGET),
+						e,
+					);
+					// Keep in pending list to retry later
+				},
+			}
+		}
+
+		// Apply block number updates
+		if !block_updates.is_empty() {
+			let mut pending = self.pending_events.write().await;
+			for (idx, new_block) in block_updates {
+				if idx < pending.len() {
+					pending[idx].block_number = new_block;
 				}
-			} else {
-				log::warn!(
-					target: &self.client.get_chain_name(),
-					"-[{}] ⚠️ Event from block #{} no longer exists on-chain (possible reorg), skipping",
-					sub_display_format(SUB_LOG_TARGET),
-					event.block_number,
-				);
+			}
+		}
+
+		// Remove processed/invalidated events
+		if !indices_to_remove.is_empty() {
+			let mut pending = self.pending_events.write().await;
+			// Sort indices in reverse order to maintain correct positions during removal
+			indices_to_remove.sort_unstable_by(|a, b| b.cmp(a));
+			for idx in indices_to_remove {
+				if idx < pending.len() {
+					pending.remove(idx);
+				}
 			}
 		}
 
 		Ok(())
 	}
 
-	/// Verify that an event still exists on-chain after confirmation.
-	/// Returns true if the event is still valid, false if it was reorged away.
-	async fn verify_event_on_chain(&self, event: &PendingEvent) -> Result<bool> {
+	/// Verify that an event still exists on-chain and find its current block.
+	/// Returns Ok(Some(block_number)) if found, Ok(None) if reorged out completely.
+	async fn verify_event_on_chain(&self, event: &PendingEvent) -> Result<Option<u64>> {
 		let log = &event.log;
-
-		// Query logs for the specific block to verify the event still exists
-		let filter = Filter::new()
-			.address(log.address())
-			.from_block(event.block_number)
-			.to_block(event.block_number);
-
-		let logs = self.client.get_logs(&filter).await?;
-
-		// Check if our specific log still exists
-		// Match by transaction hash and log index
 		let tx_hash = log.transaction_hash;
-		let log_index = log.log_index;
 
-		Ok(logs.iter().any(|l| l.transaction_hash == tx_hash && l.log_index == log_index))
+		// First check if the transaction still exists and get its current block
+		if let Some(tx_hash) = tx_hash {
+			use alloy::network::TransactionResponse;
+
+			if let Some(tx) = self.client.get_transaction_by_hash(tx_hash).await? {
+				if let Some(current_block) = tx.block_number() {
+					// Transaction exists, verify the log is still in it
+					let filter = Filter::new()
+						.address(log.address())
+						.from_block(current_block)
+						.to_block(current_block);
+
+					let logs = self.client.get_logs(&filter).await?;
+					let log_index = log.log_index;
+
+					if logs
+						.iter()
+						.any(|l| l.transaction_hash == Some(tx_hash) && l.log_index == log_index)
+					{
+						return Ok(Some(current_block));
+					}
+				}
+			}
+		}
+
+		// Transaction/log not found - likely reorged out completely
+		Ok(None)
 	}
 
 	/// Process onflight message from SocketOnflightHandler.
