@@ -43,6 +43,7 @@ sc-service = { workspace = true }
 sc-sysinfo = { workspace = true }
 sp-application-crypto = { workspace = true }
 prometheus-endpoint = { workspace = true }
+subxt = { workspace = true }
 
 [build-dependencies]
 substrate-build-script-utils = { workspace = true }
