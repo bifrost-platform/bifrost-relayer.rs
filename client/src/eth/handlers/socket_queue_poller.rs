@@ -116,15 +116,15 @@ where
 		Into::<u32>::into(msg.ins_code.ChainIndex) as ChainId
 	}
 
-	/// Query OnFlightTransfers storage to check if transfer already exists.
+	/// Query OnFlightTransfers storage to get transfer status.
 	///
-	/// Returns `true` if transfer exists, `false` otherwise.
+	/// Returns `Some(status)` if transfer exists, `None` otherwise.
 	/// Storage key: (src_chain_id, src_tx_id)
-	async fn is_on_flight_transfer_exists(
+	async fn get_on_flight_transfer_status(
 		&self,
 		src_chain_id: ChainId,
 		src_tx_id: B256,
-	) -> Result<bool> {
+	) -> Result<Option<bifrost_runtime::runtime_types::pallet_cccp_relay_queue::TransferStatus>> {
 		// Query at best block (including unfinalized) instead of latest finalized
 		let best_hash = self.sub_rpc.chain_get_block_hash(None).await?.unwrap_or_default();
 		let storage = self.sub_client.storage().at(best_hash);
@@ -137,7 +137,25 @@ where
 			)
 			.await?;
 
-		Ok(transfer.is_some())
+		Ok(transfer.map(|t| t.status))
+	}
+
+	/// Check if this relayer should skip voting for an on-flight poll.
+	///
+	/// Returns `true` if should skip (transfer exists and status is NOT Pending).
+	/// If status is Pending, relayer should still vote as threshold not yet reached.
+	async fn should_skip_on_flight_poll(
+		&self,
+		src_chain_id: ChainId,
+		src_tx_id: B256,
+	) -> Result<bool> {
+		use bifrost_runtime::runtime_types::pallet_cccp_relay_queue::TransferStatus;
+
+		match self.get_on_flight_transfer_status(src_chain_id, src_tx_id).await? {
+			None => Ok(false),                          // Transfer doesn't exist, should vote
+			Some(TransferStatus::Pending) => Ok(false), // Still pending, should vote
+			Some(_) => Ok(true),                        // OnFlight or Finalized, skip
+		}
 	}
 
 	/// Process a confirmed Socket event log.
@@ -223,12 +241,12 @@ where
 
 		// Query OnFlightTransfers storage to check current state
 		// Storage key: (src_chain_id, src_tx_id)
-		let transfer_exists = self.is_on_flight_transfer_exists(src_chain_id, src_tx_id).await?;
-
-		if transfer_exists {
+		// Skip only if transfer exists AND status is NOT Pending
+		// If status is Pending, this relayer should still vote
+		if self.should_skip_on_flight_poll(src_chain_id, src_tx_id).await? {
 			log::info!(
 				target: &self.client.get_chain_name(),
-				"-[{}] Transfer already in OnFlightTransfers, skipping: seq={}",
+				"-[{}] Transfer already processed (OnFlight/Finalized), skipping: seq={}",
 				sub_display_format(SUB_LOG_TARGET),
 				sequence_id,
 			);
