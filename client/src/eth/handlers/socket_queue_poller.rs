@@ -3,12 +3,11 @@ use std::sync::Arc;
 use alloy::{
 	dyn_abi::DynSolValue,
 	network::Network,
-	primitives::{B256, ChainId, FixedBytes, U256},
+	primitives::{B256, ChainId, FixedBytes, U256, keccak256},
 	providers::{Provider, WalletProvider, fillers::TxFiller},
 	rpc::types::{Filter, Log},
 	sol_types::SolEvent,
 };
-use array_bytes::Hexify;
 use eyre::Result;
 use subxt::ext::subxt_core::utils::AccountId20;
 use subxt::{
@@ -364,8 +363,11 @@ where
 		src_tx_id: B256,
 	) -> Result<()> {
 		let encoded_msg = self.encode_socket_message(&msg);
-		let signature =
-			self.client.sign_message(encoded_msg.hexify_prefixed().as_bytes()).await?.into();
+
+		// Node expects: keccak256("OnFlightPoll") + raw_message_bytes
+		let prefix = keccak256("OnFlightPoll".as_bytes());
+		let message_to_sign = [prefix.as_slice(), &encoded_msg].concat();
+		let signature = self.client.sign_message(&message_to_sign).await?.into();
 
 		let call = Arc::new(bifrost_runtime::tx().cccp_relay_queue().on_flight_poll(
 			SocketMessageSubmission {
@@ -410,8 +412,11 @@ where
 		src_tx_id: B256,
 	) -> Result<()> {
 		let encoded_msg = self.encode_socket_message(&msg);
-		let signature =
-			self.client.sign_message(encoded_msg.hexify_prefixed().as_bytes()).await?.into();
+
+		// Node expects: keccak256("FinalizePoll") + raw_message_bytes
+		let prefix = keccak256("FinalizePoll".as_bytes());
+		let message_to_sign = [prefix.as_slice(), &encoded_msg].concat();
+		let signature = self.client.sign_message(&message_to_sign).await?.into();
 
 		let call = Arc::new(bifrost_runtime::tx().cccp_relay_queue().finalize_poll(
 			SocketMessageSubmission {
