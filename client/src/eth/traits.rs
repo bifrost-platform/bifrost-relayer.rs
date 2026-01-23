@@ -1,9 +1,8 @@
 use std::{sync::Arc, time::Duration};
 
 use alloy::{
-	dyn_abi::DynSolValue,
 	network::{Network, TransactionBuilder},
-	primitives::{B256, ChainId, FixedBytes, U256},
+	primitives::{B256, ChainId, U256},
 	providers::{Provider, WalletProvider, fillers::TxFiller},
 	rpc::types::Log,
 	signers::Signature,
@@ -75,38 +74,6 @@ where
 		Ok(None)
 	}
 
-	fn encode_socket_message(&self, msg: Socket_Message) -> Vec<u8> {
-		let req_id = DynSolValue::Tuple(vec![
-			DynSolValue::FixedBytes(
-				FixedBytes::<32>::right_padding_from(msg.req_id.ChainIndex.as_slice()),
-				4,
-			),
-			DynSolValue::Uint(U256::from(msg.req_id.round_id), 64),
-			DynSolValue::Uint(U256::from(msg.req_id.sequence), 128),
-		]);
-		let status = DynSolValue::Uint(U256::from(msg.status), 8);
-		let ins_code = DynSolValue::Tuple(vec![
-			DynSolValue::FixedBytes(
-				FixedBytes::<32>::right_padding_from(msg.ins_code.ChainIndex.as_slice()),
-				4,
-			),
-			DynSolValue::FixedBytes(
-				FixedBytes::<32>::right_padding_from(msg.ins_code.RBCmethod.as_slice()),
-				16,
-			),
-		]);
-		let params = DynSolValue::Tuple(vec![
-			DynSolValue::FixedBytes(msg.params.tokenIDX0, 32),
-			DynSolValue::FixedBytes(msg.params.tokenIDX1, 32),
-			DynSolValue::Address(msg.params.refund),
-			DynSolValue::Address(msg.params.to),
-			DynSolValue::Uint(msg.params.amount, 256),
-			DynSolValue::Bytes(msg.params.variants.to_vec()),
-		]);
-
-		DynSolValue::Tuple(vec![req_id, status, ins_code, params]).abi_encode()
-	}
-
 	/// Build the signatures required to request an inbound `poll()` and returns a flag which represents
 	/// whether the relay transaction should be processed to an external chain.
 	async fn build_inbound_signatures(&self, _msg: Socket_Message) -> Result<(Signatures, bool)> {
@@ -121,7 +88,8 @@ where
 
 	/// Signs the given socket message.
 	async fn sign_socket_message(&self, msg: Socket_Message) -> Result<Signature> {
-		Ok(self.get_client().sign_message(&self.encode_socket_message(msg)).await?)
+		let encoded_msg: Vec<u8> = msg.into();
+		Ok(self.get_client().sign_message(&encoded_msg).await?)
 	}
 
 	/// Get the signatures of the given message.

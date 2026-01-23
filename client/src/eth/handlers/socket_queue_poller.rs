@@ -1,9 +1,8 @@
 use std::sync::Arc;
 
 use alloy::{
-	dyn_abi::DynSolValue,
 	network::Network,
-	primitives::{B256, ChainId, FixedBytes, U256, keccak256},
+	primitives::{B256, ChainId, keccak256},
 	providers::{Provider, WalletProvider, fillers::TxFiller},
 	rpc::types::{Filter, Log},
 	sol_types::SolEvent,
@@ -322,39 +321,6 @@ where
 		}
 	}
 
-	/// Encode a socket message for signing.
-	fn encode_socket_message(&self, msg: &Socket_Message) -> Vec<u8> {
-		let req_id = DynSolValue::Tuple(vec![
-			DynSolValue::FixedBytes(
-				FixedBytes::<32>::right_padding_from(msg.req_id.ChainIndex.as_slice()),
-				4,
-			),
-			DynSolValue::Uint(U256::from(msg.req_id.round_id), 64),
-			DynSolValue::Uint(U256::from(msg.req_id.sequence), 128),
-		]);
-		let status = DynSolValue::Uint(U256::from(msg.status), 8);
-		let ins_code = DynSolValue::Tuple(vec![
-			DynSolValue::FixedBytes(
-				FixedBytes::<32>::right_padding_from(msg.ins_code.ChainIndex.as_slice()),
-				4,
-			),
-			DynSolValue::FixedBytes(
-				FixedBytes::<32>::right_padding_from(msg.ins_code.RBCmethod.as_slice()),
-				16,
-			),
-		]);
-		let params = DynSolValue::Tuple(vec![
-			DynSolValue::FixedBytes(msg.params.tokenIDX0, 32),
-			DynSolValue::FixedBytes(msg.params.tokenIDX1, 32),
-			DynSolValue::Address(msg.params.refund),
-			DynSolValue::Address(msg.params.to),
-			DynSolValue::Uint(msg.params.amount, 256),
-			DynSolValue::Bytes(msg.params.variants.to_vec()),
-		]);
-
-		DynSolValue::Tuple(vec![req_id, status, ins_code, params]).abi_encode()
-	}
-
 	/// Submit on_flight_poll extrinsic to the cccp-relay-queue pallet.
 	async fn submit_on_flight_poll(
 		&self,
@@ -362,7 +328,7 @@ where
 		metadata: OnFlightPollMetadata,
 		src_tx_id: B256,
 	) -> Result<()> {
-		let encoded_msg = self.encode_socket_message(&msg);
+		let encoded_msg: Vec<u8> = msg.into();
 
 		// Node expects: keccak256("OnFlightPoll") + raw_message_bytes
 		let prefix = keccak256("OnFlightPoll".as_bytes());
@@ -411,7 +377,7 @@ where
 		metadata: FinalizePollMetadata,
 		src_tx_id: B256,
 	) -> Result<()> {
-		let encoded_msg = self.encode_socket_message(&msg);
+		let encoded_msg: Vec<u8> = msg.into();
 
 		// Node expects: keccak256("FinalizePoll") + raw_message_bytes
 		let prefix = keccak256("FinalizePoll".as_bytes());
