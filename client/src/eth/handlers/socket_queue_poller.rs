@@ -332,7 +332,7 @@ where
 
 		// Node expects: keccak256("OnFlightPoll") + raw_message_bytes
 		let prefix = keccak256("OnFlightPoll".as_bytes());
-		let message_to_sign = [prefix.as_slice(), &encoded_msg].concat();
+		let message_to_sign = [prefix.as_slice(), src_tx_id.as_ref(), &encoded_msg].concat();
 		let signature = self.client.sign_message(&message_to_sign).await?.into();
 
 		let call = Arc::new(bifrost_runtime::tx().cccp_relay_queue().on_flight_poll(
@@ -381,7 +381,7 @@ where
 
 		// Node expects: keccak256("FinalizePoll") + raw_message_bytes
 		let prefix = keccak256("FinalizePoll".as_bytes());
-		let message_to_sign = [prefix.as_slice(), &encoded_msg].concat();
+		let message_to_sign = [prefix.as_slice(), src_tx_id.as_ref(), &encoded_msg].concat();
 		let signature = self.client.sign_message(&message_to_sign).await?.into();
 
 		let call = Arc::new(bifrost_runtime::tx().cccp_relay_queue().finalize_poll(
