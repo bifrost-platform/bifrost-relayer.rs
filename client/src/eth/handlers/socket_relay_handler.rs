@@ -879,7 +879,7 @@ where
 			if status != SocketEventStatus::Accepted {
 				return Ok(());
 			}
-			let encoded_msg = self.encode_socket_message(msg);
+			let encoded_msg: Vec<u8> = msg.into();
 			let signature =
 				self.client.sign_message(encoded_msg.hexify_prefixed().as_bytes()).await?.into();
 			let call = Arc::new(bifrost_runtime::tx().blaze().submit_outbound_requests(
