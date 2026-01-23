@@ -90,6 +90,41 @@ impl From<RequestID> for FixedBytes<32> {
 	}
 }
 
+impl From<Socket_Message> for Vec<u8> {
+	fn from(msg: Socket_Message) -> Self {
+		let req_id = DynSolValue::Tuple(vec![
+			DynSolValue::FixedBytes(
+				FixedBytes::<32>::right_padding_from(msg.req_id.ChainIndex.as_slice()),
+				4,
+			),
+			DynSolValue::Uint(U256::from(msg.req_id.round_id), 64),
+			DynSolValue::Uint(U256::from(msg.req_id.sequence), 128),
+		]);
+		let status = DynSolValue::Uint(U256::from(msg.status), 8);
+		let ins_code = DynSolValue::Tuple(vec![
+			DynSolValue::FixedBytes(
+				FixedBytes::<32>::right_padding_from(msg.ins_code.ChainIndex.as_slice()),
+				4,
+			),
+			DynSolValue::FixedBytes(
+				FixedBytes::<32>::right_padding_from(msg.ins_code.RBCmethod.as_slice()),
+				16,
+			),
+		]);
+		let params = DynSolValue::Tuple(vec![
+			DynSolValue::FixedBytes(msg.params.tokenIDX0, 32),
+			DynSolValue::FixedBytes(msg.params.tokenIDX1, 32),
+			DynSolValue::Address(msg.params.refund),
+			DynSolValue::Address(msg.params.to),
+			DynSolValue::Uint(msg.params.amount, 256),
+			DynSolValue::Bytes(msg.params.variants.to_vec()),
+		]);
+
+		DynSolValue::Tuple(vec![req_id, status, ins_code, params]).abi_encode()
+	}
+}
+
 use SocketContract::SocketContractInstance;
+use alloy::{dyn_abi::DynSolValue, primitives::U256};
 
 pub type SocketInstance<F, P, N> = SocketContractInstance<Arc<FillProvider<F, P, N>>, N>;
