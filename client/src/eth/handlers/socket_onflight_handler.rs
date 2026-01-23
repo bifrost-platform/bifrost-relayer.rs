@@ -174,10 +174,8 @@ where
 			TransferOption, TransferStatus,
 		};
 
-		let current_block_number = block.number() as u64;
-
 		// First, process any pending Standard transfers that have been confirmed
-		self.process_pending_standard_transfers(current_block_number).await;
+		self.process_pending_standard_transfers().await;
 
 		let events = block.events().await?;
 
@@ -326,7 +324,7 @@ where
 	}
 
 	/// Process pending Standard transfers that have received enough block confirmations on the source chain.
-	async fn process_pending_standard_transfers(&self, _current_block_number: u64) {
+	async fn process_pending_standard_transfers(&self) {
 		// Get all pending transfers
 		let pending_transfers: Vec<PendingStandardTransfer> =
 			{ self.pending_standard_transfers.read().await.clone() };
