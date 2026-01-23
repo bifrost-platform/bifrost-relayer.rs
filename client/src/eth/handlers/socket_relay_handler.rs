@@ -599,7 +599,7 @@ where
 	}
 
 	/// Process onflight message from SocketOnflightHandler.
-	/// This triggers the Accepted relay after on_flight_poll succeeds.
+	/// This triggers the Inbound::Executed / Outbound::Accepted relay after on_flight_poll succeeds.
 	async fn process_onflight_message(&self, msg: Socket_Message) -> Result<()> {
 		let src_chain_id = Into::<u32>::into(msg.req_id.ChainIndex) as ChainId;
 		let dst_chain_id = Into::<u32>::into(msg.ins_code.ChainIndex) as ChainId;
@@ -643,7 +643,7 @@ where
 			metadata,
 		);
 
-		// Send socket message (build and send Accepted transaction)
+		// Send socket message (build and send transaction)
 		self.send_socket_message(msg, metadata, is_inbound).await
 	}
 
