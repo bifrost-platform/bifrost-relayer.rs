@@ -76,3 +76,12 @@ pub async fn initialize_sub_client(mut url: Url) -> OnlineClient<CustomConfig> {
 		.await
 		.expect(INVALID_PROVIDER_URL)
 }
+
+pub fn get_sub_rpc_url(mut url: Url) -> String {
+	if url.scheme() == "https" {
+		url.set_scheme("wss").expect(INVALID_PROVIDER_URL);
+	} else {
+		url.set_scheme("ws").expect(INVALID_PROVIDER_URL);
+	}
+	url.to_string()
+}
