@@ -97,8 +97,8 @@ where
 	bootstrap_shared_data: Arc<BootstrapSharedData>,
 	/// Pending Standard transfers waiting for block confirmations.
 	pending_standard_transfers: Arc<RwLock<Vec<PendingStandardTransfer>>>,
-	/// Already processed transfers to avoid duplicate processing. Key: (src_chain_id, src_tx_id)
-	processed_transfers: Arc<RwLock<HashSet<(u32, H256)>>>,
+	/// Already processed transfers to avoid duplicate processing. Key: (src_chain_id, sequence_id)
+	processed_transfers: Arc<RwLock<HashSet<(u32, u128)>>>,
 }
 
 impl<F, P, N: Network> SocketOnflightHandler<F, P, N>
@@ -187,13 +187,12 @@ where
 		let mut iter = storage.iter(storage_query).await?;
 
 		// Collect current OnFlight transfer keys from storage for cleanup
-		let mut current_storage_keys: HashSet<(u32, H256)> = HashSet::new();
+		let mut current_storage_keys: HashSet<(u32, u128)> = HashSet::new();
 
 		while let Some(Ok(kv)) = iter.next().await {
 			let transfer_info = kv.value;
 
 			let src_chain_id = transfer_info.src_chain_id;
-			let src_tx_id = H256(transfer_info.src_tx_id.0);
 
 			// Only process if status is OnFlight (quorum reached, voting done)
 			let is_on_flight = matches!(transfer_info.status, TransferStatus::OnFlight);
@@ -201,18 +200,7 @@ where
 				continue;
 			}
 
-			// Track this key as currently in storage with OnFlight status
-			current_storage_keys.insert((src_chain_id, src_tx_id));
-
-			// Check if already processed
-			{
-				let processed = self.processed_transfers.read().await;
-				if processed.contains(&(src_chain_id, src_tx_id)) {
-					continue;
-				}
-			}
-
-			// Decode the socket message
+			// Decode the socket message first to get sequence_id for the key
 			let socket_message = match self.decode_socket_message(&transfer_info.socket_message) {
 				Ok(msg) => msg,
 				Err(e) => {
@@ -228,11 +216,23 @@ where
 				},
 			};
 
-			let asset_index_hash = H256(socket_message.params.tokenIDX0.0);
 			let sequence_id = socket_message.req_id.sequence;
+
+			// Track this key as currently in storage with OnFlight status
+			current_storage_keys.insert((src_chain_id, sequence_id));
+
+			// Check if already processed
+			{
+				let processed = self.processed_transfers.read().await;
+				if processed.contains(&(src_chain_id, sequence_id)) {
+					continue;
+				}
+			}
+
+			let asset_index_hash = H256(socket_message.params.tokenIDX0.0);
 			let dst_chain_id = Into::<u32>::into(socket_message.ins_code.ChainIndex) as ChainId;
 			let src_chain_id_u64 = src_chain_id as ChainId;
-			let src_tx_id_b256 = B256::from_slice(&transfer_info.src_tx_id.0);
+			let src_tx_id = B256::from_slice(&transfer_info.src_tx_id.0);
 
 			// Check TransferOption: Fast or Standard
 			let is_fast = matches!(transfer_info.option, TransferOption::Fast);
@@ -258,7 +258,7 @@ where
 				.await;
 
 				// Mark as processed
-				self.processed_transfers.write().await.insert((src_chain_id, src_tx_id));
+				self.processed_transfers.write().await.insert((src_chain_id, sequence_id));
 			} else {
 				// Standard transfer: add to pending and wait for source chain block confirmations
 				let block_confirmations = self.get_block_confirmations(src_chain_id_u64);
@@ -286,7 +286,7 @@ where
 					sequence_id,
 					src_chain_id_u64,
 					dst_chain_id,
-					src_tx_id_b256,
+					src_tx_id,
 					src_block_number,
 					block_confirmations,
 				);
@@ -297,14 +297,14 @@ where
 					sequence_id,
 					src_chain_id: src_chain_id_u64,
 					dst_chain_id,
-					src_tx_id: src_tx_id_b256,
+					src_tx_id,
 					src_block_number,
 				};
 
 				self.pending_standard_transfers.write().await.push(pending_transfer);
 
 				// Mark as processed (added to pending)
-				self.processed_transfers.write().await.insert((src_chain_id, src_tx_id));
+				self.processed_transfers.write().await.insert((src_chain_id, sequence_id));
 			}
 		}
 
@@ -540,8 +540,8 @@ where
 		Ok(client.get_block_number().await?)
 	}
 
-	/// Verify that the source transaction is still valid on the source chain.
-	/// Returns Valid if receipt exists, NotFound if transaction was reorged out.
+	/// Verify that the source transaction still exists on the source chain.
+	/// Returns Valid if receipt exists, NotFound if reorged out.
 	async fn verify_src_transaction(
 		&self,
 		src_chain_id: ChainId,
@@ -552,42 +552,30 @@ where
 			.get(&src_chain_id)
 			.ok_or_else(|| eyre::eyre!("Source chain client not found: {}", src_chain_id))?;
 
-		// Query the transaction receipt to verify it still exists
-		// If the receipt exists, the transaction is mined and valid
-		// If the transaction was reorged out, the receipt won't be found
+		// Try to get the transaction receipt
 		match client.get_transaction_receipt(src_tx_id).await? {
-			Some(_receipt) => Ok(TxVerificationResult::Valid),
-			None => {
-				// Transaction not found - likely reorged out
-				log::warn!(
-					target: &self.bifrost_client.get_chain_name(),
-					"-[{}] Transaction {} on chain {} not found (possibly reorged out)",
-					sub_display_format(SUB_LOG_TARGET),
-					src_tx_id,
-					src_chain_id,
-				);
-				Ok(TxVerificationResult::NotFound)
-			},
+			Some(_) => Ok(TxVerificationResult::Valid),
+			None => Ok(TxVerificationResult::NotFound),
 		}
 	}
 
-	/// Get the block number of a transaction from the source chain.
-	/// Returns None if transaction is not found.
+	/// Get the block number where the transaction was included.
+	/// Returns None if transaction not found.
 	async fn get_tx_block_number(
 		&self,
 		src_chain_id: ChainId,
 		src_tx_id: B256,
 	) -> Result<Option<u64>> {
-		use alloy::network::TransactionResponse;
+		use alloy::network::ReceiptResponse;
 
 		let client = self
 			.system_clients
 			.get(&src_chain_id)
 			.ok_or_else(|| eyre::eyre!("Source chain client not found: {}", src_chain_id))?;
 
-		// Get the transaction by hash and extract block number
-		match client.get_transaction_by_hash(src_tx_id).await? {
-			Some(tx) => Ok(tx.block_number()),
+		// Get the transaction receipt to find the block number
+		match client.get_transaction_receipt(src_tx_id).await? {
+			Some(receipt) => Ok(receipt.block_number()),
 			None => Ok(None),
 		}
 	}
@@ -638,14 +626,25 @@ where
 			let dst_chain_id = Into::<u32>::into(socket_message.ins_code.ChainIndex) as ChainId;
 			let src_tx_id = B256::from_slice(&transfer_info.src_tx_id.0);
 
-			// Get current block number from source chain
-			let src_block_number = match self.get_src_chain_block_number(src_chain_id).await {
-				Ok(block) => block,
+			// Get the actual block number of the transaction from the source chain
+			let src_block_number = match self.get_tx_block_number(src_chain_id, src_tx_id).await {
+				Ok(Some(block)) => block,
+				Ok(None) => {
+					log::warn!(
+						target: &self.bifrost_client.get_chain_name(),
+						"-[{}] Transaction {} not found on chain {} during recovery, skipping",
+						sub_display_format(SUB_LOG_TARGET),
+						src_tx_id,
+						src_chain_id,
+					);
+					continue;
+				},
 				Err(e) => {
 					log::warn!(
 						target: &self.bifrost_client.get_chain_name(),
-						"-[{}] Failed to get source chain {} block number during recovery: {:?}",
+						"-[{}] Failed to get tx block number for {} on chain {} during recovery: {:?}",
 						sub_display_format(SUB_LOG_TARGET),
+						src_tx_id,
 						src_chain_id,
 						e,
 					);
@@ -681,7 +680,7 @@ where
 			self.processed_transfers
 				.write()
 				.await
-				.insert((transfer_info.src_chain_id, H256(transfer_info.src_tx_id.0)));
+				.insert((transfer_info.src_chain_id, sequence_id));
 
 			recovered_count += 1;
 		}

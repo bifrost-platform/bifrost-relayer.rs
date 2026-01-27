@@ -36,7 +36,7 @@ pub use runtime_types::{
 		ExecutedPsbtMessage, RollbackPollMessage, SignedPsbtMessage,
 		pallet::pallet::Call::submit_unsigned_psbt,
 	},
-	pallet_cccp_relay_queue::SocketMessageSubmission,
+	pallet_cccp_relay_queue::{FinalizePollSubmission, OnFlightPollSubmission},
 };
 
 #[allow(ambiguous_glob_reexports)]
