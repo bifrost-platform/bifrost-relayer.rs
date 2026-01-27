@@ -186,8 +186,14 @@ where
 			bifrost_runtime::storage().cccp_relay_queue().on_flight_transfers_iter();
 		let mut iter = storage.iter(storage_query).await?;
 
+		// Collect current OnFlight transfer keys from storage for cleanup
+		let mut current_storage_keys: HashSet<(u32, H256)> = HashSet::new();
+
 		while let Some(Ok(kv)) = iter.next().await {
 			let transfer_info = kv.value;
+
+			let src_chain_id = transfer_info.src_chain_id;
+			let src_tx_id = H256(transfer_info.src_tx_id.0);
 
 			// Only process if status is OnFlight (quorum reached, voting done)
 			let is_on_flight = matches!(transfer_info.status, TransferStatus::OnFlight);
@@ -195,8 +201,8 @@ where
 				continue;
 			}
 
-			let src_chain_id = transfer_info.src_chain_id;
-			let src_tx_id = H256(transfer_info.src_tx_id.0);
+			// Track this key as currently in storage with OnFlight status
+			current_storage_keys.insert((src_chain_id, src_tx_id));
 
 			// Check if already processed
 			{
@@ -299,6 +305,22 @@ where
 
 				// Mark as processed (added to pending)
 				self.processed_transfers.write().await.insert((src_chain_id, src_tx_id));
+			}
+		}
+
+		// Cleanup: remove keys from processed_transfers that are no longer in storage (completed/removed)
+		{
+			let mut processed = self.processed_transfers.write().await;
+			let before_count = processed.len();
+			processed.retain(|key| current_storage_keys.contains(key));
+			let removed_count = before_count - processed.len();
+			if removed_count > 0 {
+				log::debug!(
+					target: &self.bifrost_client.get_chain_name(),
+					"-[{}] Cleaned up {} completed transfers from processed_transfers cache",
+					sub_display_format(SUB_LOG_TARGET),
+					removed_count,
+				);
 			}
 		}
 
