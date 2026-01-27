@@ -1,4 +1,7 @@
-use std::{collections::BTreeMap, sync::Arc};
+use std::{
+	collections::{BTreeMap, HashSet},
+	sync::Arc,
+};
 use tokio::sync::RwLock;
 
 use alloy::{
@@ -40,11 +43,6 @@ pub struct SocketOnflightMessage {
 pub type SocketOnflightSender = UnboundedSender<SocketOnflightMessage>;
 /// Receiver type for SocketOnflight messages.
 pub type SocketOnflightReceiver = UnboundedReceiver<SocketOnflightMessage>;
-
-/// Transfer info result from OnFlightTransfers storage query.
-struct TransferInfoResult {
-	socket_message: Vec<u8>,
-}
 
 /// Represents a Standard transfer pending block confirmations.
 #[derive(Clone, Debug)]
@@ -99,6 +97,8 @@ where
 	bootstrap_shared_data: Arc<BootstrapSharedData>,
 	/// Pending Standard transfers waiting for block confirmations.
 	pending_standard_transfers: Arc<RwLock<Vec<PendingStandardTransfer>>>,
+	/// Already processed transfers to avoid duplicate processing. Key: (src_chain_id, src_tx_id)
+	processed_transfers: Arc<RwLock<HashSet<(u32, H256)>>>,
 }
 
 impl<F, P, N: Network> SocketOnflightHandler<F, P, N>
@@ -126,6 +126,7 @@ where
 			onflight_senders,
 			bootstrap_shared_data,
 			pending_standard_transfers: Arc::new(RwLock::new(Vec::new())),
+			processed_transfers: Arc::new(RwLock::new(HashSet::new())),
 		})
 	}
 
@@ -165,7 +166,7 @@ where
 		Ok(())
 	}
 
-	/// Process a Substrate block for TransferPolled events.
+	/// Process a Substrate block by querying OnFlightTransfers storage directly.
 	async fn process_substrate_block(
 		&self,
 		block: subxt::blocks::Block<CustomConfig, OnlineClient<CustomConfig>>,
@@ -177,146 +178,127 @@ where
 		// First, process any pending Standard transfers that have been confirmed
 		self.process_pending_standard_transfers().await;
 
-		let events = block.events().await?;
+		// Query OnFlightTransfers storage directly instead of relying on events
+		let block_hash = block.hash();
+		let storage = self.sub_client.storage().at(block_hash);
 
-		for event in events.iter() {
-			let event = match event {
-				Ok(e) => e,
-				Err(_) => continue,
+		let storage_query =
+			bifrost_runtime::storage().cccp_relay_queue().on_flight_transfers_iter();
+		let mut iter = storage.iter(storage_query).await?;
+
+		while let Some(Ok(kv)) = iter.next().await {
+			let transfer_info = kv.value;
+
+			// Only process if status is OnFlight (quorum reached, voting done)
+			let is_on_flight = matches!(transfer_info.status, TransferStatus::OnFlight);
+			if !is_on_flight {
+				continue;
+			}
+
+			let src_chain_id = transfer_info.src_chain_id;
+			let src_tx_id = H256(transfer_info.src_tx_id.0);
+
+			// Check if already processed
+			{
+				let processed = self.processed_transfers.read().await;
+				if processed.contains(&(src_chain_id, src_tx_id)) {
+					continue;
+				}
+			}
+
+			// Decode the socket message
+			let socket_message = match self.decode_socket_message(&transfer_info.socket_message) {
+				Ok(msg) => msg,
+				Err(e) => {
+					br_primitives::log_and_capture!(
+						error,
+						&self.bifrost_client.get_chain_name(),
+						SUB_LOG_TARGET,
+						self.bifrost_client.address().await,
+						"❗️ Failed to decode socket message: {:?}",
+						e
+					);
+					continue;
+				},
 			};
 
-			// Check if this is a TransferPolled event from cccp_relay_queue pallet
-			if event.pallet_name() == "CccpRelayQueue" && event.variant_name() == "TransferPolled" {
-				// Decode the event
-				if let Ok(transfer_polled) =
-					event
-						.as_root_event::<bifrost_runtime::cccp_relay_queue::events::TransferPolled>(
-						) {
-					// Only process if status is OnFlight (quorum reached)
-					let is_on_flight = matches!(transfer_polled.status, TransferStatus::OnFlight);
-					if !is_on_flight {
-						log::debug!(
+			let asset_index_hash = H256(socket_message.params.tokenIDX0.0);
+			let sequence_id = socket_message.req_id.sequence;
+			let dst_chain_id = Into::<u32>::into(socket_message.ins_code.ChainIndex) as ChainId;
+			let src_chain_id_u64 = src_chain_id as ChainId;
+			let src_tx_id_b256 = B256::from_slice(&transfer_info.src_tx_id.0);
+
+			// Check TransferOption: Fast or Standard
+			let is_fast = matches!(transfer_info.option, TransferOption::Fast);
+
+			if is_fast {
+				// Fast transfer: send immediately to destination chain handler
+				log::info!(
+					target: &self.bifrost_client.get_chain_name(),
+					"-[{}] ⚡ OnFlight (Fast) reached quorum: asset={}, seq={}, dst_chain={}",
+					sub_display_format(SUB_LOG_TARGET),
+					asset_index_hash,
+					sequence_id,
+					dst_chain_id,
+				);
+
+				self.send_to_socket_relay_handler(
+					src_chain_id_u64,
+					dst_chain_id,
+					socket_message,
+					asset_index_hash,
+					sequence_id,
+				)
+				.await;
+
+				// Mark as processed
+				self.processed_transfers.write().await.insert((src_chain_id, src_tx_id));
+			} else {
+				// Standard transfer: add to pending and wait for source chain block confirmations
+				let block_confirmations = self.get_block_confirmations(src_chain_id_u64);
+
+				// Get current block number from source chain
+				let src_block_number = match self.get_src_chain_block_number(src_chain_id_u64).await
+				{
+					Ok(block) => block,
+					Err(e) => {
+						log::warn!(
 							target: &self.bifrost_client.get_chain_name(),
-							"-[{}] TransferPolled with status {:?}, waiting for quorum (seq={:?})",
+							"-[{}] Failed to get source chain block number: {:?}",
 							sub_display_format(SUB_LOG_TARGET),
-							transfer_polled.status,
-							transfer_polled.sequence_id,
+							e,
 						);
 						continue;
-					}
+					},
+				};
 
-					// Extract event fields
-					let asset_index_hash = H256(transfer_polled.asset_index_hash.0);
-					let src_chain_id = transfer_polled.src_chain_id as ChainId;
-					let dst_chain_id = transfer_polled.dst_chain_id as ChainId;
-					let src_tx_id = B256::from_slice(&transfer_polled.src_tx_id.0);
-					let sequence_id = {
-						let u256 = transfer_polled.sequence_id;
-						u256.0[0] as u128 | ((u256.0[1] as u128) << 64)
-					};
+				log::info!(
+					target: &self.bifrost_client.get_chain_name(),
+					"-[{}] 📋 OnFlight (Standard) reached quorum: asset={}, seq={}, src_chain={}, dst_chain={}, src_tx={}, src_block={}, waiting for {} block confirmations",
+					sub_display_format(SUB_LOG_TARGET),
+					asset_index_hash,
+					sequence_id,
+					src_chain_id_u64,
+					dst_chain_id,
+					src_tx_id_b256,
+					src_block_number,
+					block_confirmations,
+				);
 
-					// Query the socket message from storage
-					// Storage key: (src_chain_id, src_tx_id)
-					let socket_message_bytes = match self
-						.query_on_flight_transfer(src_chain_id as u32, H256(src_tx_id.0))
-						.await?
-					{
-						Some(info) => info.socket_message,
-						None => {
-							log::warn!(
-								target: &self.bifrost_client.get_chain_name(),
-								"-[{}] Transfer not found in OnFlightTransfers: src_chain={}, src_tx={}",
-								sub_display_format(SUB_LOG_TARGET),
-								src_chain_id,
-								src_tx_id,
-							);
-							continue;
-						},
-					};
+				let pending_transfer = PendingStandardTransfer {
+					socket_message,
+					asset_index_hash,
+					sequence_id,
+					src_chain_id: src_chain_id_u64,
+					dst_chain_id,
+					src_tx_id: src_tx_id_b256,
+					src_block_number,
+				};
 
-					// Decode the socket message
-					let socket_message = match self.decode_socket_message(&socket_message_bytes) {
-						Ok(msg) => msg,
-						Err(e) => {
-							br_primitives::log_and_capture!(
-								error,
-								&self.bifrost_client.get_chain_name(),
-								SUB_LOG_TARGET,
-								self.bifrost_client.address().await,
-								"❗️ Failed to decode socket message: {:?}",
-								e
-							);
-							continue;
-						},
-					};
+				self.pending_standard_transfers.write().await.push(pending_transfer);
 
-					// Check TransferOption: Fast or Standard
-					let is_fast = matches!(transfer_polled.option, TransferOption::Fast);
-
-					if is_fast {
-						// Fast transfer: send immediately to destination chain handler
-						log::info!(
-							target: &self.bifrost_client.get_chain_name(),
-							"-[{}] ⚡ OnFlight (Fast) reached quorum: asset={}, seq={}, dst_chain={}",
-							sub_display_format(SUB_LOG_TARGET),
-							asset_index_hash,
-							sequence_id,
-							dst_chain_id,
-						);
-
-						self.send_to_socket_relay_handler(
-							src_chain_id,
-							dst_chain_id,
-							socket_message,
-							asset_index_hash,
-							sequence_id,
-						)
-						.await;
-					} else {
-						// Standard transfer: add to pending and wait for source chain block confirmations
-						let block_confirmations = self.get_block_confirmations(src_chain_id);
-
-						// Get current block number from source chain
-						let src_block_number =
-							match self.get_src_chain_block_number(src_chain_id).await {
-								Ok(block) => block,
-								Err(e) => {
-									log::warn!(
-										target: &self.bifrost_client.get_chain_name(),
-										"-[{}] Failed to get source chain block number: {:?}",
-										sub_display_format(SUB_LOG_TARGET),
-										e,
-									);
-									continue;
-								},
-							};
-
-						log::info!(
-							target: &self.bifrost_client.get_chain_name(),
-							"-[{}] 📋 OnFlight (Standard) reached quorum: asset={}, seq={}, src_chain={}, dst_chain={}, src_tx={}, src_block={}, waiting for {} block confirmations",
-							sub_display_format(SUB_LOG_TARGET),
-							asset_index_hash,
-							sequence_id,
-							src_chain_id,
-							dst_chain_id,
-							src_tx_id,
-							src_block_number,
-							block_confirmations,
-						);
-
-						let pending_transfer = PendingStandardTransfer {
-							socket_message,
-							asset_index_hash,
-							sequence_id,
-							src_chain_id,
-							dst_chain_id,
-							src_tx_id,
-							src_block_number,
-						};
-
-						self.pending_standard_transfers.write().await.push(pending_transfer);
-					}
-				}
+				// Mark as processed (added to pending)
+				self.processed_transfers.write().await.insert((src_chain_id, src_tx_id));
 			}
 		}
 
@@ -527,27 +509,6 @@ where
 		}
 	}
 
-	/// Query OnFlightTransfers storage to get TransferInfo.
-	/// Storage key: (src_chain_id, src_tx_id)
-	async fn query_on_flight_transfer(
-		&self,
-		src_chain_id: u32,
-		src_tx_id: H256,
-	) -> Result<Option<TransferInfoResult>> {
-		let best_hash = self.sub_rpc.chain_get_block_hash(None).await?.unwrap_or_default();
-		let storage = self.sub_client.storage().at(best_hash);
-
-		let transfer_info = storage
-			.fetch(
-				&bifrost_runtime::storage()
-					.cccp_relay_queue()
-					.on_flight_transfers(src_chain_id, src_tx_id),
-			)
-			.await?;
-
-		Ok(transfer_info.map(|info| TransferInfoResult { socket_message: info.socket_message }))
-	}
-
 	/// Query the current block number from a source chain.
 	async fn get_src_chain_block_number(&self, src_chain_id: ChainId) -> Result<u64> {
 		let client = self
@@ -693,6 +654,13 @@ where
 			};
 
 			self.pending_standard_transfers.write().await.push(pending_transfer);
+
+			// Mark as processed to avoid re-processing in process_substrate_block
+			self.processed_transfers
+				.write()
+				.await
+				.insert((transfer_info.src_chain_id, H256(transfer_info.src_tx_id.0)));
+
 			recovered_count += 1;
 		}
 
