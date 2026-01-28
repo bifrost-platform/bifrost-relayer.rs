@@ -1,6 +1,7 @@
 use std::{sync::Arc, time::Duration};
 
 use alloy::{
+	dyn_abi::SolType,
 	network::{Network, TransactionBuilder},
 	primitives::{B256, ChainId, U256},
 	providers::{Provider, WalletProvider, fillers::TxFiller},
@@ -280,8 +281,15 @@ where
 			return Ok(None);
 		}
 
-		// Decode variants
-		match Variants::abi_decode(&msg.params.variants) {
+		// Decode the variants field. The data contains encoded struct content
+		// without the outer tuple wrapper. For ABI decoding to work properly,
+		// we need to prepend an offset pointer (0x20) that indicates where
+		// the struct data begins (at byte 32).
+		let mut wrapped_data = Vec::with_capacity(32 + msg.params.variants.len());
+		wrapped_data.extend_from_slice(&[0u8; 31]); // 31 zero bytes
+		wrapped_data.push(0x20); // offset = 32 bytes
+		wrapped_data.extend_from_slice(&msg.params.variants);
+		match <Variants as SolType>::abi_decode(&wrapped_data) {
 			Ok(variants) => {
 				log::info!(
 					target: &self.get_client().get_chain_name(),
