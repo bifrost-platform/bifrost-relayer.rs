@@ -532,14 +532,27 @@ where
 	pub async fn get_asset_address_by_index(
 		&self,
 		asset_index_hash: FixedBytes<32>,
+		is_inbound: bool,
 	) -> Result<Address> {
-		Ok(self
-			.protocol_contracts
-			.vault
-			.assets_config(asset_index_hash)
-			.call()
-			.await?
-			.target)
+		let remote_asset_index =
+			self.protocol_contracts.vault.remote_asset_pair(asset_index_hash).call().await?;
+		if is_inbound {
+			Ok(self
+				.protocol_contracts
+				.vault
+				.assets_config(remote_asset_index)
+				.call()
+				.await?
+				.unified)
+		} else {
+			Ok(self
+				.protocol_contracts
+				.vault
+				.assets_config(remote_asset_index)
+				.call()
+				.await?
+				.target)
+		}
 	}
 
 	/// Get asset oracle address from RelayQueue contract.
