@@ -1059,6 +1059,7 @@ where
 #[cfg(test)]
 mod tests {
 	use alloy::{
+		dyn_abi::SolType,
 		primitives::{address, bytes},
 		providers::ProviderBuilder,
 		sol_types::SolEvent,
@@ -1067,6 +1068,7 @@ mod tests {
 	use br_primitives::contracts::socket::{
 		Socket_Struct::RequestID,
 		SocketContract::{self, Socket},
+		Variants,
 	};
 	use std::sync::Arc;
 
@@ -1123,6 +1125,30 @@ mod tests {
 				println!("params.to -> {:?}", params.to);
 				println!("params.amount -> {:?}", params.amount);
 				println!("params.variants -> {:?}", params.variants);
+
+				// Decode the variants field. The data contains encoded struct content
+				// without the outer tuple wrapper. For ABI decoding to work properly,
+				// we need to prepend an offset pointer (0x20) that indicates where
+				// the struct data begins (at byte 32).
+				let mut wrapped_data = Vec::with_capacity(32 + params.variants.len());
+				wrapped_data.extend_from_slice(&[0u8; 31]); // 31 zero bytes
+				wrapped_data.push(0x20); // offset = 32 bytes
+				wrapped_data.extend_from_slice(&params.variants);
+
+				let variants = <Variants as SolType>::abi_decode(&wrapped_data);
+				println!("variants -> {:?}", variants);
+
+				if let Ok(v) = &variants {
+					println!("  sender: {:?}", v.sender);
+					println!("  receiver: {:?}", v.receiver);
+					println!("  refund: {:?}", v.refund);
+					println!("  max_tx_fee: {:?}", v.max_tx_fee);
+					println!(
+						"  message: {:?} ({})",
+						v.message,
+						String::from_utf8_lossy(&v.message)
+					);
+				}
 			},
 			Err(error) => {
 				panic!("decode failed -> {}", error);
