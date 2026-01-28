@@ -428,12 +428,19 @@ pub struct HookMetadata {
 	pub sender: Address,
 	pub receiver: Address,
 	pub max_tx_fee: U256,
+	pub fee_in_bridged_asset: Option<U256>,
 	pub message: Bytes,
 }
 
 impl HookMetadata {
-	pub fn new(sender: Address, receiver: Address, max_tx_fee: U256, message: Bytes) -> Self {
-		Self { sender, receiver, max_tx_fee, message }
+	pub fn new(
+		sender: Address,
+		receiver: Address,
+		max_tx_fee: U256,
+		fee_in_bridged_asset: Option<U256>,
+		message: Bytes,
+	) -> Self {
+		Self { sender, receiver, max_tx_fee, fee_in_bridged_asset, message }
 	}
 }
 
@@ -441,8 +448,12 @@ impl Display for HookMetadata {
 	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
 		write!(
 			f,
-			"Hook({:?}, {:?}, {:?}, {:?})",
-			self.sender, self.receiver, self.max_tx_fee, self.message
+			"Hook({:?}, {:?}, {:?}, {:?}, {:?})",
+			self.sender,
+			self.receiver,
+			self.max_tx_fee,
+			self.fee_in_bridged_asset.unwrap_or(U256::ZERO),
+			self.message
 		)
 	}
 }
