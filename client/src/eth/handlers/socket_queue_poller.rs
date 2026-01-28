@@ -112,51 +112,33 @@ where
 		Into::<u32>::into(msg.ins_code.ChainIndex) as ChainId
 	}
 
-	/// Query OnFlightTransfers storage to get transfer status.
+	/// Check if this relayer should skip voting for an on-flight poll.
 	///
-	/// Returns `Some(status)` if transfer exists, `None` otherwise.
-	/// Storage key: (src_chain_id, sequence_id)
-	async fn get_on_flight_transfer_status(
-		&self,
-		src_chain_id: ChainId,
-		sequence_id: u128,
-	) -> Result<Option<bifrost_runtime::runtime_types::pallet_cccp_relay_queue::TransferStatus>> {
-		use bifrost_runtime::runtime_types::primitive_types::U256;
-
+	/// Returns `true` if should skip (transfer already exists in OnFlightTransfers or FinalizedTransfers).
+	/// Returns `false` if transfer is new or still in PendingTransfers (voting in progress).
+	async fn should_skip_on_flight_poll(&self, msg_hash: subxt::utils::H256) -> Result<bool> {
 		// Query at best block (including unfinalized) instead of latest finalized
 		let best_hash = self.sub_rpc.chain_get_block_hash(None).await?.unwrap_or_default();
 		let storage = self.sub_client.storage().at(best_hash);
 
-		// Convert sequence_id (u128) to U256 for storage key
-		let sequence_id_u256 = U256([sequence_id as u64, (sequence_id >> 64) as u64, 0, 0]);
-
-		let transfer = storage
-			.fetch(
-				&bifrost_runtime::storage()
-					.cccp_relay_queue()
-					.on_flight_transfers(src_chain_id as u32, sequence_id_u256),
-			)
+		// Check if already in OnFlightTransfers (approved)
+		let on_flight = storage
+			.fetch(&bifrost_runtime::storage().cccp_relay_queue().on_flight_transfers(msg_hash))
 			.await?;
-
-		Ok(transfer.map(|t| t.status))
-	}
-
-	/// Check if this relayer should skip voting for an on-flight poll.
-	///
-	/// Returns `true` if should skip (transfer exists and status is NOT Pending).
-	/// If status is Pending, relayer should still vote as threshold not yet reached.
-	async fn should_skip_on_flight_poll(
-		&self,
-		src_chain_id: ChainId,
-		sequence_id: u128,
-	) -> Result<bool> {
-		use bifrost_runtime::runtime_types::pallet_cccp_relay_queue::TransferStatus;
-
-		match self.get_on_flight_transfer_status(src_chain_id, sequence_id).await? {
-			None => Ok(false),                          // Transfer doesn't exist, should vote
-			Some(TransferStatus::Pending) => Ok(false), // Still pending, should vote
-			Some(_) => Ok(true),                        // OnFlight or Finalized, skip
+		if on_flight.is_some() {
+			return Ok(true);
 		}
+
+		// Check if already finalized
+		let finalized = storage
+			.fetch(&bifrost_runtime::storage().cccp_relay_queue().finalized_transfers(msg_hash))
+			.await?;
+		if finalized.is_some() {
+			return Ok(true);
+		}
+
+		// Transfer is either new or still in PendingTransfers - should vote
+		Ok(false)
 	}
 
 	/// Process a confirmed Socket event log.
@@ -228,9 +210,13 @@ where
 		asset_index_hash: B256,
 		src_tx_id: B256,
 	) -> Result<()> {
+		// Compute msg_hash for storage lookup
+		let encoded_msg: Vec<u8> = msg.clone().into();
+		let msg_hash = subxt::utils::H256(keccak256(&encoded_msg).0);
+
 		log::info!(
 			target: &self.client.get_chain_name(),
-			"-[{}] 📨 Socket event detected: {} seq={}, asset={}, {} -> {}, tx={}",
+			"-[{}] 📨 Socket event detected: {} seq={}, asset={}, {} -> {}, tx={}, msg_hash={}",
 			sub_display_format(SUB_LOG_TARGET),
 			if is_inbound { "Inbound" } else { "Outbound" },
 			sequence_id,
@@ -238,18 +224,18 @@ where
 			src_chain_id,
 			dst_chain_id,
 			src_tx_id,
+			msg_hash,
 		);
 
-		// Query OnFlightTransfers storage to check current state
-		// Storage key: (src_chain_id, sequence_id)
-		// Skip only if transfer exists AND status is NOT Pending
-		// If status is Pending, this relayer should still vote
-		if self.should_skip_on_flight_poll(src_chain_id, sequence_id).await? {
+		// Query OnFlightTransfers and FinalizedTransfers storage to check current state
+		// Storage key: msg_hash (keccak256 of socket message)
+		// Skip if transfer already exists in OnFlightTransfers or FinalizedTransfers
+		if self.should_skip_on_flight_poll(msg_hash).await? {
 			log::info!(
 				target: &self.client.get_chain_name(),
-				"-[{}] Transfer already processed (OnFlight/Finalized), skipping: seq={}",
+				"-[{}] Transfer already processed (OnFlight/Finalized), skipping: msg_hash={}",
 				sub_display_format(SUB_LOG_TARGET),
-				sequence_id,
+				msg_hash,
 			);
 			return Ok(());
 		}
@@ -330,35 +316,26 @@ where
 		metadata: OnFlightPollMetadata,
 		src_tx_id: B256,
 	) -> Result<()> {
-		use bifrost_runtime::runtime_types::primitive_types::U256;
 		use subxt::ext::codec::Encode;
 
 		let encoded_msg: Vec<u8> = msg.into();
-		let src_chain_id = metadata.src_chain_id as u32;
-		let sequence_id = metadata.sequence;
-		let sequence_id_u256 = U256([sequence_id as u64, (sequence_id >> 64) as u64, 0, 0]);
 		let src_tx_id_h256 = subxt::utils::H256(src_tx_id.0);
 
-		// Node expects: keccak256("OnFlightPoll") + SCALE_encode((src_tx_id, src_chain_id, sequence_id, message))
+		// Compute msg_hash = keccak256(encoded_msg)
+		let msg_hash = subxt::utils::H256(keccak256(&encoded_msg).0);
+
+		// Node expects: keccak256("OnFlightPoll") + SCALE_encode((msg, msg_hash, src_tx_id))
 		let prefix = keccak256("OnFlightPoll".as_bytes());
-		// SCALE encode (H256, u32, U256, Vec<u8>)
-		let mut encoded_data = src_tx_id_h256.encode();
-		encoded_data.extend_from_slice(&src_chain_id.encode());
-		encoded_data.extend_from_slice(&sequence_id_u256.0[0].to_le_bytes());
-		encoded_data.extend_from_slice(&sequence_id_u256.0[1].to_le_bytes());
-		encoded_data.extend_from_slice(&sequence_id_u256.0[2].to_le_bytes());
-		encoded_data.extend_from_slice(&sequence_id_u256.0[3].to_le_bytes());
-		encoded_data.extend_from_slice(&encoded_msg.encode());
+		let encoded_data = (&encoded_msg, &msg_hash, &src_tx_id_h256).encode();
 		let message_to_sign = [prefix.as_slice(), &encoded_data].concat();
 		let signature = self.client.sign_message(&message_to_sign).await?.into();
 
 		let call = Arc::new(bifrost_runtime::tx().cccp_relay_queue().on_flight_poll(
 			OnFlightPollSubmission {
 				authority_id: AccountId20(self.client.address().await.0.0),
+				msg: encoded_msg.into(),
+				msg_hash,
 				src_tx_id: src_tx_id_h256,
-				src_chain_id,
-				sequence_id: sequence_id_u256,
-				message: encoded_msg.into(),
 			},
 			signature,
 		));
@@ -395,32 +372,17 @@ where
 		msg: Socket_Message,
 		metadata: FinalizePollMetadata,
 	) -> Result<()> {
-		use bifrost_runtime::runtime_types::primitive_types::U256;
-		use subxt::ext::codec::Encode;
-
 		let encoded_msg: Vec<u8> = msg.into();
-		let src_chain_id = metadata.src_chain_id as u32;
-		let sequence_id = metadata.sequence;
-		let sequence_id_u256 = U256([sequence_id as u64, (sequence_id >> 64) as u64, 0, 0]);
 
-		// Node expects: keccak256("FinalizePoll") + SCALE_encode((src_chain_id, sequence_id, message))
+		// Node expects: keccak256("FinalizePoll") + msg (raw bytes, NOT SCALE encoded!)
 		let prefix = keccak256("FinalizePoll".as_bytes());
-		// SCALE encode (u32, U256, Vec<u8>)
-		let mut encoded_data = src_chain_id.encode();
-		encoded_data.extend_from_slice(&sequence_id_u256.0[0].to_le_bytes());
-		encoded_data.extend_from_slice(&sequence_id_u256.0[1].to_le_bytes());
-		encoded_data.extend_from_slice(&sequence_id_u256.0[2].to_le_bytes());
-		encoded_data.extend_from_slice(&sequence_id_u256.0[3].to_le_bytes());
-		encoded_data.extend_from_slice(&encoded_msg.encode());
-		let message_to_sign = [prefix.as_slice(), &encoded_data].concat();
+		let message_to_sign = [prefix.as_slice(), &encoded_msg].concat();
 		let signature = self.client.sign_message(&message_to_sign).await?.into();
 
 		let call = Arc::new(bifrost_runtime::tx().cccp_relay_queue().finalize_poll(
 			FinalizePollSubmission {
 				authority_id: AccountId20(self.client.address().await.0.0),
-				src_chain_id,
-				sequence_id: sequence_id_u256,
-				message: encoded_msg.into(),
+				msg: encoded_msg.into(),
 			},
 			signature,
 		));
