@@ -259,7 +259,7 @@ where
 		let hooks_address = match &src_client.protocol_contracts.hooks {
 			Some(hooks) => hooks.address(),
 			None => {
-				log::debug!(
+				log::info!(
 					target: &self.get_client().get_chain_name(),
 					"-[{}] ⏭️  Skipping hook processing: source chain has no hooks contract",
 					sub_display_format(SUB_LOG_TARGET)
@@ -270,7 +270,7 @@ where
 
 		// Validate refund address matches source chain hooks contract address
 		if msg.params.refund != *hooks_address {
-			log::debug!(
+			log::info!(
 				target: &self.get_client().get_chain_name(),
 				"-[{}] ⏭️  Skipping hook processing: refund address {:?} != hooks address {:?}",
 				sub_display_format(SUB_LOG_TARGET),
@@ -283,7 +283,7 @@ where
 		// Decode variants
 		match Variants::abi_decode(&msg.params.variants) {
 			Ok(variants) => {
-				log::debug!(
+				log::info!(
 					target: &self.get_client().get_chain_name(),
 					"-[{}] ✅ Decoded variants: sender={:?}, receiver={:?}, max_tx_fee={}, message_len={}",
 					sub_display_format(SUB_LOG_TARGET),
