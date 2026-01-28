@@ -29,7 +29,7 @@ sol!(
 );
 
 sol!(
-	#[derive(serde::Serialize, serde::Deserialize)]
+	#[derive(serde::Serialize, serde::Deserialize, Debug)]
 	/// Variants structure for socket message parameters.
 	/// Follows Solidity ABI encoding: (address sender, address receiver, address refund, uint256 max_tx_fee, bytes message)
 	struct Variants {
