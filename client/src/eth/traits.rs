@@ -374,6 +374,7 @@ where
 		msg: &Socket_Message,
 		max_tx_fee: U256,
 		tx_request: &mut N::TransactionRequest,
+		is_inbound: bool,
 	) -> Result<()> {
 		// Validate: maxTxFee must not exceed the bridged amount
 		if max_tx_fee > msg.params.amount {
@@ -444,8 +445,10 @@ where
 		};
 
 		// Fetch bridged asset decimals
-		let bridged_asset =
-			self.get_client().get_asset_address_by_index(msg.params.tokenIDX0).await?;
+		let bridged_asset = self
+			.get_client()
+			.get_asset_address_by_index(msg.params.tokenIDX0, is_inbound)
+			.await?;
 		let bridged_asset_decimals = if bridged_asset == cccp::NATIVE_CURRENCY_ADDRESS {
 			18 // Native currency has 18 decimals (e.g. BFC, BNB, ETH, etc.)
 		} else {
@@ -655,7 +658,12 @@ where
 	/// # Returns
 	/// * `Ok(())` - If the transaction is successfully submitted or correctly skipped.
 	/// * `Err(_)` - If an error occurs during transaction building or gas estimation.
-	async fn execute_hook(&self, msg: &Socket_Message, variants: Variants) -> Result<()> {
+	async fn execute_hook(
+		&self,
+		msg: &Socket_Message,
+		variants: Variants,
+		is_inbound: bool,
+	) -> Result<()> {
 		match &self.get_client().protocol_contracts.hooks {
 			Some(hooks) => {
 				log::info!(
@@ -673,7 +681,8 @@ where
 					.into_transaction_request()
 					.with_from(self.get_client().address().await);
 
-				self.fill_hook_gas(&msg, variants.max_tx_fee, &mut tx_request).await?;
+				self.fill_hook_gas(&msg, variants.max_tx_fee, &mut tx_request, is_inbound)
+					.await?;
 				if tx_request.gas_limit().is_none() {
 					// Skip execution, don't submit transaction
 					return Ok(());

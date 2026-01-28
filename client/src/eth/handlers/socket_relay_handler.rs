@@ -230,8 +230,10 @@ where
 					return Ok(());
 				}
 
+				let is_inbound =
+					self.is_inbound_sequence(Into::<u32>::into(msg.ins_code.ChainIndex) as ChainId);
 				let metadata = SocketRelayMetadata::new(
-					self.is_inbound_sequence(Into::<u32>::into(msg.ins_code.ChainIndex) as ChainId),
+					is_inbound,
 					status,
 					msg.req_id.sequence,
 					Into::<u32>::into(msg.req_id.ChainIndex) as ChainId,
@@ -246,7 +248,7 @@ where
 				}
 				// Check if we should execute the hook (Executed status with valid requirements)
 				if let Some(variants) = self.should_execute_hook(&msg).await? {
-					match self.execute_hook(&msg, variants).await {
+					match self.execute_hook(&msg, variants, is_inbound).await {
 						Ok(()) => (),
 						Err(error) => {
 							// we don't propagate the error to prevent hook execution errors fail the entire relay process
