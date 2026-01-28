@@ -369,13 +369,13 @@ where
 	/// # Returns
 	/// * `Ok(())` - If gas estimation and fee calculation succeed.
 	/// * `Err(_)` - If any step fails (e.g., oracle failure, fee exceeds limit).
-	async fn fill_hook_gas(
+	async fn estimate_hook_gas(
 		&self,
 		msg: &Socket_Message,
 		max_tx_fee: U256,
-		tx_request: &mut N::TransactionRequest,
+		tx_request: &N::TransactionRequest,
 		is_inbound: bool,
-	) -> Result<()> {
+	) -> Result<(U256, u64)> {
 		// Validate: maxTxFee must not exceed the bridged amount
 		if max_tx_fee > msg.params.amount {
 			return Err(eyre::eyre!(
@@ -400,7 +400,7 @@ where
 							"⚠️  Hook.execute() estimated gas reverted: {}",
 							e.to_string()
 						);
-						return Ok(());
+						return Ok((U256::ZERO, 0));
 					}
 					return Err(e.into());
 				},
@@ -409,7 +409,9 @@ where
 		};
 		let gas_price = self.get_client().get_gas_price().await?;
 		// DNC: Destination Chain's Native Currency
-		let estimated_fee_in_dnc = U256::from(gas as u128 * gas_price);
+		let estimated_fee_in_dnc = U256::from(gas).checked_mul(U256::from(gas_price)).ok_or(
+			eyre::eyre!("Gas fee calculation overflow: gas={}, gas_price={}", gas, gas_price),
+		)?;
 
 		// Fetch destination chain native currency price oracle
 		let dnc_oracle_address = self
@@ -419,11 +421,9 @@ where
 		let dnc_oracle_decimals =
 			self.get_bifrost_client().get_oracle_decimals(dnc_oracle_address).await?;
 		let dnc_native_oracle = self.get_bifrost_client().get_oracle(dnc_oracle_address).await;
-		// Get destination native currency price per full unit in USD
-		let dnc_price_in_usd = match dnc_native_oracle.latestRoundData().call().await {
-			Ok(data) => U256::from(data.answer)
-				.checked_div(U256::from(10u128.pow(dnc_oracle_decimals as u32)))
-				.ok_or(eyre::eyre!("Failed to calculate destination native currency price"))?,
+		// Get destination native currency price (keep oracle decimals for precision)
+		let dnc_price_scaled = match dnc_native_oracle.latestRoundData().call().await {
+			Ok(data) => U256::from(data.answer),
 			Err(e) => {
 				// Check if the error is a revert (on-chain oracle failure)
 				// Revert means the oracle is stale or not working, skip execution
@@ -437,7 +437,7 @@ where
 						dnc_oracle_address,
 						e.to_string()
 					);
-					return Ok(());
+					return Ok((U256::ZERO, 0));
 				}
 				// Not a revert - this is an RPC/network error, propagate it
 				return Err(e.into());
@@ -466,11 +466,9 @@ where
 			.await?;
 		let bridged_asset_oracle =
 			self.get_bifrost_client().get_oracle(bridged_asset_oracle_address).await;
-		// Get bridged asset price per full unit in USD
-		let bridged_asset_price_in_usd = match bridged_asset_oracle.latestRoundData().call().await {
-			Ok(data) => U256::from(data.answer)
-				.checked_div(U256::from(10u128.pow(bridged_asset_oracle_decimals as u32)))
-				.ok_or(eyre::eyre!("Failed to calculate bridged asset price"))?,
+		// Get bridged asset price (keep oracle decimals for precision)
+		let bridged_asset_price_scaled = match bridged_asset_oracle.latestRoundData().call().await {
+			Ok(data) => U256::from(data.answer),
 			Err(e) => {
 				// Check if the error is a revert (on-chain oracle failure)
 				if let Some(_revert_data) = e.as_revert_data() {
@@ -483,39 +481,57 @@ where
 						msg.params.tokenIDX0,
 						e.to_string()
 					);
-					return Ok(()); // Skip execution, don't submit transaction
+					return Ok((U256::ZERO, 0)); // Skip execution, don't submit transaction
 				}
 				// Not a revert - this is an RPC/network error, propagate it
 				return Err(e.into());
 			},
 		};
 
-		// Calculate fee in bridged asset with proper decimal handling
+		// Calculate fee in bridged asset with overflow-safe two-stage approach
 		//
-		// Conversion formula:
-		// fee_in_bridged_asset = (estimated_fee_in_dnc × dnc_price_in_usd × 10^bridged_asset_decimals) /
-		//                        (bridged_asset_price_in_usd × 10^18)
+		// Problem: Direct calculation can overflow U256 with high-value assets (e.g., Bitcoin at $100k)
+		// Solution: Calculate price ratio first, then apply to fee with controlled intermediate values
 		//
-		// How It Works:
-		// 1. estimated_fee_in_dnc: Gas fee in wei (18 decimals) on destination chain
-		// 2. Multiply by dnc_price_in_usd: Convert to USD value
-		// 3. Multiply by 10^bridged_asset_decimals: Scale to bridged asset's decimal places
-		// 4. Divide by bridged_asset_price_in_usd: Convert USD to bridged asset units
-		// 5. Divide by 10^18: Remove the destination chain's 18 decimal normalization
+		// Stage 1: Calculate price ratio with 18 decimals precision
+		//   price_ratio = (dnc_price_scaled × 10^18) / bridged_price_scaled
+		//   Peak value: ~10^41 (safe, well below U256 max of 10^77)
 		//
-		// Example Scenarios:
-		// - USDC (6 decimals): If fee is 0.001 ETH ($3), it correctly converts to ~3,000,000 USDC units (6 decimals)
-		// - WBTC (8 decimals): If fee is 0.001 ETH ($3), it correctly converts to ~0.00005000 BTC units (8 decimals)
-		// - Standard ERC20 (18 decimals): Works as before
+		// Stage 2: Apply ratio to fee with decimal adjustments
+		//   fee = (estimated_fee × price_ratio × 10^bridged_decimals) / (10^18 × 10^18)
+		//   Peak value: ~10^56 (safe, 21 orders of magnitude below U256 max)
+		//
+		// This preserves precision while guaranteeing zero overflow risk even with:
+		// - Bitcoin at $1M: 10^24 oracle price ✅
+		// - 100 ETH gas cost: 10^20 wei ✅
+		// - Any combination of realistic crypto prices ✅
+		//
+		// Oracle decimal handling:
+		// - When oracle decimals match: ratio calculation naturally preserves precision
+		// - When different: adjust with oracle decimal ratio in stage 2
+
+		// Stage 1: Calculate price ratio (DNC price / bridged price) with 18 decimals precision
+		let price_ratio_scaled = dnc_price_scaled
+			.checked_mul(U256::from(10u128.pow(18)))
+			.ok_or(eyre::eyre!("Price ratio scaling overflow"))?
+			.checked_div(bridged_asset_price_scaled)
+			.ok_or(eyre::eyre!("Price ratio calculation failed (division by zero?)"))?;
+
+		// Stage 2: Apply price ratio to estimated fee with decimal adjustments
 		let fee_in_bridged_asset = estimated_fee_in_dnc
-			.checked_mul(dnc_price_in_usd)
-			.ok_or(eyre::eyre!("Fee multiplication overflow"))?
+			.checked_mul(price_ratio_scaled)
+			.ok_or(eyre::eyre!("Fee × price ratio overflow"))?
 			.checked_mul(U256::from(10u128.pow(bridged_asset_decimals as u32)))
-			.ok_or(eyre::eyre!("Decimal adjustment overflow"))?
-			.checked_div(bridged_asset_price_in_usd)
-			.ok_or(eyre::eyre!("Price division failed"))?
+			.ok_or(eyre::eyre!("Bridged asset decimal adjustment overflow"))?
 			.checked_div(U256::from(10u128.pow(18)))
-			.ok_or(eyre::eyre!("Failed to convert fee to bridged asset units"))?;
+			.ok_or(eyre::eyre!("DNC decimal normalization failed"))?
+			.checked_div(U256::from(10u128.pow(18)))
+			.ok_or(eyre::eyre!("Price ratio precision removal failed"))?
+			// Adjust for oracle decimal differences if they don't match
+			.checked_mul(U256::from(10u128.pow(bridged_asset_oracle_decimals as u32)))
+			.ok_or(eyre::eyre!("Oracle decimal adjustment overflow"))?
+			.checked_div(U256::from(10u128.pow(dnc_oracle_decimals as u32)))
+			.ok_or(eyre::eyre!("Oracle decimal normalization failed"))?;
 
 		// Validate: fee_in_bridged_asset <= maxTxFee
 		if fee_in_bridged_asset > max_tx_fee {
@@ -526,18 +542,35 @@ where
 			));
 		}
 
+		// Calculate human-readable prices for logging (convert to f64 to avoid truncation)
+		// Oracle prices should fit in u128 range (max realistic price: $1M × 10^18 < 2^128)
+		let dnc_price_display = if let Ok(price_u128) = u128::try_from(dnc_price_scaled) {
+			(price_u128 as f64) / 10f64.powi(dnc_oracle_decimals as i32)
+		} else {
+			// Fallback for extremely large values
+			(dnc_price_scaled / U256::from(10u128.pow(dnc_oracle_decimals as u32))).to::<u128>()
+				as f64
+		};
+		let bridged_price_display =
+			if let Ok(price_u128) = u128::try_from(bridged_asset_price_scaled) {
+				(price_u128 as f64) / 10f64.powi(bridged_asset_oracle_decimals as i32)
+			} else {
+				(bridged_asset_price_scaled
+					/ U256::from(10u128.pow(bridged_asset_oracle_decimals as u32)))
+				.to::<u128>() as f64
+			};
+
 		log::info!(
 			target: &self.get_client().get_chain_name(),
-			"-[{}] 💰 Hook fee estimate: {} (bridged asset wei) <= max_tx_fee: {}. dst_price: ${}, bridged_price: ${}",
+			"-[{}] 💰 Hook fee estimate: {} (bridged asset wei) <= max_tx_fee: {}. dst_price: ${:.6}, bridged_price: ${:.6}",
 			sub_display_format(SUB_LOG_TARGET),
 			fee_in_bridged_asset,
 			max_tx_fee,
-			dnc_price_in_usd,
-			bridged_asset_price_in_usd
+			dnc_price_display,
+			bridged_price_display
 		);
 
-		tx_request.set_gas_limit(gas);
-		Ok(())
+		Ok((fee_in_bridged_asset, gas))
 	}
 
 	/// Validates if hooks rollback should be called for this socket message.
@@ -610,6 +643,7 @@ where
 					variants.sender,
 					variants.receiver,
 					variants.max_tx_fee,
+					None,
 					variants.message,
 				);
 
@@ -675,23 +709,33 @@ where
 					msg.req_id.sequence
 				);
 
-				// Build the Hooks.execute() call
-				let mut tx_request = hooks
+				// Build the Hooks.execute() call for initial gas estimation
+				let init_tx_request = hooks
 					.execute_0(variants.max_tx_fee, msg.clone().into())
 					.into_transaction_request()
 					.with_from(self.get_client().address().await);
 
-				self.fill_hook_gas(&msg, variants.max_tx_fee, &mut tx_request, is_inbound)
+				let (fee_in_bridged_asset, gas) = self
+					.estimate_hook_gas(&msg, variants.max_tx_fee, &init_tx_request, is_inbound)
 					.await?;
-				if tx_request.gas_limit().is_none() {
+
+				if fee_in_bridged_asset.is_zero() || gas == 0 {
 					// Skip execution, don't submit transaction
 					return Ok(());
 				}
+
+				// Build the Hooks.execute() call for actual transaction submission
+				let tx_request = hooks
+					.execute_0(fee_in_bridged_asset, msg.clone().into())
+					.into_transaction_request()
+					.with_from(self.get_client().address().await)
+					.with_gas_limit(gas);
 
 				let metadata = HookMetadata::new(
 					variants.sender,
 					variants.receiver,
 					variants.max_tx_fee,
+					Some(fee_in_bridged_asset),
 					variants.message,
 				);
 
