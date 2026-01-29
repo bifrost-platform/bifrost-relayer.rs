@@ -388,23 +388,30 @@ where
 		// Estimate gas and fee on destination chain
 		let gas = match self.get_client().estimate_gas(tx_request.clone()).await {
 			Ok(gas) => gas,
-			Err(e) => match e.as_error_resp() {
-				Some(error_resp) => {
-					if let Some(_revert_data) = error_resp.as_revert_data() {
-						// we don't propagate the error if a contract reverted the estimated gas request
-						br_primitives::log_and_capture!(
-							warn,
-							&self.get_client().get_chain_name(),
-							SUB_LOG_TARGET,
-							self.get_client().address().await,
-							"⚠️  Hook.execute() estimated gas reverted: {}",
-							e.to_string()
-						);
-						return Ok((U256::ZERO, 0));
-					}
-					return Err(e.into());
-				},
-				None => return Err(e.into()),
+			Err(e) => {
+				// Check if error is a revert, either directly or wrapped in retry error
+				let error_string = e.to_string();
+				let is_revert = if let Some(error_resp) = e.as_error_resp() {
+					error_resp.as_revert_data().is_some()
+				} else {
+					// Handle case where error is wrapped by retry layer
+					// Pattern: "Max retries exceeded ... execution reverted"
+					error_string.contains("execution reverted") || error_string.contains("revert")
+				};
+
+				if is_revert {
+					// we don't propagate the error if a contract reverted the estimated gas request
+					br_primitives::log_and_capture!(
+						warn,
+						&self.get_client().get_chain_name(),
+						SUB_LOG_TARGET,
+						self.get_client().address().await,
+						"⚠️  Hook.execute() estimated gas reverted: {}",
+						error_string
+					);
+					return Ok((U256::ZERO, 0));
+				}
+				return Err(e.into());
 			},
 		};
 		let gas_price = self.get_client().get_gas_price().await?;
@@ -427,7 +434,15 @@ where
 			Err(e) => {
 				// Check if the error is a revert (on-chain oracle failure)
 				// Revert means the oracle is stale or not working, skip execution
-				if let Some(_revert_data) = e.as_revert_data() {
+				let error_string = e.to_string();
+				let is_revert = if let Some(_revert_data) = e.as_revert_data() {
+					true
+				} else {
+					// Handle case where error is wrapped by retry layer
+					error_string.contains("execution reverted") || error_string.contains("revert")
+				};
+
+				if is_revert {
 					br_primitives::log_and_capture!(
 						warn,
 						&self.get_client().get_chain_name(),
@@ -435,7 +450,7 @@ where
 						self.get_client().address().await,
 						"⚠️  Destination native oracle reverted (oracle: {:?}). Skipping hook execution. Error: {}",
 						dnc_oracle_address,
-						e.to_string()
+						error_string
 					);
 					return Ok((U256::ZERO, 0));
 				}
@@ -471,7 +486,15 @@ where
 			Ok(data) => U256::from(data.answer),
 			Err(e) => {
 				// Check if the error is a revert (on-chain oracle failure)
-				if let Some(_revert_data) = e.as_revert_data() {
+				let error_string = e.to_string();
+				let is_revert = if let Some(_revert_data) = e.as_revert_data() {
+					true
+				} else {
+					// Handle case where error is wrapped by retry layer
+					error_string.contains("execution reverted") || error_string.contains("revert")
+				};
+
+				if is_revert {
 					br_primitives::log_and_capture!(
 						warn,
 						&self.get_client().get_chain_name(),
@@ -479,7 +502,7 @@ where
 						self.get_client().address().await,
 						"⚠️  Bridged asset oracle reverted (token: {:?}). Skipping hook execution. Error: {}",
 						msg.params.tokenIDX0,
-						e.to_string()
+						error_string
 					);
 					return Ok((U256::ZERO, 0)); // Skip execution, don't submit transaction
 				}
