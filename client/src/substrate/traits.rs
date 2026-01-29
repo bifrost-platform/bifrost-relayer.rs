@@ -72,6 +72,15 @@ where
 					return;
 				}
 			},
+			XtRequestMetadata::FinalizePoll(_) => {
+				if error_str.contains("CCCPRelayQueue::TransferAlreadyFinalized") {
+					log::info!(
+						target: &self.get_bfc_client().get_chain_name(),
+						"Transfer already finalized, no need to retry"
+					);
+					return;
+				}
+			},
 			_ => {},
 		};
 
