@@ -24,7 +24,7 @@ use eyre::Result;
 use sc_service::SpawnTaskHandle;
 use tokio::time::sleep;
 
-use crate::eth::{SUB_LOG_TARGET, send_transaction};
+use crate::eth::{SUB_LOG_TARGET, avoid_race_condition, send_transaction};
 
 use super::EthClient;
 
@@ -386,6 +386,7 @@ where
 		}
 
 		// Estimate gas and fee on destination chain
+		avoid_race_condition().await;
 		let gas = match self.get_client().estimate_gas(tx_request.clone()).await {
 			Ok(gas) => gas,
 			Err(e) => {
