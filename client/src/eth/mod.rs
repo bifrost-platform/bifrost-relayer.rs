@@ -424,6 +424,10 @@ where
 				request.gas_limit().unwrap()
 			);
 		} else {
+			if !self.metadata.is_native {
+				avoid_race_condition().await;
+			}
+
 			let gas = self.estimate_gas(request.clone()).await?;
 			let coefficient: f64 = GasCoefficient::from(self.metadata.is_native).into();
 			let estimated_gas = gas as f64 * coefficient;
@@ -435,10 +439,6 @@ where
 			request.set_max_fee_per_gas(1000 * Unit::GWEI.wei().to::<u128>());
 			request.set_max_priority_fee_per_gas(0);
 		} else {
-			// to avoid duplicate(will revert) external networks transactions
-			let duration = Duration::from_millis(rand::rng().random_range(0..=12000));
-			sleep(duration).await;
-
 			if !self.metadata.eip1559 {
 				request.set_gas_price(self.get_gas_price().await?);
 			}
@@ -641,6 +641,12 @@ where
 	) -> TransportResult<PendingTransactionBuilder<N>> {
 		self.inner.send_transaction_internal(tx).await
 	}
+}
+
+pub async fn avoid_race_condition() {
+	// to avoid duplicate(will revert) external networks transactions
+	let duration = Duration::from_millis(rand::rng().random_range(0..=12000));
+	sleep(duration).await;
 }
 
 /// Send a transaction asynchronously.
