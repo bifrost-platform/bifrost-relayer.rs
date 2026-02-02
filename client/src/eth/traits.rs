@@ -658,6 +658,8 @@ where
 					msg.req_id.sequence
 				);
 
+				avoid_race_condition().await;
+
 				// Build the Hooks.rollback() call
 				let tx_request = hooks
 					.rollback(msg.clone().into())
