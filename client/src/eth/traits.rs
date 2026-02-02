@@ -293,10 +293,11 @@ where
 			Ok(variants) => {
 				log::info!(
 					target: &self.get_client().get_chain_name(),
-					"-[{}] ✅ Decoded variants: sender={:?}, receiver={:?}, max_tx_fee={}, message_len={}",
+					"-[{}] ✅ Decoded variants: sender={:?}, receiver={:?}, refund={:?}, max_tx_fee={}, message_len={}",
 					sub_display_format(SUB_LOG_TARGET),
 					variants.sender,
 					variants.receiver,
+					variants.refund,
 					variants.max_tx_fee,
 					variants.message.len()
 				);
