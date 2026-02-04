@@ -10,6 +10,14 @@ use br_client::eth::EthClient;
 use br_primitives::periodic::PriceResponse;
 use eyre::{Result, eyre};
 
+fn get_chainlink_volume_weight(symbol: &str) -> Result<U256> {
+	match symbol {
+		"USDC" | "USDT" | "DAI" | "JPYC" => Ok(U256::from(1)),
+		"BTC" | "WBTC" | "CBBTC" => Ok(U256::from(10_000)),
+		_ => Err(eyre!("Invalid symbol: {}", symbol)),
+	}
+}
+
 #[derive(Clone)]
 pub struct ChainlinkPriceFetcher<F, P, N: Network>
 where
@@ -51,7 +59,7 @@ where
 							let decimals = contract.decimals().call().await?;
 
 							let price = price * U256::from(10u128.pow((18 - decimals).into()));
-							let volume = Some(U256::from(1));
+							let volume = Some(get_chainlink_volume_weight(symbol_str)?);
 
 							Ok(PriceResponse { price, volume })
 						} else {
