@@ -1,6 +1,6 @@
 use std::{collections::BTreeMap, sync::Arc};
 
-use crate::traits::PriceFetcher;
+use crate::{price_source::FetchMode, traits::PriceFetcher};
 use alloy::{
 	network::Network,
 	primitives::U256,
@@ -10,6 +10,14 @@ use br_client::eth::EthClient;
 use br_primitives::periodic::PriceResponse;
 use eyre::{Result, eyre};
 
+fn get_chainlink_volume_weight(symbol: &str) -> Result<U256> {
+	match symbol {
+		"USDC" | "USDT" | "DAI" | "JPYC" => Ok(U256::from(1)),
+		"BTC" | "WBTC" | "CBBTC" => Ok(U256::from(10_000)),
+		_ => Err(eyre!("Invalid symbol: {}", symbol)),
+	}
+}
+
 #[derive(Clone)]
 pub struct ChainlinkPriceFetcher<F, P, N: Network>
 where
@@ -17,6 +25,7 @@ where
 	P: Provider<N>,
 {
 	client: Option<Arc<EthClient<F, P, N>>>,
+	pub mode: FetchMode,
 }
 
 #[async_trait::async_trait]
@@ -26,14 +35,14 @@ where
 	P: Provider<N>,
 {
 	/// Get the price of a symbol from Chainlink aggregator.
-	/// Available symbols: USDC, USDT, DAI, BTC, WBTC, CBBTC
+	/// Available symbols: USDC, USDT, DAI, BTC, WBTC, CBBTC, JPYC
 	async fn get_ticker_with_symbol(&self, symbol: String) -> Result<PriceResponse> {
 		match &self.client {
 			Some(client) => {
 				let symbol_str = symbol.as_str();
 
 				match symbol_str {
-					"USDC" | "USDT" | "DAI" | "BTC" | "WBTC" | "CBBTC" => {
+					"USDC" | "USDT" | "DAI" | "BTC" | "WBTC" | "CBBTC" | "JPYC" => {
 						if let Some(contract) = match symbol_str {
 							"USDC" => &client.aggregator_contracts.chainlink_usdc_usd,
 							"USDT" => &client.aggregator_contracts.chainlink_usdt_usd,
@@ -41,6 +50,7 @@ where
 							"BTC" => &client.aggregator_contracts.chainlink_btc_usd,
 							"WBTC" => &client.aggregator_contracts.chainlink_wbtc_usd,
 							"CBBTC" => &client.aggregator_contracts.chainlink_cbbtc_usd,
+							"JPYC" => &client.aggregator_contracts.chainlink_jpy_usd,
 							_ => return Err(eyre!("Invalid symbol")),
 						} {
 							let (_, price, _, _, _) =
@@ -49,7 +59,7 @@ where
 							let decimals = contract.decimals().call().await?;
 
 							let price = price * U256::from(10u128.pow((18 - decimals).into()));
-							let volume = Some(U256::from(1));
+							let volume = Some(get_chainlink_volume_weight(symbol_str)?);
 
 							Ok(PriceResponse { price, volume })
 						} else {
@@ -66,18 +76,29 @@ where
 	async fn get_tickers(&self) -> Result<BTreeMap<String, PriceResponse>> {
 		let mut ret = BTreeMap::new();
 
-		for symbol in [
-			"USDC".to_string(),
-			"USDT".to_string(),
-			"DAI".to_string(),
-			"BTC".to_string(),
-			"WBTC".to_string(),
-			"CBBTC".to_string(),
-		] {
-			match self.get_ticker_with_symbol(symbol.clone()).await {
-				Ok(ticker) => ret.insert(symbol, ticker),
-				Err(_) => continue,
-			};
+		match &self.mode {
+			// We don't fetch dedicated symbols in standard mode. (e.g. JPYC)
+			FetchMode::Standard => {
+				for symbol in [
+					"USDC".to_string(),
+					"USDT".to_string(),
+					"DAI".to_string(),
+					"BTC".to_string(),
+					"WBTC".to_string(),
+					"CBBTC".to_string(),
+				] {
+					match self.get_ticker_with_symbol(symbol.clone()).await {
+						Ok(ticker) => ret.insert(symbol, ticker),
+						Err(_) => continue,
+					};
+				}
+			},
+			FetchMode::Dedicated(symbol) => {
+				match self.get_ticker_with_symbol(symbol.clone()).await {
+					Ok(ticker) => ret.insert(symbol.clone(), ticker),
+					Err(_) => return Err(eyre!("Failed to fetch ticker for symbol: {}", symbol)),
+				};
+			},
 		}
 
 		if ret.is_empty() { Err(eyre!("No tickers found")) } else { Ok(ret) }
@@ -89,7 +110,7 @@ where
 	F: TxFiller<N> + WalletProvider<N>,
 	P: Provider<N>,
 {
-	pub async fn new(client: Option<Arc<EthClient<F, P, N>>>) -> Self {
-		ChainlinkPriceFetcher { client }
+	pub async fn new(client: Option<Arc<EthClient<F, P, N>>>, mode: FetchMode) -> Self {
+		ChainlinkPriceFetcher { client, mode }
 	}
 }

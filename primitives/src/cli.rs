@@ -114,6 +114,8 @@ pub struct EVMProvider {
 	pub chainlink_wbtc_usd_address: Option<String>,
 	/// Chainlink cbbtc/usd aggregator
 	pub chainlink_cbbtc_usd_address: Option<String>,
+	/// Chainlink jpy/usd aggregator
+	pub chainlink_jpy_usd_address: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
