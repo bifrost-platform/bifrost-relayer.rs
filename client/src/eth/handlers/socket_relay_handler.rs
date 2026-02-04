@@ -247,8 +247,19 @@ where
 					return Ok(());
 				}
 				// Check if we should execute the hook (Executed status with valid requirements)
-				if let Some(variants) = self.should_execute_hook(&msg).await? {
-					match self.execute_hook(&msg, variants, is_inbound).await {
+				if let Some((variants, dnc_oracle_address, bridged_asset_oracle_address)) =
+					self.should_execute_hook(&msg).await?
+				{
+					match self
+						.execute_hook(
+							&msg,
+							variants,
+							dnc_oracle_address,
+							bridged_asset_oracle_address,
+							is_inbound,
+						)
+						.await
+					{
 						Ok(()) => (),
 						Err(error) => {
 							// we don't propagate the error to prevent hook execution errors fail the entire relay process
