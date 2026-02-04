@@ -3,7 +3,7 @@ use std::{sync::Arc, time::Duration};
 use alloy::{
 	dyn_abi::SolType,
 	network::{Network, TransactionBuilder},
-	primitives::{B256, ChainId, U256},
+	primitives::{Address, B256, ChainId, U256},
 	providers::{Provider, WalletProvider, fillers::TxFiller},
 	rpc::types::Log,
 	signers::Signature,
@@ -260,7 +260,7 @@ where
 		let hooks_address = match &src_client.protocol_contracts.hooks {
 			Some(hooks) => hooks.address(),
 			None => {
-				log::info!(
+				log::warn!(
 					target: &self.get_client().get_chain_name(),
 					"-[{}] ⏭️  Skipping hook processing: source chain has no hooks contract",
 					sub_display_format(SUB_LOG_TARGET)
@@ -271,7 +271,7 @@ where
 
 		// Validate refund address matches source chain hooks contract address
 		if msg.params.refund != *hooks_address {
-			log::info!(
+			log::warn!(
 				target: &self.get_client().get_chain_name(),
 				"-[{}] ⏭️  Skipping hook processing: refund address {:?} != hooks address {:?}",
 				sub_display_format(SUB_LOG_TARGET),
@@ -328,7 +328,10 @@ where
 	/// * `Ok(Some(Variants))` - If all checks pass and the hook should be executed.
 	/// * `Ok(None)` - If any check fails, indicating execution should be skipped.
 	/// * `Err(_)` - If an RPC error occurs during verification.
-	async fn should_execute_hook(&self, msg: &Socket_Message) -> Result<Option<Variants>> {
+	async fn should_execute_hook(
+		&self,
+		msg: &Socket_Message,
+	) -> Result<Option<(Variants, Address, Address)>> {
 		let variants = self.should_process_hook(msg, SocketEventStatus::Executed).await?;
 
 		// Early return if common validation failed
@@ -337,18 +340,51 @@ where
 			None => return Ok(None),
 		};
 
+		// In order to execute the hook, the oracle addresses must be registered in RelayQueue.
+		let dnc_oracle_address = match self
+			.get_bifrost_client()
+			.get_oracle_address_by_chain(self.get_client().metadata.id)
+			.await
+		{
+			Ok(address) => address,
+			Err(_) => {
+				log::warn!(
+					target: &self.get_client().get_chain_name(),
+					"-[{}] ⚠️  DNC oracle not found for chain {}. Skipping hook execution.",
+					sub_display_format(SUB_LOG_TARGET),
+					self.get_client().metadata.id,
+				);
+				return Ok(None);
+			},
+		};
+		let bridged_asset_oracle_address = match self
+			.get_bifrost_client()
+			.get_oracle_address_by_asset_index(msg.params.tokenIDX0)
+			.await
+		{
+			Ok(address) => address,
+			Err(_) => {
+				log::warn!(
+					target: &self.get_client().get_chain_name(),
+					"-[{}] ⚠️  Bridged asset oracle not found for asset index {}. Skipping hook execution.",
+					sub_display_format(SUB_LOG_TARGET),
+					msg.params.tokenIDX0,
+				);
+				return Ok(None);
+			},
+		};
+
 		// Idempotency check on destination chain
 		if let Some(hooks) = &self.get_client().protocol_contracts.hooks {
 			let is_processed = hooks.processedRequests(msg.req_id.clone().into()).call().await?;
 
 			if !is_processed {
-				return Ok(Some(variants));
+				return Ok(Some((variants, dnc_oracle_address, bridged_asset_oracle_address)));
 			}
 			return Ok(None); // Already processed
 		}
 
-		// No hooks contract - skip execution
-		Ok(None)
+		Ok(None) // No hooks contract - skip execution
 	}
 
 	/// Estimates the gas required for hook execution and calculates the fee in the bridged asset.
@@ -375,6 +411,8 @@ where
 		msg: &Socket_Message,
 		max_tx_fee: U256,
 		tx_request: &N::TransactionRequest,
+		dnc_oracle_address: Address,
+		bridged_asset_oracle_address: Address,
 		is_inbound: bool,
 	) -> Result<(U256, u64)> {
 		// Validate: maxTxFee must not exceed the bridged amount
@@ -423,10 +461,6 @@ where
 		)?;
 
 		// Fetch destination chain native currency price oracle
-		let dnc_oracle_address = self
-			.get_bifrost_client()
-			.get_oracle_address_by_chain(self.get_client().metadata.id)
-			.await?;
 		let dnc_oracle_decimals =
 			self.get_bifrost_client().get_oracle_decimals(dnc_oracle_address).await?;
 		let dnc_native_oracle = self.get_bifrost_client().get_oracle(dnc_oracle_address).await;
@@ -473,10 +507,6 @@ where
 		};
 
 		// Fetch bridged asset price oracle
-		let bridged_asset_oracle_address = self
-			.get_bifrost_client()
-			.get_oracle_address_by_asset_index(msg.params.tokenIDX0)
-			.await?;
 		let bridged_asset_oracle_decimals = self
 			.get_bifrost_client()
 			.get_oracle_decimals(bridged_asset_oracle_address)
@@ -723,6 +753,8 @@ where
 		&self,
 		msg: &Socket_Message,
 		variants: Variants,
+		dnc_oracle_address: Address,
+		bridged_asset_oracle_address: Address,
 		is_inbound: bool,
 	) -> Result<()> {
 		match &self.get_client().protocol_contracts.hooks {
@@ -743,7 +775,14 @@ where
 					.with_from(self.get_client().address().await);
 
 				let (fee_in_bridged_asset, gas) = self
-					.estimate_hook_gas(&msg, variants.max_tx_fee, &init_tx_request, is_inbound)
+					.estimate_hook_gas(
+						&msg,
+						variants.max_tx_fee,
+						&init_tx_request,
+						dnc_oracle_address,
+						bridged_asset_oracle_address,
+						is_inbound,
+					)
 					.await?;
 
 				if fee_in_bridged_asset.is_zero() || gas == 0 {
