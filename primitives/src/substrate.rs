@@ -5,7 +5,11 @@
 		path = "bounded_collections::bounded_vec::BoundedVec",
 		derive = "Ord, PartialOrd, Eq, PartialEq"
 	),
-	derive_for_type(path = "bp_btc_relay::MigrationSequence", derive = "Eq, PartialEq")
+	derive_for_type(path = "bp_btc_relay::MigrationSequence", derive = "Eq, PartialEq"),
+	derive_for_type(
+		path = "fp_account::EthereumSignature",
+		derive = "::subxt::ext::codec::Encode, ::subxt::ext::codec::Decode"
+	)
 )]
 pub mod bifrost_runtime {}
 
@@ -32,11 +36,13 @@ pub use runtime_types::{
 		ExecutedPsbtMessage, RollbackPollMessage, SignedPsbtMessage,
 		pallet::pallet::Call::submit_unsigned_psbt,
 	},
+	pallet_cccp_relay_queue::{FinalizePollSubmission, OnFlightPollSubmission},
 };
 
+#[allow(ambiguous_glob_reexports)]
 pub use bifrost_runtime::{
 	blaze::calls::types::*, btc_registration_pool::calls::types::*,
-	btc_socket_queue::calls::types::*,
+	btc_socket_queue::calls::types::*, cccp_relay_queue::calls::types::*,
 };
 
 use super::constants::errors::INVALID_PROVIDER_URL;
@@ -50,7 +56,6 @@ use url::Url;
 pub enum CustomConfig {}
 
 impl Config for CustomConfig {
-	type Hash = <SubstrateConfig as Config>::Hash;
 	type AccountId = <SubstrateConfig as Config>::AccountId;
 	type Address = Self::AccountId;
 	type Signature = EthereumSignature;
@@ -70,4 +75,13 @@ pub async fn initialize_sub_client(mut url: Url) -> OnlineClient<CustomConfig> {
 	OnlineClient::<CustomConfig>::from_insecure_url(url.as_str())
 		.await
 		.expect(INVALID_PROVIDER_URL)
+}
+
+pub fn get_sub_rpc_url(mut url: Url) -> String {
+	if url.scheme() == "https" {
+		url.set_scheme("wss").expect(INVALID_PROVIDER_URL);
+	} else {
+		url.set_scheme("ws").expect(INVALID_PROVIDER_URL);
+	}
+	url.to_string()
 }

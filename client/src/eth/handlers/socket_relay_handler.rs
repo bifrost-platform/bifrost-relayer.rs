@@ -1,4 +1,5 @@
 use std::{collections::BTreeMap, sync::Arc};
+use tokio::sync::RwLock;
 
 use alloy::{
 	network::{Network, TransactionBuilder},
@@ -17,9 +18,8 @@ use tokio_stream::{StreamExt, wrappers::BroadcastStream};
 use br_primitives::{
 	bootstrap::BootstrapSharedData,
 	constants::{
-		cli::DEFAULT_BOOTSTRAP_ROUND_OFFSET,
-		config::BOOTSTRAP_BLOCK_CHUNK_SIZE,
-		errors::{INVALID_BIFROST_NATIVENESS, INVALID_CHAIN_ID},
+		cli::DEFAULT_BOOTSTRAP_ROUND_OFFSET, config::BOOTSTRAP_BLOCK_CHUNK_SIZE,
+		errors::INVALID_CHAIN_ID,
 	},
 	contracts::socket::{
 		Socket_Struct::{Instruction, RequestID, Signatures, Socket_Message},
@@ -27,10 +27,7 @@ use br_primitives::{
 	},
 	eth::{BootstrapState, BuiltRelayTransaction, RelayDirection, SocketEventStatus},
 	substrate::{SocketMessagesSubmission, bifrost_runtime},
-	tx::{
-		SocketRelayMetadata, TxRequestMetadata, XtRequest, XtRequestMessage, XtRequestMetadata,
-		XtRequestSender,
-	},
+	tx::{SocketRelayMetadata, XtRequestMessage, XtRequestMetadata, XtRequestSender},
 	utils::sub_display_format,
 };
 
@@ -39,14 +36,28 @@ use crate::{
 	eth::{
 		ClientMap, EthClient,
 		events::EventMessage,
+		handlers::SocketOnflightReceiver,
 		send_transaction,
-		traits::{BootstrapHandler, Handler, SocketRelayBuilder},
+		traits::{BootstrapHandler, Handler, HookExecutor, SocketRelayBuilder},
 	},
 };
 
 const SUB_LOG_TARGET: &str = "socket-handler";
 
+/// A pending event waiting for block confirmations.
+#[derive(Clone, Debug)]
+struct PendingEvent {
+	/// The log event.
+	log: Log,
+	/// The block number when this event was received.
+	block_number: u64,
+}
+
 /// The essential task that handles `socket relay` related events.
+///
+/// This handler listens for:
+/// 1. TransferPolled messages from TransferPolledHandler → triggers Accepted relay
+/// 2. EVM Socket events (Executed, Accepted, etc.) → continues the relay sequence
 pub struct SocketRelayHandler<F, P, N: Network>
 where
 	F: TxFiller<N> + WalletProvider<N> + 'static,
@@ -58,6 +69,8 @@ where
 	xt_request_sender: Arc<XtRequestSender>,
 	/// The receiver that consumes new events from the block channel.
 	event_stream: BroadcastStream<EventMessage>,
+	/// The receiver for TransferPolled messages from SocketOnflightHandler.
+	onflight_receiver: SocketOnflightReceiver,
 	/// The entire clients instantiated in the system. <chain_id, Arc<EthClient>>
 	system_clients: Arc<ClientMap<F, P, N>>,
 	/// The bifrost client.
@@ -70,6 +83,8 @@ where
 	bootstrap_shared_data: Arc<BootstrapSharedData>,
 	/// Whether to enable debug mode.
 	debug_mode: bool,
+	/// Pending events waiting for block confirmations.
+	pending_events: Arc<RwLock<Vec<PendingEvent>>>,
 }
 
 #[async_trait::async_trait]
@@ -85,19 +100,111 @@ where
 		}
 		self.wait_for_all_chains_bootstrapped().await?;
 
-		while let Some(Ok(msg)) = self.event_stream.next().await {
-			log::info!(
-				target: &self.client.get_chain_name(),
-				"-[{}] 📦 Imported #{:?} with target logs({:?})",
-				sub_display_format(SUB_LOG_TARGET),
-				msg.block_number,
-				msg.event_logs.len(),
-			);
+		// Interval for checking confirmed events
+		let check_interval = tokio::time::Duration::from_millis(self.client.metadata.call_interval);
+		let mut check_timer = tokio::time::interval(check_interval);
 
-			for log in &msg.event_logs {
-				if self.is_target_contract(log) && self.is_target_event(log.topic0()) {
-					self.process_confirmed_log(log, false).await?;
-				}
+		loop {
+			tokio::select! {
+				// Handle EVM events - store as pending for confirmation
+				evm_msg = self.event_stream.next() => {
+					match evm_msg {
+						Some(Ok(msg)) => {
+								let mut new_pending_count = 0u32;
+								let mut immediate_count = 0u32;
+								for log in msg.event_logs {
+									if self.is_target_contract(&log) && self.is_target_event(log.topic0()) {
+										// Check if this event should be processed immediately
+										// Inbound + Executed or Outbound + Accepted don't need confirmations
+										if self.should_process_immediately(&log) == Some(true) {
+											if let Err(e) = self.process_confirmed_log(&log, false).await {
+												br_primitives::log_and_capture!(
+													error,
+													&self.client.get_chain_name(),
+													SUB_LOG_TARGET,
+													self.client.address().await,
+													"❗️ Error processing immediate event: {:?}",
+													e
+												);
+											}
+											immediate_count += 1;
+										} else {
+											self.pending_events.write().await.push(PendingEvent {
+												log,
+												block_number: msg.block_number,
+											});
+											new_pending_count += 1;
+										}
+									}
+								}
+								if immediate_count > 0 {
+									log::info!(
+										target: &self.client.get_chain_name(),
+										"-[{}] ⚡ Processed {} events immediately from #{:?}",
+										sub_display_format(SUB_LOG_TARGET),
+										immediate_count,
+										msg.block_number,
+									);
+								}
+								if new_pending_count > 0 {
+									log::info!(
+										target: &self.client.get_chain_name(),
+										"-[{}] 📦 Queued {} events from #{:?} for confirmation",
+										sub_display_format(SUB_LOG_TARGET),
+										new_pending_count,
+										msg.block_number,
+									);
+								}
+							},
+						Some(Err(e)) => {
+							log::warn!(
+								target: &self.client.get_chain_name(),
+								"-[{}] EVM event stream error: {:?}",
+								sub_display_format(SUB_LOG_TARGET),
+								e,
+							);
+						},
+						None => {
+							log::info!(
+								target: &self.client.get_chain_name(),
+								"-[{}] EVM event stream ended",
+								sub_display_format(SUB_LOG_TARGET),
+							);
+							break;
+						},
+					}
+				},
+				// Handle TransferPolled messages from SocketOnflightHandler
+				// These don't need confirmation - already validated through Substrate consensus
+				onflight_msg = self.onflight_receiver.recv() => {
+					if let Some(msg) = onflight_msg {
+						if let Err(e) = self.process_onflight_message(msg.socket_message).await {
+							br_primitives::log_and_capture!(
+								error,
+								&self.client.get_chain_name(),
+								SUB_LOG_TARGET,
+								self.client.address().await,
+								"❗️ Error processing TransferPolled: asset={}, seq={}, {:?}",
+								msg.asset_index_hash,
+								msg.sequence_id,
+								e
+							);
+						}
+					}
+				},
+				// Periodically check for confirmed events
+				_ = check_timer.tick() => {
+					if let Err(e) = self.process_confirmed_pending_events().await {
+						br_primitives::log_and_capture!(
+							error,
+							&self.client.get_chain_name(),
+							SUB_LOG_TARGET,
+							self.client.address().await,
+							"❗️ Error processing confirmed events: {:?}",
+							e
+						);
+					}
+				},
 			}
 		}
 
@@ -110,9 +217,24 @@ where
 				let decoded_socket = decoded_log.inner.data;
 
 				let msg = decoded_socket.msg.clone();
+				let status = SocketEventStatus::from(msg.status);
+
+				// Skip Requested status - now handled by TransferPolled from Substrate
+				if status == SocketEventStatus::Requested {
+					log::debug!(
+						target: &self.client.get_chain_name(),
+						"-[{}] Skipping Requested status (handled by TransferPolled): seq={}",
+						sub_display_format(SUB_LOG_TARGET),
+						msg.req_id.sequence,
+					);
+					return Ok(());
+				}
+
+				let is_inbound =
+					self.is_inbound_sequence(Into::<u32>::into(msg.ins_code.ChainIndex) as ChainId);
 				let metadata = SocketRelayMetadata::new(
-					self.is_inbound_sequence(Into::<u32>::into(msg.ins_code.ChainIndex) as ChainId),
-					SocketEventStatus::from(msg.status),
+					is_inbound,
+					status,
 					msg.req_id.sequence,
 					Into::<u32>::into(msg.req_id.ChainIndex) as ChainId,
 					Into::<u32>::into(msg.ins_code.ChainIndex) as ChainId,
@@ -124,10 +246,57 @@ where
 					// do nothing if not selected
 					return Ok(());
 				}
+				// Check if we should execute the hook (Executed status with valid requirements)
+				if let Some((variants, dnc_oracle_address, bridged_asset_oracle_address)) =
+					self.should_execute_hook(&msg).await?
+				{
+					match self
+						.execute_hook(
+							&msg,
+							variants,
+							dnc_oracle_address,
+							bridged_asset_oracle_address,
+							is_inbound,
+						)
+						.await
+					{
+						Ok(()) => (),
+						Err(error) => {
+							// we don't propagate the error to prevent hook execution errors fail the entire relay process
+							br_primitives::log_and_capture!(
+								error,
+								&self.client.get_chain_name(),
+								SUB_LOG_TARGET,
+								self.client.address().await,
+								"❗️ Failed to execute hook: {:?}",
+								error
+							);
+						},
+					}
+				}
+				// Check if we should rollback the hook (Rollbacked status with valid requirements)
+				if let Some(variants) = self.should_rollback_hook(&msg).await? {
+					match self.rollback_hook(&msg, variants).await {
+						Ok(()) => (),
+						Err(error) => {
+							// we don't propagate the error to prevent hook rollback errors fail the entire relay process
+							br_primitives::log_and_capture!(
+								error,
+								&self.client.get_chain_name(),
+								SUB_LOG_TARGET,
+								self.client.address().await,
+								"❗️ Failed to rollback hook: {:?}",
+								error
+							);
+						},
+					}
+				}
+
 				if self.is_sequence_ended(&msg.req_id, &msg.ins_code, metadata.status).await? {
 					// do nothing if protocol sequence ended
 					return Ok(());
 				}
+
 				self.submit_brp_outbound_request(msg.clone(), metadata.clone()).await?;
 
 				self.send_socket_message(msg.clone(), metadata.clone(), metadata.is_inbound)
@@ -266,6 +435,7 @@ where
 	pub fn new(
 		id: ChainId,
 		event_receiver: Receiver<EventMessage>,
+		onflight_receiver: SocketOnflightReceiver,
 		system_clients: Arc<ClientMap<F, P, N>>,
 		bifrost_client: Arc<EthClient<F, P, N>>,
 		xt_request_sender: Arc<XtRequestSender>,
@@ -279,6 +449,7 @@ where
 		Self {
 			event_stream: BroadcastStream::new(event_receiver),
 			client,
+			onflight_receiver,
 			system_clients,
 			bifrost_client,
 			xt_request_sender,
@@ -286,7 +457,207 @@ where
 			handle,
 			bootstrap_shared_data,
 			debug_mode,
+			pending_events: Arc::new(RwLock::new(Vec::new())),
 		}
+	}
+
+	/// Process pending events that have received enough block confirmations.
+	/// Re-verifies each event on-chain before processing to handle potential reorgs.
+	async fn process_confirmed_pending_events(&self) -> Result<()> {
+		let latest_block = self.client.get_block_number().await?;
+		let block_confirmations = self.client.metadata.block_confirmations;
+
+		// Collect confirmed events with their indices
+		let confirmed_indices: Vec<usize> = {
+			let pending = self.pending_events.read().await;
+			pending
+				.iter()
+				.enumerate()
+				.filter(|(_, e)| latest_block.saturating_sub(e.block_number) >= block_confirmations)
+				.map(|(idx, _)| idx)
+				.collect()
+		};
+
+		if confirmed_indices.is_empty() {
+			return Ok(());
+		}
+
+		// Track indices to remove and updates to apply
+		let mut indices_to_remove: Vec<usize> = Vec::new();
+		let mut block_updates: Vec<(usize, u64)> = Vec::new();
+
+		// Get events to check
+		let events_to_check: Vec<(usize, PendingEvent)> = {
+			let pending = self.pending_events.read().await;
+			confirmed_indices.iter().map(|&idx| (idx, pending[idx].clone())).collect()
+		};
+
+		// Process each confirmed event after re-verification
+		for (idx, event) in events_to_check {
+			match self.verify_event_on_chain(&event).await {
+				Ok(Some(current_block)) if current_block == event.block_number => {
+					// Block number matches, no reorg, process the event
+					log::info!(
+						target: &self.client.get_chain_name(),
+						"-[{}] ✅ Event confirmed after {} blocks, processing (block #{})",
+						sub_display_format(SUB_LOG_TARGET),
+						latest_block.saturating_sub(event.block_number),
+						event.block_number,
+					);
+
+					indices_to_remove.push(idx);
+
+					if let Err(e) = self.process_confirmed_log(&event.log, false).await {
+						br_primitives::log_and_capture!(
+							error,
+							&self.client.get_chain_name(),
+							SUB_LOG_TARGET,
+							self.client.address().await,
+							"❗️ Error processing confirmed event: {:?}",
+							e
+						);
+					}
+				},
+				Ok(Some(current_block)) => {
+					// Block number changed due to reorg, update and wait for confirmations again
+					log::info!(
+						target: &self.client.get_chain_name(),
+						"-[{}] 🔄 Reorg detected for event: block {} -> {}, waiting for confirmations again",
+						sub_display_format(SUB_LOG_TARGET),
+						event.block_number,
+						current_block,
+					);
+					block_updates.push((idx, current_block));
+				},
+				Ok(None) => {
+					// Event no longer exists (reorged out completely)
+					log::warn!(
+						target: &self.client.get_chain_name(),
+						"-[{}] ⚠️ Event from block #{} no longer exists on-chain (reorged out), skipping",
+						sub_display_format(SUB_LOG_TARGET),
+						event.block_number,
+					);
+					indices_to_remove.push(idx);
+				},
+				Err(e) => {
+					log::warn!(
+						target: &self.client.get_chain_name(),
+						"-[{}] Failed to verify event on-chain: {:?}, keeping in pending",
+						sub_display_format(SUB_LOG_TARGET),
+						e,
+					);
+					// Keep in pending list to retry later
+				},
+			}
+		}
+
+		// Apply block number updates
+		if !block_updates.is_empty() {
+			let mut pending = self.pending_events.write().await;
+			for (idx, new_block) in block_updates {
+				if idx < pending.len() {
+					pending[idx].block_number = new_block;
+				}
+			}
+		}
+
+		// Remove processed/invalidated events
+		if !indices_to_remove.is_empty() {
+			let mut pending = self.pending_events.write().await;
+			// Sort indices in reverse order to maintain correct positions during removal
+			indices_to_remove.sort_unstable_by(|a, b| b.cmp(a));
+			for idx in indices_to_remove {
+				if idx < pending.len() {
+					pending.remove(idx);
+				}
+			}
+		}
+
+		Ok(())
+	}
+
+	/// Verify that an event still exists on-chain and find its current block.
+	/// Returns Ok(Some(block_number)) if found, Ok(None) if reorged out completely.
+	async fn verify_event_on_chain(&self, event: &PendingEvent) -> Result<Option<u64>> {
+		let log = &event.log;
+		let tx_hash = log.transaction_hash;
+
+		// First check if the transaction still exists and get its current block
+		if let Some(tx_hash) = tx_hash {
+			use alloy::network::TransactionResponse;
+
+			if let Some(tx) = self.client.get_transaction_by_hash(tx_hash).await? {
+				if let Some(current_block) = tx.block_number() {
+					// Transaction exists, verify the log is still in it
+					let filter = Filter::new()
+						.address(log.address())
+						.from_block(current_block)
+						.to_block(current_block);
+
+					let logs = self.client.get_logs(&filter).await?;
+					let log_index = log.log_index;
+
+					if logs
+						.iter()
+						.any(|l| l.transaction_hash == Some(tx_hash) && l.log_index == log_index)
+					{
+						return Ok(Some(current_block));
+					}
+				}
+			}
+		}
+
+		// Transaction/log not found - likely reorged out completely
+		Ok(None)
+	}
+
+	/// Process onflight message from SocketOnflightHandler.
+	/// This triggers the Inbound::Executed / Outbound::Accepted relay after on_flight_poll succeeds.
+	async fn process_onflight_message(&self, msg: Socket_Message) -> Result<()> {
+		let src_chain_id = Into::<u32>::into(msg.req_id.ChainIndex) as ChainId;
+		let dst_chain_id = Into::<u32>::into(msg.ins_code.ChainIndex) as ChainId;
+		let is_inbound = self.is_inbound_sequence(dst_chain_id);
+
+		let metadata = SocketRelayMetadata::new(
+			is_inbound,
+			SocketEventStatus::Requested, // Original status was Requested
+			msg.req_id.sequence,
+			src_chain_id,
+			dst_chain_id,
+			msg.params.to,
+			false,
+		);
+
+		// Check if selected relayer
+		if !self.is_selected_relayer(&U256::from(msg.req_id.round_id)).await? {
+			log::debug!(
+				target: &self.client.get_chain_name(),
+				"-[{}] Not selected relayer for round {}, skipping",
+				sub_display_format(SUB_LOG_TARGET),
+				msg.req_id.round_id,
+			);
+			return Ok(());
+		}
+
+		// Check if sequence already ended
+		if self.is_sequence_ended(&msg.req_id, &msg.ins_code, metadata.status).await? {
+			log::debug!(
+				target: &self.client.get_chain_name(),
+				"-[{}] Sequence already ended, skipping",
+				sub_display_format(SUB_LOG_TARGET),
+			);
+			return Ok(());
+		}
+
+		log::info!(
+			target: &self.client.get_chain_name(),
+			"-[{}] 🚀 Processing TransferPolled relay: {}",
+			sub_display_format(SUB_LOG_TARGET),
+			metadata,
+		);
+
+		// Send socket message (build and send transaction)
+		self.send_socket_message(msg, metadata, is_inbound).await
 	}
 
 	/// Sends the `SocketMessage` to the target chain channel.
@@ -406,6 +777,29 @@ where
 		)
 	}
 
+	/// Determines if an event should be processed immediately without waiting for confirmations.
+	/// Returns true for:
+	/// - Inbound + Executed: The transaction was executed on dst chain, no need to wait
+	/// - Outbound + Accepted: The transaction was accepted on src chain, no need to wait
+	fn should_process_immediately(&self, log: &Log) -> Option<bool> {
+		match log.log_decode::<Socket>() {
+			Ok(decoded_log) => {
+				let msg = &decoded_log.inner.data.msg;
+				let status = SocketEventStatus::from(msg.status);
+				let dst_chain_id = Into::<u32>::into(msg.ins_code.ChainIndex) as ChainId;
+				let is_inbound = self.is_inbound_sequence(dst_chain_id);
+
+				let should_skip_confirmation = matches!(
+					(is_inbound, status),
+					(true, SocketEventStatus::Executed) | (false, SocketEventStatus::Accepted)
+				);
+
+				Some(should_skip_confirmation)
+			},
+			Err(_) => None,
+		}
+	}
+
 	/// Verifies whether the socket event is on an executable(=rollbackable) state.
 	fn is_executable(&self, is_inbound: bool, status: SocketEventStatus) -> bool {
 		matches!(
@@ -438,7 +832,7 @@ where
 				self.send_rollbackable_request(chain_id, metadata.clone(), socket_msg).await;
 			}
 
-			let metadata = TxRequestMetadata::SocketRelay(metadata);
+			let metadata = Arc::new(metadata);
 			send_transaction(
 				client.clone(),
 				tx_request,
@@ -498,10 +892,10 @@ where
 			if status != SocketEventStatus::Accepted {
 				return Ok(());
 			}
-			let encoded_msg = self.encode_socket_message(msg);
+			let encoded_msg: Vec<u8> = msg.into();
 			let signature =
 				self.client.sign_message(encoded_msg.hexify_prefixed().as_bytes()).await?.into();
-			let call = XtRequest::from(bifrost_runtime::tx().blaze().submit_outbound_requests(
+			let call = Arc::new(bifrost_runtime::tx().blaze().submit_outbound_requests(
 				SocketMessagesSubmission {
 					authority_id: AccountId20(self.client.address().await.0.0),
 					messages: vec![encoded_msg],
@@ -573,19 +967,7 @@ where
 			let round_info = if self.client.metadata.is_native {
 				self.client.protocol_contracts.authority.round_info().call().await?
 			} else {
-				match self.system_clients.iter().find(|(_id, client)| client.metadata.is_native) {
-					Some((_id, native_client)) => {
-						native_client.protocol_contracts.authority.round_info().call().await?
-					},
-					_ => {
-						panic!(
-							"[{}]-[{}] {}",
-							self.client.get_chain_name(),
-							SUB_LOG_TARGET,
-							INVALID_BIFROST_NATIVENESS,
-						);
-					},
-				}
+				self.bifrost_client.protocol_contracts.authority.round_info().call().await?
 			};
 
 			let bootstrap_offset_height = self
@@ -646,17 +1028,48 @@ where
 	}
 }
 
+#[async_trait::async_trait]
+impl<F, P, N: Network> HookExecutor<F, P, N> for SocketRelayHandler<F, P, N>
+where
+	F: TxFiller<N> + WalletProvider<N> + 'static,
+	P: Provider<N> + 'static,
+{
+	fn debug_mode(&self) -> bool {
+		self.debug_mode
+	}
+
+	fn handle(&self) -> SpawnTaskHandle {
+		self.handle.clone()
+	}
+
+	fn get_client(&self) -> Arc<EthClient<F, P, N>> {
+		self.client.clone()
+	}
+
+	fn get_bifrost_client(&self) -> Arc<EthClient<F, P, N>> {
+		self.bifrost_client.clone()
+	}
+
+	fn get_system_client(&self, chain_id: &ChainId) -> Option<Arc<EthClient<F, P, N>>> {
+		self.system_clients.get(chain_id).cloned()
+	}
+}
+
 #[cfg(test)]
 mod tests {
 	use alloy::{
+		dyn_abi::SolType,
 		primitives::{address, bytes},
 		providers::ProviderBuilder,
 		sol_types::SolEvent,
 	};
-	use br_primitives::contracts::socket::SocketContract::{self, Socket};
+	use array_bytes::Hexify;
+	use br_primitives::contracts::socket::{
+		Socket_Struct::RequestID,
+		SocketContract::{self, Socket},
+		Variants,
+	};
 	use std::sync::Arc;
-
-	use super::*;
 
 	#[tokio::test]
 	async fn test_is_already_done() {
@@ -685,7 +1098,7 @@ mod tests {
 	#[test]
 	fn test_socket_event_decode() {
 		let data = bytes!(
-			"00000000000000000000000000000000000000000000000000000000000000200000bfc000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001e000000000000000000000000000000000000000000000000000000000000000200000000000000000000000000000000000000000000000000000000000000050000271200000000000000000000000000000000000000000000000000000000030203010000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000e000000003000000030000bfc0148a26ea2376f006c09b7d3163f1fc70ad4134a300000000000000000000000000000000000000000000000000000000000000000000000000000000000000006e661745856b03130d03932f683cda020d7ee9ea0000000000000000000000006e661745856b03130d03932f683cda020d7ee9ea00000000000000000000000000000000000000000000000000000000000ee5e800000000000000000000000000000000000000000000000000000000000000c00000000000000000000000000000000000000000000000000000000000000000"
+			"000000000000000000000000000000000000000000000000000000000000002000aa36a7000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000005834000000000000000000000000000000000000000000000000000000000000000f00000000000000000000000000000000000000000000000000000000000000050000bfc000000000000000000000000000000000000000000000000000000000030101020000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000e0000000040000000100aa36a7ffffffffffffffffffffffffffffffffffffffff0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000fa2789d80e1f3954aada2d6da1785a9cf6bbae8b000000000000000000000000d52e34b9e819a5b980357d168254ce6ff47c397b0000000000000000000000000000000000000000000000000023867e056e780000000000000000000000000000000000000000000000000000000000000000c000000000000000000000000000000000000000000000000000000000000000e000000000000000000000000055b57a7a0f41d668c584b2246d373b639084eaed000000000000000000000000c96971f6f5a1d20efcd465b1163812a955b414a3000000000000000000000000fa2789d80e1f3954aada2d6da1785a9cf6bbae8b00000000000000000000000000000000000000000000000000038d7ea4c6800000000000000000000000000000000000000000000000000000000000000000a0000000000000000000000000000000000000000000000000000000000000000548656c6c6f000000000000000000000000000000000000000000000000000000"
 		);
 
 		match Socket::abi_decode_data(&data) {
@@ -711,6 +1124,30 @@ mod tests {
 				println!("params.to -> {:?}", params.to);
 				println!("params.amount -> {:?}", params.amount);
 				println!("params.variants -> {:?}", params.variants);
+
+				// Decode the variants field. The data contains encoded struct content
+				// without the outer tuple wrapper. For ABI decoding to work properly,
+				// we need to prepend an offset pointer (0x20) that indicates where
+				// the struct data begins (at byte 32).
+				let mut wrapped_data = Vec::with_capacity(32 + params.variants.len());
+				wrapped_data.extend_from_slice(&[0u8; 31]); // 31 zero bytes
+				wrapped_data.push(0x20); // offset = 32 bytes
+				wrapped_data.extend_from_slice(&params.variants);
+
+				let variants = <Variants as SolType>::abi_decode(&wrapped_data);
+				println!("variants -> {:?}", variants);
+
+				if let Ok(v) = &variants {
+					println!("  sender: {:?}", v.sender);
+					println!("  receiver: {:?}", v.receiver);
+					println!("  refund: {:?}", v.refund);
+					println!("  max_tx_fee: {:?}", v.max_tx_fee);
+					println!(
+						"  message: {:?} ({})",
+						v.message,
+						String::from_utf8_lossy(&v.message)
+					);
+				}
 			},
 			Err(error) => {
 				panic!("decode failed -> {}", error);

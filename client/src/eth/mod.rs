@@ -4,8 +4,15 @@ use br_primitives::{
 		errors::{INVALID_CHAIN_ID, PROVIDER_INTERNAL_ERROR},
 		tx::DEFAULT_TX_TIMEOUT_MS,
 	},
-	contracts::authority::BfcStaking::round_meta_data,
-	eth::{AggregatorContracts, GasCoefficient, ProtocolContracts, ProviderMetadata, Signers},
+	contracts::{
+		authority::BfcStaking::round_meta_data,
+		chainlink_aggregator::{ChainlinkContract, ChainlinkInstance},
+		erc20::{Erc20Contract, Erc20Instance},
+	},
+	eth::{
+		AggregatorContracts, ContractCache, GasCoefficient, ProtocolContracts, ProviderMetadata,
+		Signers,
+	},
 	tx::TxRequestMetadata,
 	utils::sub_display_format,
 };
@@ -15,7 +22,7 @@ use alloy::{
 	eips::BlockNumberOrTag,
 	network::{BlockResponse, Network, TransactionBuilder, TransactionResponse},
 	primitives::{
-		Address, ChainId, U64, keccak256,
+		Address, ChainId, FixedBytes, U64, keccak256,
 		utils::{Unit, format_units},
 	},
 	providers::{
@@ -67,6 +74,8 @@ where
 	pub protocol_contracts: ProtocolContracts<F, P, N>,
 	/// The aggregator contracts.
 	pub aggregator_contracts: AggregatorContracts<F, P, N>,
+	/// Contract cache for oracle and ERC20 instances.
+	pub contract_cache: Arc<ContractCache<F, P, N>>,
 	/// flushing not allowed to work concurrently.
 	pub martial_law: Arc<Mutex<()>>,
 }
@@ -92,6 +101,7 @@ where
 			metadata,
 			protocol_contracts,
 			aggregator_contracts,
+			contract_cache: Arc::new(ContractCache::new()),
 			martial_law: Arc::new(Mutex::new(())),
 		}
 	}
@@ -399,25 +409,36 @@ where
 	}
 
 	/// Fill the gas-related fields for the given transaction.
+	/// Skips gas estimation if gas limit is already set (e.g., for hook execution).
 	async fn fill_gas(&self, request: &mut N::TransactionRequest) -> Result<()> {
 		if request.from().is_none() {
 			request.set_from(self.address().await);
 		}
 
-		let gas = self.estimate_gas(request.clone()).await?;
-		let coefficient: f64 = GasCoefficient::from(self.metadata.is_native).into();
-		let estimated_gas = gas as f64 * coefficient;
-		request.set_gas_limit(estimated_gas.ceil() as u64);
+		// Skip gas estimation if gas limit is already set (pre-filled by caller)
+		if request.gas_limit().is_some() {
+			log::debug!(
+				target: &self.get_chain_name(),
+				"-[{}] ⏭️  Skipping gas estimation - gas limit already set: {}",
+				sub_display_format(SUB_LOG_TARGET),
+				request.gas_limit().unwrap()
+			);
+		} else {
+			if !self.metadata.is_native {
+				avoid_race_condition().await;
+			}
+
+			let gas = self.estimate_gas(request.clone()).await?;
+			let coefficient: f64 = GasCoefficient::from(self.metadata.is_native).into();
+			let estimated_gas = gas as f64 * coefficient;
+			request.set_gas_limit(estimated_gas.ceil() as u64);
+		}
 
 		if self.metadata.is_native {
 			// gas price is fixed to 1000 Gwei on bifrost network
 			request.set_max_fee_per_gas(1000 * Unit::GWEI.wei().to::<u128>());
 			request.set_max_priority_fee_per_gas(0);
 		} else {
-			// to avoid duplicate(will revert) external networks transactions
-			let duration = Duration::from_millis(rand::rng().random_range(0..=12000));
-			sleep(duration).await;
-
 			if !self.metadata.eip1559 {
 				request.set_gas_price(self.get_gas_price().await?);
 			}
@@ -474,6 +495,124 @@ where
 			},
 		}
 	}
+
+	/// Get or create an oracle contract instance from cache.
+	pub async fn get_oracle(&self, address: Address) -> Arc<ChainlinkInstance<F, P, N>> {
+		// Check cache first
+		{
+			let cache = self.contract_cache.oracles.read().await;
+			if let Some(oracle) = cache.get(&address) {
+				return oracle.clone();
+			}
+		}
+
+		// Create new instance and cache it
+		let oracle = Arc::new(ChainlinkContract::new(address, self.inner.clone()));
+		self.contract_cache.oracles.write().await.insert(address, oracle.clone());
+		oracle
+	}
+
+	/// Get or create an ERC20 contract instance from cache.
+	pub async fn get_erc20(&self, address: Address) -> Arc<Erc20Instance<F, P, N>> {
+		// Check cache first
+		{
+			let cache = self.contract_cache.erc20s.read().await;
+			if let Some(erc20) = cache.get(&address) {
+				return erc20.clone();
+			}
+		}
+
+		// Create new instance and cache it
+		let erc20 = Arc::new(Erc20Contract::new(address, self.inner.clone()));
+		self.contract_cache.erc20s.write().await.insert(address, erc20.clone());
+		erc20
+	}
+
+	/// Get asset address from Vault contract.
+	pub async fn get_asset_address_by_index(
+		&self,
+		asset_index_hash: FixedBytes<32>,
+		is_inbound: bool,
+	) -> Result<Address> {
+		let remote_asset_index =
+			self.protocol_contracts.vault.remote_asset_pair(asset_index_hash).call().await?;
+		if is_inbound {
+			Ok(self
+				.protocol_contracts
+				.vault
+				.assets_config(remote_asset_index)
+				.call()
+				.await?
+				.unified)
+		} else {
+			Ok(self
+				.protocol_contracts
+				.vault
+				.assets_config(remote_asset_index)
+				.call()
+				.await?
+				.target)
+		}
+	}
+
+	/// Get asset oracle address from RelayQueue contract.
+	pub async fn get_oracle_address_by_asset_index(
+		&self,
+		asset_index_hash: FixedBytes<32>,
+	) -> Result<Address> {
+		let relay_queue = self
+			.protocol_contracts
+			.relay_queue
+			.as_ref()
+			.ok_or(eyre::eyre!("RelayQueue contract not available"))?;
+
+		Ok(relay_queue.get_asset_oracle_by_hash(asset_index_hash).call().await?)
+	}
+
+	/// Get native currency oracle address from RelayQueue contract.
+	pub async fn get_oracle_address_by_chain(&self, chain_id: ChainId) -> Result<Address> {
+		let relay_queue = self
+			.protocol_contracts
+			.relay_queue
+			.as_ref()
+			.ok_or(eyre::eyre!("RelayQueue contract not available"))?;
+
+		Ok(relay_queue.get_native_currency_oracle(chain_id as u32).call().await?)
+	}
+
+	/// Get oracle decimals from cache or fetch and cache if not present.
+	pub async fn get_oracle_decimals(&self, address: Address) -> Result<u8> {
+		// Check cache first
+		{
+			let cache = self.contract_cache.oracle_decimals.read().await;
+			if let Some(&decimals) = cache.get(&address) {
+				return Ok(decimals);
+			}
+		}
+
+		// Fetch and cache
+		let oracle = self.get_oracle(address).await;
+		let decimals = oracle.decimals().call().await?;
+		self.contract_cache.oracle_decimals.write().await.insert(address, decimals);
+		Ok(decimals)
+	}
+
+	/// Get ERC20 token decimals from cache or fetch and cache if not present.
+	pub async fn get_erc20_decimals(&self, address: Address) -> Result<u8> {
+		// Check cache first
+		{
+			let cache = self.contract_cache.erc20_decimals.read().await;
+			if let Some(&decimals) = cache.get(&address) {
+				return Ok(decimals);
+			}
+		}
+
+		// Fetch and cache
+		let erc20 = self.get_erc20(address).await;
+		let decimals = erc20.decimals().call().await?;
+		self.contract_cache.erc20_decimals.write().await.insert(address, decimals);
+		Ok(decimals)
+	}
 }
 
 #[async_trait::async_trait]
@@ -502,6 +641,12 @@ where
 	) -> TransportResult<PendingTransactionBuilder<N>> {
 		self.inner.send_transaction_internal(tx).await
 	}
+}
+
+pub async fn avoid_race_condition() {
+	// to avoid duplicate(will revert) external networks transactions
+	let duration = Duration::from_millis(rand::rng().random_range(0..=12000));
+	sleep(duration).await;
 }
 
 /// Send a transaction asynchronously.

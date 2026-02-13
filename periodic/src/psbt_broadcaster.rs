@@ -91,10 +91,7 @@ where
 		let payload =
 			bifrost_runtime::tx().btc_socket_queue().submit_executed_request(msg, signature);
 
-		Ok((
-			XtRequest::SubmitExecutedRequest(payload),
-			XtRequestMetadata::SubmitExecutedRequest(metadata),
-		))
+		Ok((Arc::new(payload), XtRequestMetadata::SubmitExecutedRequest(metadata)))
 	}
 
 	/// Try to broadcast the transaction

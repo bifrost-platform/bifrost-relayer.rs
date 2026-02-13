@@ -114,8 +114,8 @@ where
 
 		while (stream.next().await).is_some() {
 			let latest_block = self.client.get_block_number().await?;
-			while self.is_block_confirmed(latest_block) {
-				self.process_confirmed_block().await?;
+			while self.has_new_block(latest_block) {
+				self.process_new_block().await?;
 
 				if self.is_balance_sync_enabled {
 					self.client.sync_balance().await?;
@@ -126,9 +126,10 @@ where
 		Ok(())
 	}
 
-	/// Process the confirmed block and verifies if any events emitted from the target
-	/// contracts.
-	async fn process_confirmed_block(&mut self) -> Result<()> {
+	/// Process the new block and verifies if any events emitted from the target contracts.
+	/// Note: Events are broadcast immediately without waiting for block confirmations.
+	/// Handlers that need confirmation (e.g., SocketRelayHandler) should implement their own waiting logic.
+	async fn process_new_block(&mut self) -> Result<()> {
 		let from = self.waiting_block;
 		let to = from.saturating_add(self.client.metadata.get_logs_batch_size.saturating_sub(1u64));
 
@@ -179,9 +180,9 @@ where
 		br_metrics::set_block_height(&self.client.get_chain_name(), self.waiting_block);
 	}
 
-	/// Verifies if the stored waiting block has waited enough.
+	/// Verifies if there are new blocks to process.
 	#[inline]
-	fn is_block_confirmed(&self, latest_block: u64) -> bool {
+	fn has_new_block(&self, latest_block: u64) -> bool {
 		if self.waiting_block > latest_block {
 			// difference is greater than 100 blocks
 			// if it suddenly rollbacked to an old block
@@ -196,7 +197,8 @@ where
 			}
 			return false;
 		}
-		latest_block.saturating_sub(self.waiting_block) >= self.client.metadata.block_confirmations
+		// Process immediately without waiting for confirmations
+		self.waiting_block <= latest_block
 	}
 
 	/// Bootstrap phase 0-1.

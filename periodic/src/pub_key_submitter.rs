@@ -186,7 +186,7 @@ where
 		let metadata = SubmitVaultKeyMetadata::new(who, pub_key);
 		if self.is_system_vault(who) {
 			Ok((
-				XtRequest::from(
+				Arc::new(
 					bifrost_runtime::tx()
 						.btc_registration_pool()
 						.submit_system_vault_key(msg, signature),
@@ -195,7 +195,7 @@ where
 			))
 		} else {
 			Ok((
-				XtRequest::from(
+				Arc::new(
 					bifrost_runtime::tx().btc_registration_pool().submit_vault_key(msg, signature),
 				),
 				metadata,

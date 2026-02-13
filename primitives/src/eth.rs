@@ -7,7 +7,8 @@ use alloy::{
 	},
 	signers::Signer,
 };
-use std::{str::FromStr, sync::Arc};
+use std::{collections::HashMap, str::FromStr, sync::Arc};
+use tokio::sync::RwLock;
 use url::Url;
 
 use crate::{
@@ -21,11 +22,15 @@ use crate::{
 		bitcoin_socket::{BitcoinSocketContract, BitcoinSocketInstance},
 		blaze::{BlazeContract, BlazeInstance},
 		chainlink_aggregator::{ChainlinkContract, ChainlinkInstance},
+		erc20::Erc20Instance,
+		hooks::{HooksContract, HooksInstance},
 		registration_pool::{RegistrationPoolContract, RegistrationPoolInstance},
 		relay_executive::{RelayExecutiveContract, RelayExecutiveInstance},
+		relay_queue::{RelayQueueContract, RelayQueueInstance},
 		relayer_manager::{RelayerManagerContract, RelayerManagerInstance},
 		socket::{SocketContract, SocketInstance},
 		socket_queue::{SocketQueueContract, SocketQueueInstance},
+		vault::{VaultContract, VaultInstance},
 	},
 };
 
@@ -43,6 +48,47 @@ impl Signers {
 
 	pub fn signers_address(&self) -> Vec<Address> {
 		self.0.keys().cloned().collect()
+	}
+}
+
+/// Cache for contract instances and immutable metadata to avoid repeated instantiation and RPC calls.
+pub struct ContractCache<F, P, N: Network>
+where
+	F: TxFiller<N> + WalletProvider<N>,
+	P: Provider<N>,
+{
+	/// Cached oracle contract instances by address
+	pub oracles: RwLock<HashMap<Address, Arc<ChainlinkInstance<F, P, N>>>>,
+	/// Cached ERC20 contract instances by address
+	pub erc20s: RwLock<HashMap<Address, Arc<Erc20Instance<F, P, N>>>>,
+	/// Cached oracle decimals
+	pub oracle_decimals: RwLock<HashMap<Address, u8>>,
+	/// Cached ERC20 token decimals
+	pub erc20_decimals: RwLock<HashMap<Address, u8>>,
+}
+
+impl<F, P, N: Network> Default for ContractCache<F, P, N>
+where
+	F: TxFiller<N> + WalletProvider<N>,
+	P: Provider<N>,
+{
+	fn default() -> Self {
+		Self {
+			oracles: RwLock::new(HashMap::new()),
+			erc20s: RwLock::new(HashMap::new()),
+			oracle_decimals: RwLock::new(HashMap::new()),
+			erc20_decimals: RwLock::new(HashMap::new()),
+		}
+	}
+}
+
+impl<F, P, N: Network> ContractCache<F, P, N>
+where
+	F: TxFiller<N> + WalletProvider<N>,
+	P: Provider<N>,
+{
+	pub fn new() -> Self {
+		Self::default()
 	}
 }
 
@@ -199,8 +245,14 @@ where
 	pub socket: SocketInstance<F, P, N>,
 	/// AuthorityContract
 	pub authority: AuthorityInstance<F, P, N>,
+	/// VaultContract
+	pub vault: VaultInstance<F, P, N>,
+	/// HooksContract
+	pub hooks: Option<HooksInstance<F, P, N>>,
 	/// RelayerManagerContract (Bifrost only)
 	pub relayer_manager: Option<RelayerManagerInstance<F, P, N>>,
+	/// RelayQueueContract (Bifrost only)
+	pub relay_queue: Option<RelayQueueInstance<F, P, N>>,
 	/// BitcoinSocketContract (Bifrost only)
 	pub bitcoin_socket: Option<BitcoinSocketInstance<F, P, N>>,
 	/// SocketQueueContract (Bifrost only)
@@ -232,7 +284,18 @@ where
 				Address::from_str(&evm_provider.authority_address).expect(INVALID_CONTRACT_ADDRESS),
 				provider.clone(),
 			),
+			vault: VaultContract::new(
+				Address::from_str(&evm_provider.vault_address).expect(INVALID_CONTRACT_ADDRESS),
+				provider.clone(),
+			),
+			hooks: evm_provider.hooks_address.map(|address| {
+				HooksContract::new(
+					Address::from_str(&address).expect(INVALID_CONTRACT_ADDRESS),
+					provider.clone(),
+				)
+			}),
 			relayer_manager: None,
+			relay_queue: None,
 			bitcoin_socket: None,
 			socket_queue: None,
 			registration_pool: None,
@@ -243,6 +306,13 @@ where
 			contracts.relayer_manager = Some(RelayerManagerContract::new(
 				Address::from_str(
 					&evm_provider.relayer_manager_address.expect(MISSING_CONTRACT_ADDRESS),
+				)
+				.expect(INVALID_CONTRACT_ADDRESS),
+				provider.clone(),
+			));
+			contracts.relay_queue = Some(RelayQueueContract::new(
+				Address::from_str(
+					&evm_provider.relay_queue_address.expect(MISSING_CONTRACT_ADDRESS),
 				)
 				.expect(INVALID_CONTRACT_ADDRESS),
 				provider.clone(),
@@ -415,7 +485,9 @@ pub enum BootstrapState {
 	BootstrapRoundUpPhase1,
 	/// phase 1-2. bootstrap for RoundUp event
 	BootstrapRoundUpPhase2,
-	/// phase 2. bootstrap for Socket event
+	/// phase 2-1. bootstrap for Socket queue (on_flight_poll / finalize_poll)
+	BootstrapSocketRelayQueue,
+	/// phase 2-2. bootstrap for Socket relay event
 	BootstrapSocketRelay,
 	/// phase 3. process for latest block as normal
 	NormalStart,

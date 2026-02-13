@@ -17,8 +17,8 @@ use br_primitives::{
 	contracts::{bitcoin_socket::BitcoinSocketInstance, blaze::BlazeInstance},
 	substrate::{BoundedVec, EthereumSignature, UtxoInfo, UtxoSubmission, bifrost_runtime},
 	tx::{
-		BitcoinRelayMetadata, SubmitUtxoMetadata, TxRequestMetadata, XtRequest, XtRequestMessage,
-		XtRequestMetadata, XtRequestSender,
+		BitcoinRelayMetadata, SubmitUtxoMetadata, XtRequest, XtRequestMessage, XtRequestMetadata,
+		XtRequestSender,
 	},
 	utils::sub_display_format,
 };
@@ -150,7 +150,7 @@ where
 	async fn build_unsigned_tx(&self, event: &Event) -> Result<(XtRequest, SubmitUtxoMetadata)> {
 		let (msg, signature) = self.build_payload(event).await?;
 		let metadata = SubmitUtxoMetadata::new(event);
-		Ok((XtRequest::from(bifrost_runtime::tx().blaze().submit_utxos(msg, signature)), metadata))
+		Ok((Arc::new(bifrost_runtime::tx().blaze().submit_utxos(msg, signature)), metadata))
 	}
 
 	/// Send the transaction request message to the channel.
@@ -295,7 +295,7 @@ where
 				self.bfc_client.clone(),
 				tx_request,
 				format!("{} ({})", SUB_LOG_TARGET, self.bfc_client.get_chain_name()),
-				TxRequestMetadata::BitcoinSocketRelay(metadata),
+				Arc::new(metadata),
 				self.debug_mode,
 				self.handle.clone(),
 			);

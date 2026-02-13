@@ -25,7 +25,7 @@ use br_primitives::{
 		SocketInstance,
 	},
 	eth::{BootstrapState, RoundUpEventStatus},
-	tx::{TxRequestMetadata, VSPPhase2Metadata},
+	tx::VSPPhase2Metadata,
 	utils::{encode_roundup_param, recover_message, sub_display_format},
 };
 
@@ -277,10 +277,8 @@ where
 					roundup_submit,
 					from,
 				);
-				let metadata = TxRequestMetadata::VSPPhase2(VSPPhase2Metadata::new(
-					roundup_submit.round,
-					*dst_chain_id,
-				));
+				let metadata =
+					Arc::new(VSPPhase2Metadata::new(roundup_submit.round, *dst_chain_id));
 
 				if is_bootstrap {
 					while let Err(e) = target_client
@@ -381,13 +379,13 @@ where
 			let mut bootstrap_states = self.bootstrap_shared_data.bootstrap_states.write().await;
 			for chain_id in chain_ids {
 				*bootstrap_states.get_mut(&chain_id).unwrap() =
-					BootstrapState::BootstrapSocketRelay;
+					BootstrapState::BootstrapSocketRelayQueue;
 			}
 		}
 
 		log::info!(
 			target: &self.client.get_chain_name(),
-			"-[{}] ⚙️  [Bootstrap mode] BootstrapRoundUpPhase2 → BootstrapSocketRelay",
+			"-[{}] ⚙️  [Bootstrap mode] BootstrapRoundUpPhase2 → BootstrapSocketRelayQueue",
 			sub_display_format(SUB_LOG_TARGET),
 		);
 		Ok(())
