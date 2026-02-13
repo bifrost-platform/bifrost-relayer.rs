@@ -364,6 +364,15 @@ where
 		let mut price_bytes_list: Vec<FixedBytes<32>> = vec![];
 
 		price_responses.iter().for_each(|(symbol, price_response)| {
+			if price_response.price.is_zero() {
+				log::warn!(
+					target: &self.client.get_chain_name(),
+					"-[{}] ⚠️  Skipping {} due to zero price.",
+					sub_display_format(SUB_LOG_TARGET),
+					symbol,
+				);
+				return;
+			}
 			oid_bytes_list.push(*self.asset_oid.get(symbol.as_str()).unwrap());
 			price_bytes_list.push(price_response.price.into());
 		});
