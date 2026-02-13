@@ -32,11 +32,11 @@ impl PriceFetcher for BinancePriceFetcher {
 		let mut url = self.base_url.join("ticker/24hr").unwrap();
 		url.query_pairs_mut().append_pair("symbol", (symbol + "USDT").as_str());
 
-		let res = self._send_request(url).await;
+		let res = self._send_request(url).await?;
 
 		Ok(PriceResponse {
-			price: parse_ether(&res.lastPrice).unwrap(),
-			volume: parse_ether(&res.volume).unwrap().into(),
+			price: parse_ether(&res.lastPrice)?,
+			volume: parse_ether(&res.volume)?.into(),
 		})
 	}
 
@@ -47,26 +47,20 @@ impl PriceFetcher for BinancePriceFetcher {
 		let response = reqwest::get(url).await?.json::<Vec<BinanceResponse>>().await?;
 
 		let mut ret = BTreeMap::new();
-		response.iter().for_each(|ticker| {
+		for ticker in &response {
+			let price = parse_ether(&ticker.lastPrice)?;
+			let volume = parse_ether(&ticker.volume)?.into();
+
 			if ticker.symbol == "BTCUSDT" {
 				// BTC ticker from binance is BTCB ticker
-				ret.insert(
-					"BTCB".into(),
-					PriceResponse {
-						price: parse_ether(&ticker.lastPrice).unwrap(),
-						volume: parse_ether(&ticker.volume).unwrap().into(),
-					},
-				);
+				ret.insert("BTCB".into(), PriceResponse { price, volume });
 			} else {
 				ret.insert(
 					ticker.symbol.clone().replace("USDT", ""),
-					PriceResponse {
-						price: parse_ether(&ticker.lastPrice).unwrap(),
-						volume: parse_ether(&ticker.volume).unwrap().into(),
-					},
+					PriceResponse { price, volume },
 				);
 			}
-		});
+		}
 
 		Ok(ret)
 	}
@@ -83,8 +77,8 @@ impl BinancePriceFetcher {
 		})
 	}
 
-	async fn _send_request(&self, url: Url) -> BinanceResponse {
-		reqwest::get(url).await.unwrap().json::<BinanceResponse>().await.unwrap()
+	async fn _send_request(&self, url: Url) -> Result<BinanceResponse> {
+		Ok(reqwest::get(url).await?.json::<BinanceResponse>().await?)
 	}
 }
 
