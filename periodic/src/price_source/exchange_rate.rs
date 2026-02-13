@@ -1,4 +1,4 @@
-use std::{collections::BTreeMap, fmt::Error, ops::Mul};
+use std::{collections::BTreeMap, fmt::Error};
 
 use alloy::primitives::U256;
 use br_primitives::periodic::PriceResponse;
@@ -25,39 +25,58 @@ pub async fn convert_currency_to_usd(
 		Err(_) => fetch_exchange_rate(client, &fallback_url, currency).await?,
 	};
 
-	convert_amount_with_rate(amount, exchange_rate)
+	convert_amount_with_rate(amount, &exchange_rate)
 }
 
-/// Fetch exchange rate from API endpoint
-async fn fetch_exchange_rate(client: &Client, url: &str, currency: &str) -> Result<f64, Error> {
+/// Fetch exchange rate from API endpoint as a string to avoid f64 precision loss.
+async fn fetch_exchange_rate(client: &Client, url: &str, currency: &str) -> Result<String, Error> {
 	let response = client.get(url).send().await.map_err(|_| Error)?;
 	let data: serde_json::Value = response.json().await.map_err(|_| Error)?;
 
-	// The response structure is: {"date": "...", "jpy": {"usd": 0.00xxx, ...}}
-	// We need to extract the currency object and then get the "usd" field
 	data.get(currency)
 		.and_then(|currency_obj| currency_obj.get("usd"))
-		.and_then(|usd_value| usd_value.as_f64())
+		.filter(|v| v.is_number())
+		.map(|v| v.to_string())
 		.ok_or(Error)
 }
 
-/// Convert amount using exchange rate with proper decimal handling
-fn convert_amount_with_rate(amount: U256, exchange_rate: f64) -> Result<U256, Error> {
-	let exchange_rate_decimal: u32 = {
-		let rate_str = exchange_rate.to_string();
-		if let Some(decimal_index) = rate_str.find('.') {
-			(rate_str.len() - decimal_index - 1) as u32
-		} else {
-			0
-		}
+/// Parse a decimal rate string (e.g. "0.006734") into U256 scaled by 10^18,
+/// without any f64 arithmetic.
+fn parse_rate_to_scaled_u256(rate_str: &str) -> Result<U256, Error> {
+	const DECIMALS: usize = 18;
+
+	let (integer_part, fractional_part) = if let Some(dot_pos) = rate_str.find('.') {
+		(&rate_str[..dot_pos], &rate_str[dot_pos + 1..])
+	} else {
+		(rate_str, "")
 	};
 
-	let scaled_rate =
-		U256::from(exchange_rate.mul((10u64.pow(exchange_rate_decimal)) as f64) as u64);
+	let combined = if fractional_part.len() >= DECIMALS {
+		format!("{}{}", integer_part, &fractional_part[..DECIMALS])
+	} else {
+		format!(
+			"{}{}{}",
+			integer_part,
+			fractional_part,
+			"0".repeat(DECIMALS - fractional_part.len())
+		)
+	};
+
+	let trimmed = combined.trim_start_matches('0');
+	if trimmed.is_empty() {
+		return Ok(U256::ZERO);
+	}
+
+	U256::from_str_radix(trimmed, 10).map_err(|_| Error)
+}
+
+/// Convert amount using exchange rate string with proper decimal handling.
+fn convert_amount_with_rate(amount: U256, rate_str: &str) -> Result<U256, Error> {
+	let rate_scaled = parse_rate_to_scaled_u256(rate_str)?;
 
 	amount
-		.mul(scaled_rate)
-		.checked_div(U256::from(10u64.pow(exchange_rate_decimal)))
+		.checked_mul(rate_scaled)
+		.and_then(|v| v.checked_div(U256::from(10u64.pow(18))))
 		.ok_or(Error)
 }
 
