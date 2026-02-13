@@ -9,3 +9,9 @@ pub const BOOTSTRAP_BLOCK_CHUNK_SIZE: u64 = 2000;
 
 /// The block offset used to measure the average block time at bootstrap.
 pub const BOOTSTRAP_BLOCK_OFFSET: u64 = 100;
+
+/// The maximum allowed staleness duration (in seconds) for Chainlink price feeds.
+/// If the `updatedAt` timestamp from `latestRoundData()` is older than this threshold,
+/// the price data will be considered stale and excluded from the feeding.
+/// TODO: adjust this value based on actual Chainlink heartbeat intervals per feed.
+pub const CHAINLINK_STALENESS_THRESHOLD: u64 = 3600;

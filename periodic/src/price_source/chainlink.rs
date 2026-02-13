@@ -7,8 +7,13 @@ use alloy::{
 	providers::{Provider, WalletProvider, fillers::TxFiller},
 };
 use br_client::eth::EthClient;
-use br_primitives::periodic::PriceResponse;
+use br_primitives::{
+	constants::config::CHAINLINK_STALENESS_THRESHOLD, periodic::PriceResponse,
+	utils::sub_display_format,
+};
 use eyre::{Result, eyre};
+
+const SUB_LOG_TARGET: &str = "chainlink";
 
 fn get_chainlink_volume_weight(symbol: &str) -> Result<U256> {
 	match symbol {
@@ -53,8 +58,33 @@ where
 							"JPYC" => &client.aggregator_contracts.chainlink_jpy_usd,
 							_ => return Err(eyre!("Invalid symbol")),
 						} {
-							let (_, price, _, _, _) =
+							let (_, price, _, updated_at, _) =
 								contract.latestRoundData().call().await?.into();
+
+							let now = std::time::SystemTime::now()
+								.duration_since(std::time::UNIX_EPOCH)?
+								.as_secs();
+							let updated_at_secs: u64 = updated_at.try_into().unwrap_or(0);
+							let staleness = now.saturating_sub(updated_at_secs);
+
+							if staleness > CHAINLINK_STALENESS_THRESHOLD {
+								log::warn!(
+									target: "price-fetcher",
+									"-[{}] ⚠️  Chainlink {} price is stale \
+									(last updated {}s ago, threshold: {}s). Skipping.",
+									sub_display_format(SUB_LOG_TARGET),
+									symbol_str,
+									staleness,
+									CHAINLINK_STALENESS_THRESHOLD,
+								);
+								return Err(eyre!(
+									"Chainlink {} price is stale ({}s > {}s)",
+									symbol_str,
+									staleness,
+									CHAINLINK_STALENESS_THRESHOLD,
+								));
+							}
+
 							let price = price.into_raw();
 							let decimals = contract.decimals().call().await?;
 
