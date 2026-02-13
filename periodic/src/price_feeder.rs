@@ -24,7 +24,7 @@ use br_primitives::{
 };
 
 use crate::{
-	price_source::PriceFetchers,
+	price_source::{FetchMode, PriceFetchers},
 	traits::{PeriodicWorker, PriceFetcher},
 };
 
@@ -40,9 +40,10 @@ where
 	pub client: Arc<EthClient<F, P, N>>,
 	/// The time schedule that represents when to send price feeds.
 	schedule: Schedule,
-	/// The primary source for fetching prices. (Coingecko)
-	primary_source: Vec<PriceFetchers<F, P, N>>,
-	/// The secondary source for fetching prices. (aggregated from external sources)
+	/// The primary sources for fetching prices. (Standard: Coingecko, Dedicated)
+	/// In cases when token volume is too low in the exchanges, we have to use the dedicated source.
+	primary_sources: Vec<PriceFetchers<F, P, N>>,
+	/// The secondary sources for fetching prices. (aggregated from external sources)
 	secondary_sources: Vec<PriceFetchers<F, P, N>>,
 	/// The pre-defined oracle ID's for each asset.
 	asset_oid: BTreeMap<&'static str, B256>,
@@ -72,13 +73,8 @@ where
 			self.feed_period_spreader(upcoming, true).await;
 
 			if self.client.is_selected_relayer().await? {
-				if self.primary_source.is_empty() {
-					log::warn!(
-						target: &self.client.get_chain_name(),
-						"-[{}] ⚠️  Failed to initialize primary fetcher. Trying to fetch with secondary sources.",
-						sub_display_format(SUB_LOG_TARGET),
-					);
-					self.try_with_secondary().await;
+				if self.primary_sources.is_empty() {
+					panic!("Primary source is empty");
 				} else {
 					self.try_with_primary().await;
 				}
@@ -104,7 +100,7 @@ where
 
 		Self {
 			schedule: Schedule::from_str(PRICE_FEEDER_SCHEDULE).expect(INVALID_PERIODIC_SCHEDULE),
-			primary_source: vec![],
+			primary_sources: vec![],
 			secondary_sources: vec![],
 			asset_oid,
 			client,
@@ -132,47 +128,99 @@ where
 	}
 
 	async fn try_with_primary(&self) {
-		match self.primary_source[0].get_tickers().await {
-			// If primary source works well.
-			Ok(price_responses) => {
-				self.build_and_send_transaction(price_responses).await;
-			},
-			// If primary source fails.
-			Err(_) => {
-				log::warn!(
-					target: &self.client.get_chain_name(),
-					"-[{}] ⚠️  Failed to fetch price feed data from the primary source. Retrying to fetch with secondary sources.",
-					sub_display_format(SUB_LOG_TARGET),
-				);
+		let mut all_prices = BTreeMap::new();
+		let mut failed_modes = Vec::new();
 
-				self.try_with_secondary().await;
-			},
-		};
-	}
+		// Collect prices from all primary sources
+		for fetcher in &self.primary_sources {
+			match fetcher.get_tickers().await {
+				Ok(price_responses) => {
+					log::info!(
+						target: &self.client.get_chain_name(),
+						"-[{}] ✅ Fetched {} prices from primary source (mode: {:?})",
+						sub_display_format(SUB_LOG_TARGET),
+						price_responses.len(),
+						fetcher.mode()
+					);
+					all_prices.extend(price_responses);
+				},
+				Err(_) => {
+					log::warn!(
+						target: &self.client.get_chain_name(),
+						"-[{}] ⚠️  Failed to fetch price feed data from primary source (mode: {:?}). Will retry with secondary sources.",
+						sub_display_format(SUB_LOG_TARGET),
+						fetcher.mode()
+					);
+					failed_modes.push(fetcher.mode());
+				},
+			};
+		}
 
-	async fn try_with_secondary(&self) {
-		match self.fetch_from_secondary().await {
-			Ok(price_responses) => {
-				self.build_and_send_transaction(price_responses).await;
-			},
-			Err(_) => {
-				br_primitives::log_and_capture!(
-					error,
-					&self.client.get_chain_name(),
-					SUB_LOG_TARGET,
-					self.client.address().await,
-					"❗️ Failed to fetch price feed data from secondary sources. First off, skip this feeding."
-				);
-			},
+		// Fetch from secondary sources for failed modes
+		for mode in failed_modes {
+			match self.fetch_from_secondary(mode.clone()).await {
+				Ok(secondary_prices) => {
+					log::info!(
+						target: &self.client.get_chain_name(),
+						"-[{}] ✅ Fetched {} prices from secondary sources (mode: {:?})",
+						sub_display_format(SUB_LOG_TARGET),
+						secondary_prices.len(),
+						mode
+					);
+					all_prices.extend(secondary_prices);
+				},
+				Err(_) => {
+					br_primitives::log_and_capture!(
+						error,
+						&self.client.get_chain_name(),
+						SUB_LOG_TARGET,
+						self.client.address().await,
+						"❗️ Failed to fetch prices from secondary sources (mode: {:?}). Skipping this feeding.",
+						mode
+					);
+				},
+			}
+		}
+
+		// Send single transaction with all collected prices
+		if all_prices.is_empty() {
+			br_primitives::log_and_capture!(
+				error,
+				&self.client.get_chain_name(),
+				SUB_LOG_TARGET,
+				self.client.address().await,
+				"❗️ Failed to fetch any price feed data from all sources. Skipping this feeding."
+			);
+		} else {
+			log::info!(
+				target: &self.client.get_chain_name(),
+				"-[{}] 📦 Sending single transaction with {} prices",
+				sub_display_format(SUB_LOG_TARGET),
+				all_prices.len()
+			);
+			self.build_and_send_transaction(all_prices).await;
 		}
 	}
 
 	/// If price data fetch failed with primary source, try with secondary sources.
-	async fn fetch_from_secondary(&self) -> Result<BTreeMap<String, PriceResponse>, Error> {
+	async fn fetch_from_secondary(
+		&self,
+		mode: FetchMode,
+	) -> Result<BTreeMap<String, PriceResponse>, Error> {
+		log::info!(
+			target: &self.client.get_chain_name(),
+			"-[{}] Fetching with secondary sources, mode: {:?}",
+			sub_display_format(SUB_LOG_TARGET),
+			mode
+		);
+
 		// (volume weighted price sum, total volume)
 		let mut volume_weighted: BTreeMap<String, (U256, U256)> = BTreeMap::new();
 
 		for fetcher in &self.secondary_sources {
+			if fetcher.mode() != mode {
+				continue;
+			}
 			match fetcher.get_tickers().await {
 				Ok(tickers) => {
 					tickers.iter().for_each(|(symbol, price_response)| {
@@ -200,14 +248,22 @@ where
 			return Err(Error);
 		}
 
-		if !volume_weighted.contains_key("USDC") {
-			volume_weighted.insert("USDC".into(), (parse_ether("1").unwrap(), U256::from(1)));
-		}
-		if !volume_weighted.contains_key("USDT") {
-			volume_weighted.insert("USDT".into(), (parse_ether("1").unwrap(), U256::from(1)));
-		}
-		if !volume_weighted.contains_key("DAI") {
-			volume_weighted.insert("DAI".into(), (parse_ether("1").unwrap(), U256::from(1)));
+		match mode {
+			FetchMode::Standard => {
+				if !volume_weighted.contains_key("USDC") {
+					volume_weighted
+						.insert("USDC".into(), (parse_ether("1").unwrap(), U256::from(1)));
+				}
+				if !volume_weighted.contains_key("USDT") {
+					volume_weighted
+						.insert("USDT".into(), (parse_ether("1").unwrap(), U256::from(1)));
+				}
+				if !volume_weighted.contains_key("DAI") {
+					volume_weighted
+						.insert("DAI".into(), (parse_ether("1").unwrap(), U256::from(1)));
+				}
+			},
+			FetchMode::Dedicated(_) => {},
 		}
 
 		Ok(volume_weighted
@@ -226,8 +282,23 @@ where
 
 	/// Initialize price fetchers. Can't move into new().
 	async fn initialize_fetchers(&mut self) {
-		if let Ok(primary) = PriceFetchers::new(PriceSource::Coingecko, None).await {
-			self.primary_source.push(primary);
+		if let Ok(primary) =
+			PriceFetchers::new(PriceSource::Coingecko, None, FetchMode::Standard).await
+		{
+			self.primary_sources.push(primary);
+		}
+		// for testnet only
+		// TODO: remove this when mainnet is ready
+		if self.client.chain_id() == 49088 {
+			if let Ok(primary) = PriceFetchers::new(
+				PriceSource::ExchangeRate,
+				None,
+				FetchMode::Dedicated("JPYC".into()),
+			)
+			.await
+			{
+				self.primary_sources.push(primary);
+			}
 		}
 
 		let secondary_sources = vec![
@@ -237,15 +308,30 @@ where
 			PriceSource::Upbit,
 		];
 		for source in secondary_sources {
-			if let Ok(fetcher) = PriceFetchers::new(source, None).await {
+			if let Ok(fetcher) = PriceFetchers::new(source, None, FetchMode::Standard).await {
 				self.secondary_sources.push(fetcher);
 			}
 		}
 
 		for (_, client) in self.clients.iter() {
 			if Self::has_any_chainlink_feeds(&client.aggregator_contracts) {
-				if let Ok(fetcher) =
-					PriceFetchers::new(PriceSource::Chainlink, client.clone().into()).await
+				if let Ok(fetcher) = PriceFetchers::new(
+					PriceSource::Chainlink,
+					client.clone().into(),
+					FetchMode::Standard,
+				)
+				.await
+				{
+					self.secondary_sources.push(fetcher);
+				}
+			}
+			if Self::has_chainlink_feed(&client.aggregator_contracts, "JPYC") {
+				if let Ok(fetcher) = PriceFetchers::new(
+					PriceSource::Chainlink,
+					client.clone().into(),
+					FetchMode::Dedicated("JPYC".into()),
+				)
+				.await
 				{
 					self.secondary_sources.push(fetcher);
 				}
@@ -264,6 +350,19 @@ where
 		]
 		.iter()
 		.any(|contract| contract.is_some())
+	}
+
+	fn has_chainlink_feed(contracts: &AggregatorContracts<F, P, N>, symbol: &str) -> bool {
+		match symbol {
+			"USDC" => contracts.chainlink_usdc_usd.is_some(),
+			"USDT" => contracts.chainlink_usdt_usd.is_some(),
+			"DAI" => contracts.chainlink_dai_usd.is_some(),
+			"BTC" => contracts.chainlink_btc_usd.is_some(),
+			"WBTC" => contracts.chainlink_wbtc_usd.is_some(),
+			"CBBTC" => contracts.chainlink_cbbtc_usd.is_some(),
+			"JPYC" => contracts.chainlink_jpy_usd.is_some(),
+			_ => false,
+		}
 	}
 
 	/// Build and send transaction.

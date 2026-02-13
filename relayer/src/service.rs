@@ -146,6 +146,7 @@ pub async fn relay(config: Configuration) -> Result<TaskManager, ServiceError> {
 				evm_provider.chainlink_btc_usd_address.clone(),
 				evm_provider.chainlink_wbtc_usd_address.clone(),
 				evm_provider.chainlink_cbbtc_usd_address.clone(),
+				evm_provider.chainlink_jpy_usd_address.clone(),
 			),
 		));
 
