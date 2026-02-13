@@ -287,11 +287,18 @@ where
 		{
 			self.primary_sources.push(primary);
 		}
-		if let Ok(primary) =
-			PriceFetchers::new(PriceSource::ExchangeRate, None, FetchMode::Dedicated("JPYC".into()))
-				.await
-		{
-			self.primary_sources.push(primary);
+		// for testnet only
+		// TODO: remove this when mainnet is ready
+		if self.client.chain_id() == 49088 {
+			if let Ok(primary) = PriceFetchers::new(
+				PriceSource::ExchangeRate,
+				None,
+				FetchMode::Dedicated("JPYC".into()),
+			)
+			.await
+			{
+				self.primary_sources.push(primary);
+			}
 		}
 
 		let secondary_sources = vec![
