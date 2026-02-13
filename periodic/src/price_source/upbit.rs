@@ -2,7 +2,7 @@ use std::{collections::BTreeMap, fmt::Error};
 
 use alloy::primitives::{U256, utils::parse_ether};
 use eyre::Result;
-use reqwest::Url;
+use reqwest::{Client, Url};
 use serde::Deserialize;
 
 use br_primitives::periodic::PriceResponse;
@@ -23,6 +23,7 @@ pub struct UpbitResponse {
 pub struct UpbitPriceFetcher {
 	base_url: Url,
 	symbols: String,
+	client: Client,
 }
 
 #[async_trait::async_trait]
@@ -57,7 +58,7 @@ impl PriceFetcher for UpbitPriceFetcher {
 }
 
 impl UpbitPriceFetcher {
-	pub async fn new() -> Result<Self, Error> {
+	pub fn new(client: Client) -> Self {
 		let symbols: Vec<String> = vec!["ETH".into(), "BFC".into(), "POL".into()];
 
 		let formatted_symbols: Vec<String> = symbols
@@ -71,10 +72,11 @@ impl UpbitPriceFetcher {
 			})
 			.collect();
 
-		Ok(Self {
+		Self {
 			base_url: Url::parse("https://api.upbit.com/v1/").unwrap(),
 			symbols: formatted_symbols.join(","),
-		})
+			client,
+		}
 	}
 
 	async fn format_response(
@@ -83,7 +85,7 @@ impl UpbitPriceFetcher {
 	) -> Result<(String, PriceResponse), Error> {
 		if response.market.contains("KRW-") {
 			let amount = parse_ether(&response.trade_price.to_string()).unwrap();
-			match convert_currency_to_usd("krw", amount).await {
+			match convert_currency_to_usd(&self.client, "krw", amount).await {
 				Ok(usd_price) => Ok((
 					response.market.replace("KRW-", ""),
 					PriceResponse {
@@ -97,17 +99,19 @@ impl UpbitPriceFetcher {
 			}
 		} else if response.market.contains("BTC-") {
 			match self.btc_to_krw(response.trade_price).await {
-				Ok(krw_price) => match convert_currency_to_usd("krw", krw_price).await {
-					Ok(usd_price) => Ok((
-						response.market.replace("BTC-", ""),
-						PriceResponse {
-							price: usd_price,
-							volume: parse_ether(&response.acc_trade_volume_24h.to_string())
-								.unwrap()
-								.into(),
-						},
-					)),
-					Err(_) => Err(Error),
+				Ok(krw_price) => {
+					match convert_currency_to_usd(&self.client, "krw", krw_price).await {
+						Ok(usd_price) => Ok((
+							response.market.replace("BTC-", ""),
+							PriceResponse {
+								price: usd_price,
+								volume: parse_ether(&response.acc_trade_volume_24h.to_string())
+									.unwrap()
+									.into(),
+							},
+						)),
+						Err(_) => Err(Error),
+					}
 				},
 				Err(_) => Err(Error),
 			}
@@ -123,17 +127,23 @@ impl UpbitPriceFetcher {
 	}
 
 	async fn _send_request(&self, url: Url) -> Result<Vec<UpbitResponse>> {
-		Ok(reqwest::get(url).await?.json::<Vec<UpbitResponse>>().await?)
+		Ok(self.client.get(url).send().await?.json::<Vec<UpbitResponse>>().await?)
 	}
 }
 
 #[cfg(test)]
 mod tests {
+	use std::time::Duration;
+
 	use super::*;
+
+	fn test_client() -> Client {
+		Client::builder().timeout(Duration::from_secs(10)).build().unwrap()
+	}
 
 	#[tokio::test]
 	async fn fetch_price() {
-		let upbit_fetcher: UpbitPriceFetcher = UpbitPriceFetcher::new().await.unwrap();
+		let upbit_fetcher = UpbitPriceFetcher::new(test_client());
 		let res = upbit_fetcher.get_ticker_with_symbol("BFC".to_string()).await;
 
 		println!("{:?}", res);
@@ -141,7 +151,7 @@ mod tests {
 
 	#[tokio::test]
 	async fn fetch_prices() {
-		let upbit_fetcher: UpbitPriceFetcher = UpbitPriceFetcher::new().await.unwrap();
+		let upbit_fetcher = UpbitPriceFetcher::new(test_client());
 		let res = upbit_fetcher.get_tickers().await;
 
 		println!("{:#?}", res);
@@ -149,7 +159,7 @@ mod tests {
 
 	#[tokio::test]
 	async fn btc_krw_conversion() {
-		let upbit_fetcher: UpbitPriceFetcher = UpbitPriceFetcher::new().await.unwrap();
+		let upbit_fetcher = UpbitPriceFetcher::new(test_client());
 		let res = upbit_fetcher.btc_to_krw(0.00000175f64).await;
 
 		println!("{:?}", res);

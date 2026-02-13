@@ -2,11 +2,16 @@ use std::{collections::BTreeMap, fmt::Error, ops::Mul};
 
 use alloy::primitives::U256;
 use br_primitives::periodic::PriceResponse;
+use reqwest::Client;
 
 use crate::{price_source::FetchMode, traits::PriceFetcher};
 
 /// Generic currency to USD conversion using ExchangeRatePriceFetcher logic
-pub async fn convert_currency_to_usd(currency: &str, amount: U256) -> Result<U256, Error> {
+pub async fn convert_currency_to_usd(
+	client: &Client,
+	currency: &str,
+	amount: U256,
+) -> Result<U256, Error> {
 	let primary_url = format!(
 		"https://cdn.jsdelivr.net/npm/@fawazahmed0/currency-api@latest/v1/currencies/{}.min.json",
 		currency
@@ -15,17 +20,17 @@ pub async fn convert_currency_to_usd(currency: &str, amount: U256) -> Result<U25
 		format!("https://latest.currency-api.pages.dev/v1/currencies/{}.min.json", currency);
 
 	// Try primary URL first, fallback to secondary if it fails
-	let exchange_rate = match fetch_exchange_rate(&primary_url, currency).await {
+	let exchange_rate = match fetch_exchange_rate(client, &primary_url, currency).await {
 		Ok(rate) => rate,
-		Err(_) => fetch_exchange_rate(&fallback_url, currency).await?,
+		Err(_) => fetch_exchange_rate(client, &fallback_url, currency).await?,
 	};
 
 	convert_amount_with_rate(amount, exchange_rate)
 }
 
 /// Fetch exchange rate from API endpoint
-async fn fetch_exchange_rate(url: &str, currency: &str) -> Result<f64, Error> {
-	let response = reqwest::get(url).await.map_err(|_| Error)?;
+async fn fetch_exchange_rate(client: &Client, url: &str, currency: &str) -> Result<f64, Error> {
+	let response = client.get(url).send().await.map_err(|_| Error)?;
 	let data: serde_json::Value = response.json().await.map_err(|_| Error)?;
 
 	// The response structure is: {"date": "...", "jpy": {"usd": 0.00xxx, ...}}
@@ -60,6 +65,8 @@ fn convert_amount_with_rate(amount: U256, exchange_rate: f64) -> Result<U256, Er
 pub struct ExchangeRatePriceFetcher {
 	/// Supported coins and their corresponding currency. (e.g. "JPYC" -> "jpy")
 	pub supported_coins: BTreeMap<String, String>,
+	/// The shared HTTP client.
+	client: Client,
 	/// The mode for fetching prices.
 	pub mode: FetchMode,
 }
@@ -71,7 +78,7 @@ impl PriceFetcher for ExchangeRatePriceFetcher {
 
 		// Use the shared conversion function to get the price of 1 unit (10^18) in USD
 		let one_unit = U256::from(10u64.pow(18));
-		let price = convert_currency_to_usd(currency, one_unit)
+		let price = convert_currency_to_usd(&self.client, currency, one_unit)
 			.await
 			.map_err(|_| eyre::eyre!("Failed to convert {} to USD", currency))?;
 
@@ -95,10 +102,10 @@ impl PriceFetcher for ExchangeRatePriceFetcher {
 }
 
 impl ExchangeRatePriceFetcher {
-	pub fn new(mode: FetchMode) -> Self {
+	pub fn new(client: Client, mode: FetchMode) -> Self {
 		let supported_coins = BTreeMap::from([("JPYC".into(), "jpy".into())]);
 
-		Self { supported_coins, mode }
+		Self { supported_coins, client, mode }
 	}
 
 	fn get_currency_from_symbol(&self, symbol: &str) -> &str {
@@ -110,11 +117,17 @@ impl ExchangeRatePriceFetcher {
 
 #[cfg(test)]
 mod tests {
+	use std::time::Duration;
+
 	use super::*;
+
+	fn test_client() -> Client {
+		Client::builder().timeout(Duration::from_secs(10)).build().unwrap()
+	}
 
 	#[tokio::test]
 	async fn test_get_ticker_with_symbol() {
-		let fetcher = ExchangeRatePriceFetcher::new(FetchMode::Standard);
+		let fetcher = ExchangeRatePriceFetcher::new(test_client(), FetchMode::Standard);
 		let res = fetcher
 			.get_ticker_with_symbol("JPYC".to_string())
 			.await
@@ -125,7 +138,7 @@ mod tests {
 
 	#[tokio::test]
 	async fn test_get_tickers() {
-		let fetcher = ExchangeRatePriceFetcher::new(FetchMode::Standard);
+		let fetcher = ExchangeRatePriceFetcher::new(test_client(), FetchMode::Standard);
 		let res = fetcher
 			.get_tickers()
 			.await

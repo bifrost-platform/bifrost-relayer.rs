@@ -1,4 +1,4 @@
-use std::{collections::BTreeMap, fmt::Error, str::FromStr, sync::Arc};
+use std::{collections::BTreeMap, fmt::Error, str::FromStr, sync::Arc, time::Duration};
 
 use alloy::{
 	network::Network,
@@ -13,9 +13,14 @@ use rand::Rng;
 use sc_service::SpawnTaskHandle;
 use tokio::time::sleep;
 
+use reqwest::Client;
+
 use br_client::eth::{ClientMap, EthClient, send_transaction};
 use br_primitives::{
-	constants::{errors::INVALID_PERIODIC_SCHEDULE, schedule::PRICE_FEEDER_SCHEDULE},
+	constants::{
+		config::PRICE_FETCHER_REQUEST_TIMEOUT, errors::INVALID_PERIODIC_SCHEDULE,
+		schedule::PRICE_FEEDER_SCHEDULE,
+	},
 	contracts::socket::get_asset_oids,
 	eth::AggregatorContracts,
 	periodic::{PriceResponse, PriceSource},
@@ -282,14 +287,28 @@ where
 
 	/// Initialize price fetchers. Can't move into new().
 	async fn initialize_fetchers(&mut self) {
-		if let Ok(primary) =
-			PriceFetchers::new(PriceSource::Coingecko, None, FetchMode::Standard).await
+		let http_client = Client::builder()
+			.timeout(Duration::from_secs(PRICE_FETCHER_REQUEST_TIMEOUT))
+			.build()
+			.expect("Failed to build HTTP client");
+
+		if let Ok(primary) = PriceFetchers::new(
+			PriceSource::Coingecko,
+			None,
+			http_client.clone(),
+			FetchMode::Standard,
+		)
+		.await
 		{
 			self.primary_sources.push(primary);
 		}
-		if let Ok(primary) =
-			PriceFetchers::new(PriceSource::ExchangeRate, None, FetchMode::Dedicated("JPYC".into()))
-				.await
+		if let Ok(primary) = PriceFetchers::new(
+			PriceSource::ExchangeRate,
+			None,
+			http_client.clone(),
+			FetchMode::Dedicated("JPYC".into()),
+		)
+		.await
 		{
 			self.primary_sources.push(primary);
 		}
@@ -301,7 +320,9 @@ where
 			PriceSource::Upbit,
 		];
 		for source in secondary_sources {
-			if let Ok(fetcher) = PriceFetchers::new(source, None, FetchMode::Standard).await {
+			if let Ok(fetcher) =
+				PriceFetchers::new(source, None, http_client.clone(), FetchMode::Standard).await
+			{
 				self.secondary_sources.push(fetcher);
 			}
 		}
@@ -311,6 +332,7 @@ where
 				if let Ok(fetcher) = PriceFetchers::new(
 					PriceSource::Chainlink,
 					client.clone().into(),
+					http_client.clone(),
 					FetchMode::Standard,
 				)
 				.await
@@ -322,6 +344,7 @@ where
 				if let Ok(fetcher) = PriceFetchers::new(
 					PriceSource::Chainlink,
 					client.clone().into(),
+					http_client.clone(),
 					FetchMode::Dedicated("JPYC".into()),
 				)
 				.await

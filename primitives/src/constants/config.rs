@@ -15,3 +15,6 @@ pub const BOOTSTRAP_BLOCK_OFFSET: u64 = 100;
 /// the price data will be considered stale and excluded from the feeding.
 /// TODO: adjust this value based on actual Chainlink heartbeat intervals per feed.
 pub const CHAINLINK_STALENESS_THRESHOLD: u64 = 3600;
+
+/// The HTTP request timeout (in seconds) for external price source API calls.
+pub const PRICE_FETCHER_REQUEST_TIMEOUT: u64 = 30;

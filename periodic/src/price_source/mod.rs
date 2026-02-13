@@ -6,6 +6,7 @@ use alloy::{
 };
 use async_trait::async_trait;
 use eyre::Result;
+use reqwest::Client;
 
 use br_client::eth::EthClient;
 use br_primitives::periodic::{PriceResponse, PriceSource};
@@ -22,12 +23,12 @@ use crate::{
 mod binance;
 mod chainlink;
 mod coingecko;
-mod exchange_rate;
+pub mod exchange_rate;
 mod gateio;
 mod kucoin;
 mod upbit;
 
-const LOG_TARGET: &str = "price-fetcher";
+pub(crate) const LOG_TARGET: &str = "price-fetcher";
 
 #[derive(Clone, PartialEq, Debug)]
 pub enum FetchMode {
@@ -59,22 +60,25 @@ where
 {
 	pub async fn new(
 		exchange: PriceSource,
-		client: Option<Arc<EthClient<F, P, N>>>,
+		eth_client: Option<Arc<EthClient<F, P, N>>>,
+		http_client: Client,
 		mode: FetchMode,
 	) -> Result<Self> {
 		match exchange {
-			PriceSource::Binance => Ok(PriceFetchers::Binance(BinancePriceFetcher::new().await?)),
+			PriceSource::Binance => {
+				Ok(PriceFetchers::Binance(BinancePriceFetcher::new(http_client)))
+			},
 			PriceSource::Chainlink => {
-				Ok(PriceFetchers::Chainlink(ChainlinkPriceFetcher::new(client, mode).await))
+				Ok(PriceFetchers::Chainlink(ChainlinkPriceFetcher::new(eth_client, mode).await))
 			},
 			PriceSource::Coingecko => {
-				Ok(PriceFetchers::CoinGecko(CoingeckoPriceFetcher::new().await?))
+				Ok(PriceFetchers::CoinGecko(CoingeckoPriceFetcher::new(http_client).await?))
 			},
-			PriceSource::Gateio => Ok(PriceFetchers::Gateio(GateioPriceFetcher::new().await?)),
-			PriceSource::Kucoin => Ok(PriceFetchers::Kucoin(KucoinPriceFetcher::new().await?)),
-			PriceSource::Upbit => Ok(PriceFetchers::Upbit(UpbitPriceFetcher::new().await?)),
+			PriceSource::Gateio => Ok(PriceFetchers::Gateio(GateioPriceFetcher::new(http_client))),
+			PriceSource::Kucoin => Ok(PriceFetchers::Kucoin(KucoinPriceFetcher::new(http_client))),
+			PriceSource::Upbit => Ok(PriceFetchers::Upbit(UpbitPriceFetcher::new(http_client))),
 			PriceSource::ExchangeRate => {
-				Ok(PriceFetchers::ExchangeRate(ExchangeRatePriceFetcher::new(mode)))
+				Ok(PriceFetchers::ExchangeRate(ExchangeRatePriceFetcher::new(http_client, mode)))
 			},
 		}
 	}

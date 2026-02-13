@@ -1,8 +1,8 @@
-use std::{collections::BTreeMap, fmt::Error};
+use std::collections::BTreeMap;
 
 use alloy::primitives::utils::parse_ether;
 use eyre::Result;
-use reqwest::Url;
+use reqwest::{Client, Url};
 use serde::Deserialize;
 
 use br_primitives::periodic::PriceResponse;
@@ -24,6 +24,7 @@ pub struct BinanceResponse {
 pub struct BinancePriceFetcher {
 	base_url: Url,
 	symbols: String,
+	client: Client,
 }
 
 #[async_trait::async_trait]
@@ -44,7 +45,7 @@ impl PriceFetcher for BinancePriceFetcher {
 		let mut url = self.base_url.join("ticker/24hr").unwrap();
 		url.query_pairs_mut().append_pair("symbols", self.symbols.as_str());
 
-		let response = reqwest::get(url).await?.json::<Vec<BinanceResponse>>().await?;
+		let response = self.client.get(url).send().await?.json::<Vec<BinanceResponse>>().await?;
 
 		let mut ret = BTreeMap::new();
 		for ticker in &response {
@@ -67,29 +68,35 @@ impl PriceFetcher for BinancePriceFetcher {
 }
 
 impl BinancePriceFetcher {
-	pub async fn new() -> Result<BinancePriceFetcher, Error> {
+	pub fn new(client: Client) -> Self {
 		let mut symbols: Vec<String> = vec!["ETH".into(), "BNB".into(), "POL".into(), "BTC".into()];
 		symbols.iter_mut().for_each(|symbol| symbol.push_str("USDT"));
 
-		Ok(Self {
+		Self {
 			base_url: Url::parse("https://api.binance.com/api/v3/").unwrap(),
 			symbols: serde_json::to_string(&symbols).unwrap(),
-		})
+			client,
+		}
 	}
 
 	async fn _send_request(&self, url: Url) -> Result<BinanceResponse> {
-		Ok(reqwest::get(url).await?.json::<BinanceResponse>().await?)
+		Ok(self.client.get(url).send().await?.json::<BinanceResponse>().await?)
 	}
 }
 
 #[cfg(test)]
 mod tests {
+	use std::time::Duration;
 
 	use super::*;
 
+	fn test_client() -> Client {
+		Client::builder().timeout(Duration::from_secs(10)).build().unwrap()
+	}
+
 	#[tokio::test]
 	async fn fetch_price() {
-		let binance_fetcher: BinancePriceFetcher = BinancePriceFetcher::new().await.unwrap();
+		let binance_fetcher = BinancePriceFetcher::new(test_client());
 		let res = binance_fetcher.get_ticker_with_symbol("BTC".to_string()).await;
 
 		println!("{:?}", res);
@@ -97,7 +104,7 @@ mod tests {
 
 	#[tokio::test]
 	async fn fetch_prices() {
-		let binance_fetcher: BinancePriceFetcher = BinancePriceFetcher::new().await.unwrap();
+		let binance_fetcher = BinancePriceFetcher::new(test_client());
 		let res = binance_fetcher.get_tickers().await;
 
 		println!("{:#?}", res);

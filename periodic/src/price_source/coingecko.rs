@@ -75,7 +75,7 @@ impl PriceFetcher for CoingeckoPriceFetcher {
 }
 
 impl CoingeckoPriceFetcher {
-	pub async fn new() -> Result<Self, Error> {
+	pub async fn new(client: Client) -> Result<Self, Error> {
 		let ids: Vec<String> = vec![
 			"ethereum".into(),
 			"bifrost".into(),
@@ -90,11 +90,6 @@ impl CoingeckoPriceFetcher {
 			"binance-bitcoin".into(),
 			"coinbase-wrapped-btc".into(),
 		];
-
-		let client = Client::builder()
-			.user_agent(format!("bifrost-relayer/br-periodic/{}", env!("CARGO_PKG_VERSION")))
-			.build()
-			.unwrap();
 
 		let support_coin_list: Vec<SupportedCoin> = Self::get_all_coin_list(&client)
 			.await?

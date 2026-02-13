@@ -2,7 +2,7 @@ use std::{collections::BTreeMap, fmt::Error};
 
 use alloy::primitives::utils::parse_ether;
 use eyre::Result;
-use reqwest::Url;
+use reqwest::{Client, Url};
 use serde::Deserialize;
 
 use br_primitives::periodic::PriceResponse;
@@ -23,6 +23,7 @@ pub struct GateioResponse {
 pub struct GateioPriceFetcher {
 	base_url: Url,
 	symbols: Vec<String>,
+	client: Client,
 }
 
 #[async_trait::async_trait]
@@ -61,7 +62,7 @@ impl PriceFetcher for GateioPriceFetcher {
 }
 
 impl GateioPriceFetcher {
-	pub async fn new() -> Result<Self, Error> {
+	pub fn new(client: Client) -> Self {
 		let mut symbols: Vec<String> =
 			vec!["ETH".into(), "BFC".into(), "BNB".into(), "POL".into(), "BIFI".into()];
 
@@ -73,15 +74,16 @@ impl GateioPriceFetcher {
 			}
 		});
 
-		Ok(Self {
+		Self {
 			base_url: Url::parse("https://api.gateio.ws/api/v4/")
 				.expect("Failed to parse GateIo URL"),
 			symbols,
-		})
+			client,
+		}
 	}
 
 	async fn _send_request(&self, url: Url) -> Result<Vec<GateioResponse>, Error> {
-		match reqwest::get(url).await {
+		match self.client.get(url).send().await {
 			Ok(response) => match response.json::<Vec<GateioResponse>>().await {
 				Ok(ret) => Ok(ret),
 				Err(_) => Err(Error),
@@ -93,11 +95,17 @@ impl GateioPriceFetcher {
 
 #[cfg(test)]
 mod tests {
+	use std::time::Duration;
+
 	use super::*;
+
+	fn test_client() -> Client {
+		Client::builder().timeout(Duration::from_secs(10)).build().unwrap()
+	}
 
 	#[tokio::test]
 	async fn fetch_price() {
-		let gateio_fetcher: GateioPriceFetcher = GateioPriceFetcher::new().await.unwrap();
+		let gateio_fetcher = GateioPriceFetcher::new(test_client());
 		let res = gateio_fetcher.get_ticker_with_symbol("BTC".to_string()).await;
 
 		println!("{:?}", res);
@@ -105,7 +113,7 @@ mod tests {
 
 	#[tokio::test]
 	async fn fetch_prices() {
-		let gateio_fetcher: GateioPriceFetcher = GateioPriceFetcher::new().await.unwrap();
+		let gateio_fetcher = GateioPriceFetcher::new(test_client());
 		let res = gateio_fetcher.get_tickers().await;
 
 		println!("{:#?}", res);
