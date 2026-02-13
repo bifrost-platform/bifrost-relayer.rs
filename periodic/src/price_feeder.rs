@@ -136,16 +136,23 @@ where
 		let mut all_prices = BTreeMap::new();
 		let mut failed_modes = Vec::new();
 
-		// Collect prices from all primary sources
-		for fetcher in &self.primary_sources {
-			match fetcher.get_tickers().await {
+		// Collect prices from all primary sources in parallel
+		let futures: Vec<_> = self
+			.primary_sources
+			.iter()
+			.map(|f| async { (f.mode(), f.get_tickers().await) })
+			.collect();
+		let results = futures::future::join_all(futures).await;
+
+		for (mode, result) in results {
+			match result {
 				Ok(price_responses) => {
 					log::info!(
 						target: &self.client.get_chain_name(),
 						"-[{}] ✅ Fetched {} prices from primary source (mode: {:?})",
 						sub_display_format(SUB_LOG_TARGET),
 						price_responses.len(),
-						fetcher.mode()
+						mode
 					);
 					all_prices.extend(price_responses);
 				},
@@ -154,9 +161,9 @@ where
 						target: &self.client.get_chain_name(),
 						"-[{}] ⚠️  Failed to fetch price feed data from primary source (mode: {:?}). Will retry with secondary sources.",
 						sub_display_format(SUB_LOG_TARGET),
-						fetcher.mode()
+						mode
 					);
-					failed_modes.push(fetcher.mode());
+					failed_modes.push(mode);
 				},
 			};
 		}
@@ -219,34 +226,37 @@ where
 			mode
 		);
 
+		// Fetch from all matching secondary sources in parallel
+		let futures: Vec<_> = self
+			.secondary_sources
+			.iter()
+			.filter(|f| f.mode() == mode)
+			.map(|f| f.get_tickers())
+			.collect();
+		let results = futures::future::join_all(futures).await;
+
 		// (volume weighted price sum, total volume)
 		let mut volume_weighted: BTreeMap<String, (U256, U256)> = BTreeMap::new();
 
-		for fetcher in &self.secondary_sources {
-			if fetcher.mode() != mode {
-				continue;
-			}
-			match fetcher.get_tickers().await {
-				Ok(tickers) => {
-					tickers.iter().for_each(|(symbol, price_response)| {
-						if !price_response.volume.unwrap().is_zero() {
-							if let Some(value) = volume_weighted.get_mut(symbol) {
-								value.0 += price_response.price * price_response.volume.unwrap();
-								value.1 += price_response.volume.unwrap();
-							} else {
-								volume_weighted.insert(
-									symbol.clone(),
-									(
-										price_response.price * price_response.volume.unwrap(),
-										price_response.volume.unwrap(),
-									),
-								);
-							}
+		for result in results {
+			if let Ok(tickers) = result {
+				tickers.iter().for_each(|(symbol, price_response)| {
+					if !price_response.volume.unwrap().is_zero() {
+						if let Some(value) = volume_weighted.get_mut(symbol) {
+							value.0 += price_response.price * price_response.volume.unwrap();
+							value.1 += price_response.volume.unwrap();
+						} else {
+							volume_weighted.insert(
+								symbol.clone(),
+								(
+									price_response.price * price_response.volume.unwrap(),
+									price_response.volume.unwrap(),
+								),
+							);
 						}
-					});
-				},
-				Err(_) => continue,
-			};
+					}
+				});
+			}
 		}
 
 		if volume_weighted.is_empty() {
