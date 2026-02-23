@@ -42,7 +42,7 @@ async fn fetch_exchange_rate(client: &Client, url: &str, currency: &str) -> Resu
 
 /// Parse a decimal rate string (e.g. "0.006734") into U256 scaled by 10^18,
 /// without any f64 arithmetic.
-fn parse_rate_to_scaled_u256(rate_str: &str) -> Result<U256, Error> {
+fn rate_to_scaled_u256(rate_str: &str) -> Result<U256, Error> {
 	const DECIMALS: usize = 18;
 
 	let (integer_part, fractional_part) = if let Some(dot_pos) = rate_str.find('.') {
@@ -72,7 +72,7 @@ fn parse_rate_to_scaled_u256(rate_str: &str) -> Result<U256, Error> {
 
 /// Convert amount using exchange rate string with proper decimal handling.
 fn convert_amount_with_rate(amount: U256, rate_str: &str) -> Result<U256, Error> {
-	let rate_scaled = parse_rate_to_scaled_u256(rate_str)?;
+	let rate_scaled = rate_to_scaled_u256(rate_str)?;
 
 	amount
 		.checked_mul(rate_scaled)

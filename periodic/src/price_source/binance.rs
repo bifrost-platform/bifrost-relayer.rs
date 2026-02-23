@@ -16,7 +16,7 @@ pub struct BinanceResponse {
 	pub symbol: String,
 	/// The current price of the token.
 	pub lastPrice: String,
-	/// Base currency trade volume in the last 24h (for secondary sources)
+	/// Base currency trade volume in the last 24h.
 	pub volume: String,
 }
 

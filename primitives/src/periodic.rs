@@ -7,7 +7,7 @@ use crate::contracts::socket::Socket_Struct::Socket_Message;
 pub struct PriceResponse {
 	/// The current price of the token.
 	pub price: U256,
-	/// Base currency trade volume in the last 24h (for secondary sources)
+	/// Base currency trade volume in the last 24h.
 	pub volume: Option<U256>,
 }
 
@@ -15,7 +15,6 @@ pub struct PriceResponse {
 pub enum PriceSource {
 	Binance,
 	Chainlink,
-	Coingecko,
 	Gateio,
 	Kucoin,
 	Upbit,
