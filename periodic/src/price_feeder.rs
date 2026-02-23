@@ -324,6 +324,7 @@ where
 
 		let market_sources = vec![
 			PriceSource::Binance,
+			PriceSource::Bithumb,
 			PriceSource::Gateio,
 			PriceSource::Kucoin,
 			PriceSource::Upbit,

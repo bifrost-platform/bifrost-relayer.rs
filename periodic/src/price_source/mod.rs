@@ -13,14 +13,15 @@ use br_primitives::periodic::{PriceResponse, PriceSource};
 
 use crate::{
 	price_source::{
-		binance::BinancePriceFetcher, chainlink::ChainlinkPriceFetcher,
-		exchange_rate::ExchangeRatePriceFetcher, gateio::GateioPriceFetcher,
-		kucoin::KucoinPriceFetcher, upbit::UpbitPriceFetcher,
+		binance::BinancePriceFetcher, bithumb::BithumbPriceFetcher,
+		chainlink::ChainlinkPriceFetcher, exchange_rate::ExchangeRatePriceFetcher,
+		gateio::GateioPriceFetcher, kucoin::KucoinPriceFetcher, upbit::UpbitPriceFetcher,
 	},
 	traits::PriceFetcher,
 };
 
 mod binance;
+mod bithumb;
 mod chainlink;
 pub mod exchange_rate;
 mod gateio;
@@ -42,6 +43,7 @@ where
 	P: Provider<N>,
 {
 	Binance(BinancePriceFetcher),
+	Bithumb(BithumbPriceFetcher),
 	Chainlink(ChainlinkPriceFetcher<F, P, N>),
 	Gateio(GateioPriceFetcher),
 	Kucoin(KucoinPriceFetcher),
@@ -64,6 +66,9 @@ where
 			PriceSource::Binance => {
 				Ok(PriceFetchers::Binance(BinancePriceFetcher::new(http_client)))
 			},
+			PriceSource::Bithumb => {
+				Ok(PriceFetchers::Bithumb(BithumbPriceFetcher::new(http_client)))
+			},
 			PriceSource::Chainlink => {
 				Ok(PriceFetchers::Chainlink(ChainlinkPriceFetcher::new(eth_client, mode).await))
 			},
@@ -79,6 +84,7 @@ where
 	pub fn mode(&self) -> FetchMode {
 		match self {
 			PriceFetchers::Binance(_) => FetchMode::Standard,
+			PriceFetchers::Bithumb(_) => FetchMode::Standard,
 			PriceFetchers::Chainlink(fetcher) => fetcher.mode.clone(),
 			PriceFetchers::Gateio(_) => FetchMode::Standard,
 			PriceFetchers::Kucoin(_) => FetchMode::Standard,
@@ -97,6 +103,7 @@ where
 	async fn get_ticker_with_symbol(&self, symbol: String) -> Result<PriceResponse> {
 		match self {
 			PriceFetchers::Binance(fetcher) => fetcher.get_ticker_with_symbol(symbol).await,
+			PriceFetchers::Bithumb(fetcher) => fetcher.get_ticker_with_symbol(symbol).await,
 			PriceFetchers::Chainlink(fetcher) => fetcher.get_ticker_with_symbol(symbol).await,
 			PriceFetchers::Gateio(fetcher) => fetcher.get_ticker_with_symbol(symbol).await,
 			PriceFetchers::Kucoin(fetcher) => fetcher.get_ticker_with_symbol(symbol).await,
@@ -108,6 +115,7 @@ where
 	async fn get_tickers(&self) -> Result<BTreeMap<String, PriceResponse>> {
 		match self {
 			PriceFetchers::Binance(fetcher) => fetcher.get_tickers().await,
+			PriceFetchers::Bithumb(fetcher) => fetcher.get_tickers().await,
 			PriceFetchers::Chainlink(fetcher) => fetcher.get_tickers().await,
 			PriceFetchers::Gateio(fetcher) => fetcher.get_tickers().await,
 			PriceFetchers::Kucoin(fetcher) => fetcher.get_tickers().await,
