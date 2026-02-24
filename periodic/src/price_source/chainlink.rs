@@ -8,7 +8,10 @@ use alloy::{
 };
 use br_client::eth::EthClient;
 use br_primitives::{
-	constants::config::CHAINLINK_STALENESS_THRESHOLD, periodic::PriceResponse,
+	constants::config::{
+		CHAINLINK_STALENESS_THRESHOLD_STABLE, CHAINLINK_STALENESS_THRESHOLD_VOLATILE,
+	},
+	periodic::PriceResponse,
 	utils::sub_display_format,
 };
 use eyre::{Result, eyre};
@@ -20,6 +23,13 @@ fn get_chainlink_volume_weight(symbol: &str) -> Result<U256> {
 		"USDC" | "USDT" | "DAI" | "JPYC" => Ok(U256::from(1)),
 		"BTC" | "WBTC" | "CBBTC" => Ok(U256::from(10_000) * U256::from(10u128.pow(18))),
 		_ => Err(eyre!("Invalid symbol: {}", symbol)),
+	}
+}
+
+fn get_staleness_threshold(symbol: &str) -> u64 {
+	match symbol {
+		"USDC" | "USDT" | "DAI" | "JPYC" | "CBBTC" => CHAINLINK_STALENESS_THRESHOLD_STABLE,
+		_ => CHAINLINK_STALENESS_THRESHOLD_VOLATILE,
 	}
 }
 
@@ -67,7 +77,8 @@ where
 							let updated_at_secs: u64 = updated_at.try_into().unwrap_or(0);
 							let staleness = now.saturating_sub(updated_at_secs);
 
-							if staleness > CHAINLINK_STALENESS_THRESHOLD {
+							let threshold = get_staleness_threshold(symbol_str);
+							if staleness > threshold {
 								log::warn!(
 									target: "price-fetcher",
 									"-[{}] ⚠️  Chainlink {} price is stale \
@@ -75,13 +86,13 @@ where
 									sub_display_format(SUB_LOG_TARGET),
 									symbol_str,
 									staleness,
-									CHAINLINK_STALENESS_THRESHOLD,
+									threshold,
 								);
 								return Err(eyre!(
 									"Chainlink {} price is stale ({}s > {}s)",
 									symbol_str,
 									staleness,
-									CHAINLINK_STALENESS_THRESHOLD,
+									threshold,
 								));
 							}
 
