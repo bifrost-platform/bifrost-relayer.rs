@@ -11,11 +11,11 @@ pub const BOOTSTRAP_BLOCK_CHUNK_SIZE: u64 = 2000;
 pub const BOOTSTRAP_BLOCK_OFFSET: u64 = 100;
 
 /// The maximum allowed staleness duration (in seconds) for volatile Chainlink price feeds
-/// (e.g. BTC, WBTC). Chainlink heartbeat for these feeds is typically ~1 hour.
+/// (e.g. BTC, WBTC, CBBTC). Chainlink heartbeat for these feeds is typically ~1 hour.
 pub const CHAINLINK_STALENESS_THRESHOLD_VOLATILE: u64 = 3600;
 
 /// The maximum allowed staleness duration (in seconds) for stable Chainlink price feeds
-/// (e.g. USDC, USDT, DAI, JPYC, CBBTC). Chainlink heartbeat for these feeds is typically ~24 hours.
+/// (e.g. USDC, USDT, DAI, JPYC). Chainlink heartbeat for stablecoins is typically ~24 hours.
 pub const CHAINLINK_STALENESS_THRESHOLD_STABLE: u64 = 86400;
 
 /// The HTTP request timeout (in seconds) for external price source API calls.

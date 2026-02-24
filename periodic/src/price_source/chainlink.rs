@@ -28,7 +28,7 @@ fn get_chainlink_volume_weight(symbol: &str) -> Result<U256> {
 
 fn get_staleness_threshold(symbol: &str) -> u64 {
 	match symbol {
-		"USDC" | "USDT" | "DAI" | "JPYC" | "CBBTC" => CHAINLINK_STALENESS_THRESHOLD_STABLE,
+		"USDC" | "USDT" | "DAI" | "JPYC" => CHAINLINK_STALENESS_THRESHOLD_STABLE,
 		_ => CHAINLINK_STALENESS_THRESHOLD_VOLATILE,
 	}
 }
