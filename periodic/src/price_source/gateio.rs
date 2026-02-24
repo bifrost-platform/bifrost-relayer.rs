@@ -37,7 +37,7 @@ impl PriceFetcher for GateioPriceFetcher {
 
 		Ok(PriceResponse {
 			price: parse_ether(&res.last).unwrap(),
-			volume: parse_ether(&res.base_volume).unwrap().into(),
+			volume: parse_ether(&res.base_volume).unwrap(),
 		})
 	}
 
@@ -51,7 +51,7 @@ impl PriceFetcher for GateioPriceFetcher {
 					ticker.currency_pair.replace("BIFIF_USDT", "BIFI").replace("_USDT", ""),
 					PriceResponse {
 						price: parse_ether(&ticker.last).unwrap(),
-						volume: parse_ether(&ticker.base_volume).unwrap().into(),
+						volume: parse_ether(&ticker.base_volume).unwrap(),
 					},
 				);
 			}

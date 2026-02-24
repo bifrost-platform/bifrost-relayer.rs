@@ -131,7 +131,7 @@ impl PriceFetcher for ExchangeRatePriceFetcher {
 			.await
 			.map_err(|_| eyre::eyre!("Failed to convert {} to USD", currency))?;
 
-		Ok(PriceResponse { price, volume: None })
+		Ok(PriceResponse { price, volume: U256::ZERO })
 	}
 
 	async fn get_tickers(&self) -> eyre::Result<BTreeMap<String, PriceResponse>> {

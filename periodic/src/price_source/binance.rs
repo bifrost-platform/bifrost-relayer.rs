@@ -35,10 +35,7 @@ impl PriceFetcher for BinancePriceFetcher {
 
 		let res = self._send_request(url).await?;
 
-		Ok(PriceResponse {
-			price: parse_ether(&res.lastPrice)?,
-			volume: parse_ether(&res.volume)?.into(),
-		})
+		Ok(PriceResponse { price: parse_ether(&res.lastPrice)?, volume: parse_ether(&res.volume)? })
 	}
 
 	async fn get_tickers(&self) -> Result<BTreeMap<String, PriceResponse>> {
@@ -50,7 +47,7 @@ impl PriceFetcher for BinancePriceFetcher {
 		let mut ret = BTreeMap::new();
 		for ticker in &response {
 			let price = parse_ether(&ticker.lastPrice)?;
-			let volume = parse_ether(&ticker.volume)?.into();
+			let volume = parse_ether(&ticker.volume)?;
 
 			if ticker.symbol == "BTCUSDT" {
 				// BTC ticker from binance is BTCB ticker

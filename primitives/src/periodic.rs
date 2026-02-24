@@ -8,7 +8,7 @@ pub struct PriceResponse {
 	/// The current price of the token.
 	pub price: U256,
 	/// Base currency trade volume in the last 24h.
-	pub volume: Option<U256>,
+	pub volume: U256,
 }
 
 #[derive(Debug, Clone, Deserialize)]

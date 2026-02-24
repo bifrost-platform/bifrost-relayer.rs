@@ -250,16 +250,16 @@ where
 		for result in results {
 			if let Ok(tickers) = result {
 				tickers.iter().for_each(|(symbol, price_response)| {
-					if !price_response.volume.unwrap().is_zero() {
+					if !price_response.volume.is_zero() {
 						if let Some(value) = volume_weighted.get_mut(symbol) {
-							value.0 += price_response.price * price_response.volume.unwrap();
-							value.1 += price_response.volume.unwrap();
+							value.0 += price_response.price * price_response.volume;
+							value.1 += price_response.volume;
 						} else {
 							volume_weighted.insert(
 								symbol.clone(),
 								(
-									price_response.price * price_response.volume.unwrap(),
-									price_response.volume.unwrap(),
+									price_response.price * price_response.volume,
+									price_response.volume,
 								),
 							);
 						}
@@ -297,7 +297,7 @@ where
 					symbol,
 					PriceResponse {
 						price: volume_weighted_sum / total_volume,
-						volume: total_volume.into(),
+						volume: total_volume,
 					},
 				)
 			})

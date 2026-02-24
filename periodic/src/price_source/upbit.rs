@@ -90,9 +90,7 @@ impl UpbitPriceFetcher {
 					response.market.replace("KRW-", ""),
 					PriceResponse {
 						price: usd_price,
-						volume: parse_ether(&response.acc_trade_volume_24h.to_string())
-							.unwrap()
-							.into(),
+						volume: parse_ether(&response.acc_trade_volume_24h.to_string()).unwrap(),
 					},
 				)),
 				Err(_) => Err(Error),

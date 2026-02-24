@@ -338,17 +338,18 @@ where
 		for result in results {
 			if let Ok(tickers) = result {
 				for (symbol, price_response) in &tickers {
-					if let Some(volume) = price_response.volume {
-						if !volume.is_zero() {
-							if let Some(value) = volume_weighted.get_mut(symbol) {
-								value.0 += price_response.price * volume;
-								value.1 += volume;
-							} else {
-								volume_weighted.insert(
-									symbol.clone(),
-									(price_response.price * volume, volume),
-								);
-							}
+					if !price_response.volume.is_zero() {
+						if let Some(value) = volume_weighted.get_mut(symbol) {
+							value.0 += price_response.price * price_response.volume;
+							value.1 += price_response.volume;
+						} else {
+							volume_weighted.insert(
+								symbol.clone(),
+								(
+									price_response.price * price_response.volume,
+									price_response.volume,
+								),
+							);
 						}
 					}
 				}
@@ -366,7 +367,7 @@ where
 					symbol,
 					PriceResponse {
 						price: volume_weighted_sum / total_volume,
-						volume: total_volume.into(),
+						volume: total_volume,
 					},
 				)
 			})

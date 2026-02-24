@@ -36,7 +36,7 @@ impl PriceFetcher for KucoinPriceFetcher {
 
 		let res = &self._send_request(url).await?.data;
 
-		Ok(PriceResponse { price: parse_ether(&res.last)?, volume: parse_ether(&res.vol)?.into() })
+		Ok(PriceResponse { price: parse_ether(&res.last)?, volume: parse_ether(&res.vol)? })
 	}
 
 	async fn get_tickers(&self) -> Result<BTreeMap<String, PriceResponse>> {

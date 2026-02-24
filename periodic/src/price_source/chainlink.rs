@@ -89,7 +89,7 @@ where
 							let decimals = contract.decimals().call().await?;
 
 							let price = price * U256::from(10u128.pow((18 - decimals).into()));
-							let volume = Some(get_chainlink_volume_weight(symbol_str)?);
+							let volume = get_chainlink_volume_weight(symbol_str)?;
 
 							Ok(PriceResponse { price, volume })
 						} else {

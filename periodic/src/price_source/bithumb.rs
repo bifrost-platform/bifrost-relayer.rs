@@ -72,7 +72,7 @@ impl BithumbPriceFetcher {
 		let usd_price = convert_currency_to_usd(&self.client, "krw", krw_price).await?;
 		let volume = parse_ether(&response.acc_trade_volume_24h.to_string())?;
 
-		Ok((symbol, PriceResponse { price: usd_price, volume: volume.into() }))
+		Ok((symbol, PriceResponse { price: usd_price, volume }))
 	}
 
 	async fn _send_request(&self, url: Url) -> Result<Vec<BithumbResponse>> {
