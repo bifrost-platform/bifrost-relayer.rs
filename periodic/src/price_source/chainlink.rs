@@ -18,7 +18,7 @@ const SUB_LOG_TARGET: &str = "chainlink";
 fn get_chainlink_volume_weight(symbol: &str) -> Result<U256> {
 	match symbol {
 		"USDC" | "USDT" | "DAI" | "JPYC" => Ok(U256::from(1)),
-		"BTC" | "WBTC" | "CBBTC" => Ok(U256::from(10_000)),
+		"BTC" | "WBTC" | "CBBTC" => Ok(U256::from(10_000) * U256::from(10u128.pow(18))),
 		_ => Err(eyre!("Invalid symbol: {}", symbol)),
 	}
 }

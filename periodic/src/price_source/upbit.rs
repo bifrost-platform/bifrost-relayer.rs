@@ -59,7 +59,7 @@ impl PriceFetcher for UpbitPriceFetcher {
 
 impl UpbitPriceFetcher {
 	pub fn new(client: Client) -> Self {
-		let symbols: Vec<String> = vec!["ETH".into(), "BFC".into(), "POL".into()];
+		let symbols: Vec<String> = vec!["ETH".into(), "BFC".into(), "POL".into(), "BTC".into()];
 
 		let formatted_symbols: Vec<String> = symbols
 			.into_iter()
