@@ -40,15 +40,45 @@ async fn fetch_exchange_rate(client: &Client, url: &str, currency: &str) -> Resu
 		.ok_or(Error)
 }
 
+/// Normalize a scientific notation string (e.g. "1.23e-5") into a plain decimal string
+/// (e.g. "0.0000123"). Returns the input unchanged if no exponent is present.
+fn normalize_scientific_notation(s: &str) -> String {
+	let (mantissa, exponent) = match s.find(|c: char| c == 'e' || c == 'E') {
+		Some(pos) => (&s[..pos], s[pos + 1..].parse::<i32>().unwrap_or(0)),
+		None => return s.to_string(),
+	};
+
+	let (integer, fractional) = if let Some(dot_pos) = mantissa.find('.') {
+		(&mantissa[..dot_pos], &mantissa[dot_pos + 1..])
+	} else {
+		(mantissa, "")
+	};
+
+	// digits = all significant digits without the dot
+	let digits = format!("{}{}", integer.trim_start_matches('0'), fractional);
+	// decimal_pos = where the decimal point sits relative to the start of digits
+	let decimal_pos = integer.trim_start_matches('0').len() as i32 + exponent;
+
+	if decimal_pos <= 0 {
+		format!("0.{}{}", "0".repeat((-decimal_pos) as usize), digits)
+	} else if (decimal_pos as usize) >= digits.len() {
+		format!("{}{}", digits, "0".repeat(decimal_pos as usize - digits.len()))
+	} else {
+		let (left, right) = digits.split_at(decimal_pos as usize);
+		format!("{}.{}", left, right)
+	}
+}
+
 /// Parse a decimal rate string (e.g. "0.006734") into U256 scaled by 10^18,
-/// without any f64 arithmetic.
+/// without any f64 arithmetic. Also handles scientific notation (e.g. "1.23e-5").
 fn rate_to_scaled_u256(rate_str: &str) -> Result<U256, Error> {
 	const DECIMALS: usize = 18;
 
-	let (integer_part, fractional_part) = if let Some(dot_pos) = rate_str.find('.') {
-		(&rate_str[..dot_pos], &rate_str[dot_pos + 1..])
+	let normalized = normalize_scientific_notation(rate_str);
+	let (integer_part, fractional_part) = if let Some(dot_pos) = normalized.find('.') {
+		(&normalized[..dot_pos], &normalized[dot_pos + 1..])
 	} else {
-		(rate_str, "")
+		(normalized.as_str(), "")
 	};
 
 	let combined = if fractional_part.len() >= DECIMALS {
@@ -164,5 +194,26 @@ mod tests {
 			.map_err(|e| eyre::eyre!("Failed to get tickers: {}", e))
 			.unwrap();
 		println!("Tickers: {:?}", res);
+	}
+
+	#[test]
+	fn test_normalize_scientific_notation() {
+		assert_eq!(normalize_scientific_notation("1.23e-5"), "0.0000123");
+		assert_eq!(normalize_scientific_notation("5e-3"), "0.005");
+		assert_eq!(normalize_scientific_notation("1.5e3"), "1500");
+		assert_eq!(normalize_scientific_notation("1.23e0"), "1.23");
+		assert_eq!(normalize_scientific_notation("0.006734"), "0.006734");
+		assert_eq!(normalize_scientific_notation("123"), "123");
+	}
+
+	#[test]
+	fn test_rate_to_scaled_u256_scientific() {
+		// 1.23e-5 = 0.0000123 → 12300000000000 (1.23e-5 * 1e18)
+		let result = rate_to_scaled_u256("1.23e-5").unwrap();
+		assert_eq!(result, U256::from(12_300_000_000_000u64));
+
+		// Normal decimal should still work
+		let result = rate_to_scaled_u256("0.006734").unwrap();
+		assert_eq!(result, U256::from(6_734_000_000_000_000u64));
 	}
 }
