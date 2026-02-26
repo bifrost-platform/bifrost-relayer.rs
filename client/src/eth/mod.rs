@@ -432,7 +432,7 @@ where
 	}
 
 	/// Send a transaction synchronously.
-	async fn sync_send_transaction(
+	pub async fn sync_send_transaction(
 		&self,
 		mut request: N::TransactionRequest,
 		requester: String,

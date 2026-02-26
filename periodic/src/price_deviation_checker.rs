@@ -245,6 +245,7 @@ where
 		let mut deviated_oids: Vec<FixedBytes<32>> = vec![];
 		let mut deviated_prices: Vec<FixedBytes<32>> = vec![];
 		let mut deviated_responses: BTreeMap<String, PriceResponse> = BTreeMap::new();
+		let mut finalize_only_oids: Vec<FixedBytes<32>> = vec![];
 
 		for (symbol, market_response) in &market_prices {
 			let oid = match self.asset_oid.get(symbol.as_str()) {
@@ -256,7 +257,7 @@ where
 				continue;
 			}
 
-			// Read on-chain oracle price
+			// Read on-chain finalized oracle price
 			let on_chain_price = match oracle_manager.last_oracle_data(oid).call().await {
 				Ok(result) => U256::from_be_bytes(result.into()),
 				Err(_) => continue,
@@ -266,7 +267,7 @@ where
 				continue;
 			}
 
-			// Calculate deviation: |market - oracle| * 10000 / oracle
+			// Calculate deviation against finalized price
 			let deviation_bps = if market_response.price > on_chain_price {
 				(market_response.price - on_chain_price) * U256::from(10_000) / on_chain_price
 			} else {
@@ -276,6 +277,42 @@ where
 			let threshold = U256::from(get_deviation_threshold_bps(symbol));
 
 			if deviation_bps > threshold {
+				// Deviation detected against finalized price. Check if a pending
+				// finalization (latest) already resolves the deviation.
+				let latest_price = match oracle_manager.latest_oracle_data(oid).call().await {
+					Ok(result) => {
+						let p = U256::from_be_bytes(result.into());
+						if p != on_chain_price { Some(p) } else { None }
+					},
+					Err(_) => None,
+				};
+
+				if let Some(pending_price) = latest_price {
+					// Quorum met with a pending price — check if it resolves deviation
+					let pending_deviation_bps = if market_response.price > pending_price {
+						(market_response.price - pending_price) * U256::from(10_000) / pending_price
+					} else {
+						(pending_price - market_response.price) * U256::from(10_000) / pending_price
+					};
+
+					if pending_deviation_bps <= threshold {
+						// Pending price resolves deviation — finalize only, skip feed
+						log::info!(
+							target: &self.client.get_chain_name(),
+							"-[{}] ✅ {} deviation resolved by pending finalization \
+							(finalized={}, pending={}, market={}, pending_dev={}bps)",
+							sub_display_format(SUB_LOG_TARGET),
+							symbol,
+							on_chain_price,
+							pending_price,
+							market_response.price,
+							pending_deviation_bps
+						);
+						finalize_only_oids.push(oid);
+						continue;
+					}
+				}
+
 				log::warn!(
 					target: &self.client.get_chain_name(),
 					"-[{}] 🚨 Price deviation detected for {}: \
@@ -294,6 +331,10 @@ where
 			}
 		}
 
+		// Finalize-only: pending prices that already resolve deviation
+		self.try_finalize_prices(oracle_manager, &finalize_only_oids).await;
+
+		// Feed deviated assets and then finalize
 		if !deviated_oids.is_empty() {
 			log::info!(
 				target: &self.client.get_chain_name(),
@@ -306,17 +347,71 @@ where
 				.client
 				.protocol_contracts
 				.socket
-				.oracle_aggregate_feeding(deviated_oids, deviated_prices)
+				.oracle_aggregate_feeding(deviated_oids.clone(), deviated_prices)
 				.into_transaction_request();
 
-			send_transaction(
-				self.client.clone(),
-				tx_request,
-				SUB_LOG_TARGET.to_string(),
-				TxRequestMetadata::PriceFeed(PriceFeedMetadata::new(deviated_responses)),
-				self.debug_mode,
-				self.handle.clone(),
-			);
+			if let Err(e) = self
+				.client
+				.sync_send_transaction(
+					tx_request,
+					SUB_LOG_TARGET.to_string(),
+					TxRequestMetadata::PriceFeed(PriceFeedMetadata::new(deviated_responses)),
+				)
+				.await
+			{
+				log::error!(
+					target: &self.client.get_chain_name(),
+					"-[{}] ❗️ Failed to send deviation feed tx: {:?}",
+					sub_display_format(SUB_LOG_TARGET),
+					e
+				);
+			}
+
+			self.try_finalize_prices(oracle_manager, &deviated_oids).await;
+		}
+	}
+
+	/// Check if fed oracle prices can be finalized (quorum met) and send tx if so.
+	///
+	/// For each fed OID, compares `last_oracle_data` (current finalized price) with
+	/// `latest_oracle_data` (simulated via eth_call). If they differ, quorum has been
+	/// reached and we send the actual `latest_oracle_data` transaction to finalize.
+	async fn try_finalize_prices(
+		&self,
+		oracle_manager: &OracleManagerInstance<F, P, N>,
+		fed_oids: &[FixedBytes<32>],
+	) {
+		for oid in fed_oids {
+			let last = match oracle_manager.last_oracle_data(*oid).call().await {
+				Ok(r) => r,
+				Err(_) => continue,
+			};
+			let latest = match oracle_manager.latest_oracle_data(*oid).call().await {
+				Ok(r) => r,
+				Err(_) => continue,
+			};
+
+			if last != latest {
+				log::info!(
+					target: &self.client.get_chain_name(),
+					"-[{}] 🔒 Finalizing oracle price (oid: {:?}), last: {:?}, latest: {:?}",
+					sub_display_format(SUB_LOG_TARGET),
+					oid,
+					last,
+					latest
+				);
+
+				let tx_request = oracle_manager.latest_oracle_data(*oid).into_transaction_request();
+
+				send_transaction(
+					self.client.clone(),
+					tx_request,
+					SUB_LOG_TARGET.to_string(),
+					TxRequestMetadata::PriceFeed(PriceFeedMetadata::new(BTreeMap::new())),
+					self.debug_mode,
+					self.handle.clone(),
+				);
+			}
 		}
 	}
 
