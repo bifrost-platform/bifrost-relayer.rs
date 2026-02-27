@@ -12,16 +12,27 @@ use alloy::{
 use br_primitives::{
 	bootstrap::BootstrapSharedData,
 	constants::cccp,
-	contracts::socket::{
-		Socket_Struct::{Poll_Submit, Signatures, Socket_Message},
-		Variants,
+	contracts::{
+		oracle::{OracleManagerContract, OracleManagerInstance},
+		socket::{
+			Socket_Struct::{Poll_Submit, Signatures, Socket_Message},
+			Variants,
+		},
 	},
 	eth::{BootstrapState, BuiltRelayTransaction, SocketEventStatus},
+	substrate::{
+		CustomConfig,
+		bifrost_runtime::{self, runtime_types::bp_oracle::OracleKey},
+	},
 	tx::HookMetadata,
 	utils::{recover_message, sub_display_format},
 };
 use eyre::Result;
 use sc_service::SpawnTaskHandle;
+use subxt::{
+	OnlineClient,
+	utils::{H160 as SubH160, H256 as SubH256},
+};
 use tokio::time::sleep;
 
 use crate::eth::{SUB_LOG_TARGET, avoid_race_condition, send_transaction};
@@ -189,6 +200,9 @@ where
 	/// Get the handle to spawn tasks.
 	fn handle(&self) -> SpawnTaskHandle;
 
+	/// Get the substrate online client.
+	fn get_sub_client(&self) -> OnlineClient<CustomConfig>;
+
 	/// Get the `EthClient` of the implemented handler.
 	fn get_client(&self) -> Arc<EthClient<F, P, N>>;
 
@@ -197,6 +211,58 @@ where
 
 	/// Get the `EthClient` of the system chain by chain id.
 	fn get_system_client(&self, chain_id: &ChainId) -> Option<Arc<EthClient<F, P, N>>>;
+
+	/// Resolves the oracle manager contract instance from the socket contract.
+	async fn resolve_oracle_manager(&self) -> Result<OracleManagerInstance<F, P, N>> {
+		let orc_manager_address =
+			self.get_bifrost_client().protocol_contracts.socket.orc_manager().call().await?;
+		Ok(OracleManagerContract::new(orc_manager_address, self.get_bifrost_client().provider()))
+	}
+
+	/// Fetches the oracle ID for a chain's native currency from `OracleRegistry.Oracles`.
+	async fn get_oracle_oid_for_chain(&self, chain_id: ChainId) -> Result<Option<B256>> {
+		self.fetch_oracle_oid(OracleKey::NativeCurrency(chain_id as u32)).await
+	}
+
+	/// Fetches the oracle ID for an EVM asset address from `OracleRegistry.Oracles`.
+	async fn get_oracle_oid_for_asset(&self, asset: Address) -> Result<Option<B256>> {
+		self.fetch_oracle_oid(OracleKey::Asset(SubH160(asset.0.0))).await
+	}
+
+	/// Fetches an oracle ID from `OracleRegistry.Oracles` using the typed subxt storage API.
+	async fn fetch_oracle_oid(&self, oracle_key: OracleKey) -> Result<Option<B256>> {
+		let result = self
+			.get_sub_client()
+			.storage()
+			.at_latest()
+			.await?
+			.fetch(&bifrost_runtime::storage().oracle_registry().oracles(oracle_key))
+			.await?;
+		Ok(result.map(|oid| B256::from_slice(&oid.0)))
+	}
+
+	/// Fetches the canonical asset address from `CccpRelayQueue.AssetIndexes`.
+	///
+	/// Returns the `AssetId` (H160) registered for the given CCCP asset index hash.
+	/// - `0xffff...ffff` indicates a chain's native currency.
+	/// - Any other address is the unified ERC20 contract address.
+	async fn fetch_asset_id_from_relay_queue(
+		&self,
+		asset_index_hash: B256,
+	) -> Result<Option<Address>> {
+		let result = self
+			.get_sub_client()
+			.storage()
+			.at_latest()
+			.await?
+			.fetch(
+				&bifrost_runtime::storage()
+					.cccp_relay_queue()
+					.asset_indexes(SubH256(asset_index_hash.0)),
+			)
+			.await?;
+		Ok(result.map(|h160| Address::from_slice(&h160.0)))
+	}
 
 	/// Validates common hook prerequisites for both execute and rollback operations.
 	///
@@ -328,10 +394,7 @@ where
 	/// * `Ok(Some(Variants))` - If all checks pass and the hook should be executed.
 	/// * `Ok(None)` - If any check fails, indicating execution should be skipped.
 	/// * `Err(_)` - If an RPC error occurs during verification.
-	async fn should_execute_hook(
-		&self,
-		msg: &Socket_Message,
-	) -> Result<Option<(Variants, Address, Address)>> {
+	async fn should_execute_hook(&self, msg: &Socket_Message) -> Result<Option<Variants>> {
 		let variants = self.should_process_hook(msg, SocketEventStatus::Executed).await?;
 
 		// Early return if common validation failed
@@ -340,46 +403,12 @@ where
 			None => return Ok(None),
 		};
 
-		// In order to execute the hook, the oracle addresses must be registered in RelayQueue.
-		let dnc_oracle_address = match self
-			.get_bifrost_client()
-			.get_oracle_address_by_chain(self.get_client().metadata.id)
-			.await
-		{
-			Ok(address) => address,
-			Err(_) => {
-				log::warn!(
-					target: &self.get_client().get_chain_name(),
-					"-[{}] ⚠️  DNC oracle not found for chain {}. Skipping hook execution.",
-					sub_display_format(SUB_LOG_TARGET),
-					self.get_client().metadata.id,
-				);
-				return Ok(None);
-			},
-		};
-		let bridged_asset_oracle_address = match self
-			.get_bifrost_client()
-			.get_oracle_address_by_asset_index(msg.params.tokenIDX0)
-			.await
-		{
-			Ok(address) => address,
-			Err(_) => {
-				log::warn!(
-					target: &self.get_client().get_chain_name(),
-					"-[{}] ⚠️  Bridged asset oracle not found for asset index {}. Skipping hook execution.",
-					sub_display_format(SUB_LOG_TARGET),
-					msg.params.tokenIDX0,
-				);
-				return Ok(None);
-			},
-		};
-
 		// Idempotency check on destination chain
 		if let Some(hooks) = &self.get_client().protocol_contracts.hooks {
 			let is_processed = hooks.processedRequests(msg.req_id.clone().into()).call().await?;
 
 			if !is_processed {
-				return Ok(Some((variants, dnc_oracle_address, bridged_asset_oracle_address)));
+				return Ok(Some(variants));
 			}
 			return Ok(None); // Already processed
 		}
@@ -411,8 +440,6 @@ where
 		msg: &Socket_Message,
 		max_tx_fee: U256,
 		tx_request: &N::TransactionRequest,
-		dnc_oracle_address: Address,
-		bridged_asset_oracle_address: Address,
 		is_inbound: bool,
 	) -> Result<(U256, u64)> {
 		// Validate: maxTxFee must not exceed the bridged amount
@@ -434,13 +461,10 @@ where
 				let is_revert = if let Some(error_resp) = e.as_error_resp() {
 					error_resp.as_revert_data().is_some()
 				} else {
-					// Handle case where error is wrapped by retry layer
-					// Pattern: "Max retries exceeded ... execution reverted"
 					error_string.contains("execution reverted") || error_string.contains("revert")
 				};
 
 				if is_revert {
-					// we don't propagate the error if a contract reverted the estimated gas request
 					br_primitives::log_and_capture!(
 						warn,
 						&self.get_client().get_chain_name(),
@@ -460,42 +484,45 @@ where
 			eyre::eyre!("Gas fee calculation overflow: gas={}, gas_price={}", gas, gas_price),
 		)?;
 
-		// Fetch destination chain native currency price oracle
-		let dnc_oracle_decimals =
-			self.get_bifrost_client().get_oracle_decimals(dnc_oracle_address).await?;
-		let dnc_native_oracle = self.get_bifrost_client().get_oracle(dnc_oracle_address).await;
-		// Get destination native currency price (keep oracle decimals for precision)
-		let dnc_price_scaled = match dnc_native_oracle.latestRoundData().call().await {
-			Ok(data) => U256::from(data.answer),
-			Err(e) => {
-				// Check if the error is a revert (on-chain oracle failure)
-				// Revert means the oracle is stale or not working, skip execution
-				let error_string = e.to_string();
-				let is_revert = if let Some(_revert_data) = e.as_revert_data() {
-					true
-				} else {
-					// Handle case where error is wrapped by retry layer
-					error_string.contains("execution reverted") || error_string.contains("revert")
-				};
+		// Resolve oracle manager from the socket contract
+		let oracle_manager = self.resolve_oracle_manager().await?;
 
-				if is_revert {
+		// Fetch DNC oracle ID: destination chain native currency → OracleKey::NativeCurrency(dst_chain_id)
+		let dst_chain_id = self.get_client().metadata.id;
+		let dnc_oid = match self.get_oracle_oid_for_chain(dst_chain_id).await? {
+			Some(oid) => oid,
+			None => {
+				br_primitives::log_and_capture!(
+					warn,
+					&self.get_client().get_chain_name(),
+					SUB_LOG_TARGET,
+					self.get_client().address().await,
+					"⚠️  DNC oracle ID not found for chain {}. Skipping hook execution.",
+					dst_chain_id
+				);
+				return Ok((U256::ZERO, 0));
+			},
+		};
+
+		// Resolve the unified asset address for the bridged token from the relay queue pallet.
+		// AssetIndexes maps tokenIDX0 → AssetId (H160) registered in the oracle registry.
+		let bridged_asset_id =
+			match self.fetch_asset_id_from_relay_queue(msg.params.tokenIDX0).await? {
+				Some(id) => id,
+				None => {
 					br_primitives::log_and_capture!(
 						warn,
 						&self.get_client().get_chain_name(),
 						SUB_LOG_TARGET,
 						self.get_client().address().await,
-						"⚠️  Destination native oracle reverted (oracle: {:?}). Skipping hook execution. Error: {}",
-						dnc_oracle_address,
-						error_string
+						"⚠️  Bridged asset not found in relay queue for tokenIDX0 {:?}. Skipping hook execution.",
+						msg.params.tokenIDX0
 					);
 					return Ok((U256::ZERO, 0));
-				}
-				// Not a revert - this is an RPC/network error, propagate it
-				return Err(e.into());
-			},
-		};
+				},
+			};
 
-		// Fetch bridged asset decimals
+		// Fetch bridged asset decimals from the destination chain
 		let bridged_asset = self
 			.get_client()
 			.get_asset_address_by_index(msg.params.tokenIDX0, is_inbound)
@@ -506,87 +533,99 @@ where
 			self.get_client().get_erc20_decimals(bridged_asset).await?
 		};
 
-		// Fetch bridged asset price oracle
-		let bridged_asset_oracle_decimals = self
-			.get_bifrost_client()
-			.get_oracle_decimals(bridged_asset_oracle_address)
-			.await?;
-		let bridged_asset_oracle =
-			self.get_bifrost_client().get_oracle(bridged_asset_oracle_address).await;
-		// Get bridged asset price (keep oracle decimals for precision)
-		let bridged_asset_price_scaled = match bridged_asset_oracle.latestRoundData().call().await {
-			Ok(data) => U256::from(data.answer),
-			Err(e) => {
-				// Check if the error is a revert (on-chain oracle failure)
-				let error_string = e.to_string();
-				let is_revert = if let Some(_revert_data) = e.as_revert_data() {
-					true
-				} else {
-					// Handle case where error is wrapped by retry layer
-					error_string.contains("execution reverted") || error_string.contains("revert")
-				};
+		// Bridged asset oracle ID: always look up by the unified AssetId from the relay queue.
+		let bridged_oid = match self.get_oracle_oid_for_asset(bridged_asset_id).await? {
+			Some(oid) => oid,
+			None => {
+				br_primitives::log_and_capture!(
+					warn,
+					&self.get_client().get_chain_name(),
+					SUB_LOG_TARGET,
+					self.get_client().address().await,
+					"⚠️  Bridged asset oracle ID not found for {:?}. Skipping hook execution.",
+					bridged_asset_id
+				);
+				return Ok((U256::ZERO, 0));
+			},
+		};
 
-				if is_revert {
+		// Fetch DNC price from oracle manager
+		let dnc_price = match oracle_manager.last_oracle_data(dnc_oid).call().await {
+			Ok(result) => {
+				let price = U256::from_be_bytes(result.into());
+				if price.is_zero() {
 					br_primitives::log_and_capture!(
 						warn,
 						&self.get_client().get_chain_name(),
 						SUB_LOG_TARGET,
 						self.get_client().address().await,
-						"⚠️  Bridged asset oracle reverted (token: {:?}). Skipping hook execution. Error: {}",
-						msg.params.tokenIDX0,
-						error_string
+						"⚠️  DNC oracle returned zero price. Skipping hook execution."
 					);
-					return Ok((U256::ZERO, 0)); // Skip execution, don't submit transaction
+					return Ok((U256::ZERO, 0));
 				}
-				// Not a revert - this is an RPC/network error, propagate it
-				return Err(e.into());
+				price
+			},
+			Err(e) => {
+				br_primitives::log_and_capture!(
+					warn,
+					&self.get_client().get_chain_name(),
+					SUB_LOG_TARGET,
+					self.get_client().address().await,
+					"⚠️  DNC oracle price fetch failed (chain: {}). Skipping hook execution. Error: {}",
+					dst_chain_id,
+					e.to_string()
+				);
+				return Ok((U256::ZERO, 0));
 			},
 		};
 
-		// Calculate fee in bridged asset with overflow-safe two-stage approach
-		//
-		// Problem: Direct calculation can overflow U256 with high-value assets (e.g., Bitcoin at $100k)
-		// Solution: Calculate price ratio first, then apply to fee with controlled intermediate values
-		//
-		// Stage 1: Calculate price ratio with 18 decimals precision
-		//   price_ratio = (dnc_price_scaled × 10^18) / bridged_price_scaled
-		//   Peak value: ~10^41 (safe, well below U256 max of 10^77)
-		//
-		// Stage 2: Apply ratio to fee with decimal adjustments
-		//   fee = (estimated_fee × price_ratio × 10^bridged_decimals) / (10^18 × 10^18)
-		//   Peak value: ~10^56 (safe, 21 orders of magnitude below U256 max)
-		//
-		// This preserves precision while guaranteeing zero overflow risk even with:
-		// - Bitcoin at $1M: 10^24 oracle price ✅
-		// - 100 ETH gas cost: 10^20 wei ✅
-		// - Any combination of realistic crypto prices ✅
-		//
-		// Oracle decimal handling:
-		// - When oracle decimals match: ratio calculation naturally preserves precision
-		// - When different: adjust with oracle decimal ratio in stage 2
+		// Fetch bridged asset price from oracle manager
+		let bridged_price = match oracle_manager.last_oracle_data(bridged_oid).call().await {
+			Ok(result) => {
+				let price = U256::from_be_bytes(result.into());
+				if price.is_zero() {
+					br_primitives::log_and_capture!(
+						warn,
+						&self.get_client().get_chain_name(),
+						SUB_LOG_TARGET,
+						self.get_client().address().await,
+						"⚠️  Bridged asset oracle returned zero price. Skipping hook execution."
+					);
+					return Ok((U256::ZERO, 0));
+				}
+				price
+			},
+			Err(e) => {
+				br_primitives::log_and_capture!(
+					warn,
+					&self.get_client().get_chain_name(),
+					SUB_LOG_TARGET,
+					self.get_client().address().await,
+					"⚠️  Bridged asset oracle price fetch failed (token: {:?}). Skipping hook execution. Error: {}",
+					bridged_asset,
+					e.to_string()
+				);
+				return Ok((U256::ZERO, 0));
+			},
+		};
 
-		// Stage 1: Calculate price ratio (DNC price / bridged price) with 18 decimals precision
-		let price_ratio_scaled = dnc_price_scaled
-			.checked_mul(U256::from(10u128.pow(18)))
-			.ok_or(eyre::eyre!("Price ratio scaling overflow"))?
-			.checked_div(bridged_asset_price_scaled)
-			.ok_or(eyre::eyre!("Price ratio calculation failed (division by zero?)"))?;
-
-		// Stage 2: Apply price ratio to estimated fee with decimal adjustments
+		// Fee conversion: same-scale oracle prices, no decimal correction needed.
+		//
+		// fee_bridged = estimated_fee_in_dnc × dnc_price × 10^bridged_decimals
+		//               ─────────────────────────────────────────────────────────
+		//                            bridged_price × 10^18
+		//
+		// Both prices come from the same OracleManager (unified scale), so no
+		// oracle-decimal adjustment is required.
 		let fee_in_bridged_asset = estimated_fee_in_dnc
-			.checked_mul(price_ratio_scaled)
-			.ok_or(eyre::eyre!("Fee × price ratio overflow"))?
-			.checked_mul(U256::from(10u128.pow(bridged_asset_decimals as u32)))
+			.checked_mul(dnc_price)
+			.ok_or(eyre::eyre!("Fee × DNC price overflow"))?
+			.checked_mul(U256::from(10u64).pow(U256::from(bridged_asset_decimals)))
 			.ok_or(eyre::eyre!("Bridged asset decimal adjustment overflow"))?
-			.checked_div(U256::from(10u128.pow(18)))
-			.ok_or(eyre::eyre!("DNC decimal normalization failed"))?
-			.checked_div(U256::from(10u128.pow(18)))
-			.ok_or(eyre::eyre!("Price ratio precision removal failed"))?
-			// Adjust for oracle decimal differences if they don't match
-			.checked_mul(U256::from(10u128.pow(bridged_asset_oracle_decimals as u32)))
-			.ok_or(eyre::eyre!("Oracle decimal adjustment overflow"))?
-			.checked_div(U256::from(10u128.pow(dnc_oracle_decimals as u32)))
-			.ok_or(eyre::eyre!("Oracle decimal normalization failed"))?;
+			.checked_div(bridged_price)
+			.ok_or(eyre::eyre!("Division by bridged price failed (zero?)"))?
+			.checked_div(U256::from(10u64).pow(U256::from(18u8)))
+			.ok_or(eyre::eyre!("DNC decimal normalization failed"))?;
 
 		// Validate: fee_in_bridged_asset <= maxTxFee
 		if fee_in_bridged_asset > max_tx_fee {
@@ -597,32 +636,14 @@ where
 			));
 		}
 
-		// Calculate human-readable prices for logging (convert to f64 to avoid truncation)
-		// Oracle prices should fit in u128 range (max realistic price: $1M × 10^18 < 2^128)
-		let dnc_price_display = if let Ok(price_u128) = u128::try_from(dnc_price_scaled) {
-			(price_u128 as f64) / 10f64.powi(dnc_oracle_decimals as i32)
-		} else {
-			// Fallback for extremely large values
-			(dnc_price_scaled / U256::from(10u128.pow(dnc_oracle_decimals as u32))).to::<u128>()
-				as f64
-		};
-		let bridged_price_display =
-			if let Ok(price_u128) = u128::try_from(bridged_asset_price_scaled) {
-				(price_u128 as f64) / 10f64.powi(bridged_asset_oracle_decimals as i32)
-			} else {
-				(bridged_asset_price_scaled
-					/ U256::from(10u128.pow(bridged_asset_oracle_decimals as u32)))
-				.to::<u128>() as f64
-			};
-
 		log::info!(
 			target: &self.get_client().get_chain_name(),
-			"-[{}] 💰 Hook fee estimate: {} (bridged asset wei) <= max_tx_fee: {}. dst_price: ${:.6}, bridged_price: ${:.6}",
+			"-[{}] 💰 Hook fee estimate: {} (bridged asset wei) <= max_tx_fee: {}. dnc_price: {}, bridged_price: {}",
 			sub_display_format(SUB_LOG_TARGET),
 			fee_in_bridged_asset,
 			max_tx_fee,
-			dnc_price_display,
-			bridged_price_display
+			dnc_price,
+			bridged_price,
 		);
 
 		Ok((fee_in_bridged_asset, gas))
@@ -753,8 +774,6 @@ where
 		&self,
 		msg: &Socket_Message,
 		variants: Variants,
-		dnc_oracle_address: Address,
-		bridged_asset_oracle_address: Address,
 		is_inbound: bool,
 	) -> Result<()> {
 		match &self.get_client().protocol_contracts.hooks {
@@ -775,14 +794,7 @@ where
 					.with_from(self.get_client().address().await);
 
 				let (fee_in_bridged_asset, gas) = self
-					.estimate_hook_gas(
-						&msg,
-						variants.max_tx_fee,
-						&init_tx_request,
-						dnc_oracle_address,
-						bridged_asset_oracle_address,
-						is_inbound,
-					)
+					.estimate_hook_gas(&msg, variants.max_tx_fee, &init_tx_request, is_inbound)
 					.await?;
 
 				if fee_in_bridged_asset.is_zero() || gas == 0 {

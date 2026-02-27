@@ -26,7 +26,6 @@ use crate::{
 		hooks::{HooksContract, HooksInstance},
 		registration_pool::{RegistrationPoolContract, RegistrationPoolInstance},
 		relay_executive::{RelayExecutiveContract, RelayExecutiveInstance},
-		relay_queue::{RelayQueueContract, RelayQueueInstance},
 		relayer_manager::{RelayerManagerContract, RelayerManagerInstance},
 		socket::{SocketContract, SocketInstance},
 		socket_queue::{SocketQueueContract, SocketQueueInstance},
@@ -57,12 +56,8 @@ where
 	F: TxFiller<N> + WalletProvider<N>,
 	P: Provider<N>,
 {
-	/// Cached oracle contract instances by address
-	pub oracles: RwLock<HashMap<Address, Arc<ChainlinkInstance<F, P, N>>>>,
 	/// Cached ERC20 contract instances by address
 	pub erc20s: RwLock<HashMap<Address, Arc<Erc20Instance<F, P, N>>>>,
-	/// Cached oracle decimals
-	pub oracle_decimals: RwLock<HashMap<Address, u8>>,
 	/// Cached ERC20 token decimals
 	pub erc20_decimals: RwLock<HashMap<Address, u8>>,
 }
@@ -73,12 +68,7 @@ where
 	P: Provider<N>,
 {
 	fn default() -> Self {
-		Self {
-			oracles: RwLock::new(HashMap::new()),
-			erc20s: RwLock::new(HashMap::new()),
-			oracle_decimals: RwLock::new(HashMap::new()),
-			erc20_decimals: RwLock::new(HashMap::new()),
-		}
+		Self { erc20s: RwLock::new(HashMap::new()), erc20_decimals: RwLock::new(HashMap::new()) }
 	}
 }
 
@@ -251,8 +241,6 @@ where
 	pub hooks: Option<HooksInstance<F, P, N>>,
 	/// RelayerManagerContract (Bifrost only)
 	pub relayer_manager: Option<RelayerManagerInstance<F, P, N>>,
-	/// RelayQueueContract (Bifrost only)
-	pub relay_queue: Option<RelayQueueInstance<F, P, N>>,
 	/// BitcoinSocketContract (Bifrost only)
 	pub bitcoin_socket: Option<BitcoinSocketInstance<F, P, N>>,
 	/// SocketQueueContract (Bifrost only)
@@ -295,7 +283,6 @@ where
 				)
 			}),
 			relayer_manager: None,
-			relay_queue: None,
 			bitcoin_socket: None,
 			socket_queue: None,
 			registration_pool: None,
@@ -306,13 +293,6 @@ where
 			contracts.relayer_manager = Some(RelayerManagerContract::new(
 				Address::from_str(
 					&evm_provider.relayer_manager_address.expect(MISSING_CONTRACT_ADDRESS),
-				)
-				.expect(INVALID_CONTRACT_ADDRESS),
-				provider.clone(),
-			));
-			contracts.relay_queue = Some(RelayQueueContract::new(
-				Address::from_str(
-					&evm_provider.relay_queue_address.expect(MISSING_CONTRACT_ADDRESS),
 				)
 				.expect(INVALID_CONTRACT_ADDRESS),
 				provider.clone(),

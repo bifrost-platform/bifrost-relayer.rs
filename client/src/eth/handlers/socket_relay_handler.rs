@@ -11,7 +11,7 @@ use alloy::{
 use array_bytes::Hexify;
 use eyre::Result;
 use sc_service::SpawnTaskHandle;
-use subxt::ext::subxt_core::utils::AccountId20;
+use subxt::{OnlineClient, ext::subxt_core::utils::AccountId20};
 use tokio::sync::{broadcast::Receiver, mpsc::UnboundedSender};
 use tokio_stream::{StreamExt, wrappers::BroadcastStream};
 
@@ -26,7 +26,7 @@ use br_primitives::{
 		SocketContract::Socket,
 	},
 	eth::{BootstrapState, BuiltRelayTransaction, RelayDirection, SocketEventStatus},
-	substrate::{SocketMessagesSubmission, bifrost_runtime},
+	substrate::{CustomConfig, SocketMessagesSubmission, bifrost_runtime},
 	tx::{SocketRelayMetadata, XtRequestMessage, XtRequestMetadata, XtRequestSender},
 	utils::sub_display_format,
 };
@@ -85,6 +85,8 @@ where
 	debug_mode: bool,
 	/// Pending events waiting for block confirmations.
 	pending_events: Arc<RwLock<Vec<PendingEvent>>>,
+	/// The Substrate online client for pallet storage queries.
+	sub_client: OnlineClient<CustomConfig>,
 }
 
 #[async_trait::async_trait]
@@ -247,19 +249,8 @@ where
 					return Ok(());
 				}
 				// Check if we should execute the hook (Executed status with valid requirements)
-				if let Some((variants, dnc_oracle_address, bridged_asset_oracle_address)) =
-					self.should_execute_hook(&msg).await?
-				{
-					match self
-						.execute_hook(
-							&msg,
-							variants,
-							dnc_oracle_address,
-							bridged_asset_oracle_address,
-							is_inbound,
-						)
-						.await
-					{
+				if let Some(variants) = self.should_execute_hook(&msg).await? {
+					match self.execute_hook(&msg, variants, is_inbound).await {
 						Ok(()) => (),
 						Err(error) => {
 							// we don't propagate the error to prevent hook execution errors fail the entire relay process
@@ -443,6 +434,7 @@ where
 		handle: SpawnTaskHandle,
 		bootstrap_shared_data: Arc<BootstrapSharedData>,
 		debug_mode: bool,
+		sub_client: OnlineClient<CustomConfig>,
 	) -> Self {
 		let client = system_clients.get(&id).expect(INVALID_CHAIN_ID).clone();
 
@@ -458,6 +450,7 @@ where
 			bootstrap_shared_data,
 			debug_mode,
 			pending_events: Arc::new(RwLock::new(Vec::new())),
+			sub_client,
 		}
 	}
 
@@ -1066,6 +1059,10 @@ where
 
 	fn get_system_client(&self, chain_id: &ChainId) -> Option<Arc<EthClient<F, P, N>>> {
 		self.system_clients.get(chain_id).cloned()
+	}
+
+	fn get_sub_client(&self) -> OnlineClient<CustomConfig> {
+		self.sub_client.clone()
 	}
 }
 

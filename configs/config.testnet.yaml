@@ -34,7 +34,6 @@ evm_providers:
     vault_address: "0x90381bB369D4F8069fdA9246b23637a78c5d1c83"
     hooks_address: "TODO"
     relayer_manager_address: "0x0000000000000000000000000000000000002000"
-    relay_queue_address: "0x0000000000000000000000000000000000002001"
     bitcoin_socket_address: "0xc292D9d5c31D5246cfAC67ba91202bbCF0AA8108"
     socket_queue_address: "0x0000000000000000000000000000000000000101"
     registration_pool_address: "0x0000000000000000000000000000000000000100"
@@ -95,9 +94,9 @@ evm_providers:
 
 handler_configs:
   - handler_type: Socket
-    watch_list: [ 49088, 11155111, 97, 84532, 421614 ]
+    watch_list: [49088, 11155111, 97, 84532, 421614]
   - handler_type: Roundup
-    watch_list: [ 49088 ]
+    watch_list: [49088]
 
 ###  The items below are optional. ###
 

@@ -6,7 +6,6 @@ use br_primitives::{
 	},
 	contracts::{
 		authority::BfcStaking::round_meta_data,
-		chainlink_aggregator::{ChainlinkContract, ChainlinkInstance},
 		erc20::{Erc20Contract, Erc20Instance},
 	},
 	eth::{
@@ -501,22 +500,6 @@ where
 		}
 	}
 
-	/// Get or create an oracle contract instance from cache.
-	pub async fn get_oracle(&self, address: Address) -> Arc<ChainlinkInstance<F, P, N>> {
-		// Check cache first
-		{
-			let cache = self.contract_cache.oracles.read().await;
-			if let Some(oracle) = cache.get(&address) {
-				return oracle.clone();
-			}
-		}
-
-		// Create new instance and cache it
-		let oracle = Arc::new(ChainlinkContract::new(address, self.inner.clone()));
-		self.contract_cache.oracles.write().await.insert(address, oracle.clone());
-		oracle
-	}
-
 	/// Get or create an ERC20 contract instance from cache.
 	pub async fn get_erc20(&self, address: Address) -> Arc<Erc20Instance<F, P, N>> {
 		// Check cache first
@@ -558,48 +541,6 @@ where
 				.await?
 				.target)
 		}
-	}
-
-	/// Get asset oracle address from RelayQueue contract.
-	pub async fn get_oracle_address_by_asset_index(
-		&self,
-		asset_index_hash: FixedBytes<32>,
-	) -> Result<Address> {
-		let relay_queue = self
-			.protocol_contracts
-			.relay_queue
-			.as_ref()
-			.ok_or(eyre::eyre!("RelayQueue contract not available"))?;
-
-		Ok(relay_queue.get_asset_oracle_by_hash(asset_index_hash).call().await?)
-	}
-
-	/// Get native currency oracle address from RelayQueue contract.
-	pub async fn get_oracle_address_by_chain(&self, chain_id: ChainId) -> Result<Address> {
-		let relay_queue = self
-			.protocol_contracts
-			.relay_queue
-			.as_ref()
-			.ok_or(eyre::eyre!("RelayQueue contract not available"))?;
-
-		Ok(relay_queue.get_native_currency_oracle(chain_id as u32).call().await?)
-	}
-
-	/// Get oracle decimals from cache or fetch and cache if not present.
-	pub async fn get_oracle_decimals(&self, address: Address) -> Result<u8> {
-		// Check cache first
-		{
-			let cache = self.contract_cache.oracle_decimals.read().await;
-			if let Some(&decimals) = cache.get(&address) {
-				return Ok(decimals);
-			}
-		}
-
-		// Fetch and cache
-		let oracle = self.get_oracle(address).await;
-		let decimals = oracle.decimals().call().await?;
-		self.contract_cache.oracle_decimals.write().await.insert(address, decimals);
-		Ok(decimals)
 	}
 
 	/// Get ERC20 token decimals from cache or fetch and cache if not present.

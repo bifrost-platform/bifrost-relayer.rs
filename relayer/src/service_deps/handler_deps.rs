@@ -58,6 +58,7 @@ where
 							task_manager.spawn_handle(),
 							Arc::new(bootstrap_shared_data.clone()),
 							debug_mode,
+							substrate_deps.sub_client.clone(),
 						);
 						socket_relay_handlers.push(socket_relay_handler);
 
