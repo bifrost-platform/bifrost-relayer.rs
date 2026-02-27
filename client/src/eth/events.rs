@@ -261,7 +261,17 @@ where
 		let should_bootstrap = self.is_before_bootstrap_state(BootstrapState::NormalStart).await;
 		if should_bootstrap {
 			self.wait_provider_sync().await.unwrap();
-			self.initial_flushing().await.unwrap();
+			match self.initial_flushing().await {
+				Ok(_) => (),
+				Err(e) => {
+					br_primitives::log_and_capture_simple!(
+						error,
+						"⚠️ [{}] Failed to flush stalled transactions: {}",
+						self.client.get_chain_name(),
+						e
+					);
+				},
+			}
 		}
 	}
 }
