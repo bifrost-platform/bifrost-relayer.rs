@@ -50,8 +50,9 @@ impl PriceFetcher for BinancePriceFetcher {
 			let volume = parse_ether(&ticker.volume)?;
 
 			if ticker.symbol == "BTCUSDT" {
-				// BTC ticker from binance is BTCB ticker
+				// BTC ticker from binance is BTCB & BTC ticker
 				ret.insert("BTCB".into(), PriceResponse { price, volume });
+				ret.insert("BTC".into(), PriceResponse { price, volume });
 			} else {
 				ret.insert(
 					ticker.symbol.clone().replace("USDT", ""),
@@ -66,7 +67,8 @@ impl PriceFetcher for BinancePriceFetcher {
 
 impl BinancePriceFetcher {
 	pub fn new(client: Client) -> Self {
-		let mut symbols: Vec<String> = vec!["ETH".into(), "BNB".into(), "POL".into(), "BTC".into()];
+		let mut symbols: Vec<String> =
+			vec!["ETH".into(), "BNB".into(), "POL".into(), "BTC".into(), "WBTC".into()];
 		symbols.iter_mut().for_each(|symbol| symbol.push_str("USDT"));
 
 		Self {

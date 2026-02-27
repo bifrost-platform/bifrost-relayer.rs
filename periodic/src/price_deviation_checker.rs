@@ -135,6 +135,7 @@ where
 			PriceSource::Gateio,
 			PriceSource::Kucoin,
 			PriceSource::Upbit,
+			PriceSource::Coinbase,
 		];
 		for source in sources {
 			if let Ok(fetcher) =

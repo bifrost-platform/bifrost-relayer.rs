@@ -328,6 +328,7 @@ where
 			PriceSource::Gateio,
 			PriceSource::Kucoin,
 			PriceSource::Upbit,
+			PriceSource::Coinbase,
 		];
 		for source in market_sources {
 			if let Ok(fetcher) =
