@@ -34,7 +34,7 @@ use alloy::{
 	transports::TransportResult,
 };
 use eyre::{Result, eyre};
-use rand::Rng as _;
+use rand::RngExt;
 use sc_service::SpawnTaskHandle;
 use std::{
 	cmp::max,

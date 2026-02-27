@@ -9,7 +9,7 @@ use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use cron::Schedule;
 use eyre::Result;
-use rand::Rng;
+use rand::RngExt;
 use sc_service::SpawnTaskHandle;
 use tokio::time::sleep;
 

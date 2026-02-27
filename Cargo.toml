@@ -21,9 +21,9 @@ repository = "https://github.com/bifrost-platform/bifrost-relayer.rs"
 
 [workspace.dependencies]
 # General
-log = "0.4.20"
-env_logger = "0.10.0"
-sentry = { version = "0.36.0", default-features = false, features = [
+log = "0.4.29"
+env_logger = "0.11.9"
+sentry = { version = "0.46", default-features = false, features = [
 	"reqwest",
 	"rustls",
 	"backtrace",
@@ -35,67 +35,67 @@ secrecy = { version = "0.8.0", default-features = false, features = [
 	"serde",
 ] }
 
-async-trait = "0.1.73"
-clap = "4.4.6"
+async-trait = "0.1.89"
+clap = "4.5.58"
 cron = "0.15.0"
-chrono = "0.4.31"
-thiserror = "2.0.11"
-futures = "0.3.28"
-reqwest = { version = "0.12.24", default-features = false, features = [
+chrono = "0.4.43"
+thiserror = "2.0.18"
+futures = "0.3.31"
+reqwest = { version = "0.12", default-features = false, features = [
 	"rustls-tls",
 	"json",
 	"http2",
 ] }
-rand = "0.9.0"
-lazy_static = "1.4.0"
-url = "2.5.0"
+rand = "0.10.0"
+lazy_static = "1.5.0"
+url = "2.5.8"
 array-bytes = "9.3.0"
 eyre = "0.6"
-tower = "0.5.0"
+tower = "0.5.3"
 
-serde_yaml = "0.9.25"
-serde = "1.0.188"
-serde_json = "1.0.107"
+serde_yaml = "0.9.34"
+serde = "1.0.228"
+serde_json = "1.0.149"
 
 hex = "0.4.3"
-alloy = { version = "1.0.32", default-features = false, features = [
+alloy = { version = "1.7", default-features = false, features = [
 	"full",
 	"reqwest-rustls-tls",
 	"json-rpc",
 	"signer-aws",
 ] }
-k256 = "0.13.1"
+k256 = "0.13.4"
 sha3 = "0.10.8"
 aes-gcm = "0.10.3"
 
-aws-sdk-kms = "1.54.0"
-aws-config = { version = "1.5.13", features = ["behavior-version-latest"] }
+aws-sdk-kms = "1.100.0"
+aws-config = { version = "1.8.14", features = ["behavior-version-latest"] }
 
-miniscript = "12.3.5"
+miniscript = "13.0.0"
 bitcoincore-rpc = { git = "https://github.com/bifrost-platform/rust-bitcoincore-rpc", branch = "0.19.0-reqwest" }
 
-tokio = "1.43.0"
-tokio-stream = "0.1.17"
+tokio = "1.49"
+tokio-stream = "0.1.18"
 
 subxt = "0.44.2"
 
 # Substrate Clients
-sc-cli = { git = "https://github.com/bifrost-platform/polkadot-sdk", default-features = false, branch = "bifrost-polkadot-stable2506" }
-sc-utils = { git = "https://github.com/bifrost-platform/polkadot-sdk", default-features = false, branch = "bifrost-polkadot-stable2506" }
-sc-service = { git = "https://github.com/bifrost-platform/polkadot-sdk", default-features = false, branch = "bifrost-polkadot-stable2506" }
-sc-sysinfo = { git = "https://github.com/bifrost-platform/polkadot-sdk", default-features = false, branch = "bifrost-polkadot-stable2506" }
-sc-keystore = { git = "https://github.com/bifrost-platform/polkadot-sdk", default-features = false, branch = "bifrost-polkadot-stable2506" }
-prometheus-endpoint = { package = "substrate-prometheus-endpoint", default-features = false, git = "https://github.com/bifrost-platform/polkadot-sdk", branch = "bifrost-polkadot-stable2506" }
+sc-cli = { git = "https://github.com/bifrost-platform/polkadot-sdk", default-features = false, branch = "bifrost-polkadot-stable2512" }
+sc-utils = { git = "https://github.com/bifrost-platform/polkadot-sdk", default-features = false, branch = "bifrost-polkadot-stable2512" }
+sc-service = { git = "https://github.com/bifrost-platform/polkadot-sdk", default-features = false, branch = "bifrost-polkadot-stable2512" }
+sc-sysinfo = { git = "https://github.com/bifrost-platform/polkadot-sdk", default-features = false, branch = "bifrost-polkadot-stable2512" }
+sc-keystore = { git = "https://github.com/bifrost-platform/polkadot-sdk", default-features = false, branch = "bifrost-polkadot-stable2512" }
+prometheus-endpoint = { package = "substrate-prometheus-endpoint", default-features = false, git = "https://github.com/bifrost-platform/polkadot-sdk", branch = "bifrost-polkadot-stable2512" }
 
 # Substrate Primitives
-sp-core = { git = "https://github.com/bifrost-platform/polkadot-sdk", default-features = false, branch = "bifrost-polkadot-stable2506" }
-sp-application-crypto = { git = "https://github.com/bifrost-platform/polkadot-sdk", default-features = false, branch = "bifrost-polkadot-stable2506" }
-parity-scale-codec = { version = "3.6.12", default-features = false, features = [
+sp-core = { git = "https://github.com/bifrost-platform/polkadot-sdk", default-features = false, branch = "bifrost-polkadot-stable2512" }
+sp-application-crypto = { git = "https://github.com/bifrost-platform/polkadot-sdk", default-features = false, branch = "bifrost-polkadot-stable2512" }
+parity-scale-codec = { version = "3.7.5", default-features = false, features = [
 	"derive",
 ] }
 
 # Substrate Builds
-substrate-build-script-utils = { git = "https://github.com/bifrost-platform/polkadot-sdk", default-features = false, branch = "bifrost-polkadot-stable2506" }
+substrate-build-script-utils = { git = "https://github.com/bifrost-platform/polkadot-sdk", default-features = false, branch = "bifrost-polkadot-stable2512" }
 
 [profile.production]
 inherits = "release"
