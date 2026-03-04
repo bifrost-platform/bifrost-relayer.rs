@@ -246,7 +246,6 @@ where
 		let mut deviated_oids: Vec<FixedBytes<32>> = vec![];
 		let mut deviated_prices: Vec<FixedBytes<32>> = vec![];
 		let mut deviated_responses: BTreeMap<String, PriceResponse> = BTreeMap::new();
-		let mut finalize_only_oids: Vec<FixedBytes<32>> = vec![];
 
 		for (symbol, market_response) in &market_prices {
 			let oid = match self.asset_oid.get(symbol.as_str()) {
@@ -278,42 +277,6 @@ where
 			let threshold = U256::from(get_deviation_threshold_bps(symbol));
 
 			if deviation_bps > threshold {
-				// Deviation detected against finalized price. Check if a pending
-				// finalization (latest) already resolves the deviation.
-				let latest_price = match oracle_manager.latest_oracle_data(oid).call().await {
-					Ok(result) => {
-						let p = U256::from_be_bytes(result.into());
-						if p != on_chain_price { Some(p) } else { None }
-					},
-					Err(_) => None,
-				};
-
-				if let Some(pending_price) = latest_price {
-					// Quorum met with a pending price — check if it resolves deviation
-					let pending_deviation_bps = if market_response.price > pending_price {
-						(market_response.price - pending_price) * U256::from(10_000) / pending_price
-					} else {
-						(pending_price - market_response.price) * U256::from(10_000) / pending_price
-					};
-
-					if pending_deviation_bps <= threshold {
-						// Pending price resolves deviation — finalize only, skip feed
-						log::info!(
-							target: &self.client.get_chain_name(),
-							"-[{}] ✅ {} deviation resolved by pending finalization \
-							(finalized={}, pending={}, market={}, pending_dev={}bps)",
-							sub_display_format(SUB_LOG_TARGET),
-							symbol,
-							on_chain_price,
-							pending_price,
-							market_response.price,
-							pending_deviation_bps
-						);
-						finalize_only_oids.push(oid);
-						continue;
-					}
-				}
-
 				log::warn!(
 					target: &self.client.get_chain_name(),
 					"-[{}] 🚨 Price deviation detected for {}: \
@@ -332,10 +295,6 @@ where
 			}
 		}
 
-		// Finalize-only: pending prices that already resolve deviation
-		self.try_finalize_prices(oracle_manager, &finalize_only_oids).await;
-
-		// Feed deviated assets and then finalize
 		if !deviated_oids.is_empty() {
 			log::info!(
 				target: &self.client.get_chain_name(),
@@ -368,51 +327,35 @@ where
 				);
 			}
 
-			self.try_finalize_prices(oracle_manager, &deviated_oids).await;
+			// Finalize all fed assets
+			self.finalize_prices(oracle_manager, &deviated_oids);
 		}
 	}
 
-	/// Check if fed oracle prices can be finalized (quorum met) and send tx if so.
-	///
-	/// For each fed OID, compares `last_oracle_data` (current finalized price) with
-	/// `latest_oracle_data` (simulated via eth_call). If they differ, quorum has been
-	/// reached and we send the actual `latest_oracle_data` transaction to finalize.
-	async fn try_finalize_prices(
+	/// Send `latest_oracle_data` for each OID to finalize the oracle price.
+	fn finalize_prices(
 		&self,
 		oracle_manager: &OracleManagerInstance<F, P, N>,
-		fed_oids: &[FixedBytes<32>],
+		oids: &[FixedBytes<32>],
 	) {
-		for oid in fed_oids {
-			let last = match oracle_manager.last_oracle_data(*oid).call().await {
-				Ok(r) => r,
-				Err(_) => continue,
-			};
-			let latest = match oracle_manager.latest_oracle_data(*oid).call().await {
-				Ok(r) => r,
-				Err(_) => continue,
-			};
+		for oid in oids {
+			log::info!(
+				target: &self.client.get_chain_name(),
+				"-[{}] 🔒 Finalizing oracle price (oid: {:?})",
+				sub_display_format(SUB_LOG_TARGET),
+				oid
+			);
 
-			if last != latest {
-				log::info!(
-					target: &self.client.get_chain_name(),
-					"-[{}] 🔒 Finalizing oracle price (oid: {:?}), last: {:?}, latest: {:?}",
-					sub_display_format(SUB_LOG_TARGET),
-					oid,
-					last,
-					latest
-				);
+			let tx_request = oracle_manager.latest_oracle_data(*oid).into_transaction_request();
 
-				let tx_request = oracle_manager.latest_oracle_data(*oid).into_transaction_request();
-
-				send_transaction(
-					self.client.clone(),
-					tx_request,
-					SUB_LOG_TARGET.to_string(),
-					TxRequestMetadata::PriceFeed(PriceFeedMetadata::new(BTreeMap::new())),
-					self.debug_mode,
-					self.handle.clone(),
-				);
-			}
+			send_transaction(
+				self.client.clone(),
+				tx_request,
+				SUB_LOG_TARGET.to_string(),
+				TxRequestMetadata::PriceFeed(PriceFeedMetadata::new(BTreeMap::new())),
+				self.debug_mode,
+				self.handle.clone(),
+			);
 		}
 	}
 
