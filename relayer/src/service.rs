@@ -252,6 +252,7 @@ where
 	let PeriodicDeps {
 		mut heartbeat_sender,
 		mut oracle_price_feeder,
+		mut price_deviation_checker,
 		mut roundup_emitter,
 		rollback_emitters,
 		mut keypair_migrator,
@@ -340,6 +341,30 @@ where
 					"oracle price feeder({}:{}) stopped: {:?}\nRestarting in 12 seconds...",
 					oracle_price_feeder.client.get_chain_name(),
 					oracle_price_feeder.client.address().await,
+					report
+				);
+				log::error!("{log_msg}");
+				sentry::capture_message(&log_msg, sentry::Level::Error);
+
+				tokio::time::sleep(Duration::from_secs(12)).await;
+			}
+		},
+	);
+
+	// spawn price deviation checker
+	task_manager.spawn_essential_handle().spawn(
+		Box::leak(
+			format!("{}-price-deviation-checker", price_deviation_checker.client.get_chain_name())
+				.into_boxed_str(),
+		),
+		Some("oracle"),
+		async move {
+			loop {
+				let report = price_deviation_checker.run().await;
+				let log_msg = format!(
+					"price deviation checker({}:{}) stopped: {:?}\nRestarting in 12 seconds...",
+					price_deviation_checker.client.get_chain_name(),
+					price_deviation_checker.client.address().await,
 					report
 				);
 				log::error!("{log_msg}");

@@ -1,4 +1,4 @@
-use std::{collections::BTreeMap, fmt::Error, str::FromStr, sync::Arc};
+use std::{collections::BTreeMap, fmt::Error, str::FromStr, sync::Arc, time::Duration};
 
 use alloy::{
 	network::Network,
@@ -13,9 +13,14 @@ use rand::Rng;
 use sc_service::SpawnTaskHandle;
 use tokio::time::sleep;
 
+use reqwest::Client;
+
 use br_client::eth::{ClientMap, EthClient, send_transaction};
 use br_primitives::{
-	constants::{errors::INVALID_PERIODIC_SCHEDULE, schedule::PRICE_FEEDER_SCHEDULE},
+	constants::{
+		config::PRICE_FETCHER_REQUEST_TIMEOUT, errors::INVALID_PERIODIC_SCHEDULE,
+		schedule::PRICE_FEEDER_SCHEDULE,
+	},
 	contracts::socket::get_asset_oids,
 	eth::AggregatorContracts,
 	periodic::{PriceResponse, PriceSource},
@@ -40,11 +45,10 @@ where
 	pub client: Arc<EthClient<F, P, N>>,
 	/// The time schedule that represents when to send price feeds.
 	schedule: Schedule,
-	/// The primary sources for fetching prices. (Standard: Coingecko, Dedicated)
-	/// In cases when token volume is too low in the exchanges, we have to use the dedicated source.
-	primary_sources: Vec<PriceFetchers<F, P, N>>,
-	/// The secondary sources for fetching prices. (aggregated from external sources)
-	secondary_sources: Vec<PriceFetchers<F, P, N>>,
+	/// The dedicated source for a specific token (e.g. ExchangeRate for JPYC).
+	dedicated_source: Option<PriceFetchers<F, P, N>>,
+	/// The market sources for fetching prices (VWAP aggregated).
+	market_sources: Vec<PriceFetchers<F, P, N>>,
 	/// The pre-defined oracle ID's for each asset.
 	asset_oid: BTreeMap<&'static str, B256>,
 	/// The vector that contains each `EthClient`.
@@ -73,10 +77,10 @@ where
 			self.feed_period_spreader(upcoming, true).await;
 
 			if self.client.is_selected_relayer().await? {
-				if self.primary_sources.is_empty() {
-					panic!("Primary source is empty");
+				if self.market_sources.is_empty() {
+					panic!("Market sources are empty");
 				} else {
-					self.try_with_primary().await;
+					self.fetch_and_feed().await;
 				}
 			}
 
@@ -100,8 +104,8 @@ where
 
 		Self {
 			schedule: Schedule::from_str(PRICE_FEEDER_SCHEDULE).expect(INVALID_PERIODIC_SCHEDULE),
-			primary_sources: vec![],
-			secondary_sources: vec![],
+			dedicated_source: None,
+			market_sources: vec![],
 			asset_oid,
 			client,
 			clients,
@@ -127,59 +131,76 @@ where
 		}
 	}
 
-	async fn try_with_primary(&self) {
+	async fn fetch_and_feed(&self) {
 		let mut all_prices = BTreeMap::new();
-		let mut failed_modes = Vec::new();
 
-		// Collect prices from all primary sources
-		for fetcher in &self.primary_sources {
-			match fetcher.get_tickers().await {
+		// Fetch Standard mode prices from exchange sources (VWAP)
+		match self.fetch_vwap_prices(FetchMode::Standard).await {
+			Ok(standard_prices) => {
+				log::info!(
+					target: &self.client.get_chain_name(),
+					"-[{}] ✅ Fetched {} prices from exchange sources (VWAP)",
+					sub_display_format(SUB_LOG_TARGET),
+					standard_prices.len()
+				);
+				all_prices.extend(standard_prices);
+			},
+			Err(_) => {
+				br_primitives::log_and_capture!(
+					error,
+					&self.client.get_chain_name(),
+					SUB_LOG_TARGET,
+					self.client.address().await,
+					"❗️ Failed to fetch Standard prices from exchange sources."
+				);
+			},
+		}
+
+		// Fetch Dedicated mode prices from dedicated source (e.g. ExchangeRate for JPYC)
+		if let Some(ref source) = self.dedicated_source {
+			let mode = source.mode();
+			match source.get_tickers().await {
 				Ok(price_responses) => {
 					log::info!(
 						target: &self.client.get_chain_name(),
-						"-[{}] ✅ Fetched {} prices from primary source (mode: {:?})",
+						"-[{}] ✅ Fetched {} prices from dedicated source (mode: {:?})",
 						sub_display_format(SUB_LOG_TARGET),
 						price_responses.len(),
-						fetcher.mode()
+						mode
 					);
 					all_prices.extend(price_responses);
 				},
 				Err(_) => {
 					log::warn!(
 						target: &self.client.get_chain_name(),
-						"-[{}] ⚠️  Failed to fetch price feed data from primary source (mode: {:?}). Will retry with secondary sources.",
+						"-[{}] ⚠️  Failed to fetch from dedicated source (mode: {:?}). Retrying with exchange sources.",
 						sub_display_format(SUB_LOG_TARGET),
-						fetcher.mode()
+						mode
 					);
-					failed_modes.push(fetcher.mode());
+					match self.fetch_vwap_prices(mode.clone()).await {
+						Ok(fallback_prices) => {
+							log::info!(
+								target: &self.client.get_chain_name(),
+								"-[{}] ✅ Fetched {} prices from exchange sources (mode: {:?})",
+								sub_display_format(SUB_LOG_TARGET),
+								fallback_prices.len(),
+								mode
+							);
+							all_prices.extend(fallback_prices);
+						},
+						Err(_) => {
+							br_primitives::log_and_capture!(
+								error,
+								&self.client.get_chain_name(),
+								SUB_LOG_TARGET,
+								self.client.address().await,
+								"❗️ Failed to fetch prices from exchange sources (mode: {:?}). Skipping this feeding.",
+								mode
+							);
+						},
+					}
 				},
 			};
-		}
-
-		// Fetch from secondary sources for failed modes
-		for mode in failed_modes {
-			match self.fetch_from_secondary(mode.clone()).await {
-				Ok(secondary_prices) => {
-					log::info!(
-						target: &self.client.get_chain_name(),
-						"-[{}] ✅ Fetched {} prices from secondary sources (mode: {:?})",
-						sub_display_format(SUB_LOG_TARGET),
-						secondary_prices.len(),
-						mode
-					);
-					all_prices.extend(secondary_prices);
-				},
-				Err(_) => {
-					br_primitives::log_and_capture!(
-						error,
-						&self.client.get_chain_name(),
-						SUB_LOG_TARGET,
-						self.client.address().await,
-						"❗️ Failed to fetch prices from secondary sources (mode: {:?}). Skipping this feeding.",
-						mode
-					);
-				},
-			}
 		}
 
 		// Send single transaction with all collected prices
@@ -202,46 +223,49 @@ where
 		}
 	}
 
-	/// If price data fetch failed with primary source, try with secondary sources.
-	async fn fetch_from_secondary(
+	/// Fetch volume-weighted average prices from exchange sources for the given mode.
+	async fn fetch_vwap_prices(
 		&self,
 		mode: FetchMode,
 	) -> Result<BTreeMap<String, PriceResponse>, Error> {
 		log::info!(
 			target: &self.client.get_chain_name(),
-			"-[{}] Fetching with secondary sources, mode: {:?}",
+			"-[{}] Fetching VWAP prices from exchange sources, mode: {:?}",
 			sub_display_format(SUB_LOG_TARGET),
 			mode
 		);
 
+		// Fetch from all matching exchange sources in parallel
+		let futures: Vec<_> = self
+			.market_sources
+			.iter()
+			.filter(|f| f.mode() == mode)
+			.map(|f| f.get_tickers())
+			.collect();
+		let results = futures::future::join_all(futures).await;
+
 		// (volume weighted price sum, total volume)
 		let mut volume_weighted: BTreeMap<String, (U256, U256)> = BTreeMap::new();
 
-		for fetcher in &self.secondary_sources {
-			if fetcher.mode() != mode {
-				continue;
-			}
-			match fetcher.get_tickers().await {
-				Ok(tickers) => {
-					tickers.iter().for_each(|(symbol, price_response)| {
-						if !price_response.volume.unwrap().is_zero() {
-							if let Some(value) = volume_weighted.get_mut(symbol) {
-								value.0 += price_response.price * price_response.volume.unwrap();
-								value.1 += price_response.volume.unwrap();
-							} else {
-								volume_weighted.insert(
-									symbol.clone(),
-									(
-										price_response.price * price_response.volume.unwrap(),
-										price_response.volume.unwrap(),
-									),
-								);
-							}
+		for result in results {
+			if let Ok(tickers) = result {
+				tickers.iter().for_each(|(symbol, price_response)| {
+					if !price_response.volume.is_zero() {
+						if let Some(value) = volume_weighted.get_mut(symbol) {
+							value.0 += price_response.price * price_response.volume;
+							value.1 += price_response.volume;
+						} else {
+							volume_weighted.insert(
+								symbol.clone(),
+								(
+									price_response.price * price_response.volume,
+									price_response.volume,
+								),
+							);
 						}
-					});
-				},
-				Err(_) => continue,
-			};
+					}
+				});
+			}
 		}
 
 		if volume_weighted.is_empty() {
@@ -273,7 +297,7 @@ where
 					symbol,
 					PriceResponse {
 						price: volume_weighted_sum / total_volume,
-						volume: total_volume.into(),
+						volume: total_volume,
 					},
 				)
 			})
@@ -282,27 +306,35 @@ where
 
 	/// Initialize price fetchers. Can't move into new().
 	async fn initialize_fetchers(&mut self) {
-		if let Ok(primary) =
-			PriceFetchers::new(PriceSource::Coingecko, None, FetchMode::Standard).await
+		let http_client = Client::builder()
+			.timeout(Duration::from_secs(PRICE_FETCHER_REQUEST_TIMEOUT))
+			.build()
+			.expect("Failed to build HTTP client");
+
+		if let Ok(fetcher) = PriceFetchers::new(
+			PriceSource::ExchangeRate,
+			None,
+			http_client.clone(),
+			FetchMode::Dedicated("JPYC".into()),
+		)
+		.await
 		{
-			self.primary_sources.push(primary);
-		}
-		if let Ok(primary) =
-			PriceFetchers::new(PriceSource::ExchangeRate, None, FetchMode::Dedicated("JPYC".into()))
-				.await
-		{
-			self.primary_sources.push(primary);
+			self.dedicated_source = Some(fetcher);
 		}
 
-		let secondary_sources = vec![
+		let market_sources = vec![
 			PriceSource::Binance,
+			PriceSource::Bithumb,
 			PriceSource::Gateio,
 			PriceSource::Kucoin,
 			PriceSource::Upbit,
+			PriceSource::Coinbase,
 		];
-		for source in secondary_sources {
-			if let Ok(fetcher) = PriceFetchers::new(source, None, FetchMode::Standard).await {
-				self.secondary_sources.push(fetcher);
+		for source in market_sources {
+			if let Ok(fetcher) =
+				PriceFetchers::new(source, None, http_client.clone(), FetchMode::Standard).await
+			{
+				self.market_sources.push(fetcher);
 			}
 		}
 
@@ -311,22 +343,24 @@ where
 				if let Ok(fetcher) = PriceFetchers::new(
 					PriceSource::Chainlink,
 					client.clone().into(),
+					http_client.clone(),
 					FetchMode::Standard,
 				)
 				.await
 				{
-					self.secondary_sources.push(fetcher);
+					self.market_sources.push(fetcher);
 				}
 			}
 			if Self::has_chainlink_feed(&client.aggregator_contracts, "JPYC") {
 				if let Ok(fetcher) = PriceFetchers::new(
 					PriceSource::Chainlink,
 					client.clone().into(),
+					http_client.clone(),
 					FetchMode::Dedicated("JPYC".into()),
 				)
 				.await
 				{
-					self.secondary_sources.push(fetcher);
+					self.market_sources.push(fetcher);
 				}
 			}
 		}
@@ -364,6 +398,15 @@ where
 		let mut price_bytes_list: Vec<FixedBytes<32>> = vec![];
 
 		price_responses.iter().for_each(|(symbol, price_response)| {
+			if price_response.price.is_zero() {
+				log::warn!(
+					target: &self.client.get_chain_name(),
+					"-[{}] ⚠️  Skipping {} due to zero price.",
+					sub_display_format(SUB_LOG_TARGET),
+					symbol,
+				);
+				return;
+			}
 			oid_bytes_list.push(*self.asset_oid.get(symbol.as_str()).unwrap());
 			price_bytes_list.push(price_response.price.into());
 		});

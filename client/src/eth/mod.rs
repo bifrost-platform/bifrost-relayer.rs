@@ -96,6 +96,11 @@ where
 		}
 	}
 
+	/// Get the inner provider.
+	pub fn provider(&self) -> Arc<FillProvider<F, P, N>> {
+		self.inner.clone()
+	}
+
 	/// Verifies whether the configured chain id and the provider's chain id match.
 	pub async fn verify_chain_id(&self) -> Result<()> {
 		let chain_id = self.get_chain_id().await?;
@@ -427,7 +432,7 @@ where
 	}
 
 	/// Send a transaction synchronously.
-	async fn sync_send_transaction(
+	pub async fn sync_send_transaction(
 		&self,
 		mut request: N::TransactionRequest,
 		requester: String,
