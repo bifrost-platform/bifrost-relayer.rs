@@ -881,14 +881,14 @@ where
 			if self.is_inbound_sequence(dst) || dst != bitcoin_chain_id {
 				return Ok(());
 			}
-			if self.get_client().chain_id() == 3068 {
+			if self.client.chain_id() == 3068 {
 				if msg.params.tokenIDX0
 					!= b256!("0x000000030000000300000bfccb4e4f67b33eebfc17c82cf6e8c0b56d269aeb79")
 				{
 					return Ok(());
 				}
 			}
-			if self.get_client().chain_id() == 49088 {
+			if self.client.chain_id() == 49088 {
 				if msg.params.tokenIDX0
 					!= b256!("0x00000003000000030000bfc0e002306b8fdf96044eef870cc500f15e11ef4eaa")
 				{
