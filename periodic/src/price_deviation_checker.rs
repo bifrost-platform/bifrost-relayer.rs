@@ -315,7 +315,7 @@ where
 				.sync_send_transaction(
 					tx_request,
 					SUB_LOG_TARGET.to_string(),
-					TxRequestMetadata::PriceFeed(PriceFeedMetadata::new(deviated_responses)),
+					Arc::new(PriceFeedMetadata::new(deviated_responses)),
 				)
 				.await
 			{
@@ -352,7 +352,7 @@ where
 				self.client.clone(),
 				tx_request,
 				SUB_LOG_TARGET.to_string(),
-				Arc::new(PriceFeedMetadata::new(deviated_responses)),
+				Arc::new(PriceFeedMetadata::new(BTreeMap::new())),
 				self.debug_mode,
 				self.handle.clone(),
 			);
