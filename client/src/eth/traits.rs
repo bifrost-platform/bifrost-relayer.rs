@@ -114,10 +114,13 @@ where
 			.call()
 			.await?;
 
-		let mut signature_vec = Vec::<Signature>::from(signatures);
-		signature_vec.sort_by_key(|k| recover_message(*k, &msg.abi_encode()));
+		let mut keyed = Vec::<Signature>::from(signatures)
+			.into_iter()
+			.map(|sig| recover_message(sig, &msg.abi_encode()).map(|addr| (addr, sig)))
+			.collect::<Result<Vec<_>, _>>()?;
+		keyed.sort_by_key(|(addr, _)| *addr);
 
-		Ok(Signatures::from(signature_vec))
+		Ok(Signatures::from(keyed.into_iter().map(|(_, sig)| sig).collect::<Vec<_>>()))
 	}
 }
 
