@@ -503,7 +503,7 @@ where
 			}
 			if self.get_client().chain_id() == 49088 {
 				if msg.params.tokenIDX0
-					!= b256!("0x00000003000000030000bfc06dc9a4f82a0dc721dc0aa89be6eadc7a553191c1")
+					!= b256!("0x00000003000000030000bfc03249548c713c9c75c003de2dc0e7bc8fa7b8eea5")
 				{
 					return Ok(());
 				}
