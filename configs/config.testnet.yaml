@@ -17,7 +17,8 @@ keystore_config:
 btc_provider:
   id: 10001
   chain: "test"
-  provider: "<YOUR_BITCOIN_RPC_ENDPOINT>"
+  # For testnet, the RPC must be testnet4
+  provider: "<YOUR_BITCOIN_TESTNET4_RPC_ENDPOINT>"
   call_interval: 10000
 
 evm_providers:
@@ -60,6 +61,7 @@ evm_providers:
     chainlink_dai_usd_address: "0xE4eE17114774713d2De0eC0f035d4F7665fc025D"
     chainlink_btc_usd_address: "0x5741306c21795FdCBb9b265Ea0255F499DFe515C"
     chainlink_wbtc_usd_address: "0x5741306c21795FdCBb9b265Ea0255F499DFe515C"
+    chainlink_cbbtc_usd_address: "0x5741306c21795FdCBb9b265Ea0255F499DFe515C"
   - name: "base-sepolia"
     id: 84532
     provider: "<YOUR_BASE_SEPOLIA_RPC_ENDPOINT>"
@@ -82,9 +84,9 @@ evm_providers:
 
 handler_configs:
   - handler_type: Socket
-    watch_list: [49088, 11155111, 97, 84532, 421614]
+    watch_list: [ 49088, 11155111, 97, 84532, 421614 ]
   - handler_type: Roundup
-    watch_list: [49088]
+    watch_list: [ 49088 ]
 
 ###  The items below are optional. ###
 

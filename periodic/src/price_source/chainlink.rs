@@ -7,14 +7,29 @@ use alloy::{
 	providers::{Provider, WalletProvider, fillers::TxFiller},
 };
 use br_client::eth::EthClient;
-use br_primitives::periodic::PriceResponse;
+use br_primitives::{
+	constants::config::{
+		CHAINLINK_STALENESS_THRESHOLD_STABLE, CHAINLINK_STALENESS_THRESHOLD_VOLATILE,
+	},
+	periodic::PriceResponse,
+	utils::sub_display_format,
+};
 use eyre::{Result, eyre};
+
+const SUB_LOG_TARGET: &str = "chainlink";
 
 fn get_chainlink_volume_weight(symbol: &str) -> Result<U256> {
 	match symbol {
 		"USDC" | "USDT" | "DAI" | "JPYC" => Ok(U256::from(1)),
-		"BTC" | "WBTC" | "CBBTC" => Ok(U256::from(10_000)),
+		"BTC" | "WBTC" | "CBBTC" => Ok(U256::from(10_000) * U256::from(10u128.pow(18))),
 		_ => Err(eyre!("Invalid symbol: {}", symbol)),
+	}
+}
+
+fn get_staleness_threshold(symbol: &str) -> u64 {
+	match symbol {
+		"USDC" | "USDT" | "DAI" | "JPYC" => CHAINLINK_STALENESS_THRESHOLD_STABLE,
+		_ => CHAINLINK_STALENESS_THRESHOLD_VOLATILE,
 	}
 }
 
@@ -53,13 +68,39 @@ where
 							"JPYC" => &client.aggregator_contracts.chainlink_jpy_usd,
 							_ => return Err(eyre!("Invalid symbol")),
 						} {
-							let (_, price, _, _, _) =
+							let (_, price, _, updated_at, _) =
 								contract.latestRoundData().call().await?.into();
+
+							let now = std::time::SystemTime::now()
+								.duration_since(std::time::UNIX_EPOCH)?
+								.as_secs();
+							let updated_at_secs: u64 = updated_at.try_into().unwrap_or(0);
+							let staleness = now.saturating_sub(updated_at_secs);
+
+							let threshold = get_staleness_threshold(symbol_str);
+							if staleness > threshold {
+								log::warn!(
+									target: "price-fetcher",
+									"-[{}] ⚠️  Chainlink {} price is stale \
+									(last updated {}s ago, threshold: {}s). Skipping.",
+									sub_display_format(SUB_LOG_TARGET),
+									symbol_str,
+									staleness,
+									threshold,
+								);
+								return Err(eyre!(
+									"Chainlink {} price is stale ({}s > {}s)",
+									symbol_str,
+									staleness,
+									threshold,
+								));
+							}
+
 							let price = price.into_raw();
 							let decimals = contract.decimals().call().await?;
 
 							let price = price * U256::from(10u128.pow((18 - decimals).into()));
-							let volume = Some(get_chainlink_volume_weight(symbol_str)?);
+							let volume = get_chainlink_volume_weight(symbol_str)?;
 
 							Ok(PriceResponse { price, volume })
 						} else {
