@@ -17,7 +17,8 @@ keystore_config:
 btc_provider:
   id: 10001
   chain: "test"
-  provider: "<YOUR_BITCOIN_RPC_ENDPOINT>"
+  # For testnet, the RPC must be testnet4
+  provider: "<YOUR_BITCOIN_TESTNET4_RPC_ENDPOINT>"
   call_interval: 10000
 
 evm_providers:
