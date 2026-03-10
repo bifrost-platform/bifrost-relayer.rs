@@ -133,7 +133,9 @@ where
 				address: BoundedVec(event.address.assume_checked_ref().to_string().into_bytes()),
 			}],
 		};
-		let utxo_hash = keccak256(Encode::encode(&(txid, event.index, event.amount.to_sat())));
+		let address = BoundedVec(event.address.assume_checked_ref().to_string().into_bytes());
+		let utxo_hash =
+			keccak256(Encode::encode(&(txid, event.index, event.amount.to_sat(), address)));
 
 		let signature = self
 			.bfc_client
@@ -225,6 +227,7 @@ where
 				event.txid.to_byte_array().into(),
 				U256::from(event.index),
 				U256::from(event.amount.to_sat()),
+				event.address.assume_checked_ref().to_string().into_bytes().into(),
 				self.bfc_client().address().await,
 			)
 			.call()
