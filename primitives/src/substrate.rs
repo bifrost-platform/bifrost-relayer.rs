@@ -3,7 +3,7 @@
 	derive_for_all_types = "Clone",
 	derive_for_type(
 		path = "bounded_collections::bounded_vec::BoundedVec",
-		derive = "Ord, PartialOrd, Eq, PartialEq"
+		derive = "Ord, PartialOrd, Eq, PartialEq, ::subxt::ext::codec::Encode"
 	),
 	derive_for_type(path = "bp_btc_relay::MigrationSequence", derive = "Eq, PartialEq"),
 	derive_for_type(
