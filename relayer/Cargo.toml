@@ -1,6 +1,6 @@
 [package]
 name = "bifrost-relayer"
-version = "2.2.2"
+version = "3.0.0-rc"
 description = "The core rust implementation for Bifrost relayer"
 authors = { workspace = true }
 homepage = { workspace = true }
@@ -19,9 +19,9 @@ alloy = { workspace = true }
 futures = { workspace = true }
 clap = { workspace = true, features = ["derive"] }
 tokio = { workspace = true, features = [
-	"signal",
-	"rt-multi-thread",
-	"parking_lot",
+    "signal",
+    "rt-multi-thread",
+    "parking_lot",
 ] }
 miniscript = { workspace = true }
 bitcoincore-rpc = { workspace = true }
