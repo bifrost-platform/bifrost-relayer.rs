@@ -594,8 +594,7 @@ pub fn send_transaction<F, P, N: Network>(
 					err
 				);
 
-				let error_str = err.to_string().to_lowercase();
-				if error_str.contains("nonce too low") || error_str.contains("already known") {
+				if err.to_string().to_lowercase().contains("nonce too low") {
 					client.flush_stalled_transactions().await.unwrap();
 					send_transaction(client, request, requester, metadata, debug_mode, handle);
 				}
