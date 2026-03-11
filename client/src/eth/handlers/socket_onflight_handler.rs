@@ -59,14 +59,16 @@ struct PendingStandardTransfer {
 	dst_chain_id: ChainId,
 	/// The source transaction hash (for reorg verification).
 	src_tx_id: B256,
-	/// The source block number when Requested event was emitted (for reorg verification).
+	/// The source block number where the transaction was included (for reorg verification).
 	src_block_number: u64,
+	/// The msg_hash (keccak256 of socket message) for processed_transfers tracking.
+	msg_hash: H256,
 }
 
 /// Result of source transaction verification.
 enum TxVerificationResult {
-	/// Transaction is valid (receipt exists).
-	Valid,
+	/// Transaction is valid (receipt exists) with its block number.
+	Valid { block_number: Option<u64> },
 	/// Transaction receipt not found (reorged out completely).
 	NotFound,
 }
@@ -258,14 +260,27 @@ where
 				// Standard transfer: add to pending and wait for source chain block confirmations
 				let block_confirmations = self.get_block_confirmations(src_chain_id);
 
-				// Get current block number from source chain
-				let src_block_number = match self.get_src_chain_block_number(src_chain_id).await {
-					Ok(block) => block,
+				// Get the actual block number where the source transaction was included
+				let src_block_number = match self.get_tx_block_number(src_chain_id, src_tx_id).await
+				{
+					Ok(Some(block)) => block,
+					Ok(None) => {
+						log::warn!(
+							target: &self.bifrost_client.get_chain_name(),
+							"-[{}] Transaction {} not found on chain {}, skipping",
+							sub_display_format(SUB_LOG_TARGET),
+							src_tx_id,
+							src_chain_id,
+						);
+						continue;
+					},
 					Err(e) => {
 						log::warn!(
 							target: &self.bifrost_client.get_chain_name(),
-							"-[{}] Failed to get source chain block number: {:?}",
+							"-[{}] Failed to get tx block number for {} on chain {}: {:?}",
 							sub_display_format(SUB_LOG_TARGET),
+							src_tx_id,
+							src_chain_id,
 							e,
 						);
 						continue;
@@ -294,6 +309,7 @@ where
 					dst_chain_id,
 					src_tx_id,
 					src_block_number,
+					msg_hash,
 				};
 
 				self.pending_standard_transfers.write().await.push(pending_transfer);
@@ -338,6 +354,9 @@ where
 		// Track transfers that need block number update (reorg detected but tx still valid)
 		let mut transfers_to_update: Vec<(usize, u64)> = Vec::new();
 
+		// Track msg_hashes to remove from processed_transfers (reorged out transfers)
+		let mut hashes_to_unmark: Vec<H256> = Vec::new();
+
 		// Check each pending transfer
 		for (idx, transfer) in pending_transfers.iter().enumerate() {
 			let block_confirmations = self.get_block_confirmations(transfer.src_chain_id);
@@ -360,20 +379,16 @@ where
 
 			// Check if enough blocks have passed on the source chain
 			if current_src_block.saturating_sub(transfer.src_block_number) >= block_confirmations {
-				// Verify the source transaction is still valid
+				// Verify the source transaction and get its block number in a single RPC call
 				match self.verify_src_transaction(transfer.src_chain_id, transfer.src_tx_id).await {
-					Ok(TxVerificationResult::Valid) => {
-						// Get the actual block number of the transaction to check for reorg
-						match self
-							.get_tx_block_number(transfer.src_chain_id, transfer.src_tx_id)
-							.await
-						{
-							Ok(Some(tx_block)) if tx_block == transfer.src_block_number => {
+					Ok(TxVerificationResult::Valid { block_number }) => {
+						match block_number {
+							Some(tx_block) if tx_block == transfer.src_block_number => {
 								// Block number matches, no reorg, process the transfer
 								transfers_to_process.push(transfer.clone());
 								transfers_to_remove.push(idx);
 							},
-							Ok(Some(tx_block)) => {
+							Some(tx_block) => {
 								// Block number changed due to reorg, update and wait again
 								log::info!(
 									target: &self.bifrost_client.get_chain_name(),
@@ -385,24 +400,15 @@ where
 								);
 								transfers_to_update.push((idx, tx_block));
 							},
-							Ok(None) => {
-								// Transaction not found (shouldn't happen since receipt exists)
+							None => {
+								// Receipt exists but block_number is None (shouldn't normally happen)
 								// Be conservative and keep waiting
 								log::warn!(
 									target: &self.bifrost_client.get_chain_name(),
-									"-[{}] Transaction {} has receipt but not found in chain, keeping in pending",
+									"-[{}] Transaction {} has receipt but no block number, keeping in pending",
 									sub_display_format(SUB_LOG_TARGET),
 									transfer.src_tx_id,
 								);
-							},
-							Err(e) => {
-								log::warn!(
-									target: &self.bifrost_client.get_chain_name(),
-									"-[{}] Failed to get tx block number: {:?}",
-									sub_display_format(SUB_LOG_TARGET),
-									e,
-								);
-								// Keep in pending list to retry later
 							},
 						}
 					},
@@ -417,6 +423,9 @@ where
 							transfer.src_tx_id,
 						);
 						transfers_to_remove.push(idx);
+						// Also unmark from processed_transfers so it can be re-processed
+						// if the Substrate chain still has the entry and it reappears
+						hashes_to_unmark.push(transfer.msg_hash);
 					},
 					Err(e) => {
 						log::warn!(
@@ -449,6 +458,14 @@ where
 				if idx < pending.len() {
 					pending.remove(idx);
 				}
+			}
+		}
+
+		// Unmark reorged-out transfers from processed_transfers so they can be re-processed
+		if !hashes_to_unmark.is_empty() {
+			let mut processed = self.processed_transfers.write().await;
+			for hash in &hashes_to_unmark {
+				processed.remove(hash);
 			}
 		}
 
@@ -535,21 +552,25 @@ where
 		Ok(client.get_block_number().await?)
 	}
 
-	/// Verify that the source transaction still exists on the source chain.
-	/// Returns Valid if receipt exists, NotFound if reorged out.
+	/// Verify that the source transaction still exists on the source chain and return its block number.
+	/// Returns Valid with block_number if receipt exists, NotFound if reorged out.
 	async fn verify_src_transaction(
 		&self,
 		src_chain_id: ChainId,
 		src_tx_id: B256,
 	) -> Result<TxVerificationResult> {
+		use alloy::network::ReceiptResponse;
+
 		let client = self
 			.system_clients
 			.get(&src_chain_id)
 			.ok_or_else(|| eyre::eyre!("Source chain client not found: {}", src_chain_id))?;
 
-		// Try to get the transaction receipt
+		// Get the transaction receipt (single RPC call for both verification and block number)
 		match client.get_transaction_receipt(src_tx_id).await? {
-			Some(_) => Ok(TxVerificationResult::Valid),
+			Some(receipt) => {
+				Ok(TxVerificationResult::Valid { block_number: receipt.block_number() })
+			},
 			None => Ok(TxVerificationResult::NotFound),
 		}
 	}
@@ -668,6 +689,7 @@ where
 				dst_chain_id,
 				src_tx_id,
 				src_block_number,
+				msg_hash,
 			};
 
 			self.pending_standard_transfers.write().await.push(pending_transfer);
