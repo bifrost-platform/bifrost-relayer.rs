@@ -291,7 +291,10 @@ where
 						)
 						.await
 					{
-						if e.to_string().to_lowercase().contains("nonce too low") {
+						let error_str = e.to_string().to_lowercase();
+						if error_str.contains("nonce too low")
+							|| error_str.contains("already known")
+						{
 							target_client.flush_stalled_transactions().await?;
 							continue;
 						} else {
