@@ -28,7 +28,7 @@ use br_primitives::{
 use eyre::Result;
 use miniscript::bitcoin::{Txid, hashes::Hash};
 use sc_service::SpawnTaskHandle;
-use std::sync::Arc;
+use std::{collections::HashSet, sync::Arc};
 use subxt::ext::subxt_core::utils::AccountId20;
 use tokio::sync::broadcast::Receiver;
 use tokio_stream::{StreamExt, wrappers::BroadcastStream};
@@ -190,8 +190,11 @@ where
 				msg.events.len()
 			);
 
+			let mut seen_txids = HashSet::new();
 			for event in msg.events {
-				self.process_event(&event).await?;
+				if seen_txids.insert(event.txid) {
+					self.process_event(&event).await?;
+				}
 			}
 		}
 
