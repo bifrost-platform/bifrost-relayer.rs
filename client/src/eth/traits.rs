@@ -350,6 +350,12 @@ where
 			return Ok(None);
 		}
 
+		// Skip decoding when variants payload is empty (e.g. no hook data).
+		// Decoding empty data would cause Overrun since Variants has multiple fields.
+		if msg.params.variants.is_empty() {
+			return Ok(None);
+		}
+
 		// Decode the variants field. The data contains encoded struct content
 		// without the outer tuple wrapper. For ABI decoding to work properly,
 		// we need to prepend an offset pointer (0x20) that indicates where
