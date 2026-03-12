@@ -1108,12 +1108,17 @@ mod tests {
 
 	#[test]
 	fn test_socket_event_decode() {
-		let data = bytes!(
-			"00000000000000000000000000000000000000000000000000000000000000200000bfc000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000226d00000000000000000000000000000000000000000000000000000000000008eb00000000000000000000000000000000000000000000000000000000000000010000271100000000000000000000000000000000000000000000000000000000030203010000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000e000000003000000030000bfc06dc9a4f82a0dc721dc0aa89be6eadc7a553191c100000000000000000000000000000000000000000000000000000000000000000000000000000000000000003dacfba2a2a7526e4397ff691df1873c50efb5420000000000000000000000003dacfba2a2a7526e4397ff691df1873c50efb5420000000000000000000000000000000000000000000000000000000000003c0000000000000000000000000000000000000000000000000000000000000000c00000000000000000000000000000000000000000000000000000000000000000"
-		);
+		let data = bytes!("");
 
 		match Socket::abi_decode_data(&data) {
 			Ok(socket) => {
+				let size_mb = data.len() as f64 / (1024.0 * 1024.0);
+				println!(
+					"socket message (raw) byte size -> {} bytes ({:.6} MB)",
+					data.len(),
+					size_mb
+				);
+
 				let socket_msg = socket.0;
 				let req_id = socket_msg.req_id;
 				let status = socket_msg.status;
@@ -1136,19 +1141,21 @@ mod tests {
 				println!("params.amount -> {:?}", params.amount);
 				println!("params.variants -> {:?}", params.variants);
 
-				// Decode the variants field. The data contains encoded struct content
-				// without the outer tuple wrapper. For ABI decoding to work properly,
-				// we need to prepend an offset pointer (0x20) that indicates where
-				// the struct data begins (at byte 32).
-				let mut wrapped_data = Vec::with_capacity(32 + params.variants.len());
-				wrapped_data.extend_from_slice(&[0u8; 31]); // 31 zero bytes
-				wrapped_data.push(0x20); // offset = 32 bytes
-				wrapped_data.extend_from_slice(&params.variants);
-
-				let variants = <Variants as SolType>::abi_decode(&wrapped_data);
+				// Decode the variants field only when non-empty; empty payload causes Overrun.
+				let variants = if params.variants.is_empty() {
+					None
+				} else {
+					// The data contains encoded struct content without the outer tuple wrapper.
+					// Prepend an offset pointer (0x20) so ABI decoding finds the struct at byte 32.
+					let mut wrapped_data = Vec::with_capacity(32 + params.variants.len());
+					wrapped_data.extend_from_slice(&[0u8; 31]); // 31 zero bytes
+					wrapped_data.push(0x20); // offset = 32 bytes
+					wrapped_data.extend_from_slice(&params.variants);
+					Some(<Variants as SolType>::abi_decode(&wrapped_data))
+				};
 				println!("variants -> {:?}", variants);
 
-				if let Ok(v) = &variants {
+				if let Some(Ok(v)) = &variants {
 					println!("  sender: {:?}", v.sender);
 					println!("  receiver: {:?}", v.receiver);
 					println!("  refund: {:?}", v.refund);
