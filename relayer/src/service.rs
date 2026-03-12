@@ -125,7 +125,7 @@ pub async fn relay(config: Configuration) -> Result<TaskManager, ServiceError> {
 		let provider = Arc::new(
 			ProviderBuilder::new()
 				.disable_recommended_fillers()
-				.with_simple_nonce_management()
+				.with_cached_nonce_management()
 				.filler(GasFiller)
 				.filler(ChainIdFiller::new(evm_provider.id.into()))
 				.network::<AnyNetwork>()
