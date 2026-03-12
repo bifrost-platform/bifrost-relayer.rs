@@ -435,6 +435,14 @@ where
 			let gas = self.estimate_gas(request.clone()).await?;
 			let coefficient: f64 = GasCoefficient::from(self.metadata.is_native).into();
 			let estimated_gas = gas as f64 * coefficient;
+
+			log::info!(
+				target: &self.get_chain_name(),
+				"-[{}] 🔍 Estimated gas: {} -> {}",
+				sub_display_format(SUB_LOG_TARGET),
+				gas, estimated_gas
+			);
+
 			request.set_gas_limit(estimated_gas.ceil() as u64);
 		}
 
@@ -464,7 +472,16 @@ where
 
 		self.fill_gas(&mut request).await?;
 		let pending = match self.send_transaction(request).await {
-			Ok(pending) => pending,
+			Ok(pending) => {
+				log::info!(
+					target: &requester,
+					" 🔖 Transaction submitted ({} tx:{}): {}",
+					self.get_chain_name(),
+					pending.tx_hash(),
+					metadata
+				);
+				pending
+			},
 			Err(err) => {
 				br_primitives::log_and_capture_simple!(
 					error,
@@ -486,7 +503,7 @@ where
 			Ok(tx_hash) => {
 				log::info!(
 					target: &requester,
-					" 🔖 Transaction confirmed ({} tx:{}): {}",
+					" ✅ Transaction confirmed ({} tx:{}): {}",
 					self.get_chain_name(),
 					tx_hash,
 					metadata
@@ -636,7 +653,7 @@ pub fn send_transaction<F, P, N: Network>(
 			Ok(pending) => {
 				log::info!(
 					target: &requester,
-					" 🔖 Send transaction ({} tx:{}): {}",
+					" 🔖 Transaction submitted ({} tx:{}): {}",
 					client.get_chain_name(),
 					pending.tx_hash(),
 					metadata
@@ -650,7 +667,7 @@ pub fn send_transaction<F, P, N: Network>(
 					Ok(tx_hash) => {
 						log::info!(
 							target: &requester,
-							" 🔖 Transaction confirmed ({} tx:{}): {}",
+							" ✅ Transaction confirmed ({} tx:{}): {}",
 							client.get_chain_name(),
 							tx_hash,
 							metadata

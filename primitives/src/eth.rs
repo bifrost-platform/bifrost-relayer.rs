@@ -356,7 +356,7 @@ impl From<GasCoefficient> for f64 {
 	fn from(value: GasCoefficient) -> Self {
 		match value {
 			GasCoefficient::Low => 1.2,
-			GasCoefficient::Mid => 7.0,
+			GasCoefficient::Mid => 5.0,
 			GasCoefficient::High => 10.0,
 		}
 	}
