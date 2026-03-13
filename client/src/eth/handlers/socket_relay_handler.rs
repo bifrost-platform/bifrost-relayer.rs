@@ -492,10 +492,11 @@ where
 					// Block number matches, no reorg, process the event
 					log::info!(
 						target: &self.client.get_chain_name(),
-						"-[{}] ✅ Event confirmed after {} blocks, processing (block #{})",
+						"-[{}] ✅ Event confirmed after {} blocks, processing event (block #{}, tx: {})",
 						sub_display_format(SUB_LOG_TARGET),
 						latest_block.saturating_sub(event.block_number),
 						event.block_number,
+						event.log.transaction_hash.unwrap_or_default(),
 					);
 
 					indices_to_remove.push(idx);
