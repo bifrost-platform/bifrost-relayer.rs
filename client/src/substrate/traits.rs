@@ -78,6 +78,15 @@ where
 					return;
 				}
 			},
+			XtRequestMetadata::OnFlightPoll(_) => {
+				if error_str.contains("CCCPRelayQueue::TransferAlreadyOnFlight") {
+					log::info!(
+						target: &self.get_bfc_client().get_chain_name(),
+						"Transfer already on flight, no need to retry"
+					);
+					return;
+				}
+			},
 			XtRequestMetadata::FinalizePoll(_) => {
 				if error_str.contains("CCCPRelayQueue::TransferAlreadyFinalized") {
 					log::info!(
