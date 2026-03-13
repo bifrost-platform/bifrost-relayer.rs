@@ -12,32 +12,23 @@ use br_cli::{
 	runner::{Runner, build_runtime},
 };
 use chrono::Local;
-use env_logger::fmt::Color;
-use log::Level;
 
 use crate::cli::Cli;
 
 fn main() {
 	env_logger::Builder::new()
 		.format(|buf, record| {
-			let mut level_style = buf.style();
-			let color = match record.level() {
-				Level::Info => Color::Green,
-				_ => Color::Red,
-			};
-
-			level_style.set_color(color).set_bold(true);
-
 			writeln!(
 				buf,
-				"{} {:05} {:020}]{}",
+				"{} {:<5} {:<20}]{}",
 				Local::now().format("%Y-%m-%dT%H:%M:%S"),
-				level_style.value(record.level()),
+				record.level(),
 				record.target(),
 				record.args(),
 			)
 		})
-		.filter(None, log::LevelFilter::Info)
+		.filter_level(log::LevelFilter::Info)
+		.filter_module("alloy_transport_http", log::LevelFilter::Off)
 		.init();
 
 	let cli = Cli::from_args();

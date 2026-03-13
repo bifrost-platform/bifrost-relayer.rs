@@ -23,7 +23,7 @@ use br_primitives::{
 		socket::get_asset_oids,
 	},
 	periodic::{PriceResponse, PriceSource},
-	tx::{PriceFeedMetadata, TxRequestMetadata},
+	tx::PriceFeedMetadata,
 	utils::sub_display_format,
 };
 
@@ -315,7 +315,7 @@ where
 				.sync_send_transaction(
 					tx_request,
 					SUB_LOG_TARGET.to_string(),
-					TxRequestMetadata::PriceFeed(PriceFeedMetadata::new(deviated_responses)),
+					Arc::new(PriceFeedMetadata::new(deviated_responses)),
 				)
 				.await
 			{
@@ -352,7 +352,7 @@ where
 				self.client.clone(),
 				tx_request,
 				SUB_LOG_TARGET.to_string(),
-				TxRequestMetadata::PriceFeed(PriceFeedMetadata::new(BTreeMap::new())),
+				Arc::new(PriceFeedMetadata::new(BTreeMap::new())),
 				self.debug_mode,
 				self.handle.clone(),
 			);

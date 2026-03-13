@@ -1,31 +1,20 @@
 use std::{
 	collections::BTreeMap,
 	fmt::{Display, Formatter},
+	sync::Arc,
 };
 
-use alloy::{
-	primitives::{Address, B256, ChainId, U256},
-	rpc::types::TransactionRequest,
-};
+use alloy::primitives::{Address, B256, Bytes, ChainId, U256};
 use bitcoincore_rpc::bitcoin::PublicKey;
 use miniscript::bitcoin::{Address as BtcAddress, Amount, Txid, address::NetworkUnchecked};
-use subxt::{
-	Metadata,
-	ext::subxt_core::Error,
-	tx::{DefaultPayload, Payload},
-};
+use subxt::tx::Payload;
 use tokio::sync::mpsc::{UnboundedSender, error::SendError};
 
 use crate::{
 	btc::Event as BtcEvent,
 	constants::tx::{DEFAULT_TX_RETRIES, DEFAULT_TX_RETRY_INTERVAL_MS},
-	eth::{GasCoefficient, SocketEventStatus},
+	eth::SocketEventStatus,
 	periodic::PriceResponse,
-	substrate::{
-		BroadcastPoll, RemoveOutboundMessages, SubmitExecutedRequest, SubmitFeeRate,
-		SubmitOutboundRequests, SubmitRollbackPoll, SubmitSignedPsbt, SubmitSystemVaultKey,
-		SubmitUnsignedPsbt, SubmitUtxos, SubmitVaultKey, VaultKeyPresubmission,
-	},
 };
 
 #[derive(Clone, Debug)]
@@ -251,36 +240,7 @@ impl Display for BitcoinRelayMetadata {
 	}
 }
 
-#[derive(Clone, Debug)]
-pub enum TxRequestMetadata {
-	SocketRelay(SocketRelayMetadata),
-	PriceFeed(PriceFeedMetadata),
-	VSPPhase1(VSPPhase1Metadata),
-	VSPPhase2(VSPPhase2Metadata),
-	Heartbeat(HeartbeatMetadata),
-	Flush(FlushMetadata),
-	Rollback(RollbackMetadata),
-	BitcoinSocketRelay(BitcoinRelayMetadata),
-}
-
-impl Display for TxRequestMetadata {
-	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-		write!(
-			f,
-			"{}",
-			match self {
-				TxRequestMetadata::SocketRelay(metadata) => metadata.to_string(),
-				TxRequestMetadata::PriceFeed(metadata) => metadata.to_string(),
-				TxRequestMetadata::VSPPhase1(metadata) => metadata.to_string(),
-				TxRequestMetadata::VSPPhase2(metadata) => metadata.to_string(),
-				TxRequestMetadata::Heartbeat(metadata) => metadata.to_string(),
-				TxRequestMetadata::Flush(metadata) => metadata.to_string(),
-				TxRequestMetadata::Rollback(metadata) => metadata.to_string(),
-				TxRequestMetadata::BitcoinSocketRelay(metadata) => metadata.to_string(),
-			}
-		)
-	}
-}
+pub type TxRequestMetadata = Arc<dyn Display + Send + Sync>;
 
 #[derive(Clone, Debug)]
 /// The metadata used for vault key submission.
@@ -463,6 +423,117 @@ impl Display for RemoveOutboundMessagesMetadata {
 	}
 }
 
+#[derive(Clone, Debug)]
+pub struct HookMetadata {
+	pub sender: Address,
+	pub receiver: Address,
+	pub max_tx_fee: U256,
+	pub fee_in_bridged_asset: Option<U256>,
+	pub message: Bytes,
+}
+
+impl HookMetadata {
+	pub fn new(
+		sender: Address,
+		receiver: Address,
+		max_tx_fee: U256,
+		fee_in_bridged_asset: Option<U256>,
+		message: Bytes,
+	) -> Self {
+		Self { sender, receiver, max_tx_fee, fee_in_bridged_asset, message }
+	}
+}
+
+impl Display for HookMetadata {
+	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		write!(
+			f,
+			"Hook({:?}, {:?}, {:?}, {:?}, {:?})",
+			self.sender,
+			self.receiver,
+			self.max_tx_fee,
+			self.fee_in_bridged_asset.unwrap_or(U256::ZERO),
+			self.message
+		)
+	}
+}
+
+#[derive(Clone, Debug)]
+pub struct OnFlightPollMetadata {
+	/// The socket relay direction flag.
+	pub is_inbound: bool,
+	/// The socket request sequence ID.
+	pub sequence: u128,
+	/// The source chain ID.
+	pub src_chain_id: ChainId,
+	/// The destination chain ID.
+	pub dst_chain_id: ChainId,
+}
+
+impl OnFlightPollMetadata {
+	pub fn new(
+		is_inbound: bool,
+		sequence: u128,
+		src_chain_id: ChainId,
+		dst_chain_id: ChainId,
+	) -> Self {
+		Self { is_inbound, sequence, src_chain_id, dst_chain_id }
+	}
+}
+
+impl Display for OnFlightPollMetadata {
+	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		write!(
+			f,
+			"OnFlightPoll({}-{}, {:?} -> {:?})",
+			if self.is_inbound { "Inbound" } else { "Outbound" },
+			self.sequence,
+			self.src_chain_id,
+			self.dst_chain_id,
+		)
+	}
+}
+
+#[derive(Clone, Debug)]
+pub struct FinalizePollMetadata {
+	/// The socket relay direction flag.
+	pub is_inbound: bool,
+	/// The socket request sequence ID.
+	pub sequence: u128,
+	/// The source chain ID.
+	pub src_chain_id: ChainId,
+	/// The destination chain ID.
+	pub dst_chain_id: ChainId,
+	/// Whether the transfer was committed (true) or rollbacked (false).
+	pub is_committed: bool,
+}
+
+impl FinalizePollMetadata {
+	pub fn new(
+		is_inbound: bool,
+		sequence: u128,
+		src_chain_id: ChainId,
+		dst_chain_id: ChainId,
+		is_committed: bool,
+	) -> Self {
+		Self { is_inbound, sequence, src_chain_id, dst_chain_id, is_committed }
+	}
+}
+
+impl Display for FinalizePollMetadata {
+	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		write!(
+			f,
+			"FinalizePoll({}-{}, {:?} -> {:?}, {})",
+			if self.is_inbound { "Inbound" } else { "Outbound" },
+			self.sequence,
+			self.src_chain_id,
+			self.dst_chain_id,
+			if self.is_committed { "Committed" } else { "Rollbacked" },
+		)
+	}
+}
+
 #[derive(Clone)]
 pub enum XtRequestMetadata {
 	SubmitVaultKey(SubmitVaultKeyMetadata),
@@ -476,6 +547,8 @@ pub enum XtRequestMetadata {
 	SubmitOutboundRequests(SocketRelayMetadata),
 	SubmitFeeRate(SubmitFeeRateMetadata),
 	RemoveOutboundMessages(RemoveOutboundMessagesMetadata),
+	OnFlightPoll(OnFlightPollMetadata),
+	FinalizePoll(FinalizePollMetadata),
 }
 
 impl Display for XtRequestMetadata {
@@ -495,128 +568,14 @@ impl Display for XtRequestMetadata {
 				XtRequestMetadata::SubmitOutboundRequests(metadata) => metadata.to_string(),
 				XtRequestMetadata::SubmitFeeRate(metadata) => metadata.to_string(),
 				XtRequestMetadata::RemoveOutboundMessages(metadata) => metadata.to_string(),
+				XtRequestMetadata::OnFlightPoll(metadata) => metadata.to_string(),
+				XtRequestMetadata::FinalizePoll(metadata) => metadata.to_string(),
 			}
 		)
 	}
 }
 
-#[derive(Clone)]
-pub enum XtRequest {
-	SubmitSignedPsbt(DefaultPayload<SubmitSignedPsbt>),
-	SubmitVaultKey(DefaultPayload<SubmitVaultKey>),
-	SubmitUnsignedPsbt(DefaultPayload<SubmitUnsignedPsbt>),
-	SubmitExecutedRequest(DefaultPayload<SubmitExecutedRequest>),
-	SubmitSystemVaultKey(DefaultPayload<SubmitSystemVaultKey>),
-	SubmitRollbackPoll(DefaultPayload<SubmitRollbackPoll>),
-	VaultKeyPresubmission(DefaultPayload<VaultKeyPresubmission>),
-	SubmitUtxos(DefaultPayload<SubmitUtxos>),
-	BroadcastPoll(DefaultPayload<BroadcastPoll>),
-	SubmitOutboundRequests(DefaultPayload<SubmitOutboundRequests>),
-	SubmitFeeRate(DefaultPayload<SubmitFeeRate>),
-	RemoveOutboundMessages(DefaultPayload<RemoveOutboundMessages>),
-}
-
-// Macro to generate all implementations for XtRequest
-macro_rules! impl_xt_request {
-	($($variant:ident($payload:ty)),*) => {
-		// Generate Payload implementation
-		impl Payload for XtRequest {
-			fn encode_call_data_to(&self, metadata: &Metadata, out: &mut Vec<u8>) -> Result<(), Error> {
-				match self {
-					$(XtRequest::$variant(call) => call.encode_call_data_to(metadata, out),)*
-				}
-			}
-		}
-
-		// Generate TryFrom and From implementations for each variant
-		$(
-			impl TryFrom<XtRequest> for DefaultPayload<$payload> {
-				type Error = ();
-
-				fn try_from(value: XtRequest) -> Result<Self, Self::Error> {
-					if let XtRequest::$variant(call) = value {
-						Ok(call)
-					} else {
-						Err(())
-					}
-				}
-			}
-
-			impl From<DefaultPayload<$payload>> for XtRequest {
-				fn from(value: DefaultPayload<$payload>) -> Self {
-					Self::$variant(value)
-				}
-			}
-		)*
-	};
-}
-
-// Generate all implementations for all variants
-impl_xt_request! {
-	SubmitSignedPsbt(SubmitSignedPsbt),
-	SubmitVaultKey(SubmitVaultKey),
-	SubmitUnsignedPsbt(SubmitUnsignedPsbt),
-	SubmitExecutedRequest(SubmitExecutedRequest),
-	SubmitSystemVaultKey(SubmitSystemVaultKey),
-	SubmitRollbackPoll(SubmitRollbackPoll),
-	VaultKeyPresubmission(VaultKeyPresubmission),
-	SubmitUtxos(SubmitUtxos),
-	BroadcastPoll(BroadcastPoll),
-	SubmitOutboundRequests(SubmitOutboundRequests),
-	SubmitFeeRate(SubmitFeeRate),
-	RemoveOutboundMessages(RemoveOutboundMessages)
-}
-
-/// The message format passed through the event channel.
-pub struct TxRequestMessage {
-	/// The remaining retries of the transaction request.
-	pub retries_remaining: u8,
-	/// The retry interval in milliseconds.
-	pub retry_interval: u64,
-	/// The raw transaction request.
-	pub tx_request: TransactionRequest,
-	/// Additional data of the transaction request.
-	pub metadata: TxRequestMetadata,
-	/// Check mempool to prevent duplicate relay.
-	pub check_mempool: bool,
-	/// The flag that represents whether the event is processed to an external chain.
-	pub give_random_delay: bool,
-	/// The gas coefficient that will be multiplied to the estimated gas amount.
-	pub gas_coefficient: GasCoefficient,
-	/// The flag that represents whether the event is requested by a bootstrap process.
-	/// If true, the event will be processed by a asynchronous task.
-	pub is_bootstrap: bool,
-}
-
-impl TxRequestMessage {
-	/// Instantiates a new `TxRequestMessage` instance.
-	pub fn new(
-		tx_request: TransactionRequest,
-		metadata: TxRequestMetadata,
-		check_mempool: bool,
-		give_random_delay: bool,
-		gas_coefficient: GasCoefficient,
-		is_bootstrap: bool,
-	) -> Self {
-		Self {
-			retries_remaining: DEFAULT_TX_RETRIES,
-			retry_interval: DEFAULT_TX_RETRY_INTERVAL_MS,
-			tx_request,
-			metadata,
-			check_mempool,
-			give_random_delay,
-			gas_coefficient,
-			is_bootstrap,
-		}
-	}
-
-	/// Builds a new `TxRequestMessage` to use on transaction retry. This will reduce the remaining
-	/// retry counter and increase the retry interval.
-	pub fn build_retry_event(&mut self) {
-		self.tx_request.nonce = None;
-		self.retries_remaining = self.retries_remaining.saturating_sub(1);
-	}
-}
+pub type XtRequest = Arc<dyn Payload + Send + Sync>;
 
 pub struct XtRequestMessage {
 	/// The remaining retries of the transaction request.

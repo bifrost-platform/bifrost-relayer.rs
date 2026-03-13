@@ -7,7 +7,8 @@ use alloy::{
 	},
 	signers::Signer,
 };
-use std::{str::FromStr, sync::Arc};
+use std::{collections::HashMap, str::FromStr, sync::Arc};
+use tokio::sync::RwLock;
 use url::Url;
 
 use crate::{
@@ -21,11 +22,14 @@ use crate::{
 		bitcoin_socket::{BitcoinSocketContract, BitcoinSocketInstance},
 		blaze::{BlazeContract, BlazeInstance},
 		chainlink_aggregator::{ChainlinkContract, ChainlinkInstance},
+		erc20::Erc20Instance,
+		hooks::{HooksContract, HooksInstance},
 		registration_pool::{RegistrationPoolContract, RegistrationPoolInstance},
 		relay_executive::{RelayExecutiveContract, RelayExecutiveInstance},
 		relayer_manager::{RelayerManagerContract, RelayerManagerInstance},
 		socket::{SocketContract, SocketInstance},
 		socket_queue::{SocketQueueContract, SocketQueueInstance},
+		vault::{VaultContract, VaultInstance},
 	},
 };
 
@@ -43,6 +47,38 @@ impl Signers {
 
 	pub fn signers_address(&self) -> Vec<Address> {
 		self.0.keys().cloned().collect()
+	}
+}
+
+/// Cache for contract instances and immutable metadata to avoid repeated instantiation and RPC calls.
+pub struct ContractCache<F, P, N: Network>
+where
+	F: TxFiller<N> + WalletProvider<N>,
+	P: Provider<N>,
+{
+	/// Cached ERC20 contract instances by address
+	pub erc20s: RwLock<HashMap<Address, Arc<Erc20Instance<F, P, N>>>>,
+	/// Cached ERC20 token decimals
+	pub erc20_decimals: RwLock<HashMap<Address, u8>>,
+}
+
+impl<F, P, N: Network> Default for ContractCache<F, P, N>
+where
+	F: TxFiller<N> + WalletProvider<N>,
+	P: Provider<N>,
+{
+	fn default() -> Self {
+		Self { erc20s: RwLock::new(HashMap::new()), erc20_decimals: RwLock::new(HashMap::new()) }
+	}
+}
+
+impl<F, P, N: Network> ContractCache<F, P, N>
+where
+	F: TxFiller<N> + WalletProvider<N>,
+	P: Provider<N>,
+{
+	pub fn new() -> Self {
+		Self::default()
 	}
 }
 
@@ -199,6 +235,10 @@ where
 	pub socket: SocketInstance<F, P, N>,
 	/// AuthorityContract
 	pub authority: AuthorityInstance<F, P, N>,
+	/// VaultContract
+	pub vault: VaultInstance<F, P, N>,
+	/// HooksContract
+	pub hooks: Option<HooksInstance<F, P, N>>,
 	/// RelayerManagerContract (Bifrost only)
 	pub relayer_manager: Option<RelayerManagerInstance<F, P, N>>,
 	/// BitcoinSocketContract (Bifrost only)
@@ -232,6 +272,16 @@ where
 				Address::from_str(&evm_provider.authority_address).expect(INVALID_CONTRACT_ADDRESS),
 				provider.clone(),
 			),
+			vault: VaultContract::new(
+				Address::from_str(&evm_provider.vault_address).expect(INVALID_CONTRACT_ADDRESS),
+				provider.clone(),
+			),
+			hooks: evm_provider.hooks_address.map(|address| {
+				HooksContract::new(
+					Address::from_str(&address).expect(INVALID_CONTRACT_ADDRESS),
+					provider.clone(),
+				)
+			}),
 			relayer_manager: None,
 			bitcoin_socket: None,
 			socket_queue: None,
@@ -306,7 +356,7 @@ impl From<GasCoefficient> for f64 {
 	fn from(value: GasCoefficient) -> Self {
 		match value {
 			GasCoefficient::Low => 1.2,
-			GasCoefficient::Mid => 7.0,
+			GasCoefficient::Mid => 5.0,
 			GasCoefficient::High => 10.0,
 		}
 	}
@@ -415,7 +465,9 @@ pub enum BootstrapState {
 	BootstrapRoundUpPhase1,
 	/// phase 1-2. bootstrap for RoundUp event
 	BootstrapRoundUpPhase2,
-	/// phase 2. bootstrap for Socket event
+	/// phase 2-1. bootstrap for Socket queue (on_flight_poll / finalize_poll)
+	BootstrapSocketRelayQueue,
+	/// phase 2-2. bootstrap for Socket relay event
 	BootstrapSocketRelay,
 	/// phase 3. process for latest block as normal
 	NormalStart,
