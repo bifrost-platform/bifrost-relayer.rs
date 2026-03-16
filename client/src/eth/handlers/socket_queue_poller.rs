@@ -116,7 +116,11 @@ where
 	///
 	/// Returns `true` if should skip (transfer already exists in OnFlightTransfers or FinalizedTransfers).
 	/// Returns `false` if transfer is new or still in PendingTransfers (voting in progress).
-	async fn should_skip_on_flight_poll(&self, msg_hash: subxt::utils::H256) -> Result<bool> {
+	async fn should_skip_on_flight_poll(
+		&self,
+		msg_hash: subxt::utils::H256,
+		src_tx_id: subxt::utils::H256,
+	) -> Result<bool> {
 		// Query at best block (including unfinalized) instead of latest finalized
 		let best_hash = self.sub_rpc.chain_get_block_hash(None).await?.unwrap_or_default();
 		let storage = self.sub_client.storage().at(best_hash);
@@ -129,7 +133,7 @@ where
 			return Ok(true);
 		}
 
-		// Check if already finalized
+		// Check if already in FinalizedTransfers (finalized)
 		let finalized = storage
 			.fetch(&bifrost_runtime::storage().cccp_relay_queue().finalized_transfers(msg_hash))
 			.await?;
@@ -137,7 +141,48 @@ where
 			return Ok(true);
 		}
 
+		// Check if already voted for this transfer
+		let pending = storage
+			.fetch(
+				&bifrost_runtime::storage()
+					.cccp_relay_queue()
+					.pending_transfers(msg_hash, src_tx_id),
+			)
+			.await?;
+		if let Some(pending) = pending {
+			let voter = AccountId20(self.client.address().await.0.0);
+			if pending.on_flight_voters.0.iter().any(|v| v == &voter) {
+				return Ok(true);
+			}
+		}
+
 		// Transfer is either new or still in PendingTransfers - should vote
+		Ok(false)
+	}
+
+	async fn should_skip_finalize_poll(&self, msg_hash: subxt::utils::H256) -> Result<bool> {
+		let best_hash = self.sub_rpc.chain_get_block_hash(None).await?.unwrap_or_default();
+		let storage = self.sub_client.storage().at(best_hash);
+
+		// Check if already in FinalizedTransfers
+		let finalized = storage
+			.fetch(&bifrost_runtime::storage().cccp_relay_queue().finalized_transfers(msg_hash))
+			.await?;
+		if finalized.is_some() {
+			return Ok(true);
+		}
+
+		// Check if already voted for this transfer
+		let on_flight = storage
+			.fetch(&bifrost_runtime::storage().cccp_relay_queue().on_flight_transfers(msg_hash))
+			.await?;
+		if let Some(on_flight) = on_flight {
+			let voter = AccountId20(self.client.address().await.0.0);
+			if on_flight.finalization_voters.0.iter().any(|v| v == &voter) {
+				return Ok(true);
+			}
+		}
+
 		Ok(false)
 	}
 
@@ -227,13 +272,16 @@ where
 			msg_hash,
 		);
 
-		// Query OnFlightTransfers and FinalizedTransfers storage to check current state
+		// Query OnFlightTransfers storage to check current state
 		// Storage key: msg_hash (keccak256 of socket message)
-		// Skip if transfer already exists in OnFlightTransfers or FinalizedTransfers
-		if self.should_skip_on_flight_poll(msg_hash).await? {
+		// Skip if transfer already exists in OnFlightTransfers
+		if self
+			.should_skip_on_flight_poll(msg_hash, subxt::utils::H256(src_tx_id.0))
+			.await?
+		{
 			log::info!(
 				target: &self.client.get_chain_name(),
-				"-[{}] Transfer already processed (OnFlight/Finalized), skipping: msg_hash={}",
+				"-[{}] Transfer already processed (OnFlight), skipping: msg_hash={}",
 				sub_display_format(SUB_LOG_TARGET),
 				msg_hash,
 			);
@@ -250,7 +298,7 @@ where
 			metadata,
 		);
 
-		self.submit_on_flight_poll(msg, metadata, src_tx_id).await
+		self.submit_on_flight_poll(encoded_msg, metadata, src_tx_id).await
 	}
 
 	/// Process COMMITTED/ROLLBACKED status - submit finalize_poll.
@@ -265,6 +313,9 @@ where
 	) -> Result<()> {
 		let is_committed = status == SocketEventStatus::Committed;
 
+		let encoded_msg: Vec<u8> = msg.clone().into();
+		let msg_hash = subxt::utils::H256(keccak256(&encoded_msg).0);
+
 		log::info!(
 			target: &self.client.get_chain_name(),
 			"-[{}] 📨 Socket {} event detected: {} seq={}, {} -> {}",
@@ -275,6 +326,16 @@ where
 			src_chain_id,
 			dst_chain_id,
 		);
+
+		if self.should_skip_finalize_poll(msg_hash).await? {
+			log::info!(
+				target: &self.client.get_chain_name(),
+				"-[{}] Transfer already processed (Finalized), skipping: msg_hash={}",
+				sub_display_format(SUB_LOG_TARGET),
+				msg_hash,
+			);
+			return Ok(());
+		}
 
 		let metadata = FinalizePollMetadata::new(
 			is_inbound,
@@ -291,7 +352,7 @@ where
 			metadata,
 		);
 
-		self.submit_finalize_poll(msg, metadata).await
+		self.submit_finalize_poll(encoded_msg, metadata).await
 	}
 
 	/// Check if the log is from the target Socket contract.
@@ -312,13 +373,12 @@ where
 	/// Submit on_flight_poll extrinsic to the cccp-relay-queue pallet.
 	async fn submit_on_flight_poll(
 		&self,
-		msg: Socket_Message,
+		encoded_msg: Vec<u8>,
 		metadata: OnFlightPollMetadata,
 		src_tx_id: B256,
 	) -> Result<()> {
 		use subxt::ext::codec::Encode;
 
-		let encoded_msg: Vec<u8> = msg.into();
 		let src_tx_id_h256 = subxt::utils::H256(src_tx_id.0);
 
 		// Compute msg_hash = keccak256(encoded_msg)
@@ -369,11 +429,9 @@ where
 	/// Submit finalize_poll extrinsic to the cccp-relay-queue pallet.
 	async fn submit_finalize_poll(
 		&self,
-		msg: Socket_Message,
+		encoded_msg: Vec<u8>,
 		metadata: FinalizePollMetadata,
 	) -> Result<()> {
-		let encoded_msg: Vec<u8> = msg.into();
-
 		// Node expects: keccak256("FinalizePoll") + msg (raw bytes, NOT SCALE encoded!)
 		let prefix = keccak256("FinalizePoll".as_bytes());
 		let message_to_sign = [prefix.as_slice(), &encoded_msg].concat();
