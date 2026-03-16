@@ -891,7 +891,7 @@ where
 			}
 			if self.client.chain_id() == 49088 {
 				if msg.params.tokenIDX0
-					!= b256!("0x00000003000000030000bfc0e002306b8fdf96044eef870cc500f15e11ef4eaa")
+					!= b256!("0x00000003000000030000bfc0847018622152e78b1cd7a55d65024a1a079d90da")
 				{
 					return Ok(());
 				}

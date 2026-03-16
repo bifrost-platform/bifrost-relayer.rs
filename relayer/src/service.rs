@@ -333,53 +333,53 @@ where
 			}
 		});
 
-	// spawn oracle price feeder
-	task_manager.spawn_essential_handle().spawn(
-		Box::leak(
-			format!("{}-oracle-price-feeder", oracle_price_feeder.client.get_chain_name())
-				.into_boxed_str(),
-		),
-		Some("oracle"),
-		async move {
-			loop {
-				let report = oracle_price_feeder.run().await;
-				let log_msg = format!(
-					"oracle price feeder({}:{}) stopped: {:?}\nRestarting in 12 seconds...",
-					oracle_price_feeder.client.get_chain_name(),
-					oracle_price_feeder.client.address().await,
-					report
-				);
-				log::error!("{log_msg}");
-				sentry::capture_message(&log_msg, sentry::Level::Error);
+	// // spawn oracle price feeder
+	// task_manager.spawn_essential_handle().spawn(
+	// 	Box::leak(
+	// 		format!("{}-oracle-price-feeder", oracle_price_feeder.client.get_chain_name())
+	// 			.into_boxed_str(),
+	// 	),
+	// 	Some("oracle"),
+	// 	async move {
+	// 		loop {
+	// 			let report = oracle_price_feeder.run().await;
+	// 			let log_msg = format!(
+	// 				"oracle price feeder({}:{}) stopped: {:?}\nRestarting in 12 seconds...",
+	// 				oracle_price_feeder.client.get_chain_name(),
+	// 				oracle_price_feeder.client.address().await,
+	// 				report
+	// 			);
+	// 			log::error!("{log_msg}");
+	// 			sentry::capture_message(&log_msg, sentry::Level::Error);
 
-				tokio::time::sleep(Duration::from_secs(12)).await;
-			}
-		},
-	);
+	// 			tokio::time::sleep(Duration::from_secs(12)).await;
+	// 		}
+	// 	},
+	// );
 
-	// spawn price deviation checker
-	task_manager.spawn_essential_handle().spawn(
-		Box::leak(
-			format!("{}-price-deviation-checker", price_deviation_checker.client.get_chain_name())
-				.into_boxed_str(),
-		),
-		Some("oracle"),
-		async move {
-			loop {
-				let report = price_deviation_checker.run().await;
-				let log_msg = format!(
-					"price deviation checker({}:{}) stopped: {:?}\nRestarting in 12 seconds...",
-					price_deviation_checker.client.get_chain_name(),
-					price_deviation_checker.client.address().await,
-					report
-				);
-				log::error!("{log_msg}");
-				sentry::capture_message(&log_msg, sentry::Level::Error);
+	// // spawn price deviation checker
+	// task_manager.spawn_essential_handle().spawn(
+	// 	Box::leak(
+	// 		format!("{}-price-deviation-checker", price_deviation_checker.client.get_chain_name())
+	// 			.into_boxed_str(),
+	// 	),
+	// 	Some("oracle"),
+	// 	async move {
+	// 		loop {
+	// 			let report = price_deviation_checker.run().await;
+	// 			let log_msg = format!(
+	// 				"price deviation checker({}:{}) stopped: {:?}\nRestarting in 12 seconds...",
+	// 				price_deviation_checker.client.get_chain_name(),
+	// 				price_deviation_checker.client.address().await,
+	// 				report
+	// 			);
+	// 			log::error!("{log_msg}");
+	// 			sentry::capture_message(&log_msg, sentry::Level::Error);
 
-				tokio::time::sleep(Duration::from_secs(12)).await;
-			}
-		},
-	);
+	// 			tokio::time::sleep(Duration::from_secs(12)).await;
+	// 		}
+	// 	},
+	// );
 
 	// spawn socket rollback emitters
 	rollback_emitters.into_iter().for_each(|mut emitter| {
