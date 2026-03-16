@@ -133,6 +133,23 @@ where
 		let from = self.waiting_block;
 		let to = from.saturating_add(self.client.metadata.get_logs_batch_size.saturating_sub(1u64));
 
+		if from < to {
+			log::info!(
+				target: &self.client.get_chain_name(),
+				"-[{}] ✨ Imported #({:?} … {:?})",
+				sub_display_format(SUB_LOG_TARGET),
+				from,
+				to
+			);
+		} else {
+			log::info!(
+				target: &self.client.get_chain_name(),
+				"-[{}] ✨ Imported #{:?}",
+				sub_display_format(SUB_LOG_TARGET),
+				self.waiting_block
+			);
+		}
+
 		let filter = match &self.client.protocol_contracts.bitcoin_socket {
 			Some(bitcoin_socket) => Filter::new()
 				.from_block(BlockNumber::from(from))
@@ -150,23 +167,6 @@ where
 		let target_logs = self.client.get_logs(&filter).await?;
 		if !target_logs.is_empty() {
 			self.sender.send(EventMessage::new(self.waiting_block, target_logs)).unwrap();
-		}
-
-		if from < to {
-			log::info!(
-				target: &self.client.get_chain_name(),
-				"-[{}] ✨ Imported #({:?} … {:?})",
-				sub_display_format(SUB_LOG_TARGET),
-				from,
-				to
-			);
-		} else {
-			log::info!(
-				target: &self.client.get_chain_name(),
-				"-[{}] ✨ Imported #{:?}",
-				sub_display_format(SUB_LOG_TARGET),
-				self.waiting_block
-			);
 		}
 
 		self.increment_waiting_block(to);
