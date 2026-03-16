@@ -545,10 +545,13 @@ where
 
 	/// Query the current block number from a source chain.
 	async fn get_src_chain_block_number(&self, src_chain_id: ChainId) -> Result<u64> {
-		let client = self
-			.system_clients
-			.get(&src_chain_id)
-			.ok_or_else(|| eyre::eyre!("Source chain client not found: {}", src_chain_id))?;
+		let client = if self.bifrost_client.get_bitcoin_chain_id() == Some(src_chain_id) {
+			&self.bifrost_client
+		} else {
+			self.system_clients
+				.get(&src_chain_id)
+				.ok_or_else(|| eyre::eyre!("Source chain client not found: {}", src_chain_id))?
+		};
 		Ok(client.get_block_number().await?)
 	}
 
@@ -561,10 +564,13 @@ where
 	) -> Result<TxVerificationResult> {
 		use alloy::network::ReceiptResponse;
 
-		let client = self
-			.system_clients
-			.get(&src_chain_id)
-			.ok_or_else(|| eyre::eyre!("Source chain client not found: {}", src_chain_id))?;
+		let client = if self.bifrost_client.get_bitcoin_chain_id() == Some(src_chain_id) {
+			&self.bifrost_client
+		} else {
+			self.system_clients
+				.get(&src_chain_id)
+				.ok_or_else(|| eyre::eyre!("Source chain client not found: {}", src_chain_id))?
+		};
 
 		// Get the transaction receipt (single RPC call for both verification and block number)
 		match client.get_transaction_receipt(src_tx_id).await? {
@@ -584,10 +590,13 @@ where
 	) -> Result<Option<u64>> {
 		use alloy::network::ReceiptResponse;
 
-		let client = self
-			.system_clients
-			.get(&src_chain_id)
-			.ok_or_else(|| eyre::eyre!("Source chain client not found: {}", src_chain_id))?;
+		let client = if self.bifrost_client.get_bitcoin_chain_id() == Some(src_chain_id) {
+			&self.bifrost_client
+		} else {
+			self.system_clients
+				.get(&src_chain_id)
+				.ok_or_else(|| eyre::eyre!("Source chain client not found: {}", src_chain_id))?
+		};
 
 		// Get the transaction receipt to find the block number
 		match client.get_transaction_receipt(src_tx_id).await? {
