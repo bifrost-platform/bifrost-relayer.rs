@@ -224,7 +224,7 @@ where
 
 	/// Fetches the oracle ID for a chain's native currency from `OracleRegistry.Oracles`.
 	async fn get_oracle_oid_for_chain(&self, chain_id: ChainId) -> Result<Option<B256>> {
-		self.fetch_oracle_oid(OracleKey::NativeCurrency(chain_id as u32)).await
+		self.fetch_oracle_oid(OracleKey::NativeCurrency(chain_id as u64)).await
 	}
 
 	/// Fetches the oracle ID for an EVM asset address from `OracleRegistry.Oracles`.
