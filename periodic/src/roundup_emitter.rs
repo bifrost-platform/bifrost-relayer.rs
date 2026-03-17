@@ -362,6 +362,13 @@ where
 					bootstrap_config.round_offset.unwrap_or(DEFAULT_BOOTSTRAP_ROUND_OFFSET)
 				);
 			}
+
+			// Always overwrite the cache so RoundupRelayHandler receives the most
+			// recent snapshot (this method may be called multiple times while waiting
+			// for quorum; the last write is what matters).
+			self.bootstrap_shared_data
+				.set_bootstrap_roundup_logs(round_up_events.clone())
+				.await;
 		}
 
 		Ok(round_up_events)

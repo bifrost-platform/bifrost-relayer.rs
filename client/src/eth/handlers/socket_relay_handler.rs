@@ -969,6 +969,23 @@ where
 	}
 
 	async fn get_bootstrap_events(&self) -> Result<Vec<Log>> {
+		let chain_id = self.client.chain_id();
+
+		// Reuse logs cached by SocketQueuePoller (which runs first in
+		// BootstrapSocketRelayQueue) to avoid a duplicate eth_getLogs call.
+		if let Some(cached) = self.bootstrap_shared_data.take_bootstrap_socket_logs(chain_id).await
+		{
+			log::info!(
+				target: &self.client.get_chain_name(),
+				"-[{}] ⚙️  [Bootstrap mode] Reusing {} cached Socket events (no duplicate eth_getLogs)",
+				sub_display_format(SUB_LOG_TARGET),
+				cached.len(),
+			);
+			return Ok(cached);
+		}
+
+		// Fallback: fetch directly when no cache is available (e.g. bootstrap
+		// ran without SocketQueuePoller, or cache was already consumed).
 		let mut logs = vec![];
 
 		if let Some(bootstrap_config) = &self.bootstrap_shared_data.bootstrap_config {
@@ -989,6 +1006,14 @@ where
 			let latest_block_number = self.client.get_block_number().await?;
 			let mut from_block = latest_block_number.saturating_sub(bootstrap_offset_height);
 			let to_block = latest_block_number;
+
+			log::warn!(
+				target: &self.client.get_chain_name(),
+				"-[{}] ⚙️  [Bootstrap mode] Cache miss – fetching Socket events from block {} to {}",
+				sub_display_format(SUB_LOG_TARGET),
+				from_block,
+				to_block,
+			);
 
 			// Split from_block into smaller chunks
 			while from_block <= to_block {

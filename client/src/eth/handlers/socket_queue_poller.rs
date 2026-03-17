@@ -333,7 +333,12 @@ where
 			matches!(status, SocketEventStatus::Committed | SocketEventStatus::Accepted);
 
 		let encoded_msg: Vec<u8> = msg.clone().into();
-		let msg_hash = subxt::utils::H256(keccak256(&encoded_msg).0);
+		// The pallet keys all transfer storage entries by the hash of the
+		// Requested-status message. Reset status to Requested (1) before
+		// hashing so storage lookups in should_skip_finalize_poll match.
+		let mut requested_msg = msg.clone();
+		requested_msg.status = 1; // SocketEventStatus::Requested
+		let msg_hash = subxt::utils::H256(keccak256(&Vec::<u8>::from(requested_msg)).0);
 
 		log::info!(
 			target: &self.client.get_chain_name(),
@@ -661,6 +666,12 @@ where
 				sub_display_format(SUB_LOG_TARGET),
 				logs.len(),
 			);
+
+			// Cache the fetched logs so SocketRelayHandler can reuse them without
+			// issuing a duplicate eth_getLogs for the same block range.
+			self.bootstrap_shared_data
+				.set_bootstrap_socket_logs(self.client.chain_id(), logs.clone())
+				.await;
 		}
 
 		Ok(logs)

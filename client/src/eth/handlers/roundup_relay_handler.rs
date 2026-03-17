@@ -397,6 +397,24 @@ where
 	}
 
 	async fn get_bootstrap_events(&self) -> Result<Vec<Log>> {
+		// Reuse logs cached by RoundupEmitter (which runs first in BootstrapRoundUpPhase1)
+		// to avoid a duplicate eth_getLogs call for the same block range.
+		if let Some(cached) = self.bootstrap_shared_data.take_bootstrap_roundup_logs().await {
+			log::info!(
+				target: &self.client.get_chain_name(),
+				"-[{}] ⚙️  [Bootstrap mode] Reusing {} cached RoundUp events (no duplicate eth_getLogs)",
+				sub_display_format(SUB_LOG_TARGET),
+				cached.len(),
+			);
+			return Ok(cached);
+		}
+
+		// Fallback: fetch directly when no cache is available.
+		log::warn!(
+			target: &self.client.get_chain_name(),
+			"-[{}] ⚙️  [Bootstrap mode] Cache miss – fetching RoundUp events directly",
+			sub_display_format(SUB_LOG_TARGET),
+		);
 		if let Some(bootstrap_config) = &self.bootstrap_shared_data.bootstrap_config {
 			self.client
 				.get_historical_logs(
