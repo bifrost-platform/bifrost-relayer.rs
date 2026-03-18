@@ -6,7 +6,7 @@ use alloy::{
 use br_client::eth::{EthClient, send_transaction};
 use br_primitives::{
 	constants::{errors::INVALID_PERIODIC_SCHEDULE, schedule::HEARTBEAT_SCHEDULE},
-	tx::{HeartbeatMetadata, TxRequestMetadata},
+	tx::HeartbeatMetadata,
 };
 use cron::Schedule;
 use eyre::Result;
@@ -102,7 +102,7 @@ where
 			self.client.clone(),
 			tx_request,
 			SUB_LOG_TARGET.to_string(),
-			TxRequestMetadata::Heartbeat(metadata),
+			Arc::new(metadata),
 			self.debug_mode,
 			self.handle.clone(),
 		);

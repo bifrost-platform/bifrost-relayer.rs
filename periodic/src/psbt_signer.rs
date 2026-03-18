@@ -156,7 +156,7 @@ where
 		if let Some((msg, signature)) = self.build_payload(unsigned_psbt).await? {
 			let metadata = SubmitSignedPsbtMetadata::new(hash_bytes(&msg.unsigned_psbt));
 			return Ok(Some((
-				XtRequest::from(
+				Arc::new(
 					bifrost_runtime::tx().btc_socket_queue().submit_signed_psbt(msg, signature),
 				),
 				metadata,
