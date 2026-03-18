@@ -11,6 +11,7 @@ repository = { workspace = true }
 [dependencies]
 # General
 alloy = { workspace = true }
+parity-scale-codec = { workspace = true }
 thiserror = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 tokio = { workspace = true, features = [

@@ -1,4 +1,4 @@
-use alloy::primitives::ChainId;
+use alloy::{primitives::ChainId, rpc::types::Log};
 use std::{collections::BTreeMap, sync::Arc};
 use tokio::sync::{Barrier, RwLock};
 
@@ -15,6 +15,12 @@ pub struct BootstrapSharedData {
 	pub bootstrap_states: Arc<RwLock<BTreeMap<ChainId, BootstrapState>>>,
 	/// The bootstrap configurations.
 	pub bootstrap_config: Option<BootstrapConfig>,
+	/// Cached Socket bootstrap logs per chain, populated by SocketQueuePoller and
+	/// consumed by SocketRelayHandler to avoid duplicate eth_getLogs calls.
+	pub bootstrap_socket_logs: Arc<RwLock<BTreeMap<ChainId, Vec<Log>>>>,
+	/// Cached RoundUp bootstrap logs (Bifrost chain only), populated by RoundupEmitter
+	/// and consumed by RoundupRelayHandler to avoid a duplicate eth_getLogs call.
+	pub bootstrap_roundup_logs: Arc<RwLock<Option<Vec<Log>>>>,
 }
 
 impl BootstrapSharedData {
@@ -58,7 +64,41 @@ impl BootstrapSharedData {
 				.saturating_add(1),
 		));
 		let bootstrap_states = Arc::new(RwLock::new(bootstrap_states));
+		let bootstrap_socket_logs = Arc::new(RwLock::new(BTreeMap::new()));
+		let bootstrap_roundup_logs = Arc::new(RwLock::new(None));
 
-		Self { roundup_barrier, bootstrap_states, bootstrap_config: bootstrap_config.clone() }
+		Self {
+			roundup_barrier,
+			bootstrap_states,
+			bootstrap_config: bootstrap_config.clone(),
+			bootstrap_socket_logs,
+			bootstrap_roundup_logs,
+		}
+	}
+}
+
+impl BootstrapSharedData {
+	/// Store fetched bootstrap logs for a chain so subsequent handlers can reuse them.
+	pub async fn set_bootstrap_socket_logs(&self, chain_id: ChainId, logs: Vec<Log>) {
+		self.bootstrap_socket_logs.write().await.insert(chain_id, logs);
+	}
+
+	/// Take the cached bootstrap logs for a chain, removing them from the cache.
+	/// Returns `None` if no cache entry exists for the chain.
+	pub async fn take_bootstrap_socket_logs(&self, chain_id: ChainId) -> Option<Vec<Log>> {
+		self.bootstrap_socket_logs.write().await.remove(&chain_id)
+	}
+
+	/// Store the latest RoundUp bootstrap logs (Bifrost chain only).
+	/// Called by RoundupEmitter on every get_bootstrap_events() call so the cache
+	/// always reflects the most recent fetch when transitioning to Phase2.
+	pub async fn set_bootstrap_roundup_logs(&self, logs: Vec<Log>) {
+		*self.bootstrap_roundup_logs.write().await = Some(logs);
+	}
+
+	/// Take the cached RoundUp bootstrap logs, removing them from the cache.
+	/// Returns `None` if RoundupEmitter has not run yet.
+	pub async fn take_bootstrap_roundup_logs(&self) -> Option<Vec<Log>> {
+		self.bootstrap_roundup_logs.write().await.take()
 	}
 }

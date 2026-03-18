@@ -122,7 +122,7 @@ where
 		let metadata = VaultKeyPresubmissionMetadata { keys: pub_keys.len() };
 
 		Ok((
-			XtRequest::from(
+			Arc::new(
 				bifrost_runtime::tx()
 					.btc_registration_pool()
 					.vault_key_presubmission(msg, signature),

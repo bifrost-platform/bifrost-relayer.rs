@@ -25,7 +25,7 @@ use br_primitives::{
 		SocketInstance,
 	},
 	eth::{BootstrapState, RoundUpEventStatus},
-	tx::{TxRequestMetadata, VSPPhase2Metadata},
+	tx::VSPPhase2Metadata,
 	utils::{encode_roundup_param, recover_message, sub_display_format},
 };
 
@@ -207,11 +207,16 @@ where
 		let signatures =
 			self.client.protocol_contracts.socket.get_round_signatures(round).call().await?;
 
-		let mut signature_vec = Vec::<Signature>::from(signatures);
-		signature_vec
-			.sort_by_key(|k| recover_message(*k, &encode_roundup_param(round, new_relayers)));
+		let mut keyed = Vec::<Signature>::from(signatures)
+			.into_iter()
+			.map(|sig| {
+				recover_message(sig, &encode_roundup_param(round, new_relayers))
+					.map(|addr| (addr, sig))
+			})
+			.collect::<Result<Vec<_>, _>>()?;
+		keyed.sort_by_key(|(addr, _)| *addr);
 
-		Ok(Signatures::from(signature_vec))
+		Ok(Signatures::from(keyed.into_iter().map(|(_, sig)| sig).collect::<Vec<_>>()))
 	}
 
 	/// Verifies whether the current relayer was selected at the given round.
@@ -277,10 +282,8 @@ where
 					roundup_submit,
 					from,
 				);
-				let metadata = TxRequestMetadata::VSPPhase2(VSPPhase2Metadata::new(
-					roundup_submit.round,
-					*dst_chain_id,
-				));
+				let metadata =
+					Arc::new(VSPPhase2Metadata::new(roundup_submit.round, *dst_chain_id));
 
 				if is_bootstrap {
 					while let Err(e) = target_client
@@ -381,19 +384,37 @@ where
 			let mut bootstrap_states = self.bootstrap_shared_data.bootstrap_states.write().await;
 			for chain_id in chain_ids {
 				*bootstrap_states.get_mut(&chain_id).unwrap() =
-					BootstrapState::BootstrapSocketRelay;
+					BootstrapState::BootstrapSocketRelayQueue;
 			}
 		}
 
 		log::info!(
 			target: &self.client.get_chain_name(),
-			"-[{}] ⚙️  [Bootstrap mode] BootstrapRoundUpPhase2 → BootstrapSocketRelay",
+			"-[{}] ⚙️  [Bootstrap mode] BootstrapRoundUpPhase2 → BootstrapSocketRelayQueue",
 			sub_display_format(SUB_LOG_TARGET),
 		);
 		Ok(())
 	}
 
 	async fn get_bootstrap_events(&self) -> Result<Vec<Log>> {
+		// Reuse logs cached by RoundupEmitter (which runs first in BootstrapRoundUpPhase1)
+		// to avoid a duplicate eth_getLogs call for the same block range.
+		if let Some(cached) = self.bootstrap_shared_data.take_bootstrap_roundup_logs().await {
+			log::info!(
+				target: &self.client.get_chain_name(),
+				"-[{}] ⚙️  [Bootstrap mode] Reusing {} cached RoundUp events (no duplicate eth_getLogs)",
+				sub_display_format(SUB_LOG_TARGET),
+				cached.len(),
+			);
+			return Ok(cached);
+		}
+
+		// Fallback: fetch directly when no cache is available.
+		log::warn!(
+			target: &self.client.get_chain_name(),
+			"-[{}] ⚙️  [Bootstrap mode] Cache miss – fetching RoundUp events directly",
+			sub_display_format(SUB_LOG_TARGET),
+		);
 		if let Some(bootstrap_config) = &self.bootstrap_shared_data.bootstrap_config {
 			self.client
 				.get_historical_logs(
