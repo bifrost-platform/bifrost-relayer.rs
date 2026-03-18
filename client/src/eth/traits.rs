@@ -232,6 +232,26 @@ where
 		self.fetch_oracle_oid(OracleKey::Asset(SubH160(asset.0.0))).await
 	}
 
+	/// Checks if the given token index is hookable.
+	async fn is_hookable(&self, asset_index_hash: B256) -> Result<bool> {
+		match self
+			.get_sub_client()
+			.storage()
+			.at_latest()
+			.await?
+			.fetch(
+				&bifrost_runtime::storage()
+					.cccp_relay_queue()
+					.asset_indexes_hook_state(SubH256(asset_index_hash.0)),
+			)
+			.await
+		{
+			Ok(Some(is_hookable)) => Ok(is_hookable),
+			Ok(None) => Ok(false),
+			Err(e) => Err(e.into()),
+		}
+	}
+
 	/// Fetches an oracle ID from `OracleRegistry.Oracles` using the typed subxt storage API.
 	async fn fetch_oracle_oid(&self, oracle_key: OracleKey) -> Result<Option<B256>> {
 		let result = self
@@ -458,6 +478,10 @@ where
 				max_tx_fee,
 				msg.params.amount
 			));
+		}
+		// Validate: check if msg.params.tokenIDX0 is hookable
+		if !self.is_hookable(msg.params.tokenIDX0).await? {
+			return Ok((U256::ZERO, 0));
 		}
 
 		// Estimate gas and fee on destination chain
