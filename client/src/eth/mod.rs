@@ -298,8 +298,8 @@ where
 
 		log::info!(target: &self.get_chain_name(), "-[{}] Flushing stalled transactions", sub_display_format(SUB_LOG_TARGET));
 
-		// if the chain is native or txpool is not enabled, do nothing
-		if self.metadata.is_native || self.txpool_status().await.is_err() {
+		// if txpool namespace is not enabled on the chain, do nothing
+		if self.txpool_status().await.is_err() {
 			return Ok(());
 		}
 
