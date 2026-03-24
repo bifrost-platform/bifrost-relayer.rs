@@ -86,6 +86,11 @@ pub struct EVMProvider {
 	/// configured batch size. Default size is set to 1, which means it will be requested on every
 	/// new block. (default: 1)
 	pub get_logs_batch_size: Option<u64>,
+	/// Maximum fee (in destination chain's native currency wei) the relayer will pay to execute
+	/// a single `Hooks.execute()` call. If the estimated gas cost exceeds this value, the hook
+	/// execution is skipped to prevent draining the relayer's native balance.
+	/// Only relevant for chains that have `hooks_address` configured.
+	pub max_hook_fee: Option<u128>,
 	/// Socket contract address
 	pub socket_address: String,
 	/// Authority contract address
