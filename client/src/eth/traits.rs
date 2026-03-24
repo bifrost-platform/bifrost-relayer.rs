@@ -534,6 +534,22 @@ where
 			eyre::eyre!("Gas fee calculation overflow: gas={}, gas_price={}", gas, gas_price),
 		)?;
 
+		// Validate: estimated gas cost must not exceed the configured max hook fee
+		if let Some(max_hook_fee) = self.get_client().metadata.max_hook_fee {
+			if estimated_fee_in_dnc > max_hook_fee {
+				br_primitives::log_and_capture!(
+					warn,
+					&self.get_client().get_chain_name(),
+					SUB_LOG_TARGET,
+					self.get_client().address().await,
+					"⚠️  Estimated hook fee ({} wei) exceeds max_hook_fee limit ({} wei). Skipping hook execution.",
+					estimated_fee_in_dnc,
+					max_hook_fee
+				);
+				return Ok((U256::ZERO, 0));
+			}
+		}
+
 		// Resolve oracle manager from the socket contract
 		let oracle_manager = self.resolve_oracle_manager().await?;
 
