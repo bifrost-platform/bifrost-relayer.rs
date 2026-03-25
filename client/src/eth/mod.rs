@@ -322,7 +322,8 @@ where
 					.with_from(address)
 					.with_to(tx.to().unwrap())
 					.with_input(tx.input().clone())
-					.with_nonce(tx.nonce());
+					.with_nonce(tx.nonce())
+					.with_gas_limit(tx.gas_limit());
 				if tx.is_eip1559() {
 					request.set_max_fee_per_gas(
 						TransactionResponse::max_fee_per_gas(&tx).unwrap_or(0),
