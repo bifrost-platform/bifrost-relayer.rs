@@ -9,7 +9,7 @@ use alloy::{
 };
 use eyre::Result;
 use subxt::ext::subxt_core::utils::AccountId20;
-use subxt::{OnlineClient, backend::legacy::LegacyRpcMethods, backend::rpc::RpcClient};
+use subxt::{OnlineClient, backend::legacy::LegacyRpcMethods};
 use tokio::sync::broadcast::Receiver;
 use tokio_stream::{StreamExt, wrappers::BroadcastStream};
 
@@ -18,7 +18,10 @@ use br_primitives::{
 	constants::{cli::DEFAULT_BOOTSTRAP_ROUND_OFFSET, config::BOOTSTRAP_BLOCK_CHUNK_SIZE},
 	contracts::socket::{Socket_Struct::Socket_Message, SocketContract::Socket},
 	eth::{BootstrapState, SocketEventStatus},
-	substrate::{CustomConfig, FinalizePollSubmission, OnFlightPollSubmission, bifrost_runtime},
+	substrate::{
+		CustomConfig, FinalizePollSubmission, OnFlightPollSubmission, bifrost_runtime,
+		create_rpc_client,
+	},
 	tx::{
 		FinalizePollMetadata, OnFlightPollMetadata, XtRequestMessage, XtRequestMetadata,
 		XtRequestSender,
@@ -73,7 +76,7 @@ where
 		event_receiver: Receiver<EventMessage>,
 		bootstrap_shared_data: Arc<BootstrapSharedData>,
 	) -> Result<Self> {
-		let rpc_client = RpcClient::from_url(&sub_rpc_url).await?;
+		let rpc_client = create_rpc_client(&sub_rpc_url).await?;
 		let sub_rpc = LegacyRpcMethods::<CustomConfig>::new(rpc_client);
 
 		Ok(Self {
