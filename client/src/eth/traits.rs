@@ -3,7 +3,7 @@ use std::{sync::Arc, time::Duration};
 use alloy::{
 	dyn_abi::SolType,
 	network::{Network, TransactionBuilder},
-	primitives::{Address, B256, ChainId, U256},
+	primitives::{Address, B256, ChainId, I256, U256},
 	providers::{Provider, WalletProvider, fillers::TxFiller},
 	rpc::types::Log,
 	signers::Signature,
@@ -11,8 +11,9 @@ use alloy::{
 };
 use br_primitives::{
 	bootstrap::BootstrapSharedData,
-	constants::cccp,
+	constants::{cccp, config::CHAINLINK_STALENESS_THRESHOLD_VOLATILE},
 	contracts::{
+		chainlink_aggregator::ChainlinkContract,
 		oracle::{OracleManagerContract, OracleManagerInstance},
 		socket::{
 			Socket_Struct::{Poll_Submit, Signatures, Socket_Message},
@@ -287,6 +288,21 @@ where
 		Ok(result.map(|h160| Address::from_slice(&h160.0)))
 	}
 
+	/// Fetches the Chainlink aggregator address and decimal precision for the given asset
+	/// from `OracleRegistry.Aggregators`.
+	///
+	/// Returns `(aggregator_address, decimal)` if found, or `None` if no aggregator is registered.
+	async fn fetch_aggregator_info(&self, asset_id: Address) -> Result<Option<(Address, u8)>> {
+		let result = self
+			.get_sub_client()
+			.storage()
+			.at_latest()
+			.await?
+			.fetch(&bifrost_runtime::storage().oracle_registry().aggregators(SubH160(asset_id.0.0)))
+			.await?;
+		Ok(result.map(|info| (Address::from_slice(&info.address.0), info.decimal)))
+	}
+
 	/// Validates common hook prerequisites for both execute and rollback operations.
 	///
 	/// This private helper method performs the following checks:
@@ -367,6 +383,11 @@ where
 				msg.params.refund,
 				hooks_address
 			);
+			return Ok(None);
+		}
+
+		// Check if msg.params.tokenIDX0 is hookable
+		if !self.is_hookable(msg.params.tokenIDX0).await? {
 			return Ok(None);
 		}
 
@@ -479,10 +500,6 @@ where
 				msg.params.amount
 			));
 		}
-		// Validate: check if msg.params.tokenIDX0 is hookable
-		if !self.is_hookable(msg.params.tokenIDX0).await? {
-			return Ok((U256::ZERO, 0));
-		}
 
 		// Estimate gas and fee on destination chain
 		avoid_race_condition().await;
@@ -516,6 +533,22 @@ where
 		let estimated_fee_in_dnc = U256::from(gas).checked_mul(U256::from(gas_price)).ok_or(
 			eyre::eyre!("Gas fee calculation overflow: gas={}, gas_price={}", gas, gas_price),
 		)?;
+
+		// Validate: estimated gas cost must not exceed the configured max hook fee
+		if let Some(max_hook_fee) = self.get_client().metadata.max_hook_fee {
+			if estimated_fee_in_dnc > max_hook_fee {
+				br_primitives::log_and_capture!(
+					warn,
+					&self.get_client().get_chain_name(),
+					SUB_LOG_TARGET,
+					self.get_client().address().await,
+					"⚠️  Estimated hook fee ({} wei) exceeds max_hook_fee limit ({} wei). Skipping hook execution.",
+					estimated_fee_in_dnc,
+					max_hook_fee
+				);
+				return Ok((U256::ZERO, 0));
+			}
+		}
 
 		// Resolve oracle manager from the socket contract
 		let oracle_manager = self.resolve_oracle_manager().await?;
@@ -582,10 +615,28 @@ where
 			},
 		};
 
+		let now = std::time::SystemTime::now()
+			.duration_since(std::time::UNIX_EPOCH)
+			.unwrap_or_default()
+			.as_secs();
+
 		// Fetch DNC price from oracle manager
-		let dnc_price = match oracle_manager.last_oracle_data(dnc_oid).call().await {
-			Ok(result) => {
-				let price = U256::from_be_bytes(result.into());
+		let dnc_price = match oracle_manager.last_oracle_info(dnc_oid).call().await {
+			Ok(info) => {
+				let staleness = now.saturating_sub(info._1.time);
+				if staleness > CHAINLINK_STALENESS_THRESHOLD_VOLATILE {
+					br_primitives::log_and_capture!(
+						warn,
+						&self.get_client().get_chain_name(),
+						SUB_LOG_TARGET,
+						self.get_client().address().await,
+						"⚠️  DNC oracle price is stale (last updated {}s ago, threshold: {}s). Skipping hook execution.",
+						staleness,
+						CHAINLINK_STALENESS_THRESHOLD_VOLATILE
+					);
+					return Ok((U256::ZERO, 0));
+				}
+				let price = U256::from_be_bytes(info._1.data.into());
 				if price.is_zero() {
 					br_primitives::log_and_capture!(
 						warn,
@@ -612,34 +663,142 @@ where
 			},
 		};
 
-		// Fetch bridged asset price from oracle manager
-		let bridged_price = match oracle_manager.last_oracle_data(bridged_oid).call().await {
-			Ok(result) => {
-				let price = U256::from_be_bytes(result.into());
-				if price.is_zero() {
+		// Fetch bridged asset price: use aggregator contract if oracle ID is zero,
+		// otherwise fetch from the oracle manager.
+		let bridged_price = if bridged_oid == B256::ZERO {
+			// A zero oracle ID signals that pricing comes from an aggregator contract.
+			let (aggregator_address, aggregator_decimals) =
+				match self.fetch_aggregator_info(bridged_asset_id).await? {
+					Some(info) => info,
+					None => {
+						br_primitives::log_and_capture!(
+							warn,
+							&self.get_client().get_chain_name(),
+							SUB_LOG_TARGET,
+							self.get_client().address().await,
+							"⚠️  Oracle aggregator not found for asset {:?}. Skipping hook execution.",
+							bridged_asset_id
+						);
+						return Ok((U256::ZERO, 0));
+					},
+				};
+
+			let aggregator =
+				ChainlinkContract::new(aggregator_address, self.get_bifrost_client().provider());
+			match aggregator.latestRoundData().call().await {
+				Ok(round_data) => {
+					let staleness =
+						now.saturating_sub(round_data.updatedAt.try_into().unwrap_or_default());
+					if staleness > CHAINLINK_STALENESS_THRESHOLD_VOLATILE {
+						br_primitives::log_and_capture!(
+							warn,
+							&self.get_client().get_chain_name(),
+							SUB_LOG_TARGET,
+							self.get_client().address().await,
+							"⚠️  Oracle aggregator price is stale (last updated {}s ago, threshold: {}s) for {:?}. Skipping hook execution.",
+							staleness,
+							CHAINLINK_STALENESS_THRESHOLD_VOLATILE,
+							bridged_asset_id
+						);
+						return Ok((U256::ZERO, 0));
+					}
+
+					let answer = round_data.answer;
+					if answer <= I256::ZERO {
+						br_primitives::log_and_capture!(
+							warn,
+							&self.get_client().get_chain_name(),
+							SUB_LOG_TARGET,
+							self.get_client().address().await,
+							"⚠️  Oracle aggregator returned non-positive price for {:?}. Skipping hook execution.",
+							bridged_asset_id
+						);
+						return Ok((U256::ZERO, 0));
+					}
+					// Normalize to 18-decimal scale to match the oracle manager's price format.
+					let price_raw = answer.into_raw();
+					let normalized = if aggregator_decimals <= 18 {
+						price_raw
+							.checked_mul(
+								U256::from(10u64).pow(U256::from(18u8 - aggregator_decimals)),
+							)
+							.ok_or(eyre::eyre!("Oracle aggregator price normalization overflow"))?
+					} else {
+						price_raw
+							.checked_div(
+								U256::from(10u64).pow(U256::from(aggregator_decimals - 18u8)),
+							)
+							.ok_or(eyre::eyre!("Oracle aggregator price normalization underflow"))?
+					};
+					if normalized.is_zero() {
+						br_primitives::log_and_capture!(
+							warn,
+							&self.get_client().get_chain_name(),
+							SUB_LOG_TARGET,
+							self.get_client().address().await,
+							"⚠️  Oracle aggregator normalized price is zero for {:?}. Skipping hook execution.",
+							bridged_asset_id
+						);
+						return Ok((U256::ZERO, 0));
+					}
+					normalized
+				},
+				Err(e) => {
 					br_primitives::log_and_capture!(
 						warn,
 						&self.get_client().get_chain_name(),
 						SUB_LOG_TARGET,
 						self.get_client().address().await,
-						"⚠️  Bridged asset oracle returned zero price. Skipping hook execution."
+						"⚠️  Oracle aggregator price fetch failed (token: {:?}). Skipping hook execution. Error: {}",
+						bridged_asset_id,
+						e.to_string()
 					);
 					return Ok((U256::ZERO, 0));
-				}
-				price
-			},
-			Err(e) => {
-				br_primitives::log_and_capture!(
-					warn,
-					&self.get_client().get_chain_name(),
-					SUB_LOG_TARGET,
-					self.get_client().address().await,
-					"⚠️  Bridged asset oracle price fetch failed (token: {:?}). Skipping hook execution. Error: {}",
-					bridged_asset,
-					e.to_string()
-				);
-				return Ok((U256::ZERO, 0));
-			},
+				},
+			}
+		} else {
+			// Fetch bridged asset price from oracle manager
+			match oracle_manager.last_oracle_info(bridged_oid).call().await {
+				Ok(info) => {
+					let staleness = now.saturating_sub(info._1.time);
+					if staleness > CHAINLINK_STALENESS_THRESHOLD_VOLATILE {
+						br_primitives::log_and_capture!(
+							warn,
+							&self.get_client().get_chain_name(),
+							SUB_LOG_TARGET,
+							self.get_client().address().await,
+							"⚠️  Bridged asset oracle price is stale (last updated {}s ago, threshold: {}s). Skipping hook execution.",
+							staleness,
+							CHAINLINK_STALENESS_THRESHOLD_VOLATILE
+						);
+						return Ok((U256::ZERO, 0));
+					}
+					let price = U256::from_be_bytes(info._1.data.into());
+					if price.is_zero() {
+						br_primitives::log_and_capture!(
+							warn,
+							&self.get_client().get_chain_name(),
+							SUB_LOG_TARGET,
+							self.get_client().address().await,
+							"⚠️  Bridged asset oracle returned zero price. Skipping hook execution."
+						);
+						return Ok((U256::ZERO, 0));
+					}
+					price
+				},
+				Err(e) => {
+					br_primitives::log_and_capture!(
+						warn,
+						&self.get_client().get_chain_name(),
+						SUB_LOG_TARGET,
+						self.get_client().address().await,
+						"⚠️  Bridged asset oracle price fetch failed (token: {:?}). Skipping hook execution. Error: {}",
+						bridged_asset,
+						e.to_string()
+					);
+					return Ok((U256::ZERO, 0));
+				},
+			}
 		};
 
 		// Fee conversion: same-scale oracle prices, no decimal correction needed.

@@ -1,8 +1,12 @@
-use std::{sync::Arc, time::Duration};
+use std::{
+	collections::HashMap,
+	sync::{Arc, Mutex},
+	time::Duration,
+};
 
 use alloy::{
 	network::{Network, primitives::ReceiptResponse as _},
-	primitives::{Address, B256, Signature, U256},
+	primitives::{Address, B256, ChainId, Signature, U256},
 	providers::{Provider, WalletProvider, fillers::TxFiller},
 	rpc::types::Log,
 	sol_types::SolEvent as _,
@@ -16,8 +20,9 @@ use tokio_stream::{StreamExt, wrappers::BroadcastStream};
 use br_primitives::{
 	bootstrap::BootstrapSharedData,
 	constants::{
-		cli::DEFAULT_BOOTSTRAP_ROUND_OFFSET, config::BOOTSTRAP_BLOCK_CHUNK_SIZE,
-		tx::DEFAULT_CALL_RETRY_INTERVAL_MS,
+		cli::DEFAULT_BOOTSTRAP_ROUND_OFFSET,
+		config::BOOTSTRAP_BLOCK_CHUNK_SIZE,
+		tx::{DEFAULT_CALL_RETRY_INTERVAL_MS, ROUNDUP_RELAY_RETRY_INTERVAL_MS},
 	},
 	contracts::socket::{
 		Socket_Struct::{Round_Up_Submit, Signatures},
@@ -56,6 +61,11 @@ where
 	handle: SpawnTaskHandle,
 	/// Whether to enable debug mode.
 	debug_mode: bool,
+	/// Pending roundup relays per external chain, stored as a `Vec` sorted by round ascending
+	/// so that the lowest (oldest) rounds are relayed first on retry.
+	/// Uses a plain `Mutex` (no `Arc`) for interior mutability — the lock is always released
+	/// before any `.await`, so there is no deadlock risk in this single-handler context.
+	pending_relays: Mutex<HashMap<ChainId, Vec<Round_Up_Submit>>>,
 }
 
 #[async_trait]
@@ -71,23 +81,42 @@ where
 		}
 
 		self.wait_for_all_chains_bootstrapped().await?;
-		while let Some(Ok(msg)) = self.event_stream.next().await {
-			log::info!(
-				target: &self.client.get_chain_name(),
-				"-[{}] 📦 Imported #{:?} with target logs({:?})",
-				sub_display_format(SUB_LOG_TARGET),
-				msg.block_number,
-				msg.event_logs.len(),
-			);
 
-			for log in msg.event_logs {
-				if self.is_target_contract(&log) && self.is_target_event(log.topic0()) {
-					self.process_confirmed_log(&log, false).await?;
-				}
+		let mut retry_interval = tokio::time::interval(tokio::time::Duration::from_millis(
+			ROUNDUP_RELAY_RETRY_INTERVAL_MS,
+		));
+		// Skip the immediate first tick so we don't retry before any failure has occurred.
+		retry_interval.tick().await;
+
+		loop {
+			tokio::select! {
+				msg = self.event_stream.next() => {
+					match msg {
+						Some(Ok(msg)) => {
+							log::info!(
+								target: &self.client.get_chain_name(),
+								"-[{}] 📦 Imported #{:?} with target logs({:?})",
+								sub_display_format(SUB_LOG_TARGET),
+								msg.block_number,
+								msg.event_logs.len(),
+							);
+
+							for log in msg.event_logs {
+								if self.is_target_contract(&log) && self.is_target_event(log.topic0()) {
+									self.process_confirmed_log(&log, false).await?;
+								}
+							}
+						},
+						_ => {},
+					}
+				},
+				_ = retry_interval.tick() => {
+					if !self.pending_relays.lock().unwrap().is_empty() {
+						self.retry_pending_relays().await?;
+					}
+				},
 			}
 		}
-
-		Ok(())
 	}
 
 	async fn process_confirmed_log(&self, log: &Log, is_bootstrap: bool) -> Result<()> {
@@ -118,17 +147,13 @@ where
 
 					match RoundUpEventStatus::from_u8(serialized_log.status) {
 						RoundUpEventStatus::NextAuthorityCommitted => {
-							self.broadcast_roundup(
-								&self
-									.build_roundup_submit(
-										serialized_log.roundup.round,
-										serialized_log.roundup.new_relayers,
-									)
-									.await?,
-								relay_as,
-								is_bootstrap,
-							)
-							.await?;
+							let roundup_submit = self
+								.build_roundup_submit(
+									serialized_log.roundup.round,
+									serialized_log.roundup.new_relayers,
+								)
+								.await?;
+							self.broadcast_roundup(roundup_submit, relay_as, is_bootstrap).await?;
 						},
 						RoundUpEventStatus::NextAuthorityRelayed => return Ok(()),
 					}
@@ -190,6 +215,7 @@ where
 			bootstrap_shared_data,
 			handle,
 			debug_mode,
+			pending_relays: Mutex::new(HashMap::new()),
 		}
 	}
 
@@ -261,10 +287,18 @@ where
 			.into_transaction_request()
 	}
 
-	/// Check roundup submitted before. If not, call `round_control_relay`.
+	/// Broadcasts a `round_control_relay` to all external chains.
+	///
+	/// For the non-bootstrap path, the `roundup_submit` is always stored in `pending_relays`
+	/// before attempting the immediate send, so the 10-minute retry interval can catch any
+	/// chains that were out-of-sync at the time of the original event.
+	///
+	/// - Bootstrap path (`is_bootstrap=true`): errors propagate immediately; no pending storage.
+	/// - Normal path (`is_bootstrap=false`): fire-and-forget send; per-chain RPC failures are
+	///   logged and the chain stays in `pending_relays` for later retry.
 	async fn broadcast_roundup(
 		&self,
-		roundup_submit: &Round_Up_Submit,
+		roundup_submit: Round_Up_Submit,
 		from: Address,
 		is_bootstrap: bool,
 	) -> Result<()> {
@@ -273,13 +307,23 @@ where
 		}
 
 		for (dst_chain_id, target_client) in self.external_clients.iter() {
-			// Check roundup submitted to target chain before.
+			// For the normal path, always record this relay before attempting to send so that
+			// the retry interval can pick it up if the chain is out-of-sync.
+			if !is_bootstrap {
+				let mut pending = self.pending_relays.lock().unwrap();
+				let relays = pending.entry(*dst_chain_id).or_default();
+				if !relays.iter().any(|r| r.round == roundup_submit.round) {
+					let pos = relays.partition_point(|r| r.round < roundup_submit.round);
+					relays.insert(pos, roundup_submit.clone());
+				}
+			}
+
 			let latest_round =
 				target_client.protocol_contracts.authority.latest_round().call().await?;
 			if roundup_submit.round > latest_round {
 				let transaction_request = self.build_transaction_request(
 					&target_client.protocol_contracts.socket,
-					roundup_submit,
+					&roundup_submit,
 					from,
 				);
 				let metadata =
@@ -311,6 +355,82 @@ where
 						self.handle.clone(),
 					);
 				}
+			}
+		}
+
+		Ok(())
+	}
+
+	/// Retries all pending roundup relays. Called every 10 minutes via interval tick.
+	///
+	/// For each external chain with pending relays, fetches its current round and:
+	/// - Drops the entire chain entry if the chain is already synced to the bifrost latest round.
+	/// - Otherwise relays all pending rounds (ascending) whose round exceeds the chain's current round.
+	async fn retry_pending_relays(&self) -> Result<()> {
+		let bifrost_latest_round =
+			self.client.protocol_contracts.authority.latest_round().call().await?;
+
+		let chain_ids: Vec<ChainId> = self.pending_relays.lock().unwrap().keys().cloned().collect();
+
+		for dst_chain_id in chain_ids {
+			let target_client = match self.external_clients.get(&dst_chain_id) {
+				Some(c) => c.clone(),
+				None => {
+					self.pending_relays.lock().unwrap().remove(&dst_chain_id);
+					continue;
+				},
+			};
+
+			let chain_latest_round =
+				target_client.protocol_contracts.authority.latest_round().call().await?;
+
+			// Drop all pending entries for this chain if it is already synced.
+			if chain_latest_round == bifrost_latest_round {
+				log::info!(
+					target: &self.client.get_chain_name(),
+					"-[{}] ✅ Chain {} already synced to round {:?}. Dropping pending relays.",
+					sub_display_format(SUB_LOG_TARGET),
+					dst_chain_id,
+					chain_latest_round,
+				);
+				self.pending_relays.lock().unwrap().remove(&dst_chain_id);
+				continue;
+			}
+
+			// Collect only the rounds that still need to be relayed (ascending order).
+			let pending_submits: Vec<Round_Up_Submit> = self
+				.pending_relays
+				.lock()
+				.unwrap()
+				.get(&dst_chain_id)
+				.map(|v| v.iter().filter(|r| r.round > chain_latest_round).cloned().collect())
+				.unwrap_or_default();
+
+			for roundup_submit in pending_submits {
+				let from = self.relay_as(roundup_submit.round - U256::from(1)).await;
+
+				log::info!(
+					target: &self.client.get_chain_name(),
+					"-[{}] 🔄 Retrying RoundUp relay to chain {} for round {:?}",
+					sub_display_format(SUB_LOG_TARGET),
+					dst_chain_id,
+					roundup_submit.round,
+				);
+
+				let transaction_request = self.build_transaction_request(
+					&target_client.protocol_contracts.socket,
+					&roundup_submit,
+					from,
+				);
+				let metadata = Arc::new(VSPPhase2Metadata::new(roundup_submit.round, dst_chain_id));
+				send_transaction(
+					target_client.clone(),
+					transaction_request,
+					SUB_LOG_TARGET.to_string(),
+					metadata,
+					self.debug_mode,
+					self.handle.clone(),
+				);
 			}
 		}
 

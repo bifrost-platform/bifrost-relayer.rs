@@ -298,8 +298,8 @@ where
 
 		log::info!(target: &self.get_chain_name(), "-[{}] Flushing stalled transactions", sub_display_format(SUB_LOG_TARGET));
 
-		// if the chain is native or txpool is not enabled, do nothing
-		if self.metadata.is_native || self.txpool_status().await.is_err() {
+		// if txpool namespace is not enabled on the chain, do nothing
+		if self.txpool_status().await.is_err() {
 			return Ok(());
 		}
 
@@ -322,7 +322,8 @@ where
 					.with_from(address)
 					.with_to(tx.to().unwrap())
 					.with_input(tx.input().clone())
-					.with_nonce(tx.nonce());
+					.with_nonce(tx.nonce())
+					.with_gas_limit(tx.gas_limit());
 				if tx.is_eip1559() {
 					request.set_max_fee_per_gas(
 						TransactionResponse::max_fee_per_gas(&tx).unwrap_or(0),

@@ -1,6 +1,6 @@
 use alloy::{
 	network::Network,
-	primitives::{Address, ChainId, map::AddressHashMap},
+	primitives::{Address, ChainId, U256, map::AddressHashMap},
 	providers::{
 		Provider, WalletProvider,
 		fillers::{FillProvider, TxFiller},
@@ -108,6 +108,9 @@ pub struct ProviderMetadata {
 	pub is_native: bool,
 	/// The flag whether the chain is relay target.
 	pub is_relay_target: bool,
+	/// Maximum fee in native currency wei the relayer will pay for a single `Hooks.execute()`.
+	/// Hook execution is skipped if the estimated gas cost exceeds this value.
+	pub max_hook_fee: Option<U256>,
 }
 
 impl ProviderMetadata {
@@ -136,6 +139,7 @@ impl ProviderMetadata {
 				false => RelayDirection::Outbound,
 			},
 			is_relay_target: evm_provider.is_relay_target,
+			max_hook_fee: evm_provider.max_hook_fee.map(U256::from),
 		}
 	}
 }
