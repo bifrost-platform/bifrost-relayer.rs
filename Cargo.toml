@@ -78,6 +78,7 @@ tokio = "1.49"
 tokio-stream = "0.1.18"
 
 subxt = "0.44.2"
+jsonrpsee = { version = "0.24.10", features = ["ws-client"] }
 
 # Substrate Clients
 sc-cli = { git = "https://github.com/bifrost-platform/polkadot-sdk", default-features = false, branch = "bifrost-polkadot-stable2512" }

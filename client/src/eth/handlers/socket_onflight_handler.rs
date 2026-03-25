@@ -11,16 +11,14 @@ use alloy::{
 	sol_types::SolType,
 };
 use eyre::Result;
-use subxt::{
-	OnlineClient, backend::legacy::LegacyRpcMethods, backend::rpc::RpcClient, utils::H256,
-};
+use subxt::{OnlineClient, backend::legacy::LegacyRpcMethods, utils::H256};
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 
 use br_primitives::{
 	bootstrap::BootstrapSharedData,
 	contracts::socket::Socket_Struct::{Instruction, RequestID, Socket_Message, Task_Params},
 	eth::BootstrapState,
-	substrate::{CustomConfig, bifrost_runtime},
+	substrate::{CustomConfig, bifrost_runtime, create_rpc_client},
 	utils::sub_display_format,
 };
 
@@ -117,7 +115,7 @@ where
 		onflight_senders: Arc<BTreeMap<ChainId, SocketOnflightSender>>,
 		bootstrap_shared_data: Arc<BootstrapSharedData>,
 	) -> Result<Self> {
-		let rpc_client = RpcClient::from_url(&sub_rpc_url).await?;
+		let rpc_client = create_rpc_client(&sub_rpc_url).await?;
 		let sub_rpc = LegacyRpcMethods::<CustomConfig>::new(rpc_client);
 
 		Ok(Self {
