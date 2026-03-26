@@ -54,9 +54,9 @@ use subxt::{
 };
 use url::Url;
 
-/// Maximum WebSocket response body size (64 MB).
+/// Maximum WebSocket response body size (128 MB).
 /// The default jsonrpsee limit is 10 MB, which can be exceeded by large Substrate blocks.
-const MAX_WS_RESPONSE_BODY_SIZE: u32 = 64 * 1024 * 1024;
+const MAX_WS_RESPONSE_BODY_SIZE: u32 = 128 * 1024 * 1024;
 
 #[derive(Debug, Clone)]
 pub enum CustomConfig {}
