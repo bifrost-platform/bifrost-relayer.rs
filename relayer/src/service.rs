@@ -439,11 +439,13 @@ where
 				loop {
 					let report = handler.run().await;
 					let log_msg = format!(
-						"socket onflight handler stopped: {:?}\nRestarting immediately...",
+						"socket onflight handler stopped: {:?}\nRestarting in 12 seconds...",
 						report
 					);
 					log::error!("{log_msg}");
 					sentry::capture_message(&log_msg, sentry::Level::Error);
+
+					tokio::time::sleep(Duration::from_secs(12)).await;
 				}
 			},
 		);
