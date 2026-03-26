@@ -435,7 +435,8 @@ where
 
 			let gas = self.estimate_gas(request.clone()).await?;
 			let coefficient: f64 = GasCoefficient::from(self.metadata.is_native).into();
-			let estimated_gas = gas as f64 * coefficient;
+			// max gas limit for a single transaction is 52,000,000 on bifrost network
+			let estimated_gas = (gas as f64 * coefficient).min(52_000_000_f64);
 
 			log::info!(
 				target: &self.get_chain_name(),
