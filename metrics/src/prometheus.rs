@@ -29,13 +29,116 @@ lazy_static! {
 		"Number of seconds between the UNIX epoch and the moment the process started",
 	)
 	.unwrap();
+
+	// ----------------------------------------------------------------
+	// Solana / cccp-solana metrics
+	// ----------------------------------------------------------------
+
+	/// Latest slot the slot manager has observed for a given cluster.
+	pub static ref SOL_SLOT_HEIGHT: GaugeVec<U64> = GaugeVec::<U64>::new(
+		Opts::new("relayer_sol_slot_height", "Latest observed slot per Solana cluster"),
+		&["cluster"],
+	)
+	.unwrap();
+
+	/// Cumulative count of `getSlot`/`getSignaturesForAddress`/`getTransaction`
+	/// RPC requests issued to a given cluster.
+	pub static ref SOL_RPC_CALLS: GaugeVec<U64> = GaugeVec::<U64>::new(
+		Opts::new("relayer_sol_rpc_calls", "Cumulative Solana RPC call count per cluster"),
+		&["cluster"],
+	)
+	.unwrap();
+
+	/// Cumulative count of inbound CCCP events the slot manager has
+	/// decoded and broadcast to handlers.
+	pub static ref SOL_INBOUND_EVENTS: GaugeVec<U64> = GaugeVec::<U64>::new(
+		Opts::new(
+			"relayer_sol_inbound_events",
+			"Cumulative count of inbound SocketEvents decoded from a Solana cluster",
+		),
+		&["cluster"],
+	)
+	.unwrap();
+
+	/// Cumulative count of outbound `poll(...)` / `round_control_relay(...)`
+	/// transactions submitted to a given cluster.
+	pub static ref SOL_OUTBOUND_SUBMITTED: GaugeVec<U64> = GaugeVec::<U64>::new(
+		Opts::new(
+			"relayer_sol_outbound_submitted",
+			"Cumulative count of cccp-solana IXs submitted to a cluster",
+		),
+		&["cluster"],
+	)
+	.unwrap();
+
+	/// Cumulative count of failed outbound submissions (after retries).
+	pub static ref SOL_OUTBOUND_FAILED: GaugeVec<U64> = GaugeVec::<U64>::new(
+		Opts::new(
+			"relayer_sol_outbound_failed",
+			"Cumulative count of cccp-solana IX submissions that errored",
+		),
+		&["cluster"],
+	)
+	.unwrap();
+
+	/// Cumulative count of outbound transactions rejected due to exceeding
+	/// Solana's 1232-byte packet limit (typically too many CCCP signatures).
+	pub static ref SOL_OUTBOUND_OVERSIZED: GaugeVec<U64> = GaugeVec::<U64>::new(
+		Opts::new(
+			"relayer_sol_outbound_oversized",
+			"Count of outbound txs rejected for exceeding 1232B size limit",
+		),
+		&["cluster"],
+	)
+	.unwrap();
 }
 
 /// Register prometheus metrics and setup initial values.
 pub fn setup(registry: &Registry) {
 	register_system_prometheus_metrics(registry);
 	register_evm_prometheus_metrics(registry);
+	register_sol_prometheus_metrics(registry);
 	set_system_uptime();
+}
+
+/// Register Solana cluster related prometheus metrics.
+fn register_sol_prometheus_metrics(registry: &Registry) {
+	registry.register(Box::new(SOL_SLOT_HEIGHT.clone())).unwrap();
+	registry.register(Box::new(SOL_RPC_CALLS.clone())).unwrap();
+	registry.register(Box::new(SOL_INBOUND_EVENTS.clone())).unwrap();
+	registry.register(Box::new(SOL_OUTBOUND_SUBMITTED.clone())).unwrap();
+	registry.register(Box::new(SOL_OUTBOUND_FAILED.clone())).unwrap();
+	registry.register(Box::new(SOL_OUTBOUND_OVERSIZED.clone())).unwrap();
+}
+
+/// Set the latest observed Solana slot for a given cluster.
+pub fn set_sol_slot_height(cluster: &str, slot: u64) {
+	SOL_SLOT_HEIGHT.with_label_values(&[cluster]).set(slot);
+}
+
+/// Increase the Solana RPC call counter for a cluster.
+pub fn increase_sol_rpc_calls(cluster: &str) {
+	SOL_RPC_CALLS.with_label_values(&[cluster]).inc();
+}
+
+/// Increase the Solana inbound event counter for a cluster.
+pub fn add_sol_inbound_events(cluster: &str, count: u64) {
+	SOL_INBOUND_EVENTS.with_label_values(&[cluster]).add(count);
+}
+
+/// Increase the Solana outbound success counter for a cluster.
+pub fn increase_sol_outbound_submitted(cluster: &str) {
+	SOL_OUTBOUND_SUBMITTED.with_label_values(&[cluster]).inc();
+}
+
+/// Increase the Solana outbound failure counter for a cluster.
+pub fn increase_sol_outbound_failed(cluster: &str) {
+	SOL_OUTBOUND_FAILED.with_label_values(&[cluster]).inc();
+}
+
+/// Increase the Solana outbound oversized-transaction counter.
+pub fn increase_sol_outbound_oversized(cluster: &str) {
+	SOL_OUTBOUND_OVERSIZED.with_label_values(&[cluster]).inc();
 }
 
 /// Register system related prometheus metrics.

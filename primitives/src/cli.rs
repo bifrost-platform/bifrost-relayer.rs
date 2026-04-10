@@ -47,6 +47,10 @@ pub struct RelayerConfig {
 	pub evm_providers: Vec<EVMProvider>,
 	/// BTC configs
 	pub btc_provider: BTCProvider,
+	/// Solana configs (one entry per Solana cluster the relayer should
+	/// observe). Optional — if absent, no Solana wiring is spawned.
+	#[serde(default)]
+	pub sol_providers: Vec<SolProvider>,
 	/// Handler configs
 	pub handler_configs: Vec<HandlerConfig>,
 	/// Bootstrapping configs
@@ -125,6 +129,79 @@ pub struct EVMProvider {
 	pub chainlink_cbbtc_usd_address: Option<String>,
 	/// Chainlink jpy/usd aggregator
 	pub chainlink_jpy_usd_address: Option<String>,
+}
+
+/// Solana cluster configuration. Mirrors `BTCProvider` in spirit but for
+/// the `cccp-solana` Anchor program: the relayer polls slots, decodes
+/// program logs into `SocketEvent`s, and submits matching Bifrost
+/// extrinsics. The `id` field is the same `ChainId` (u64) the rest of the
+/// relayer uses to route messages — it does NOT have to equal the 4-byte
+/// `bytes4 ChainIndex` baked into the on-chain socket message; the latter
+/// is encoded into the `cccp-solana` constants module and shared via
+/// runtime config.
+#[derive(Debug, Clone, Deserialize)]
+pub struct SolProvider {
+	/// Cluster name (free-form, used in logs).
+	pub name: String,
+	/// CCCP `ChainId` for this cluster — must match the `pallet-cccp-relay-queue`
+	/// registration on Bifrost.
+	pub id: ChainId,
+	/// JSON-RPC endpoint URL (`https://api.devnet.solana.com` etc.).
+	pub provider: String,
+	/// Optional WebSocket endpoint for `slotSubscribe`. Falls back to
+	/// polling `getSlot` over the HTTP RPC if absent.
+	pub ws_provider: Option<String>,
+	/// Slot polling interval in milliseconds.
+	pub call_interval: u64,
+	/// Number of confirmed slots required before a transaction is treated
+	/// as final. Defaults to 32 (Solana finalized commitment) if absent.
+	pub block_confirmations: Option<u64>,
+	/// Commitment level for `getSlot` / `getTransaction`
+	/// (`processed` | `confirmed` | `finalized`). Defaults to `finalized`.
+	pub commitment: Option<String>,
+	/// `cccp-solana` program id (base58).
+	pub program_id: String,
+	/// Whether the relayer should send outbound `poll(...)` IXs to this
+	/// cluster. Mirror of `EVMProvider.is_relay_target`.
+	pub is_relay_target: bool,
+	/// Optional `getSignaturesForAddress` page size.
+	pub get_signatures_batch_size: Option<u64>,
+	/// Path to the local Solana keypair JSON used for fee payment + relayer
+	/// signature submissions. The relayer's CCCP signing key remains
+	/// secp256k1 — this is the Ed25519 wallet used to *pay fees* and to
+	/// authorize the relayer side of `poll(...)` IXs.
+	pub fee_payer_keypair_path: String,
+	/// Static asset registry: maps the on-chain CCCP `AssetIndex` (32-byte
+	/// hex, optionally `0x`-prefixed) to the SPL Mint address (base58)
+	/// the cccp-solana vault holds for that asset.
+	#[serde(default)]
+	pub assets: Vec<SolAssetEntry>,
+	/// Base priority fee in micro-lamports per compute unit.
+	/// The outbound handler starts at this value and escalates on
+	/// confirmation timeouts. Defaults to 1 000.
+	pub base_priority_fee: Option<u64>,
+	/// Maximum priority fee in micro-lamports per compute unit.
+	/// The handler never escalates above this. Defaults to 1 000 000.
+	pub max_priority_fee: Option<u64>,
+	/// Seconds to wait for a transaction to confirm before
+	/// re-sending with a higher priority fee. Defaults to 30.
+	pub confirmation_timeout_secs: Option<u64>,
+	/// Maximum number of send-with-escalation retries. Defaults to 3.
+	pub max_send_retries: Option<u32>,
+}
+
+/// One row of the per-cluster asset registry. The `index` field is the
+/// 32-byte CCCP `AssetIndex` (= EVM `bytes32 tokenIDX0`) as a hex string.
+#[derive(Debug, Clone, Deserialize)]
+pub struct SolAssetEntry {
+	/// 32-byte hex (with or without `0x` prefix) — same value the EVM
+	/// `Task_Params.tokenIDX0` field carries on the wire.
+	pub index: String,
+	/// SPL Mint pubkey (base58).
+	pub mint: String,
+	/// Optional human-readable name (e.g. `usdc`). Used in logs only.
+	#[serde(default)]
+	pub name: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]

@@ -77,6 +77,18 @@ bitcoincore-rpc = { git = "https://github.com/bifrost-platform/rust-bitcoincore-
 tokio = "1.49"
 tokio-stream = "0.1.18"
 
+# Solana
+solana-sdk = "3"
+solana-client = "3.0"
+solana-pubsub-client = "3.0"
+solana-commitment-config = "3"
+solana-transaction-status-client-types = "3"
+
+# Anchor codec
+borsh = { version = "1.5", features = ["derive"] }
+base64 = "0.22"
+sha2 = "0.10"
+
 subxt = "0.44.2"
 jsonrpsee = { version = "0.24.10", features = ["ws-client"] }
 

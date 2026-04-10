@@ -40,6 +40,7 @@ use crate::{
 		send_transaction,
 		traits::{BootstrapHandler, Handler, HookExecutor, SocketRelayBuilder},
 	},
+	sol::convert::{build_sol_poll_submit, decode_solana_wallet_from_variants},
 };
 
 const SUB_LOG_TARGET: &str = "socket-handler";
@@ -77,6 +78,14 @@ where
 	bifrost_client: Arc<EthClient<F, P, N>>,
 	/// The rollback sender for each chain.
 	rollback_senders: Arc<BTreeMap<ChainId, Arc<UnboundedSender<Socket_Message>>>>,
+	/// Outbound submission senders, keyed by Solana cluster `ChainId`. The
+	/// handler dispatches to one of these whenever it would otherwise fall
+	/// off the end of `system_clients.get(chain_id)` (= the dst chain is a
+	/// non-EVM Solana cluster). The vault token accounts the cccp-solana
+	/// `poll(...)` IX needs are looked up via the
+	/// `crate::sol::pda` helpers using the per-cluster `SolClient` the
+	/// upstream wiring keeps in `SolDeps`.
+	sol_outbound_senders: Arc<BTreeMap<ChainId, crate::sol::handlers::outbound::SolOutboundSender>>,
 	/// The handle to spawn tasks.
 	handle: SpawnTaskHandle,
 	/// The bootstrap shared data.
@@ -431,6 +440,9 @@ where
 		bifrost_client: Arc<EthClient<F, P, N>>,
 		xt_request_sender: Arc<XtRequestSender>,
 		rollback_senders: Arc<BTreeMap<ChainId, Arc<UnboundedSender<Socket_Message>>>>,
+		sol_outbound_senders: Arc<
+			BTreeMap<ChainId, crate::sol::handlers::outbound::SolOutboundSender>,
+		>,
 		handle: SpawnTaskHandle,
 		bootstrap_shared_data: Arc<BootstrapSharedData>,
 		debug_mode: bool,
@@ -446,6 +458,7 @@ where
 			bifrost_client,
 			xt_request_sender,
 			rollback_senders,
+			sol_outbound_senders,
 			handle,
 			bootstrap_shared_data,
 			debug_mode,
@@ -835,6 +848,106 @@ where
 				self.debug_mode,
 				self.handle.clone(),
 			);
+			return;
+		}
+
+		// No EVM client for this `chain_id` — fall back to the Solana
+		// outbound dispatcher. The `tx_request` argument is unused on the
+		// Solana path because the cccp-solana `poll(...)` IX is built from
+		// the raw `socket_msg` (we ABI-decode it again on the Solana
+		// program), but it stays in the signature for symmetry with the
+		// EVM path.
+		let _ = tx_request;
+		self.dispatch_to_solana(chain_id, metadata, socket_msg).await;
+	}
+
+	/// Forward an outbound `Socket_Message` to the per-cluster Solana
+	/// outbound queue. Mirrors the EVM `send_transaction` path but uses
+	/// the cccp-solana `poll(...)` instruction builder instead of an
+	/// alloy contract call.
+	async fn dispatch_to_solana(
+		&self,
+		chain_id: ChainId,
+		metadata: SocketRelayMetadata,
+		socket_msg: Socket_Message,
+	) {
+		let Some(sender) = self.sol_outbound_senders.get(&chain_id) else {
+			log::debug!(
+				target: &self.client.get_chain_name(),
+				"-[{}] no EVM or Solana sender for dst chain {chain_id}; skipping {}",
+				sub_display_format(SUB_LOG_TARGET),
+				metadata,
+			);
+			return;
+		};
+
+		// Convert the EVM `Socket_Message` into the borsh-mirror used by
+		// the Solana ix builder. The cross-impl tests in
+		// `crate::sol::codec::tests::cross_impl_request_id_pack` and
+		// friends pin the byte format so this conversion can never drift.
+		let sol_submit = match build_sol_poll_submit(&socket_msg) {
+			Ok(s) => s,
+			Err(err) => {
+				br_primitives::log_and_capture!(
+					error,
+					&self.client.get_chain_name(),
+					SUB_LOG_TARGET,
+					self.client.address().await,
+					"❗️ Failed to convert socket message into Solana PollSubmit: {err}"
+				);
+				return;
+			},
+		};
+
+		// `asset_index` for the cccp-solana `poll(...)` IX seeds the
+		// `asset_config` PDA. We re-use `params.tokenIDX0` directly —
+		// EVM-side `Vault.assets_config` and on-chain `AssetConfig` PDA
+		// are keyed by the same 32-byte index.
+		let asset_index = crate::sol::codec::AssetIndex(socket_msg.params.tokenIDX0.into());
+
+		// Solana wallet of the recipient. The CCCP Task_Params.to slot is
+		// only 20 bytes (= EVM address) so we can't fit a 32-byte
+		// solana_sdk::Pubkey there. The convention used by the cccp-solana
+		// `request` IX is to embed the depositor's Solana wallet in
+		// `Task_Params.variants[0..32]` so the BFC side can echo it back
+		// in any subsequent outbound message destined for that user.
+		let recipient_wallet = match decode_solana_wallet_from_variants(&socket_msg.params.variants)
+		{
+			Ok(pk) => pk,
+			Err(err) => {
+				log::warn!(
+					target: &self.client.get_chain_name(),
+					"-[{}] (sol-route) {} skipped — variants did not carry a Solana wallet: {err}",
+					sub_display_format(SUB_LOG_TARGET),
+					metadata,
+				);
+				return;
+			},
+		};
+
+		let job = crate::sol::handlers::outbound::SolOutboundJob::PollFromBfc {
+			submit: sol_submit,
+			asset_index,
+			recipient_wallet,
+		};
+
+		match sender.send(job) {
+			Ok(()) => log::info!(
+				target: &self.client.get_chain_name(),
+				"-[{}] 📤 (sol-route) enqueued {} for cluster {chain_id}",
+				sub_display_format(SUB_LOG_TARGET),
+				metadata,
+			),
+			Err(err) => {
+				br_primitives::log_and_capture!(
+					error,
+					&self.client.get_chain_name(),
+					SUB_LOG_TARGET,
+					self.client.address().await,
+					"❗️ Failed to enqueue {} on Solana cluster {chain_id}: {err}",
+					metadata
+				);
+			},
 		}
 	}
 
