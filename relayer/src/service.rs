@@ -24,7 +24,9 @@ use tokio::sync::RwLock;
 
 use crate::{
 	cli::{LOG_TARGET, SUB_LOG_TARGET},
-	service_deps::{BtcDeps, FullDeps, HandlerDeps, ManagerDeps, PeriodicDeps, SubstrateDeps},
+	service_deps::{
+		BtcDeps, FullDeps, HandlerDeps, ManagerDeps, PeriodicDeps, SolDeps, SubstrateDeps,
+	},
 	verification::assert_configuration_validity,
 };
 use br_client::{
@@ -204,6 +206,37 @@ pub async fn relay(config: Configuration) -> Result<TaskManager, ServiceError> {
 		&task_manager,
 		debug_mode,
 	);
+	// Build per-cluster Solana wiring BEFORE the handler deps so the
+	// SocketRelayHandler can be wired up with the per-cluster outbound
+	// senders. Empty if no `sol_providers` are configured. Failure to
+	// construct any cluster (e.g. invalid program ID, unreadable fee-payer
+	// keypair, unreachable RPC endpoint) is a configuration error and
+	// fails fast at boot via the per-cluster health probe.
+	let sol_deps = crate::service_deps::build_sol_deps(
+		&config.relayer_config.sol_providers,
+		bfc_client.clone(),
+		substrate_deps.xt_request_sender.clone(),
+	)
+	.await
+	.map_err(|e| ServiceError::Other(format!("failed to build Solana deps: {e}")))?;
+
+	// Collect outbound senders by ChainId for the SocketRelayHandler
+	// dispatch table. Each Solana cluster gets exactly one entry; if no
+	// clusters are configured this map is empty and the handler treats
+	// the Solana branch as a no-op.
+	let sol_outbound_senders: std::sync::Arc<
+		std::collections::BTreeMap<
+			alloy::primitives::ChainId,
+			br_client::sol::handlers::outbound::SolOutboundSender,
+		>,
+	> = {
+		let mut map = std::collections::BTreeMap::new();
+		for entry in &sol_deps {
+			map.insert(entry.client.chain_id, entry.outbound_sender.clone());
+		}
+		std::sync::Arc::new(map)
+	};
+
 	let handler_deps = HandlerDeps::new(
 		&config,
 		&manager_deps,
@@ -211,6 +244,7 @@ pub async fn relay(config: Configuration) -> Result<TaskManager, ServiceError> {
 		bootstrap_shared_data.clone(),
 		bfc_client.clone(),
 		periodic_deps.rollback_senders.clone(),
+		sol_outbound_senders,
 		&task_manager,
 		debug_mode,
 	)
@@ -230,7 +264,7 @@ pub async fn relay(config: Configuration) -> Result<TaskManager, ServiceError> {
 
 	Ok(spawn_relayer_tasks(
 		task_manager,
-		FullDeps { manager_deps, periodic_deps, handler_deps, substrate_deps, btc_deps },
+		FullDeps { manager_deps, periodic_deps, handler_deps, substrate_deps, btc_deps, sol_deps },
 		&config,
 	))
 }
@@ -247,7 +281,8 @@ where
 {
 	let prometheus_config = &config.relayer_config.prometheus_config;
 
-	let FullDeps { manager_deps, periodic_deps, handler_deps, substrate_deps, btc_deps } = deps;
+	let FullDeps { manager_deps, periodic_deps, handler_deps, substrate_deps, btc_deps, sol_deps } =
+		deps;
 
 	let ManagerDeps { event_managers, .. } = manager_deps;
 	let PeriodicDeps {
@@ -667,6 +702,75 @@ where
 			}
 		},
 	);
+
+	// ----------------------------------------------------------------
+	// Spawn per-cluster Solana workers (one trio per `sol_providers`).
+	// ----------------------------------------------------------------
+	for SolDeps { client, mut slot_manager, mut inbound, mut outbound, outbound_sender: _ } in
+		sol_deps
+	{
+		let cluster_name = client.get_chain_name();
+
+		let slot_label = format!("solana-slot-manager-{}", cluster_name);
+		let slot_label: &'static str = Box::leak(slot_label.into_boxed_str());
+		task_manager.spawn_essential_handle().spawn(
+			slot_label,
+			Some("solana-slot-manager"),
+			async move {
+				loop {
+					let report = slot_manager.run().await;
+					let log_msg = format!(
+						"solana slot manager stopped: {report:?}\nRestarting in 12 seconds...",
+					);
+					log::error!("{log_msg}");
+					sentry::capture_message(&log_msg, sentry::Level::Error);
+					tokio::time::sleep(Duration::from_secs(12)).await;
+				}
+			},
+		);
+
+		let inbound_label = format!("solana-inbound-handler-{}", cluster_name);
+		let inbound_label: &'static str = Box::leak(inbound_label.into_boxed_str());
+		task_manager.spawn_essential_handle().spawn(
+			inbound_label,
+			Some("solana-inbound"),
+			async move {
+				loop {
+					let report = inbound.run().await;
+					let log_msg = format!(
+						"solana inbound handler stopped: {report:?}\nRestarting in 12 seconds...",
+					);
+					log::error!("{log_msg}");
+					sentry::capture_message(&log_msg, sentry::Level::Error);
+					tokio::time::sleep(Duration::from_secs(12)).await;
+				}
+			},
+		);
+
+		let outbound_label = format!("solana-outbound-handler-{}", cluster_name);
+		let outbound_label: &'static str = Box::leak(outbound_label.into_boxed_str());
+		task_manager.spawn_essential_handle().spawn(
+			outbound_label,
+			Some("solana-outbound"),
+			async move {
+				loop {
+					let report = outbound.run().await;
+					let log_msg = format!(
+						"solana outbound handler stopped: {report:?}\nRestarting in 12 seconds...",
+					);
+					log::error!("{log_msg}");
+					sentry::capture_message(&log_msg, sentry::Level::Error);
+					tokio::time::sleep(Duration::from_secs(12)).await;
+				}
+			},
+		);
+
+		// `outbound_sender` is currently dropped at the end of this loop
+		// iteration. Once the Bifrost socket relay handler grows a Solana
+		// dst-chain branch (= the next integration step), the sender will
+		// be threaded through `manager_deps` so that branch can dispatch
+		// `SolOutboundJob`s here.
+	}
 
 	// spawn prometheus endpoint
 	if let Some(prometheus_config) = prometheus_config {

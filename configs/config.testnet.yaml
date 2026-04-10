@@ -100,6 +100,39 @@ handler_configs:
 
 ###  The items below are optional. ###
 
+# Solana cluster wiring. Each entry spawns a SlotManager + inbound +
+# outbound handler trio. Leave this list empty (or omit it entirely) to
+# disable the Solana track. Each cluster's `id` must also be registered
+# on Bifrost via `pallet-cccp-relay-queue` so the unsigned-extrinsic
+# submission path accepts it.
+sol_providers:
+  - name: "solana-devnet"
+    id: 1399811149
+    provider: "https://api.devnet.solana.com"
+    ws_provider: "wss://api.devnet.solana.com"
+    call_interval: 2000
+    block_confirmations: 32
+    commitment: "finalized"
+    program_id: "<YOUR_CCCP_SOLANA_PROGRAM_ID>"
+    is_relay_target: true
+    get_signatures_batch_size: 100
+    fee_payer_keypair_path: "<PATH_TO_FEE_PAYER_KEYPAIR_JSON>"
+    # Priority fee escalation for outbound transactions.
+    # base_priority_fee: 1000        # micro-lamports per CU (default: 1000)
+    # max_priority_fee: 1000000      # ceiling (default: 1_000_000)
+    # confirmation_timeout_secs: 30  # per-attempt timeout (default: 30)
+    # max_send_retries: 3            # total escalation attempts (default: 3)
+    # Static asset registry — operators must keep this in sync with the
+    # on-chain `init_asset_config` PDAs. The `index` field is the same
+    # 32-byte CCCP `AssetIndex` the EVM track uses.
+    assets:
+      - name: "usdc"
+        index: "0x0100010000000000000000000000000000000000000000000000000000000008"
+        mint: "<USDC_DEVNET_SPL_MINT>"
+      - name: "usdt"
+        index: "0x010001000000000000000000000000000000000000000000000000000000000a"
+        mint: "<USDT_DEVNET_SPL_MINT>"
+
 bootstrap_config:
   is_enabled: true
   round_offset: 3

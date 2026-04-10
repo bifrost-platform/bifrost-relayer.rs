@@ -2,4 +2,5 @@
 
 pub mod btc;
 pub mod eth;
+pub mod sol;
 pub mod substrate;

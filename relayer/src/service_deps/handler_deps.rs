@@ -1,5 +1,6 @@
 use super::*;
 use br_client::eth::handlers::{SocketOnflightHandler, SocketOnflightSender, SocketQueuePoller};
+use br_client::sol::handlers::outbound::SolOutboundSender;
 use tokio::sync::mpsc;
 
 pub struct HandlerDeps<F, P, N: AlloyNetwork>
@@ -29,6 +30,7 @@ where
 		bootstrap_shared_data: BootstrapSharedData,
 		bfc_client: Arc<EthClient<F, P, N>>,
 		rollback_senders: Arc<BTreeMap<ChainId, Arc<UnboundedSender<Socket_Message>>>>,
+		sol_outbound_senders: Arc<BTreeMap<ChainId, SolOutboundSender>>,
 		task_manager: &TaskManager,
 		debug_mode: bool,
 	) -> Self {
@@ -55,6 +57,7 @@ where
 							bifrost_client.clone(),
 							substrate_deps.xt_request_sender.clone(),
 							rollback_senders.clone(),
+							sol_outbound_senders.clone(),
 							task_manager.spawn_handle(),
 							Arc::new(bootstrap_shared_data.clone()),
 							debug_mode,
