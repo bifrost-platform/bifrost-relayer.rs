@@ -246,7 +246,14 @@ where
 
 	/// Bootstrap phase 0-2.
 	async fn initial_flushing(&self) -> Result<()> {
-		self.client.flush_stalled_transactions().await?;
+		if let Err(e) = self.client.flush_stalled_transactions().await {
+			br_primitives::log_and_capture_simple!(
+				error,
+				"⚠️ [{}] Failed to flush stalled transactions: {}",
+				self.client.get_chain_name(),
+				e
+			);
+		}
 		self.set_bootstrap_state(BootstrapState::BootstrapRoundUpPhase1).await;
 
 		log::info!(
@@ -263,17 +270,7 @@ where
 		let should_bootstrap = self.is_before_bootstrap_state(BootstrapState::NormalStart).await;
 		if should_bootstrap {
 			self.wait_provider_sync().await.unwrap();
-			match self.initial_flushing().await {
-				Ok(_) => (),
-				Err(e) => {
-					br_primitives::log_and_capture_simple!(
-						error,
-						"⚠️ [{}] Failed to flush stalled transactions: {}",
-						self.client.get_chain_name(),
-						e
-					);
-				},
-			}
+			self.initial_flushing().await.unwrap();
 		}
 	}
 }
