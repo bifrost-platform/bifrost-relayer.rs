@@ -188,6 +188,14 @@ pub struct SolProvider {
 	pub confirmation_timeout_secs: Option<u64>,
 	/// Maximum number of send-with-escalation retries. Defaults to 3.
 	pub max_send_retries: Option<u32>,
+	/// Number of Solana slots to walk backwards from the current tip
+	/// during bootstrap so the relayer picks up events it missed while
+	/// offline. `None` (= 0) means "start from the current tip and
+	/// ignore any earlier history". A typical mainnet setting is 64–256
+	/// slots (≈ 30s–2min) to cover brief restarts; larger values cover
+	/// longer outages at the cost of more `getSignaturesForAddress`
+	/// pagination calls at boot.
+	pub bootstrap_offset_slots: Option<u64>,
 }
 
 /// One row of the per-cluster asset registry. The `index` field is the

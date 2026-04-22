@@ -237,6 +237,20 @@ pub async fn relay(config: Configuration) -> Result<TaskManager, ServiceError> {
 		std::sync::Arc::new(map)
 	};
 
+	// Parallel map of `SolClient`s keyed by the same `ChainId`. The
+	// RoundupRelayHandler uses these to probe `socket_config.latest_round_id`
+	// in the Solana dispatch + retry paths. Shares the same `Arc<RpcClient>`
+	// the outbound workers use, so no extra connection is opened.
+	let sol_clients: std::sync::Arc<
+		std::collections::BTreeMap<alloy::primitives::ChainId, br_client::sol::client::SolClient>,
+	> = {
+		let mut map = std::collections::BTreeMap::new();
+		for entry in &sol_deps {
+			map.insert(entry.client.chain_id, entry.client.clone());
+		}
+		std::sync::Arc::new(map)
+	};
+
 	let handler_deps = HandlerDeps::new(
 		&config,
 		&manager_deps,
@@ -244,6 +258,7 @@ pub async fn relay(config: Configuration) -> Result<TaskManager, ServiceError> {
 		bootstrap_shared_data.clone(),
 		bfc_client.clone(),
 		periodic_deps.rollback_senders.clone(),
+		sol_clients,
 		sol_outbound_senders,
 		&task_manager,
 		debug_mode,
@@ -704,10 +719,19 @@ where
 	);
 
 	// ----------------------------------------------------------------
-	// Spawn per-cluster Solana workers (one trio per `sol_providers`).
+	// Spawn per-cluster Solana workers. The merged outbound handler
+	// owns both the BFC → Solana submission loop and the Solana → BFC
+	// commit mirror, so each cluster only needs slot-manager / inbound /
+	// outbound — three spawns per `sol_providers` entry.
 	// ----------------------------------------------------------------
-	for SolDeps { client, mut slot_manager, mut inbound, mut outbound, outbound_sender: _ } in
-		sol_deps
+	for SolDeps {
+		client,
+		bootstrap_offset_slots,
+		mut slot_manager,
+		mut inbound,
+		mut outbound,
+		outbound_sender: _,
+	} in sol_deps
 	{
 		let cluster_name = client.get_chain_name();
 
@@ -717,6 +741,26 @@ where
 			slot_label,
 			Some("solana-slot-manager"),
 			async move {
+				// Run bootstrap catch-up once before entering the live
+				// loop. Failures are logged and ignored — the live loop
+				// still starts and will pick up new events from the tip,
+				// so a flaky history fetch doesn't block steady-state
+				// relaying. Retry-on-restart is handled by the outer
+				// supervisor loop since any panic here lands in the
+				// `loop { ... }` below.
+				if bootstrap_offset_slots > 0 {
+					if let Err(err) = slot_manager.bootstrap_catchup(bootstrap_offset_slots).await {
+						log::error!(
+							"solana slot manager bootstrap catch-up failed: {err:?}; \
+							 proceeding with live polling only",
+						);
+						sentry::capture_message(
+							&format!("solana bootstrap catch-up failed: {err:?}"),
+							sentry::Level::Warning,
+						);
+					}
+				}
+
 				loop {
 					let report = slot_manager.run().await;
 					let log_msg = format!(

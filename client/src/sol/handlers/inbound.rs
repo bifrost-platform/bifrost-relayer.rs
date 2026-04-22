@@ -99,8 +99,8 @@ where
 			},
 			status: ev.status,
 			ins_code: Instruction {
-				ChainIndex: FixedBytes::from([0u8; 4]), // overwritten below
-				RBCmethod: FixedBytes::from([0u8; 16]), // overwritten below
+				ChainIndex: FixedBytes::from(ev.ins_code_chain),
+				RBCmethod: FixedBytes::from(ev.ins_code_method),
 			},
 			params: Task_Params {
 				tokenIDX0: FixedBytes::from(ev.asset_index),

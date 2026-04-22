@@ -59,6 +59,14 @@ pub struct Event {
 	/// Phase the message advanced to (e.g. `Requested` for inbound,
 	/// `Committed` for inbound-commit, `Executed` for outbound-exec).
 	pub status: u8,
+	/// `SocketMessage.ins_code.chain` (4-byte `ChainIndex`). Preserved
+	/// verbatim from the on-chain event so every relayer's re-encoded
+	/// `Socket_Message` hashes byte-identically — required for BFC-side
+	/// quorum to form on the submitted extrinsic.
+	pub ins_code_chain: ChainIndex,
+	/// `SocketMessage.ins_code.method` (16-byte `RBCmethod`). Same
+	/// quorum-equivalence requirement as `ins_code_chain`.
+	pub ins_code_method: RBCmethod,
 	/// Asset index from `Task_Params.tokenIDX0`.
 	pub asset_index: AssetIndex,
 	/// Recipient EVM address from `Task_Params.to`.

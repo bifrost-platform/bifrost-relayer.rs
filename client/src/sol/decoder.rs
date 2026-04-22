@@ -20,8 +20,6 @@
 use base64::Engine;
 use borsh::BorshDeserialize;
 
-use br_primitives::sol::{Event, EventType};
-
 use crate::sol::codec::{
 	ROUND_UP_EVENT_DISCRIMINATOR, RoundUpSubmit, SOCKET_EVENT_DISCRIMINATOR, SocketMessage,
 };
@@ -63,50 +61,6 @@ pub fn decode_anchor_events(log_messages: &[String]) -> Vec<DecodedAnchorEvent> 
 		}
 	}
 	out
-}
-
-/// Convert decoded `SocketEvent`s into the relayer-facing `Event` shape.
-/// `slot` and `signature` are taken from the surrounding transaction
-/// envelope (`getTransaction` response). The split between inbound and
-/// outbound is decided by the caller — we only know the message body here.
-pub fn into_relayer_events(
-	decoded: &[DecodedAnchorEvent],
-	slot: u64,
-	signature: &str,
-) -> (Vec<Event>, Vec<EventType>) {
-	let mut events = Vec::new();
-	let mut classifications = Vec::new();
-	for ev in decoded {
-		match ev {
-			DecodedAnchorEvent::Socket(msg) => {
-				events.push(Event {
-					signature: signature.to_string(),
-					slot,
-					req_chain: msg.req_id.chain.0,
-					round_id: msg.req_id.round_id,
-					sequence: msg.req_id.sequence,
-					status: msg.status,
-					asset_index: msg.params.token_idx0.0,
-					to: msg.params.to,
-					refund: msg.params.refund,
-					amount: msg.params.amount,
-					variants: msg.params.variants.clone(),
-				});
-				// Caller will decide inbound vs outbound based on the
-				// request_id chain (= this_chain → inbound, otherwise
-				// outbound). Default to Inbound here so the slot manager
-				// can route correctly.
-				classifications.push(EventType::Inbound);
-			},
-			DecodedAnchorEvent::RoundUp(_) => {
-				// Round-up events do not flow through the inbound/outbound
-				// event channel; they're handled by a separate worker.
-				// Skipping them here keeps the relayer-facing event shape
-				// simple.
-			},
-		}
-	}
-	(events, classifications)
 }
 
 #[cfg(test)]
@@ -164,17 +118,6 @@ mod tests {
 			DecodedAnchorEvent::Socket(d) => assert_eq!(d, &msg),
 			other => panic!("expected SocketEvent, got {other:?}"),
 		}
-
-		let (events, classes) = into_relayer_events(&decoded, 999, "sig123");
-		assert_eq!(events.len(), 1);
-		assert_eq!(events[0].signature, "sig123");
-		assert_eq!(events[0].slot, 999);
-		assert_eq!(events[0].round_id, 1);
-		assert_eq!(events[0].sequence, 7);
-		assert_eq!(events[0].status, 5);
-		assert_eq!(events[0].refund, [0xcd; 20]);
-		assert_eq!(events[0].variants, vec![1, 2, 3, 4, 5]);
-		assert_eq!(classes, vec![EventType::Inbound]);
 	}
 
 	#[test]

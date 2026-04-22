@@ -8,11 +8,11 @@
 
 use solana_sdk::pubkey::Pubkey;
 
-use br_primitives::contracts::socket::Socket_Struct::Socket_Message;
+use br_primitives::contracts::socket::Socket_Struct::{Round_Up_Submit, Socket_Message};
 
 use crate::sol::codec::{
-	AssetIndex, ChainIndex, Instruction, PollSubmit, RBCmethod, RequestId, Signatures,
-	SocketMessage, TaskParams,
+	AssetIndex, ChainIndex, Instruction, PollSubmit, RBCmethod, RequestId, RoundUpSubmit,
+	Signatures, SocketMessage, TaskParams,
 };
 
 /// Convert a Bifrost-side `Socket_Message` into the borsh-encodable
@@ -72,6 +72,48 @@ fn chain_index_bytes(value: &alloy::primitives::FixedBytes<4>) -> eyre::Result<[
 
 fn rbc_method_bytes(value: &alloy::primitives::FixedBytes<16>) -> eyre::Result<[u8; 16]> {
 	Ok((*value).into())
+}
+
+/// Convert a Bifrost-side `Round_Up_Submit` into the borsh-encodable
+/// `RoundUpSubmit` shape consumed by the on-chain `cccp-solana::
+/// round_control_relay(...)` instruction.
+///
+/// Field mapping (byte-pinned by the round-trip test below and by the
+/// on-chain layout in `cccp-solana::codec::RoundUpSubmit`):
+///
+///   * `round`        = `U256::to_be_bytes::<32>()` — matches the
+///     on-chain `round_as_u64` extractor, which reads the low 8 bytes
+///     of the uint256 as a big-endian `u64`.
+///   * `new_relayers` = each EVM `Address` becomes a `[u8; 20]` in the
+///     same order. The on-chain program does not sort — it verifies the
+///     signatures against this exact ordering, so the caller MUST have
+///     already sorted the relayer set the same way the on-chain majority
+///     check expects (ascending by address bytes).
+///   * `sigs`         = `{ r, s, v }` copied across; `r`/`s` are
+///     `FixedBytes<32>` so they convert to `[u8; 32]`; `v` is
+///     `alloy::primitives::Bytes` which derefs to `[u8]`.
+///
+/// Returns an error if the three signature vectors have mismatched
+/// lengths — that would mean the upstream `get_sorted_signatures`
+/// produced a malformed bundle and we refuse to build a doomed IX.
+pub fn build_sol_round_up_submit(submit: &Round_Up_Submit) -> eyre::Result<RoundUpSubmit> {
+	let round = submit.round.to_be_bytes::<32>();
+
+	let new_relayers: Vec<[u8; 20]> =
+		submit.new_relayers.iter().map(|addr| (*addr).into()).collect();
+
+	let r_len = submit.sigs.r.len();
+	let s_len = submit.sigs.s.len();
+	let v_len = submit.sigs.v.len();
+	if r_len != s_len || s_len != v_len {
+		eyre::bail!("mismatched signature vectors: r={r_len} s={s_len} v={v_len}");
+	}
+
+	let r: Vec<[u8; 32]> = submit.sigs.r.iter().map(|x| (*x).into()).collect();
+	let s: Vec<[u8; 32]> = submit.sigs.s.iter().map(|x| (*x).into()).collect();
+	let v: Vec<u8> = submit.sigs.v.iter().copied().collect();
+
+	Ok(RoundUpSubmit { round, new_relayers, sigs: Signatures { r, s, v } })
 }
 
 /// Extract the depositor's Solana wallet pubkey from the
@@ -148,6 +190,56 @@ mod tests {
 	fn decode_solana_wallet_from_variants_too_short() {
 		let variants = vec![0u8; 16];
 		assert!(decode_solana_wallet_from_variants(&variants).is_err());
+	}
+
+	#[test]
+	fn round_up_submit_to_borsh_preserves_all_fields() {
+		use br_primitives::contracts::socket::Socket_Struct::Signatures as EvmSignatures;
+
+		let evm = Round_Up_Submit {
+			round: U256::from(42u64),
+			new_relayers: vec![Address::from([0x11; 20]), Address::from([0x22; 20])],
+			sigs: EvmSignatures {
+				r: vec![FixedBytes::from([0xaa; 32]), FixedBytes::from([0xbb; 32])],
+				s: vec![FixedBytes::from([0xcc; 32]), FixedBytes::from([0xdd; 32])],
+				v: Bytes::from(vec![27u8, 28u8]),
+			},
+		};
+
+		let borsh = build_sol_round_up_submit(&evm).expect("conversion");
+
+		// round = uint256 BE; last 8 bytes must encode the u64 value so the
+		// on-chain `round_as_u64` extractor recovers the same number.
+		assert_eq!(&borsh.round[0..24], &[0u8; 24]);
+		assert_eq!(&borsh.round[24..32], &42u64.to_be_bytes());
+
+		assert_eq!(borsh.new_relayers, vec![[0x11u8; 20], [0x22u8; 20]]);
+		assert_eq!(borsh.sigs.r, vec![[0xaau8; 32], [0xbbu8; 32]]);
+		assert_eq!(borsh.sigs.s, vec![[0xccu8; 32], [0xddu8; 32]]);
+		assert_eq!(borsh.sigs.v, vec![27u8, 28u8]);
+
+		// Round-trip through borsh to guarantee wire compatibility.
+		let encoded = borsh::to_vec(&borsh).expect("borsh serialize");
+		let decoded = <RoundUpSubmit as borsh::BorshDeserialize>::try_from_slice(&encoded)
+			.expect("borsh deserialize");
+		assert_eq!(decoded, borsh);
+	}
+
+	#[test]
+	fn round_up_submit_rejects_mismatched_sig_lengths() {
+		use br_primitives::contracts::socket::Socket_Struct::Signatures as EvmSignatures;
+
+		let evm = Round_Up_Submit {
+			round: U256::from(1u64),
+			new_relayers: vec![Address::from([0u8; 20])],
+			sigs: EvmSignatures {
+				r: vec![FixedBytes::from([0u8; 32]), FixedBytes::from([0u8; 32])],
+				s: vec![FixedBytes::from([0u8; 32])],
+				v: Bytes::from(vec![27u8]),
+			},
+		};
+
+		assert!(build_sol_round_up_submit(&evm).is_err());
 	}
 
 	#[test]
