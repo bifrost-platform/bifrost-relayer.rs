@@ -39,6 +39,13 @@ use crate::sol::decoder::{DecodedAnchorEvent, decode_anchor_events};
 const SUB_LOG_TARGET: &str = "slot-manager";
 /// How long to run HTTP polling before retrying a dropped WS connection.
 const WS_RECONNECT_INTERVAL: std::time::Duration = std::time::Duration::from_secs(30);
+/// Maximum gap allowed between WS `slotSubscribe` notifications before
+/// the watchdog declares the stream stalled and forces an HTTP fallback.
+/// Solana mainnet produces a slot every ~400ms; confirmed-commitment
+/// updates typically arrive within a few seconds, so a 10-second window
+/// is long enough to avoid false positives on a slow cluster but tight
+/// enough to recover from a silently-dead WS pipe within one cycle.
+const WS_NOTIFICATION_WATCHDOG: std::time::Duration = std::time::Duration::from_secs(10);
 
 /// Slot poller — produces `EventMessage` items from the configured
 /// Solana cluster.
@@ -182,7 +189,16 @@ impl SlotManager {
 
 	/// WebSocket-driven loop. Connects to the cluster's WS endpoint,
 	/// subscribes to `slotSubscribe`, and fires a `tick()` on every
-	/// notification. Returns when the stream ends or an error occurs.
+	/// notification. Returns when the stream ends, an error occurs, or
+	/// the notification watchdog fires.
+	///
+	/// The watchdog protects against silently-dead WS connections: the
+	/// underlying tokio-tungstenite socket can stay up while the Solana
+	/// node stops pushing updates (observed on some RPC providers under
+	/// load). If no notification arrives within
+	/// `WS_NOTIFICATION_WATCHDOG`, we return `Err` so the caller falls
+	/// back to HTTP polling and re-establishes the WS connection on the
+	/// next reconnect cycle.
 	async fn run_ws_loop(&mut self, ws_url: String) -> eyre::Result<()> {
 		use tokio_stream::StreamExt;
 
@@ -199,45 +215,57 @@ impl SlotManager {
 
 		log::info!(
 			target: &self.client.get_chain_name(),
-			"[{}] WS slotSubscribe active",
+			"[{}] WS slotSubscribe active (watchdog={WS_NOTIFICATION_WATCHDOG:?})",
 			SUB_LOG_TARGET,
 		);
 
-		while let Some(slot_info) = stream.next().await {
-			// The WS notification gives us the slot number directly.
-			// We still need to fetch signatures + transactions via HTTP
-			// RPC, but we save the `getSlot` call and gain sub-second
-			// latency compared to HTTP polling.
-			log::trace!(
-				target: &self.client.get_chain_name(),
-				"[{}] WS slot notification: slot={}",
-				SUB_LOG_TARGET,
-				slot_info.slot,
-			);
-			br_metrics::set_sol_slot_height(&self.client.name, slot_info.slot);
+		loop {
+			match tokio::time::timeout(WS_NOTIFICATION_WATCHDOG, stream.next()).await {
+				Ok(Some(slot_info)) => {
+					// The WS notification gives us the slot number directly.
+					// We still need to fetch signatures + transactions via
+					// HTTP RPC, but we save the `getSlot` call and gain
+					// sub-second latency compared to HTTP polling.
+					log::trace!(
+						target: &self.client.get_chain_name(),
+						"[{}] WS slot notification: slot={}",
+						SUB_LOG_TARGET,
+						slot_info.slot,
+					);
 
-			if slot_info.slot <= self.last_processed_slot {
-				continue;
-			}
+					if slot_info.slot <= self.last_processed_slot {
+						continue;
+					}
 
-			if let Err(err) = self.tick_at_slot(slot_info.slot).await {
-				log::warn!(
-					target: &self.client.get_chain_name(),
-					"[{}] WS tick failed at slot {}: {err:?}",
-					SUB_LOG_TARGET,
-					slot_info.slot,
-				);
+					if let Err(err) = self.tick_at_slot(slot_info.slot).await {
+						log::warn!(
+							target: &self.client.get_chain_name(),
+							"[{}] WS tick failed at slot {}: {err:?}",
+							SUB_LOG_TARGET,
+							slot_info.slot,
+						);
+					}
+				},
+				Ok(None) => {
+					// Stream ended gracefully — let the outer `run()` loop
+					// fall back to HTTP polling, then retry WS.
+					return Ok(());
+				},
+				Err(_elapsed) => {
+					// Watchdog fired. Treat this as a transport failure so
+					// the caller falls back to HTTP polling and we
+					// re-establish the WS handshake on the next cycle.
+					return Err(eyre::eyre!(
+						"WS slotSubscribe stalled — no notification within {WS_NOTIFICATION_WATCHDOG:?}"
+					));
+				},
 			}
 		}
-
-		Ok(())
 	}
 
 	/// One polling tick: refresh slot via HTTP, then process.
 	pub async fn tick(&mut self) -> eyre::Result<()> {
 		let latest_slot = self.rpc.get_slot().await.map_err(|e| eyre::eyre!("get_slot: {e}"))?;
-		br_metrics::increase_sol_rpc_calls(&self.client.name);
-		br_metrics::set_sol_slot_height(&self.client.name, latest_slot);
 
 		if latest_slot <= self.last_processed_slot {
 			return Ok(());
@@ -261,7 +289,6 @@ impl SlotManager {
 			.get_signatures_for_address_with_config(&self.client.program_id, cfg)
 			.await
 			.map_err(|e| eyre::eyre!("get_signatures_for_address: {e}"))?;
-		br_metrics::increase_sol_rpc_calls(&self.client.name);
 
 		if sigs.is_empty() {
 			// Nothing happened — emit a NewSlot heartbeat so handlers can
@@ -302,7 +329,6 @@ impl SlotManager {
 					continue;
 				},
 			};
-			br_metrics::increase_sol_rpc_calls(&self.client.name);
 
 			self.process_transaction(slot, &sig_str, &tx);
 		}
@@ -315,6 +341,152 @@ impl SlotManager {
 			self.last_seen_signature = Some(latest);
 		}
 		self.last_processed_slot = latest_slot;
+		Ok(())
+	}
+
+	/// Walk backwards from the current slot until we cross the requested
+	/// `offset_slots` boundary, processing every cccp-solana transaction
+	/// in between. Called once at boot when
+	/// `SolProvider.bootstrap_offset_slots` is set.
+	///
+	/// The RPC returns signatures newest-first and we paginate via
+	/// `before`, so the walk is:
+	///
+	///   cursor = None                           # = "start from tip"
+	///   loop:
+	///     page = getSignaturesForAddress(before=cursor, limit=batch)
+	///     if page empty: break
+	///     if oldest entry in page is below deadline: stop after this page
+	///     cursor = page.last().signature
+	///
+	/// We then process the full catch-up range in chronological order so
+	/// subscribers see events in the same order `tick_at_slot` would
+	/// deliver them live, and update `last_seen_signature` to the
+	/// newest signature we saw (so the next live tick starts from that
+	/// cursor, not duplicate what we already replayed).
+	pub async fn bootstrap_catchup(&mut self, offset_slots: u64) -> eyre::Result<()> {
+		if offset_slots == 0 {
+			return Ok(());
+		}
+
+		let tip = self.rpc.get_slot().await.map_err(|e| eyre::eyre!("get_slot: {e}"))?;
+
+		// Saturating arithmetic — a fresh cluster may have slot numbers
+		// smaller than the offset.
+		let deadline_slot = tip.saturating_sub(offset_slots);
+
+		log::info!(
+			target: &self.client.get_chain_name(),
+			"[{}] bootstrap catch-up: tip={tip} deadline={deadline_slot} (offset={offset_slots})",
+			SUB_LOG_TARGET,
+		);
+
+		// Collect all pages into a single chronologically-sorted list
+		// before processing so inbound/outbound subscribers receive
+		// events in the same order live polling would produce.
+		let mut collected: Vec<
+			solana_client::rpc_response::RpcConfirmedTransactionStatusWithSignature,
+		> = Vec::new();
+		let batch = self.client.get_signatures_batch_size as usize;
+		let mut before: Option<Signature> = None;
+
+		loop {
+			let cfg = GetConfirmedSignaturesForAddress2Config {
+				before,
+				until: None,
+				limit: Some(batch),
+				commitment: None,
+			};
+			let page = self
+				.rpc
+				.get_signatures_for_address_with_config(&self.client.program_id, cfg)
+				.await
+				.map_err(|e| eyre::eyre!("bootstrap get_signatures_for_address: {e}"))?;
+
+			if page.is_empty() {
+				break;
+			}
+
+			let page_oldest_slot = page.last().map(|e| e.slot).unwrap_or(0);
+			let page_newest_sig = page.first().map(|e| e.signature.clone());
+
+			collected.extend(page);
+
+			if page_oldest_slot <= deadline_slot {
+				// We've walked back past the deadline; stop paginating.
+				break;
+			}
+
+			// Move cursor to the oldest sig in this page so the next
+			// getSignaturesForAddress fetches strictly older entries.
+			before = page_newest_sig.as_ref().and_then(|_| {
+				collected.last().and_then(|e| Signature::from_str(&e.signature).ok())
+			});
+			if before.is_none() {
+				break;
+			}
+		}
+
+		// Drop entries older than the deadline — they're from beyond the
+		// configured offset and we don't replay them.
+		collected.retain(|e| e.slot > deadline_slot);
+
+		if collected.is_empty() {
+			log::info!(
+				target: &self.client.get_chain_name(),
+				"[{}] bootstrap catch-up: no cccp-solana traffic in the last {offset_slots} slots",
+				SUB_LOG_TARGET,
+			);
+			self.last_processed_slot = tip;
+			return Ok(());
+		}
+
+		// RPC returned newest-first; reverse so we replay oldest-first.
+		collected.reverse();
+
+		log::info!(
+			target: &self.client.get_chain_name(),
+			"[{}] bootstrap catch-up: replaying {} signatures from slot {}..={}",
+			SUB_LOG_TARGET,
+			collected.len(),
+			collected.first().map(|e| e.slot).unwrap_or(0),
+			collected.last().map(|e| e.slot).unwrap_or(0),
+		);
+
+		for entry in &collected {
+			let sig_str = entry.signature.clone();
+			let slot = entry.slot;
+			let Ok(signature) = Signature::from_str(&sig_str) else {
+				log::warn!(
+					target: &self.client.get_chain_name(),
+					"[{}] bootstrap: unparseable signature {sig_str}",
+					SUB_LOG_TARGET,
+				);
+				continue;
+			};
+
+			let tx = match self.rpc.get_transaction(&signature, UiTransactionEncoding::Json).await {
+				Ok(tx) => tx,
+				Err(err) => {
+					log::warn!(
+						target: &self.client.get_chain_name(),
+						"[{}] bootstrap get_transaction({sig_str}) failed: {err}",
+						SUB_LOG_TARGET,
+					);
+					continue;
+				},
+			};
+
+			self.process_transaction(slot, &sig_str, &tx);
+		}
+
+		// Advance cursors so the live tick picks up from where catch-up
+		// left off — i.e. the newest signature we saw, and the tip slot.
+		if let Some(newest) = collected.last().and_then(|e| Signature::from_str(&e.signature).ok())
+		{
+			self.last_seen_signature = Some(newest);
+		}
+		self.last_processed_slot = tip;
 		Ok(())
 	}
 
@@ -353,6 +525,8 @@ impl SlotManager {
 				round_id: msg.req_id.round_id,
 				sequence: msg.req_id.sequence,
 				status: msg.status,
+				ins_code_chain: msg.ins_code.chain.0,
+				ins_code_method: msg.ins_code.method.0,
 				asset_index: msg.params.token_idx0.0,
 				to: msg.params.to,
 				refund: msg.params.refund,
@@ -377,15 +551,11 @@ impl SlotManager {
 			}
 		}
 
-		let inbound_count = inbound_events.len() as u64;
 		if !inbound_events.is_empty() {
 			let _ = self.sender.send(EventMessage::new(slot, EventType::Inbound, inbound_events));
 		}
 		if !outbound_events.is_empty() {
 			let _ = self.sender.send(EventMessage::new(slot, EventType::Outbound, outbound_events));
-		}
-		if inbound_count > 0 {
-			br_metrics::add_sol_inbound_events(&self.client.name, inbound_count);
 		}
 	}
 }

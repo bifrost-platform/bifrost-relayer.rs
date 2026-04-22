@@ -5,11 +5,11 @@
 // relayer config; if no providers are configured, no Solana wiring is
 // spawned at all.
 //
-// `SolDeps` is generic in `<F, P, N>` so the inbound handler can hold
-// the same Bifrost `EthClient` shape every other relayer subsystem uses.
-// The outbound handler does not need the EthClient — it talks directly
-// to the configured Solana cluster — but it accepts the same generics
-// for symmetry with the rest of the deps containers.
+// `SolDeps` is generic in `<F, P, N>` so the inbound + outbound
+// handlers can hold the same Bifrost `EthClient` shape every other
+// relayer subsystem uses. `SolOutboundHandler` owns both the BFC →
+// Solana submission path and the Solana → BFC commit mirror in one
+// worker.
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -43,9 +43,15 @@ where
 	P: Provider<N>,
 {
 	pub client: SolClient,
+	/// Number of slots to walk backwards on boot, passed to
+	/// `SlotManager::bootstrap_catchup` before the live loop starts.
+	/// `0` / `None` disables catch-up.
+	pub bootstrap_offset_slots: u64,
 	pub slot_manager: SlotManager,
 	pub inbound: SolInboundHandler<F, P, N>,
-	pub outbound: SolOutboundHandler,
+	/// Merged outbound worker: BFC → Solana IX submission + Solana → BFC
+	/// commit mirror in a single `tokio::select!` loop.
+	pub outbound: SolOutboundHandler<F, P, N>,
 	/// Send half of the outbound submission queue. The Bifrost socket
 	/// relay handler pushes `SolOutboundJob`s here when it has a message
 	/// destined for this cluster.
@@ -75,8 +81,8 @@ where
 		);
 		let inbound = SolInboundHandler::new(
 			client.clone(),
-			bfc_client,
-			xt_request_sender,
+			bfc_client.clone(),
+			xt_request_sender.clone(),
 			slot_manager.subscribe(),
 		);
 
@@ -88,6 +94,9 @@ where
 		let registry = AssetRegistry::from_entries(&provider.assets, &vault_pda)?;
 
 		let fee_payer_path = PathBuf::from(&provider.fee_payer_keypair_path);
+		// Merged outbound worker: gets its own broadcast subscriber so
+		// lag on the commit-mirror branch doesn't starve the inbound
+		// handler (and vice versa).
 		let (outbound, outbound_sender) = SolOutboundHandler::new(
 			client.clone(),
 			fee_payer_path,
@@ -96,9 +105,21 @@ where
 			provider.max_priority_fee,
 			provider.confirmation_timeout_secs,
 			provider.max_send_retries,
+			bfc_client,
+			xt_request_sender,
+			slot_manager.subscribe(),
 		)?;
 
-		Ok(Self { client, slot_manager, inbound, outbound, outbound_sender })
+		let bootstrap_offset_slots = provider.bootstrap_offset_slots.unwrap_or(0);
+
+		Ok(Self {
+			client,
+			bootstrap_offset_slots,
+			slot_manager,
+			inbound,
+			outbound,
+			outbound_sender,
+		})
 	}
 }
 

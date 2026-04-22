@@ -163,6 +163,10 @@ pub const SUBMIT_SIGNATURES_IX_DISCRIMINATOR: [u8; 8] =
 pub const POLL_BUFFERED_IX_DISCRIMINATOR: [u8; 8] =
 	[0xde, 0x5b, 0x9f, 0xaf, 0xc9, 0x56, 0x81, 0xeb];
 
+/// `sha256("global:close_poll_signatures")[..8]`
+pub const CLOSE_POLL_SIGNATURES_IX_DISCRIMINATOR: [u8; 8] =
+	[0x10, 0xcf, 0xed, 0xdb, 0x12, 0xc8, 0xf7, 0xb3];
+
 /// Compute an Anchor sighash at runtime. Used by the regression tests
 /// below; production paths use the const values above.
 pub fn anchor_sighash(namespace: &str, name: &str) -> [u8; 8] {
@@ -211,6 +215,10 @@ mod tests {
 			SUBMIT_SIGNATURES_IX_DISCRIMINATOR
 		);
 		assert_eq!(anchor_sighash("global", "poll_buffered"), POLL_BUFFERED_IX_DISCRIMINATOR);
+		assert_eq!(
+			anchor_sighash("global", "close_poll_signatures"),
+			CLOSE_POLL_SIGNATURES_IX_DISCRIMINATOR
+		);
 	}
 
 	/// Borsh round-trip a SocketMessage and assert the byte length is

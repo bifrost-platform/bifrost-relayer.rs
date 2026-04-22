@@ -18,9 +18,9 @@ use solana_sdk::instruction::{AccountMeta, Instruction as SolanaIx};
 use solana_sdk::pubkey::Pubkey;
 
 use crate::sol::codec::{
-	AssetIndex, POLL_BUFFERED_IX_DISCRIMINATOR, POLL_IX_DISCRIMINATOR, PollSubmit,
-	ROUND_CONTROL_RELAY_IX_DISCRIMINATOR, RoundUpSubmit, SUBMIT_SIGNATURES_IX_DISCRIMINATOR,
-	Signatures, SocketMessage,
+	AssetIndex, CLOSE_POLL_SIGNATURES_IX_DISCRIMINATOR, POLL_BUFFERED_IX_DISCRIMINATOR,
+	POLL_IX_DISCRIMINATOR, PollSubmit, ROUND_CONTROL_RELAY_IX_DISCRIMINATOR, RoundUpSubmit,
+	SUBMIT_SIGNATURES_IX_DISCRIMINATOR, Signatures, SocketMessage,
 };
 use crate::sol::pda;
 
@@ -200,6 +200,34 @@ pub fn build_submit_signatures_ix(
 	SolanaIx { program_id: *program_id, accounts, data }
 }
 
+/// Build a `close_poll_signatures(req_id_pack, status)` instruction.
+/// Used by ops / automated cleanup to reclaim rent from a stranded
+/// `PollSignatures` PDA. The caller (signer, mut) receives the refund.
+pub fn build_close_poll_signatures_ix(
+	program_id: &Pubkey,
+	caller: &Pubkey,
+	req_id_pack: &[u8; 32],
+	status: u8,
+) -> SolanaIx {
+	let (poll_sigs, _) = pda::poll_signatures_raw(program_id, req_id_pack, status);
+
+	// Account meta order MUST match the on-chain `ClosePollSignatures`
+	// struct: (caller signer+mut, poll_signatures mut).
+	let accounts = vec![
+		AccountMeta::new(*caller, true),    // caller (signer, mut)
+		AccountMeta::new(poll_sigs, false), // poll_signatures (mut, close)
+	];
+
+	let mut data = Vec::with_capacity(8 + 32 + 1);
+	data.extend_from_slice(&CLOSE_POLL_SIGNATURES_IX_DISCRIMINATOR);
+	req_id_pack
+		.serialize(&mut data)
+		.expect("borsh serialization of req_id_pack must not fail");
+	data.push(status);
+
+	SolanaIx { program_id: *program_id, accounts, data }
+}
+
 /// Build a `poll_buffered(msg, option, asset_index)` instruction.
 /// Reads signatures from the pre-populated `PollSignatures` PDA
 /// instead of carrying them in instruction data.
@@ -263,6 +291,71 @@ fn round_id_from_submit(submit: &RoundUpSubmit) -> u64 {
 	let mut buf = [0u8; 8];
 	buf.copy_from_slice(&submit.round[24..32]);
 	u64::from_be_bytes(buf)
+}
+
+#[cfg(test)]
+mod close_poll_signatures_tests {
+	use super::*;
+	use crate::sol::codec::CLOSE_POLL_SIGNATURES_IX_DISCRIMINATOR;
+	use borsh::BorshDeserialize;
+
+	#[test]
+	fn close_poll_signatures_ix_layout() {
+		let program_id = Pubkey::new_unique();
+		let caller = Pubkey::new_unique();
+		let rid_pack = [0xab; 32];
+		let status = 10u8;
+
+		let ix = build_close_poll_signatures_ix(&program_id, &caller, &rid_pack, status);
+
+		// program_id matches
+		assert_eq!(ix.program_id, program_id);
+
+		// account order: [caller (signer+mut), poll_signatures (mut)]
+		assert_eq!(ix.accounts.len(), 2);
+		assert_eq!(ix.accounts[0].pubkey, caller);
+		assert!(ix.accounts[0].is_signer);
+		assert!(ix.accounts[0].is_writable);
+		assert_eq!(
+			ix.accounts[1].pubkey,
+			pda::poll_signatures_raw(&program_id, &rid_pack, status).0
+		);
+		assert!(ix.accounts[1].is_writable);
+
+		// data = discriminator || rid_pack || status
+		assert_eq!(&ix.data[0..8], &CLOSE_POLL_SIGNATURES_IX_DISCRIMINATOR);
+		let mut tail = &ix.data[8..];
+		let decoded_rid = <[u8; 32]>::deserialize(&mut tail).expect("rid_pack decodes");
+		assert_eq!(decoded_rid, rid_pack);
+		assert_eq!(tail.len(), 1, "only status byte should remain");
+		assert_eq!(tail[0], status);
+	}
+
+	#[test]
+	fn close_poll_signatures_pda_matches_submit_signatures_pda() {
+		// Regression: the cleanup IX must target the same PDA that
+		// `submit_signatures` / `poll_buffered` use, otherwise `close`
+		// never reaches the stranded account.
+		let program_id = Pubkey::new_unique();
+		let caller = Pubkey::new_unique();
+		let rid_pack = [0x42; 32];
+		let status = 5u8;
+
+		let close_ix = build_close_poll_signatures_ix(&program_id, &caller, &rid_pack, status);
+		let submit_ix = build_submit_signatures_ix(
+			&program_id,
+			&caller,
+			&Signatures::default(),
+			&rid_pack,
+			status,
+		);
+
+		// submit_signatures puts poll_signatures at index 2; close puts
+		// it at index 1. Compare by pubkey, not by position.
+		let close_pda = close_ix.accounts[1].pubkey;
+		let submit_pda = submit_ix.accounts[2].pubkey;
+		assert_eq!(close_pda, submit_pda);
+	}
 }
 
 #[cfg(test)]
