@@ -26,21 +26,27 @@ use br_client::{
 		handlers::{
 			inbound::SolInboundHandler,
 			outbound::{SolOutboundHandler, SolOutboundSender},
+			queue_poller::SolSocketQueuePoller,
 		},
 		pda,
 		registry::AssetRegistry,
 		slot_manager::SlotManager,
 	},
 };
-use br_primitives::{cli::SolProvider, tx::XtRequestSender};
+use br_primitives::{
+	cli::SolProvider,
+	substrate::{CustomConfig, create_rpc_client},
+	tx::XtRequestSender,
+};
+use subxt::{OnlineClient, backend::legacy::LegacyRpcMethods};
 
 const DEFAULT_SOL_CONFIRMATION_DEPTH: u64 = 32;
 
 /// Per-cluster Solana dependency bundle.
 pub struct SolDeps<F, P, N: AlloyNetwork>
 where
-	F: TxFiller<N> + WalletProvider<N>,
-	P: Provider<N>,
+	F: TxFiller<N> + WalletProvider<N> + 'static,
+	P: Provider<N> + 'static,
 {
 	pub client: SolClient,
 	/// Number of slots to walk backwards on boot, passed to
@@ -56,17 +62,24 @@ where
 	/// relay handler pushes `SolOutboundJob`s here when it has a message
 	/// destined for this cluster.
 	pub outbound_sender: SolOutboundSender,
+	/// Mirrors CCCP socket state transitions (Requested / Committed /
+	/// Rollbacked) into the Bifrost `cccp-relay-queue` pallet via
+	/// `on_flight_poll` / `finalize_poll` extrinsics. Equivalent of the
+	/// EVM `SocketQueuePoller` for the Solana track.
+	pub queue_poller: SolSocketQueuePoller<F, P, N>,
 }
 
 impl<F, P, N: AlloyNetwork> SolDeps<F, P, N>
 where
-	F: TxFiller<N> + WalletProvider<N>,
-	P: Provider<N>,
+	F: TxFiller<N> + WalletProvider<N> + 'static,
+	P: Provider<N> + 'static,
 {
 	pub fn new(
 		provider: &SolProvider,
 		bfc_client: Arc<EthClient<F, P, N>>,
 		xt_request_sender: Arc<XtRequestSender>,
+		sub_client: OnlineClient<CustomConfig>,
+		sub_rpc: LegacyRpcMethods<CustomConfig>,
 	) -> eyre::Result<Self> {
 		let client = SolClient::new(provider);
 
@@ -105,10 +118,22 @@ where
 			provider.max_priority_fee,
 			provider.confirmation_timeout_secs,
 			provider.max_send_retries,
-			bfc_client,
-			xt_request_sender,
+			bfc_client.clone(),
+			xt_request_sender.clone(),
 			slot_manager.subscribe(),
 		)?;
+
+		// Queue poller gets its own broadcast subscriber — lag on BFC
+		// storage queries or xt submission must never drop events the
+		// inbound/outbound handlers also need to see.
+		let queue_poller = SolSocketQueuePoller::new(
+			client.clone(),
+			bfc_client,
+			sub_client,
+			sub_rpc,
+			xt_request_sender,
+			slot_manager.subscribe(),
+		);
 
 		let bootstrap_offset_slots = provider.bootstrap_offset_slots.unwrap_or(0);
 
@@ -119,6 +144,7 @@ where
 			inbound,
 			outbound,
 			outbound_sender,
+			queue_poller,
 		})
 	}
 }
@@ -138,14 +164,31 @@ pub async fn build_sol_deps<F, P, N: AlloyNetwork>(
 	providers: &[SolProvider],
 	bfc_client: Arc<EthClient<F, P, N>>,
 	xt_request_sender: Arc<XtRequestSender>,
+	sub_client: OnlineClient<CustomConfig>,
+	sub_rpc_url: &str,
 ) -> eyre::Result<Vec<SolDeps<F, P, N>>>
 where
-	F: TxFiller<N> + WalletProvider<N>,
-	P: Provider<N>,
+	F: TxFiller<N> + WalletProvider<N> + 'static,
+	P: Provider<N> + 'static,
 {
+	// Build the legacy RPC client once; it's cheap to clone and every
+	// per-cluster queue poller needs it for storage best-block queries.
+	let sub_rpc = {
+		let rpc_client = create_rpc_client(sub_rpc_url)
+			.await
+			.map_err(|e| eyre::eyre!("create substrate RPC client for queue poller: {e}"))?;
+		LegacyRpcMethods::<CustomConfig>::new(rpc_client)
+	};
+
 	let mut out = Vec::with_capacity(providers.len());
 	for p in providers {
-		let deps = SolDeps::new(p, bfc_client.clone(), xt_request_sender.clone())?;
+		let deps = SolDeps::new(
+			p,
+			bfc_client.clone(),
+			xt_request_sender.clone(),
+			sub_client.clone(),
+			sub_rpc.clone(),
+		)?;
 		let slot = deps.client.health_check().await?;
 		log::info!(
 			target: &deps.client.get_chain_name(),

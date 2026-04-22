@@ -275,6 +275,8 @@ where
 				SUB_LOG_TARGET,
 				attempts,
 			);
+			br_metrics::increase_sol_poll_submissions(&self.client.name, "dropped");
+			br_metrics::set_sol_pending_relays(&self.client.name, self.pending.len() as u64);
 			return;
 		}
 
@@ -285,6 +287,7 @@ where
 		let next_retry_at = tokio::time::Instant::now() + backoff;
 
 		self.pending.push(PendingJob { job, attempts: attempts + 1, next_retry_at });
+		br_metrics::set_sol_pending_relays(&self.client.name, self.pending.len() as u64);
 	}
 
 	/// Walk `pending` and retry every job whose backoff has elapsed.
@@ -303,6 +306,7 @@ where
 				.into_iter()
 				.partition(|p| p.next_retry_at <= now);
 		self.pending = stalled;
+		br_metrics::set_sol_pending_relays(&self.client.name, self.pending.len() as u64);
 
 		for PendingJob { job, attempts, .. } in ready {
 			match self.handle(job.clone()).await {
@@ -676,6 +680,7 @@ where
 				.send_transaction(&tx)
 				.await
 				.map_err(|e| eyre::eyre!("send_transaction: {e}"))?;
+			br_metrics::increase_sol_poll_submissions(&self.client.name, "sent");
 
 			log::info!(
 				target: &self.client.get_chain_name(),
@@ -691,6 +696,7 @@ where
 						"[{}] tx confirmed: sig={signature}",
 						SUB_LOG_TARGET,
 					);
+					br_metrics::increase_sol_poll_submissions(&self.client.name, "confirmed");
 					return Ok(());
 				},
 				Err(err) => {
@@ -707,6 +713,7 @@ where
 						);
 						priority_fee = next_fee;
 					} else {
+						br_metrics::increase_sol_poll_submissions(&self.client.name, "failed");
 						return Err(eyre::eyre!(
 							"tx failed after {} attempts (last sig={signature}): {err}",
 							self.max_send_retries + 1
