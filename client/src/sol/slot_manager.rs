@@ -290,10 +290,17 @@ impl SlotManager {
 			.await
 			.map_err(|e| eyre::eyre!("get_signatures_for_address: {e}"))?;
 
+		// Publish slot as a `block_height` gauge so the existing EVM
+		// Grafana panels pick up the Solana cluster alongside the EVM
+		// chains. The label is the cluster name, matching the shape
+		// every other `relayer_block_height` entry uses.
+		br_metrics::set_block_height(&self.client.name, latest_slot);
+
 		if sigs.is_empty() {
 			// Nothing happened — emit a NewSlot heartbeat so handlers can
 			// tell apart "no events yet" from "RPC stalled".
 			let _ = self.sender.send(EventMessage::new_slot(latest_slot));
+			br_metrics::increase_sol_events(&self.client.name, "new_slot");
 			self.last_processed_slot = latest_slot;
 			return Ok(());
 		}
@@ -552,10 +559,18 @@ impl SlotManager {
 		}
 
 		if !inbound_events.is_empty() {
+			let count = inbound_events.len() as u64;
 			let _ = self.sender.send(EventMessage::new(slot, EventType::Inbound, inbound_events));
+			for _ in 0..count {
+				br_metrics::increase_sol_events(&self.client.name, "inbound");
+			}
 		}
 		if !outbound_events.is_empty() {
+			let count = outbound_events.len() as u64;
 			let _ = self.sender.send(EventMessage::new(slot, EventType::Outbound, outbound_events));
+			for _ in 0..count {
+				br_metrics::increase_sol_events(&self.client.name, "outbound");
+			}
 		}
 	}
 }

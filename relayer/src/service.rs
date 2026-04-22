@@ -216,6 +216,8 @@ pub async fn relay(config: Configuration) -> Result<TaskManager, ServiceError> {
 		&config.relayer_config.sol_providers,
 		bfc_client.clone(),
 		substrate_deps.xt_request_sender.clone(),
+		substrate_deps.sub_client.clone(),
+		&substrate_deps.sub_rpc_url,
 	)
 	.await
 	.map_err(|e| ServiceError::Other(format!("failed to build Solana deps: {e}")))?;
@@ -731,6 +733,7 @@ where
 		mut inbound,
 		mut outbound,
 		outbound_sender: _,
+		mut queue_poller,
 	} in sol_deps
 	{
 		let cluster_name = client.get_chain_name();
@@ -814,6 +817,24 @@ where
 		// dst-chain branch (= the next integration step), the sender will
 		// be threaded through `manager_deps` so that branch can dispatch
 		// `SolOutboundJob`s here.
+
+		let queue_poller_label = format!("solana-queue-poller-{}", cluster_name);
+		let queue_poller_label: &'static str = Box::leak(queue_poller_label.into_boxed_str());
+		task_manager.spawn_essential_handle().spawn(
+			queue_poller_label,
+			Some("solana-queue-poller"),
+			async move {
+				loop {
+					let report = queue_poller.run().await;
+					let log_msg = format!(
+						"solana queue poller stopped: {report:?}\nRestarting in 12 seconds...",
+					);
+					log::error!("{log_msg}");
+					sentry::capture_message(&log_msg, sentry::Level::Error);
+					tokio::time::sleep(Duration::from_secs(12)).await;
+				}
+			},
+		);
 	}
 
 	// spawn prometheus endpoint
