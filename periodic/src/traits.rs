@@ -1,6 +1,7 @@
 use cron::Schedule;
 use eyre::Result;
 use std::collections::BTreeMap;
+use std::time::Duration;
 use tokio::time::sleep;
 
 use br_primitives::periodic::PriceResponse;
@@ -15,13 +16,26 @@ pub trait PeriodicWorker {
 
 	/// Wait until it reaches the next schedule.
 	async fn wait_until_next_time(&self) {
-		let sleep_duration =
-			self.schedule().upcoming(chrono::Utc).next().unwrap() - chrono::Utc::now();
+		let now = chrono::Utc::now();
+		let Some(next_fire) = self.schedule().upcoming(chrono::Utc).next() else {
+			log::error!("periodic schedule has no next tick; sleep 60s and retry");
+			sleep(Duration::from_secs(60)).await;
+			return;
+		};
 
-		match sleep_duration.to_std() {
-			Ok(sleep_duration) => sleep(sleep_duration).await,
-			Err(_) => return,
-		}
+		let sleep_chrono = next_fire - now;
+		let sleep_std = match sleep_chrono.to_std() {
+			Ok(d) => d,
+			Err(_) => {
+				log::warn!(
+					"next tick {:?} is not after now {:?}, sleep 1s and retry",
+					next_fire,
+					now
+				);
+				Duration::from_secs(1)
+			},
+		};
+		sleep(sleep_std).await;
 	}
 }
 
