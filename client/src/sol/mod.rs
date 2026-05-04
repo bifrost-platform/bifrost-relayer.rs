@@ -46,5 +46,4 @@ pub mod seeds {
 	pub const ROUNDUP_HIST: &[u8] = b"rup";
 	pub const ROUNDUP_FILTER: &[u8] = b"rupf";
 	pub const ASSET_CONFIG: &[u8] = b"asset";
-	pub const USER_REGISTRY: &[u8] = b"user";
 }

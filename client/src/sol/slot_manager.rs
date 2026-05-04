@@ -543,15 +543,22 @@ impl SlotManager {
 
 			// Inbound = the request originated on this chain (req_id.chain
 			// is our this_chain). Outbound = the request was created on
-			// another chain (req_id.chain is BFC_MAIN or another remote).
+			// another chain (req_id.chain is one of the BFC tracks or
+			// another remote).
 			//
-			// We don't have direct access to `this_chain` here without an
-			// RPC roundtrip; instead we use the convention that BFC_MAIN
-			// (0x00000bfc) means "outbound" and anything else means
-			// "inbound" (the user-side `request` IX always sets
-			// req_id.chain = SOL_MAIN). This matches the on-chain
-			// `_switch_poll_type` dispatch precisely.
-			if msg.req_id.chain.0 == [0x00, 0x00, 0x0b, 0xfc] {
+			// We don't have direct access to `this_chain` here without
+			// an RPC roundtrip; instead we use the convention that any
+			// recognized BFC ChainIndex (mainnet `0x00000bfc` or
+			// testnet `0x0000bfc0`) means "outbound" and anything else
+			// means "inbound" (the user-side `request` IX always sets
+			// req_id.chain = SOL_MAIN). The matching test on the
+			// on-chain side is `code_chain == SocketConfig.bfc_chain_index`
+			// — that locks the pairing to one BFC at deploy time, but
+			// the relayer accepts either so a single binary works on
+			// both tracks without a config flag.
+			let is_bfc_origin =
+				matches!(msg.req_id.chain.0, [0x00, 0x00, 0x0b, 0xfc] | [0x00, 0x00, 0xbf, 0xc0]);
+			if is_bfc_origin {
 				outbound_events.push(evt);
 			} else {
 				inbound_events.push(evt);

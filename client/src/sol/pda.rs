@@ -105,15 +105,11 @@ pub fn poll_filter(program_id: &Pubkey, rid: &RequestId, signer: &EvmAddress) ->
 }
 
 // ---------------------------------------------------------------------------
-// Per-asset / per-user PDAs
+// Per-asset PDAs
 // ---------------------------------------------------------------------------
 
 pub fn asset_config(program_id: &Pubkey, asset_index: &AssetIndex) -> (Pubkey, u8) {
 	find(&[seeds::ASSET_CONFIG, asset_index], program_id)
-}
-
-pub fn user_registry(program_id: &Pubkey, owner: &Pubkey) -> (Pubkey, u8) {
-	find(&[seeds::USER_REGISTRY, owner.as_ref()], program_id)
 }
 
 #[cfg(test)]
@@ -124,7 +120,7 @@ mod tests {
 	/// the cccp-solana abi_compat tests
 	/// (`programs/cccp-solana/tests/abi_compat.rs::fix_canonical`):
 	///
-	///   chain    = 0x00000bfc  (BFC_MAIN)
+	///   chain    = 0x00000bfc  (BFC_MAIN — Bifrost mainnet, chainId 3068)
 	///   round_id = 7           (u64 BE)
 	///   sequence = 42          (u128 BE)
 	///
@@ -132,8 +128,12 @@ mod tests {
 	/// If this constant ever drifts, both the on-chain `RequestRecord`
 	/// PDA seeds AND the relayer-side PDA derivation are misaligned and
 	/// every cross-chain message would silently miss its account.
+	///
+	/// Note: cccp-solana also defines `BFC_TEST = 0x0000bfc0` (testnet)
+	/// for runtime acceptance in `is_bfc_chain`, but this fixture pins
+	/// the mainnet value as the canonical reference.
 	const CANONICAL_FIXTURE_PACKED: [u8; 32] = [
-		0x00, 0x00, 0x0b, 0xfc, // chain
+		0x00, 0x00, 0x0b, 0xfc, // chain (BFC_MAIN, mainnet)
 		0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x07, // round_id = 7
 		0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
 		0x2a, // sequence = 42
@@ -182,6 +182,5 @@ mod tests {
 		assert_eq!(seeds::ROUNDUP_HIST, b"rup");
 		assert_eq!(seeds::ROUNDUP_FILTER, b"rupf");
 		assert_eq!(seeds::ASSET_CONFIG, b"asset");
-		assert_eq!(seeds::USER_REGISTRY, b"user");
 	}
 }
