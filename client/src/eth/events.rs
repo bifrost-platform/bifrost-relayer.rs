@@ -243,7 +243,7 @@ where
 	}
 
 	/// Bootstrap phase 0-2.
-	async fn initial_flushing(&self) -> Result<()> {
+	async fn initial_flushing(&self) {
 		if let Err(e) = self.client.flush_stalled_transactions().await {
 			br_primitives::log_and_capture_simple!(
 				error,
@@ -259,7 +259,6 @@ where
 			"-[{}] ⚙️  [Bootstrap mode] FlushingStalledTransactions → BootstrapRoundUpPhase1",
 			sub_display_format(SUB_LOG_TARGET),
 		);
-		Ok(())
 	}
 
 	/// Bootstrap phase 0-1, 0-2.
@@ -268,7 +267,7 @@ where
 		let should_bootstrap = self.is_before_bootstrap_state(BootstrapState::NormalStart).await;
 		if should_bootstrap {
 			self.wait_provider_sync().await.unwrap();
-			self.initial_flushing().await.unwrap();
+			self.initial_flushing().await;
 		}
 	}
 }

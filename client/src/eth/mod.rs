@@ -293,7 +293,7 @@ where
 		sleep(Duration::from_millis(self.metadata.call_interval * 2)).await;
 
 		let address = self.address().await;
-		let content = self.txpool_content().await?.remove_from(&address);
+		let content = self.txpool_content_from(address).await?;
 		let mut pending = content.pending;
 		pending.extend(content.queued);
 
