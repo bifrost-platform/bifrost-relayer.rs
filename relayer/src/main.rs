@@ -38,6 +38,7 @@ fn main() {
 			)
 		})
 		.filter(None, log::LevelFilter::Info)
+		.filter_module("alloy_transport_http", log::LevelFilter::Off)
 		.init();
 
 	let cli = Cli::from_args();

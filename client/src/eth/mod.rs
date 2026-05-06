@@ -284,8 +284,8 @@ where
 
 		log::info!(target: &self.get_chain_name(), "-[{}] Flushing stalled transactions", sub_display_format(SUB_LOG_TARGET));
 
-		// if the chain is native or txpool is not enabled, do nothing
-		if self.metadata.is_native || self.txpool_status().await.is_err() {
+		// if txpool namespace is not enabled on the chain, do nothing
+		if self.txpool_status().await.is_err() {
 			return Ok(());
 		}
 
@@ -293,7 +293,7 @@ where
 		sleep(Duration::from_millis(self.metadata.call_interval * 2)).await;
 
 		let address = self.address().await;
-		let content = self.txpool_content().await?.remove_from(&address);
+		let content = self.txpool_content_from(address).await?;
 		let mut pending = content.pending;
 		pending.extend(content.queued);
 
@@ -308,7 +308,8 @@ where
 					.with_from(address)
 					.with_to(tx.to().unwrap())
 					.with_input(tx.input().clone())
-					.with_nonce(tx.nonce());
+					.with_nonce(tx.nonce())
+					.with_gas_limit(tx.gas_limit());
 				if tx.is_eip1559() {
 					request.set_max_fee_per_gas(
 						TransactionResponse::max_fee_per_gas(&tx).unwrap_or(0),
@@ -406,7 +407,8 @@ where
 
 		let gas = self.estimate_gas(request.clone()).await?;
 		let coefficient: f64 = GasCoefficient::from(self.metadata.is_native).into();
-		let estimated_gas = gas as f64 * coefficient;
+		// max gas limit for a single transaction is 52,000,000 on bifrost network
+		let estimated_gas = (gas as f64 * coefficient).min(52_000_000_f64);
 		request.set_gas_limit(estimated_gas.ceil() as u64);
 
 		if self.metadata.is_native {
