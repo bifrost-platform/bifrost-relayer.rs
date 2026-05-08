@@ -1,10 +1,9 @@
-use std::{collections::BTreeMap, time::Duration};
+use std::collections::BTreeMap;
 
 use alloy::primitives::utils::parse_ether;
 use eyre::Result;
 use reqwest::{Client, Url};
 use serde::Deserialize;
-use tokio::time::sleep;
 
 use br_primitives::periodic::PriceResponse;
 
@@ -29,7 +28,7 @@ pub struct CoinbasePriceFetcher {
 impl PriceFetcher for CoinbasePriceFetcher {
 	async fn get_ticker_with_symbol(&self, symbol: String) -> Result<PriceResponse> {
 		let url = self.base_url.join(&format!("products/{}-USD/ticker", symbol))?;
-		let res = self._send_request(url).await;
+		let res = self._send_request(url).await?;
 
 		Ok(PriceResponse { price: parse_ether(&res.price)?, volume: parse_ether(&res.volume)? })
 	}
@@ -43,7 +42,10 @@ impl PriceFetcher for CoinbasePriceFetcher {
 				Err(_) => continue,
 			};
 
-			let res = self._send_request(url).await;
+			let res = match self._send_request(url).await {
+				Ok(res) => res,
+				Err(_) => continue,
+			};
 			if let (Ok(price), Ok(volume)) = (parse_ether(&res.price), parse_ether(&res.volume)) {
 				if symbol == "BTC" {
 					ret.insert(symbol.clone(), PriceResponse { price, volume });
@@ -68,17 +70,8 @@ impl CoinbasePriceFetcher {
 		}
 	}
 
-	async fn _send_request(&self, url: Url) -> CoinbaseResponse {
-		loop {
-			match self.client.get(url.clone()).send().await {
-				Ok(res) => match res.json::<CoinbaseResponse>().await {
-					Ok(res) => return res,
-					Err(_) => {},
-				},
-				Err(_) => {},
-			}
-			sleep(Duration::from_millis(1000)).await;
-		}
+	async fn _send_request(&self, url: Url) -> Result<CoinbaseResponse> {
+		Ok(self.client.get(url).send().await?.json::<CoinbaseResponse>().await?)
 	}
 }
 
