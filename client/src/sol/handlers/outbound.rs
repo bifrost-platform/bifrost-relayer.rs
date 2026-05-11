@@ -1028,7 +1028,9 @@ mod tests {
 		asset_index: &AssetIndex,
 		recipient_wallet: &Pubkey,
 	) -> eyre::Result<Vec<Instruction>> {
-		let entry = registry.get(&asset_index.0).unwrap();
+		let entry = registry
+			.get(&asset_index.0)
+			.expect("test fixture: asset_index must be in the fake registry");
 		let recipient_ata = derive_ata(recipient_wallet, &entry.mint);
 		let tokens = PollTokenAccounts {
 			mint: entry.mint,
@@ -1077,7 +1079,9 @@ mod tests {
 
 		// The poll IX must use the registry-derived vault ATA, not some
 		// other random pubkey.
-		let entry = registry.get(&asset_index.0).unwrap();
+		let entry = registry
+			.get(&asset_index.0)
+			.expect("test fixture: asset_index must be in the fake registry");
 		let expected_vault_ta = derive_ata(&pda::vault_config(&program_id).0, &entry.mint);
 		assert_eq!(entry.vault_token_account, expected_vault_ta);
 		// Position 7 in the Poll Accounts struct is `vault_token_account`
