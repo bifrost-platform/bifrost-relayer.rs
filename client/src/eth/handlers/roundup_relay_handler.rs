@@ -51,6 +51,12 @@ use crate::{
 
 const SUB_LOG_TARGET: &str = "roundup-handler";
 
+/// Per-external-chain wait budget for `wait_if_latest_round` before the barrier
+/// is released anyway. Prevents the bootstrap from stalling indefinitely when
+/// an external EVM's Authority round-space is disjoint from this BFC node's
+/// (e.g. a private testbed BFC pointed at public sepolia contracts).
+const EXTERNAL_ROUNDUP_WAIT_TIMEOUT_SECS: u64 = 120;
+
 /// The essential task that handles `roundup relay` related events.
 pub struct RoundupRelayHandler<F, P, N: Network>
 where
@@ -345,7 +351,11 @@ where
 
 				let latest_round =
 					target_client.protocol_contracts.authority.latest_round().call().await?;
-				if roundup_submit.round > latest_round {
+				// Strict next-round gate: dst Socket.round_control_relay only accepts
+				// `submit.round - 1 == latest_round`. Sending anything else just burns a tx
+				// and emits a "latest round" revert that the bootstrap retry loop would keep
+				// re-trying until it exhausts retries. Pre-filter here.
+				if roundup_submit.round == latest_round + U256::from(1) {
 					let transaction_request = self.build_transaction_request(
 						&target_client.protocol_contracts.socket,
 						&roundup_submit,
@@ -705,19 +715,59 @@ where
 	}
 
 	/// Check if external clients are in the latest round.
+	///
+	/// Each external EVM gets its own task that polls `latest_round` against the
+	/// BFC node's `latest_round` and releases the shared `roundup_barrier` when it
+	/// catches up. Two safety nets vs. the original implementation:
+	///
+	///   * RPC-level errors are logged instead of `.unwrap()`-panicking the
+	///     spawned task (which would have leaked the barrier permit forever).
+	///   * A per-chain deadline (`EXTERNAL_ROUNDUP_WAIT_TIMEOUT_SECS`) bounds the
+	///     wait so a round-space-mismatched external EVM cannot stall the
+	///     bootstrap-to-NormalStart transition. Hitting the deadline emits a
+	///     warning and releases the barrier anyway.
 	async fn wait_if_latest_round(&self) -> Result<()> {
 		let external_clients = &self.external_clients;
+		let bootstrap_chain_name = self.client.get_chain_name();
 
-		for (_, target_client) in external_clients.iter() {
+		for (dst_chain_id, target_client) in external_clients.iter() {
 			let this_roundup_barrier = self.bootstrap_shared_data.roundup_barrier.clone();
 			let bifrost_authority = self.client.protocol_contracts.authority.clone();
 			let target_authority = target_client.protocol_contracts.authority.clone();
+			let log_target = bootstrap_chain_name.clone();
+			let dst_chain_id = *dst_chain_id;
 
 			tokio::spawn(async move {
-				while target_authority.latest_round().call().await.unwrap()
-					< bifrost_authority.latest_round().call().await.unwrap()
-				{
+				let deadline = tokio::time::Instant::now()
+					+ Duration::from_secs(EXTERNAL_ROUNDUP_WAIT_TIMEOUT_SECS);
+				let mut timed_out = false;
+				loop {
+					let target = target_authority.latest_round().call().await;
+					let bifrost = bifrost_authority.latest_round().call().await;
+					match (target, bifrost) {
+						(Ok(t), Ok(b)) if t >= b => break,
+						(Err(err), _) | (_, Err(err)) => {
+							log::warn!(
+								target: &log_target,
+								"-[{}] wait_if_latest_round: latest_round probe failed for dst {dst_chain_id}: {err}",
+								sub_display_format(SUB_LOG_TARGET),
+							);
+						},
+						_ => {},
+					}
+					if tokio::time::Instant::now() >= deadline {
+						timed_out = true;
+						break;
+					}
 					tokio::time::sleep(Duration::from_millis(DEFAULT_CALL_RETRY_INTERVAL_MS)).await;
+				}
+				if timed_out {
+					log::warn!(
+						target: &log_target,
+						"-[{}] wait_if_latest_round: dst {dst_chain_id} did not catch up within {}s; releasing barrier",
+						sub_display_format(SUB_LOG_TARGET),
+						EXTERNAL_ROUNDUP_WAIT_TIMEOUT_SECS,
+					);
 				}
 
 				this_roundup_barrier.wait().await;
