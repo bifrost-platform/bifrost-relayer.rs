@@ -101,9 +101,14 @@ const MAX_PENDING_BACKOFF: Duration = Duration::from_secs(15 * 60);
 // ── Compute Budget Program ──────────────────────────────────────────
 // We construct the IX data by hand to avoid pulling in an extra crate.
 // Program ID: ComputeBudget111111111111111111111111111111
+//   base58("ComputeBudget111111111111111111111111111111") → the 32 bytes
+//   below. Any drift here surfaces as `ProgramAccountNotFound` at preflight
+//   (or `Attempt to load a program that does not exist` at the validator),
+//   because the BPF loader can't resolve the phony program account that the
+//   wrong bytes encode.
 const COMPUTE_BUDGET_PROGRAM_ID: Pubkey = Pubkey::new_from_array([
-	3, 6, 70, 111, 229, 33, 23, 50, 255, 236, 173, 186, 114, 195, 155, 231, 188, 140, 229, 164,
-	218, 0, 137, 145, 204, 121, 124, 0, 0, 0, 0, 0,
+	3, 6, 70, 111, 229, 33, 23, 50, 255, 236, 173, 186, 114, 195, 155, 231, 188, 140, 229, 187,
+	197, 247, 18, 107, 44, 67, 155, 58, 64, 0, 0, 0,
 ]);
 
 /// SetComputeUnitLimit(u32) — instruction discriminator 0x02.

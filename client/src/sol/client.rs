@@ -31,17 +31,18 @@ use crate::sol::pda;
 ///   8.. 40   authority: Pubkey        (32)
 ///  40.. 72   vault: Pubkey            (32)
 ///  72.. 76   this_chain: ChainIndex   ( 4)
-///  76.. 92   sequence: u128           (16)
-///  92..100   request_timeout: i64     ( 8)
-/// 100..108   latest_round_id: u64     ( 8)   ← here
-/// 108..116   active_rounds_size: u64  ( 8)
-/// 116..117   bump: u8                 ( 1)
+///  76.. 80   bfc_chain_index: ChainIndex ( 4)
+///  80.. 96   sequence: u128           (16)
+///  96..104   request_timeout: i64     ( 8)
+/// 104..112   latest_round_id: u64     ( 8)   ← here
+/// 112..120   active_rounds_size: u64  ( 8)
+/// 120..121   bump: u8                 ( 1)
 /// ```
 ///
 /// Anchor serializes primitive integers as little-endian (borsh contract),
-/// so the relayer reads the 8 bytes starting at offset 100 and decodes
+/// so the relayer reads the 8 bytes starting at offset 104 and decodes
 /// them with `u64::from_le_bytes`.
-const SOCKET_CONFIG_LATEST_ROUND_ID_OFFSET: usize = 100;
+const SOCKET_CONFIG_LATEST_ROUND_ID_OFFSET: usize = 104;
 
 #[derive(Clone)]
 pub struct SolClient {
@@ -181,9 +182,9 @@ mod tests {
 	#[test]
 	fn socket_config_latest_round_id_offset_matches_layout() {
 		// Layout: discriminator(8) + authority(32) + vault(32) + this_chain(4)
-		//       + sequence(16) + request_timeout(8) + latest_round_id(8)
-		//       + active_rounds_size(8) + bump(1)  = 117 bytes.
-		let mut blob = vec![0u8; 117];
+		//       + bfc_chain_index(4) + sequence(16) + request_timeout(8)
+		//       + latest_round_id(8) + active_rounds_size(8) + bump(1)  = 121 bytes.
+		let mut blob = vec![0u8; 121];
 
 		// Anchor account discriminator (first 8 bytes) — arbitrary here.
 		blob[0..8].copy_from_slice(&[1, 2, 3, 4, 5, 6, 7, 8]);
@@ -193,16 +194,17 @@ mod tests {
 		blob[8..40].copy_from_slice(&[0x11; 32]); // authority
 		blob[40..72].copy_from_slice(&[0x22; 32]); // vault
 		blob[72..76].copy_from_slice(&[0x33; 4]); // this_chain
-		blob[76..92].copy_from_slice(&[0x44; 16]); // sequence
-		blob[92..100].copy_from_slice(&[0x55; 8]); // request_timeout
+		blob[76..80].copy_from_slice(&[0x66; 4]); // bfc_chain_index
+		blob[80..96].copy_from_slice(&[0x44; 16]); // sequence
+		blob[96..104].copy_from_slice(&[0x55; 8]); // request_timeout
 
 		// latest_round_id = 0x0000_0000_0000_2A = 42 (little-endian).
 		let expected: u64 = 42;
 		blob[SOCKET_CONFIG_LATEST_ROUND_ID_OFFSET..SOCKET_CONFIG_LATEST_ROUND_ID_OFFSET + 8]
 			.copy_from_slice(&expected.to_le_bytes());
 
-		blob[108..116].copy_from_slice(&[0x77; 8]); // active_rounds_size
-		blob[116] = 0xff; // bump
+		blob[112..120].copy_from_slice(&[0x77; 8]); // active_rounds_size
+		blob[120] = 0xff; // bump
 
 		let mut buf = [0u8; 8];
 		buf.copy_from_slice(
