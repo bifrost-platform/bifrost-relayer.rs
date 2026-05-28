@@ -71,7 +71,7 @@ use crate::sol::ata::{build_create_ata_idempotent_ix, derive_ata};
 use crate::sol::client::SolClient;
 use crate::sol::codec::{AssetIndex, PollSubmit, RoundUpSubmit, Signatures};
 use crate::sol::ix_builder::{
-	PollTokenAccounts, SIGS_PER_CHUNK, build_poll_buffered_ix, build_poll_ix,
+	PollTokenAccounts, SIGS_PER_CHUNK, build_close_round_ix, build_poll_buffered_ix, build_poll_ix,
 	build_round_control_relay_ix, build_submit_signatures_ix,
 };
 use crate::sol::registry::AssetRegistry;
@@ -135,6 +135,27 @@ const PRIORITY_FEE_MULTIPLIER: u64 = 3;
 const CONFIRMATION_POLL_INTERVAL: Duration = Duration::from_millis(2_000);
 /// Solana's maximum transaction packet size.
 const SOLANA_MAX_TX_SIZE: usize = 1232;
+
+// ── Round-rent sweep ────────────────────────────────────────────────
+/// How often the handler sweeps expired `RoundInfo` PDAs to reclaim the
+/// rent-exempt deposit this relayer funded. Rounds advance slowly (one per
+/// BFC round period, ~minutes), so a multi-minute cadence keeps RPC load
+/// negligible while still recovering deposits within an hour of expiry.
+const ROUND_SWEEP_TICK: Duration = Duration::from_secs(10 * 60);
+
+/// Upper bound on how many rounds a single sweep tick inspects. Caps the
+/// `getMultipleAccounts` fan-out per tick; the cursor advances by this much
+/// each time so a backlog drains over successive ticks rather than in one
+/// burst.
+const ROUND_SWEEP_MAX_PER_TICK: u64 = 256;
+
+/// On the first sweep after boot, look back at most this many rounds below
+/// the active window rather than scanning from genesis. Pre-feature rounds
+/// carry no recorded payer (so are never closable) and re-scanning the full
+/// history every restart is wasteful — this bounds the catch-up to a recent
+/// window that still recovers self-funded rounds expired during a brief
+/// downtime.
+const ROUND_SWEEP_BOOT_LOOKBACK: u64 = 1024;
 
 /// Work item pushed onto the outbound queue.
 #[derive(Debug, Clone)]
@@ -396,6 +417,15 @@ where
 		// any failure has occurred.
 		retry_ticker.tick().await;
 
+		let mut sweep_ticker = tokio::time::interval(ROUND_SWEEP_TICK);
+		// First tick fires immediately; skip it so the sweep cursor is
+		// seeded one full interval after boot (gives the cluster time to
+		// report a stable round window).
+		sweep_ticker.tick().await;
+		// Next round id this relayer has not yet considered for closing.
+		// `None` until the first sweep seeds it from the live round window.
+		let mut sweep_cursor: Option<u64> = None;
+
 		loop {
 			tokio::select! {
 				item = self.event_stream.next() => {
@@ -449,8 +479,101 @@ where
 				_ = retry_ticker.tick() => {
 					self.drain_pending().await;
 				},
+				_ = sweep_ticker.tick() => {
+					if let Err(err) = self.sweep_expired_rounds(&mut sweep_cursor).await {
+						log::warn!(
+							target: &self.client.get_chain_name(),
+							"[{}] round-rent sweep tick failed: {err:?}",
+							SUB_LOG_TARGET,
+						);
+					}
+				},
 			}
 		}
+	}
+
+	/// Reclaim the rent-exempt deposit of expired `RoundInfo` PDAs this
+	/// relayer funded. Walks a bounded window of rounds that have dropped
+	/// out of the active set, fetches each round's recorded `payer`, and
+	/// sends `close_round` for the ones funded by this relayer's fee-payer.
+	///
+	/// The on-chain `close_round` IX independently re-checks both the payer
+	/// match and the active-window guard, so a stale local view here can
+	/// only ever cause a harmless rejected tx — never an erroneous close.
+	async fn sweep_expired_rounds(&self, cursor: &mut Option<u64>) -> eyre::Result<()> {
+		let (latest, active) = self.client.round_window().await?;
+
+		// Highest round that is strictly outside the active window, i.e.
+		// `round_id + active_rounds_size < latest_round_id`. Below 1 means
+		// nothing is closable yet.
+		let hi = match latest.checked_sub(active).and_then(|v| v.checked_sub(1)) {
+			Some(h) => h,
+			None => return Ok(()), // active window still covers every round
+		};
+
+		// Seed the cursor on the first sweep: start a bounded look-back
+		// below the current closable edge rather than from genesis.
+		let lo = match *cursor {
+			Some(c) => c,
+			None => {
+				let seed = hi.saturating_sub(ROUND_SWEEP_BOOT_LOOKBACK);
+				*cursor = Some(seed);
+				seed
+			},
+		};
+
+		if lo > hi {
+			return Ok(()); // caught up — nothing newly expired
+		}
+
+		// Bound the per-tick scan; advance the cursor by what we cover.
+		let scan_hi = hi.min(lo + ROUND_SWEEP_MAX_PER_TICK - 1);
+		let round_ids: Vec<u64> = (lo..=scan_hi).collect();
+
+		let me = self.fee_payer.pubkey();
+		let payers = self.client.round_info_payers(&round_ids).await?;
+
+		let mine: Vec<u64> = round_ids
+			.iter()
+			.zip(payers.iter())
+			.filter_map(|(rid, payer)| match payer {
+				Some(p) if *p == me => Some(*rid),
+				_ => None,
+			})
+			.collect();
+
+		if !mine.is_empty() {
+			log::info!(
+				target: &self.client.get_chain_name(),
+				"[{}] round-rent sweep: reclaiming {} expired round(s) in [{lo}, {scan_hi}] (latest={latest} active={active})",
+				SUB_LOG_TARGET,
+				mine.len(),
+			);
+		}
+
+		for rid in mine {
+			let ix = build_close_round_ix(&self.client.program_id, &me, rid);
+			match self.send_single_ix(ix).await {
+				Ok(()) => log::debug!(
+					target: &self.client.get_chain_name(),
+					"[{}] closed expired round {rid}, rent refunded to {me}",
+					SUB_LOG_TARGET,
+				),
+				// Best-effort: a failed close just leaves the deposit locked
+				// until a later tick retries (the cursor still advances, but
+				// a subsequent boot's look-back or a manual sweep recovers
+				// it). Don't abort the whole tick on one bad round.
+				Err(err) => log::warn!(
+					target: &self.client.get_chain_name(),
+					"[{}] close_round({rid}) failed: {err:?}",
+					SUB_LOG_TARGET,
+				),
+			}
+		}
+
+		// Advance past the window we just scanned.
+		*cursor = Some(scan_hi + 1);
+		Ok(())
 	}
 
 	// ---------------------------------------------------------------------

@@ -18,9 +18,10 @@ use solana_sdk::instruction::{AccountMeta, Instruction as SolanaIx};
 use solana_sdk::pubkey::Pubkey;
 
 use crate::sol::codec::{
-	AssetIndex, CLOSE_POLL_SIGNATURES_IX_DISCRIMINATOR, POLL_BUFFERED_IX_DISCRIMINATOR,
-	POLL_IX_DISCRIMINATOR, PollSubmit, ROUND_CONTROL_RELAY_IX_DISCRIMINATOR, RoundUpSubmit,
-	SUBMIT_SIGNATURES_IX_DISCRIMINATOR, Signatures, SocketMessage,
+	AssetIndex, CLOSE_POLL_SIGNATURES_IX_DISCRIMINATOR, CLOSE_ROUND_IX_DISCRIMINATOR,
+	POLL_BUFFERED_IX_DISCRIMINATOR, POLL_IX_DISCRIMINATOR, PollSubmit,
+	ROUND_CONTROL_RELAY_IX_DISCRIMINATOR, RoundUpSubmit, SUBMIT_SIGNATURES_IX_DISCRIMINATOR,
+	Signatures, SocketMessage,
 };
 use crate::sol::pda;
 
@@ -228,6 +229,33 @@ pub fn build_close_poll_signatures_ix(
 	SolanaIx { program_id: *program_id, accounts, data }
 }
 
+/// Build a `close_round(round_id)` instruction. Used by the round-rent
+/// sweep worker to reclaim the rent-exempt deposit of an expired
+/// `RoundInfo` PDA. The on-chain program enforces that `relayer` equals
+/// the round's recorded `payer` and that the round has dropped out of the
+/// active window, so a relayer only ever reclaims deposits it funded.
+pub fn build_close_round_ix(program_id: &Pubkey, relayer: &Pubkey, round_id: u64) -> SolanaIx {
+	let (socket_config, _) = pda::socket_config(program_id);
+	let (round_info, _) = pda::round_info(program_id, round_id);
+
+	// Account meta order MUST match the on-chain `CloseRound` struct in
+	// `instructions/close_round.rs`: (relayer signer+mut, socket_config
+	// readonly, round_info mut+close).
+	let accounts = vec![
+		AccountMeta::new(*relayer, true), // relayer (signer, mut)
+		AccountMeta::new_readonly(socket_config, false), // socket_config
+		AccountMeta::new(round_info, false), // round_info (mut, close)
+	];
+
+	let mut data = Vec::with_capacity(8 + 8);
+	data.extend_from_slice(&CLOSE_ROUND_IX_DISCRIMINATOR);
+	round_id
+		.serialize(&mut data)
+		.expect("borsh serialization of round_id must not fail");
+
+	SolanaIx { program_id: *program_id, accounts, data }
+}
+
 /// Build a `poll_buffered(msg, option, asset_index)` instruction.
 /// Reads signatures from the pre-populated `PollSignatures` PDA
 /// instead of carrying them in instruction data.
@@ -329,6 +357,38 @@ mod close_poll_signatures_tests {
 		assert_eq!(decoded_rid, rid_pack);
 		assert_eq!(tail.len(), 1, "only status byte should remain");
 		assert_eq!(tail[0], status);
+	}
+
+	#[test]
+	fn close_round_ix_layout() {
+		use crate::sol::codec::CLOSE_ROUND_IX_DISCRIMINATOR;
+
+		let program_id = Pubkey::new_unique();
+		let relayer = Pubkey::new_unique();
+		let round_id = 0x0123_4567_89ab_cdefu64;
+
+		let ix = build_close_round_ix(&program_id, &relayer, round_id);
+
+		assert_eq!(ix.program_id, program_id);
+
+		// account order: [relayer (signer+mut), socket_config (ro),
+		// round_info (mut, close)] — must match on-chain CloseRound.
+		assert_eq!(ix.accounts.len(), 3);
+		assert_eq!(ix.accounts[0].pubkey, relayer);
+		assert!(ix.accounts[0].is_signer);
+		assert!(ix.accounts[0].is_writable);
+		assert_eq!(ix.accounts[1].pubkey, pda::socket_config(&program_id).0);
+		assert!(!ix.accounts[1].is_signer);
+		assert!(!ix.accounts[1].is_writable);
+		assert_eq!(ix.accounts[2].pubkey, pda::round_info(&program_id, round_id).0);
+		assert!(ix.accounts[2].is_writable);
+
+		// data = discriminator || round_id (u64 LE, borsh)
+		assert_eq!(&ix.data[0..8], &CLOSE_ROUND_IX_DISCRIMINATOR);
+		let mut tail = &ix.data[8..];
+		let decoded = u64::deserialize(&mut tail).expect("round_id decodes");
+		assert_eq!(decoded, round_id);
+		assert!(tail.is_empty(), "no trailing bytes after round_id");
 	}
 
 	#[test]

@@ -44,6 +44,60 @@ use crate::sol::pda;
 /// them with `u64::from_le_bytes`.
 const SOCKET_CONFIG_LATEST_ROUND_ID_OFFSET: usize = 104;
 
+/// Byte offset of the `active_rounds_size: u64` field inside the Anchor-
+/// serialized `SocketConfig` account (immediately after `latest_round_id`,
+/// see the layout table above).
+const SOCKET_CONFIG_ACTIVE_ROUNDS_SIZE_OFFSET: usize = 112;
+
+/// Fixed-prefix offset of the `relayers` Vec length (`u32`, little-endian)
+/// inside an Anchor-serialized `RoundInfo` account:
+///
+/// ```text
+///   0.. 8   Anchor discriminator
+///   8..40   relayer_hash: [u8; 32]
+///  40..44   relayers Vec length (u32 LE)   ← here
+///  44..44+len*20   relayers: [[u8; 20]; len]
+///   ..+8    round_id: u64
+///   ..+1    bump: u8
+///   ..+32   payer: Pubkey                  (appended by the round-rent feature)
+/// ```
+///
+/// `payer` sits AFTER the variable-length `relayers` Vec, so its byte
+/// offset depends on the relayer count and must be computed at decode time
+/// via [`round_info_payer_offset`].
+const ROUND_INFO_RELAYERS_LEN_OFFSET: usize = 40;
+
+/// Compute the byte offset of `RoundInfo.payer` given the decoded
+/// `relayers` Vec length: `disc(8) + relayer_hash(32) + vec_len(4) +
+/// relayers(len*20) + round_id(8) + bump(1)`.
+fn round_info_payer_offset(relayers_len: usize) -> usize {
+	8 + 32 + 4 + relayers_len * 20 + 8 + 1
+}
+
+/// Decode `RoundInfo.payer` from a raw account data buffer. Returns `None`
+/// when the buffer is too short to hold the field — which is exactly the
+/// case for rounds created before the round-rent feature shipped (their
+/// account was allocated under the old, payer-less layout), so those
+/// rounds are correctly treated as having no recorded payer and are never
+/// closable.
+fn decode_round_info_payer(data: &[u8]) -> Option<Pubkey> {
+	if data.len() < ROUND_INFO_RELAYERS_LEN_OFFSET + 4 {
+		return None;
+	}
+	let mut len_bytes = [0u8; 4];
+	len_bytes
+		.copy_from_slice(&data[ROUND_INFO_RELAYERS_LEN_OFFSET..ROUND_INFO_RELAYERS_LEN_OFFSET + 4]);
+	let relayers_len = u32::from_le_bytes(len_bytes) as usize;
+
+	let off = round_info_payer_offset(relayers_len);
+	if data.len() < off + 32 {
+		return None;
+	}
+	let mut payer = [0u8; 32];
+	payer.copy_from_slice(&data[off..off + 32]);
+	Some(Pubkey::new_from_array(payer))
+}
+
 #[derive(Clone)]
 pub struct SolClient {
 	/// Free-form cluster name (e.g. `solana-devnet`). Used in logs and
@@ -159,6 +213,65 @@ impl SolClient {
 		buf.copy_from_slice(&account.data[SOCKET_CONFIG_LATEST_ROUND_ID_OFFSET..end]);
 		Ok(u64::from_le_bytes(buf))
 	}
+
+	/// Read `(latest_round_id, active_rounds_size)` from `socket_config` in
+	/// a single account fetch. Used by the round-rent sweep to compute which
+	/// rounds have dropped out of the active window and are safe to close.
+	pub async fn round_window(&self) -> eyre::Result<(u64, u64)> {
+		let (socket_config_pda, _) = pda::socket_config(&self.program_id);
+
+		let account = self.rpc.get_account(&socket_config_pda).await.map_err(|e| {
+			eyre::eyre!("get_account(socket_config={socket_config_pda}) on {}: {e}", self.name)
+		})?;
+
+		let need = SOCKET_CONFIG_ACTIVE_ROUNDS_SIZE_OFFSET + 8;
+		if account.data.len() < need {
+			eyre::bail!(
+				"socket_config on {} is too small ({} bytes) — expected at least {} \
+				 (program may not be initialized)",
+				self.name,
+				account.data.len(),
+				need,
+			);
+		}
+
+		let mut latest = [0u8; 8];
+		latest.copy_from_slice(
+			&account.data
+				[SOCKET_CONFIG_LATEST_ROUND_ID_OFFSET..SOCKET_CONFIG_LATEST_ROUND_ID_OFFSET + 8],
+		);
+		let mut active = [0u8; 8];
+		active.copy_from_slice(
+			&account.data[SOCKET_CONFIG_ACTIVE_ROUNDS_SIZE_OFFSET
+				..SOCKET_CONFIG_ACTIVE_ROUNDS_SIZE_OFFSET + 8],
+		);
+		Ok((u64::from_le_bytes(latest), u64::from_le_bytes(active)))
+	}
+
+	/// Batch-fetch the `payer` of each `RoundInfo` PDA for the given round
+	/// ids. Returns one entry per input id, in order: `Some(pubkey)` if the
+	/// round account exists and carries a recorded payer, `None` if the
+	/// account is absent (already closed / never created) or predates the
+	/// round-rent layout. Fetches in chunks of 100 to respect the RPC
+	/// `getMultipleAccounts` cap.
+	pub async fn round_info_payers(&self, round_ids: &[u64]) -> eyre::Result<Vec<Option<Pubkey>>> {
+		let mut out = Vec::with_capacity(round_ids.len());
+		for chunk in round_ids.chunks(100) {
+			let pdas: Vec<Pubkey> =
+				chunk.iter().map(|rid| pda::round_info(&self.program_id, *rid).0).collect();
+			let accounts = self.rpc.get_multiple_accounts(&pdas).await.map_err(|e| {
+				eyre::eyre!(
+					"get_multiple_accounts(round_info x{}) on {}: {e}",
+					pdas.len(),
+					self.name
+				)
+			})?;
+			for account in accounts {
+				out.push(account.and_then(|a| decode_round_info_payer(&a.data)));
+			}
+		}
+		Ok(out)
+	}
 }
 
 fn parse_commitment(s: Option<&str>) -> CommitmentConfig {
@@ -215,5 +328,44 @@ mod tests {
 		// Smoke-check the surrounding sentinels didn't bleed into the slot.
 		assert_eq!(blob[SOCKET_CONFIG_LATEST_ROUND_ID_OFFSET - 1], 0x55);
 		assert_eq!(blob[SOCKET_CONFIG_LATEST_ROUND_ID_OFFSET + 8], 0x77);
+	}
+
+	/// Build a `RoundInfo` blob the way Anchor would serialize it and assert
+	/// `decode_round_info_payer` recovers the payer regardless of the
+	/// (variable) relayer count. Mirrors `cccp-solana::state::RoundInfo`.
+	#[test]
+	fn round_info_payer_decode_matches_layout() {
+		for relayers_len in [0usize, 1, 7, 64] {
+			let payer_off = round_info_payer_offset(relayers_len);
+			// Account allocated at the full max size, payer written at its
+			// (variable) offset, tail left as zero padding — exactly how
+			// Anchor lays out an `init`-ed account with `space = SIZE`.
+			let max_off = round_info_payer_offset(64);
+			let mut blob = vec![0u8; max_off + 32];
+
+			blob[0..8].copy_from_slice(&[9u8; 8]); // discriminator
+			blob[8..40].copy_from_slice(&[0x11; 32]); // relayer_hash
+			blob[ROUND_INFO_RELAYERS_LEN_OFFSET..ROUND_INFO_RELAYERS_LEN_OFFSET + 4]
+				.copy_from_slice(&(relayers_len as u32).to_le_bytes());
+			// relayers payload + round_id + bump left as zeros — irrelevant.
+
+			let expected = Pubkey::new_unique();
+			blob[payer_off..payer_off + 32].copy_from_slice(&expected.to_bytes());
+
+			assert_eq!(decode_round_info_payer(&blob), Some(expected));
+		}
+	}
+
+	/// A buffer too short to contain the payer (pre-feature layout) decodes
+	/// to `None`, so legacy rounds are never treated as closable.
+	#[test]
+	fn round_info_payer_decode_short_buffer_is_none() {
+		// relayers_len = 7 → payer would start at round_info_payer_offset(7),
+		// but we truncate the buffer right before it.
+		let payer_off = round_info_payer_offset(7);
+		let mut blob = vec![0u8; payer_off]; // one byte short of the payer field
+		blob[ROUND_INFO_RELAYERS_LEN_OFFSET..ROUND_INFO_RELAYERS_LEN_OFFSET + 4]
+			.copy_from_slice(&7u32.to_le_bytes());
+		assert_eq!(decode_round_info_payer(&blob), None);
 	}
 }
