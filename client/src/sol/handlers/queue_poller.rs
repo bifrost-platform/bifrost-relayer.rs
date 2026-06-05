@@ -128,7 +128,7 @@ where
 			},
 			params: Task_Params {
 				tokenIDX0: FixedBytes::from(ev.asset_index),
-				tokenIDX1: FixedBytes::from([0u8; 32]),
+				tokenIDX1: FixedBytes::from(ev.token_idx1),
 				refund: Address::from(ev.refund),
 				to: Address::from(ev.to),
 				amount: U256::from_be_bytes(ev.amount),

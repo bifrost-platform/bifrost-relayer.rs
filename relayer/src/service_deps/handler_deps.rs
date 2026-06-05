@@ -105,6 +105,7 @@ where
 			match SocketOnflightHandler::new(
 				bifrost_client.clone(),
 				clients.clone(),
+				sol_clients.clone(),
 				substrate_deps.sub_client.clone(),
 				substrate_deps.sub_rpc_url.clone(),
 				Arc::new(onflight_senders),

@@ -66,6 +66,26 @@ fn empty_signatures() -> Signatures {
 	Signatures::default()
 }
 
+/// Convert the EVM-side aggregated signature bundle (`bytes32[] r`,
+/// `bytes32[] s`, `bytes v`) into the borsh-mirror shape the cccp-solana
+/// `poll(...)` IX expects. The wire format on both sides is identical
+/// (same ECDSA secp256k1 r/s/v); we're only re-wrapping the alloy
+/// fixed-byte arrays into plain `[u8; 32]` for borsh serialization.
+///
+/// Used by `dispatch_to_solana` when an inbound `Accepted`/`Rejected`
+/// event lands on BFC for a Solana-sourced transfer — the BFC Socket
+/// contract's `polled_sigs[rid][status]` already holds the relayer
+/// signatures the destination chain needs to verify the same message.
+pub fn evm_to_sol_signatures(
+	evm: &br_primitives::contracts::socket::Socket_Struct::Signatures,
+) -> Signatures {
+	Signatures {
+		r: evm.r.iter().map(|b| b.0).collect(),
+		s: evm.s.iter().map(|b| b.0).collect(),
+		v: evm.v.to_vec(),
+	}
+}
+
 fn chain_index_bytes(value: &alloy::primitives::FixedBytes<4>) -> eyre::Result<[u8; 4]> {
 	Ok((*value).into())
 }

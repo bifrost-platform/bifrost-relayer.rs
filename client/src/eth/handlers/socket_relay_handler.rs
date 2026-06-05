@@ -686,6 +686,50 @@ where
 			)
 		};
 
+		// Defensive pre-check (EVM targets only): query the destination
+		// chain's Socket `poll_filter[req_id][our_addr]` for the bit at
+		// position `msg.status`. If it's already set, this relayer has
+		// already submitted a poll for that exact (rid, status) — the
+		// contract would `revert "poll filtered"`. Skipping here avoids
+		// the gas-estimate retry storm we otherwise see on restart when
+		// `socket-queue-poller` re-fetches historical events whose
+		// pollFilter bits are permanently set on chain (e.g., for
+		// transfers that already completed successfully in a prior run).
+		if let Some(client) = self.system_clients.get(&relay_tx_chain_id) {
+			let our_addr = self.client.address().await;
+			match client
+				.protocol_contracts
+				.socket
+				.get_poll_filter(socket_msg.req_id.clone(), our_addr)
+				.call()
+				.await
+			{
+				Ok(mask) => {
+					let bit_set = (mask >> U256::from(socket_msg.status)) & U256::from(1u64)
+						== U256::from(1u64);
+					if bit_set {
+						log::debug!(
+							target: &self.client.get_chain_name(),
+							"-[{}] skipping {} — pollFilter bit {} already set for relayer {}",
+							sub_display_format(SUB_LOG_TARGET),
+							metadata,
+							socket_msg.status,
+							our_addr,
+						);
+						return Ok(());
+					}
+				},
+				Err(err) => {
+					log::debug!(
+						target: &self.client.get_chain_name(),
+						"-[{}] pollFilter precheck failed for {}: {err:?}, proceeding anyway",
+						sub_display_format(SUB_LOG_TARGET),
+						metadata,
+					);
+				},
+			}
+		}
+
 		// build and send transaction request
 		if let Some(built_transaction) = self
 			.build_transaction(socket_msg.clone(), is_inbound, relay_tx_chain_id)
@@ -698,6 +742,17 @@ where
 				socket_msg,
 			)
 			.await;
+		} else if self.sol_outbound_senders.contains_key(&relay_tx_chain_id) {
+			// `build_transaction` returns `None` whenever `relay_tx_chain_id`
+			// is not in `system_clients` (the EVM client map). For Solana
+			// destinations this is normal — there is no EVM `poll()` to
+			// build, the cccp-solana `poll(...)` IX is constructed downstream
+			// by `sol-outbound` from the raw `socket_msg`. Without this
+			// fallback the inbound+Accepted (and outbound+Rejected) handoff
+			// to Solana silently drops, the Solana side never emits
+			// `Committed`/`Rollbacked`, and `cccp-relay-queue`'s
+			// `OnFlightTransfers` entry never moves to `FinalizedTransfers`.
+			self.dispatch_to_solana(relay_tx_chain_id, metadata, socket_msg).await;
 		}
 
 		Ok(())
@@ -885,7 +940,7 @@ where
 		// the Solana ix builder. The cross-impl tests in
 		// `crate::sol::codec::tests::cross_impl_request_id_pack` and
 		// friends pin the byte format so this conversion can never drift.
-		let sol_submit = match build_sol_poll_submit(&socket_msg) {
+		let mut sol_submit = match build_sol_poll_submit(&socket_msg) {
 			Ok(s) => s,
 			Err(err) => {
 				br_primitives::log_and_capture!(
@@ -898,6 +953,32 @@ where
 				return;
 			},
 		};
+
+		// Populate the relayer signatures for the cccp-solana `poll(...)`
+		// IX. `build_sol_poll_submit` deliberately leaves `sigs` empty so
+		// the caller can attach the right set — for the dispatch-to-Solana
+		// leg we want the BFC-side aggregated signatures already collected
+		// in `polled_sigs[req_id][status]`. cccp-solana verifies the same
+		// secp256k1 signatures over the same encoded message, so the
+		// EVM-stored set is reusable verbatim (re-wrapped from alloy
+		// fixed-byte to plain `[u8; 32]` by `evm_to_sol_signatures`).
+		// Without this step the IX downstream would carry zero sigs,
+		// `sol-outbound`'s `submit_signatures` loop would emit nothing,
+		// and the on-chain majority check would reject the poll.
+		match self.get_sorted_signatures(socket_msg.clone()).await {
+			Ok(evm_sigs) => {
+				sol_submit.sigs = crate::sol::convert::evm_to_sol_signatures(&evm_sigs);
+			},
+			Err(err) => {
+				log::warn!(
+					target: &self.client.get_chain_name(),
+					"-[{}] (sol-route) {} skipped — failed to fetch BFC sigs: {err}",
+					sub_display_format(SUB_LOG_TARGET),
+					metadata,
+				);
+				return;
+			},
+		}
 
 		// `asset_index` for the cccp-solana `poll(...)` IX seeds the
 		// `asset_config` PDA. We re-use `params.tokenIDX0` directly —

@@ -69,6 +69,14 @@ pub struct Event {
 	pub ins_code_method: RBCmethod,
 	/// Asset index from `Task_Params.tokenIDX0`.
 	pub asset_index: AssetIndex,
+	/// Asset index from `Task_Params.tokenIDX1` — preserved verbatim from
+	/// the on-chain event. cccp-solana hashes the full `User_Request`
+	/// (including `token_idx1`) into `RequestRecord.msg_hash` at request
+	/// time, so the relayer must keep `token_idx1` byte-identical on every
+	/// re-encoding through the round trip; otherwise the source-side
+	/// `inbound_commit_relay`'s `request_integrity` check fails with
+	/// `UserParamsIntegrity (6025)`.
+	pub token_idx1: AssetIndex,
 	/// Recipient EVM address from `Task_Params.to`.
 	pub to: EvmAddress,
 	/// Refund EVM address from `Task_Params.refund` (after the on-chain

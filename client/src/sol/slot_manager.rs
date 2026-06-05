@@ -535,6 +535,7 @@ impl SlotManager {
 				ins_code_chain: msg.ins_code.chain.0,
 				ins_code_method: msg.ins_code.method.0,
 				asset_index: msg.params.token_idx0.0,
+				token_idx1: msg.params.token_idx1.0,
 				to: msg.params.to,
 				refund: msg.params.refund,
 				amount: msg.params.amount,

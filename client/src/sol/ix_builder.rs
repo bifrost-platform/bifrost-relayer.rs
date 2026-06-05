@@ -105,7 +105,13 @@ pub fn build_poll_ix(
 		AccountMeta::new_readonly(prev_round, false), // prev_round
 		AccountMeta::new(request_record, false), // request_record (init_if_needed, mut)
 		AccountMeta::new_readonly(asset_config, false), // asset_config
-		AccountMeta::new_readonly(tokens.mint, false), // mint
+		// `mint` is declared `#[account(mut, address = asset_config.mint)]`
+		// on the on-chain `Poll<'info>` — the mintable outbound branch
+		// calls `spl_token::mint_to` which updates `Mint.supply`. Anchor's
+		// constraint check rejects the call (`AnchorError ConstraintMut
+		// 2000`) if the meta is `new_readonly`, even for non-mintable
+		// assets that never actually trip the mint CPI.
+		AccountMeta::new(tokens.mint, false), // mint (mut)
 		AccountMeta::new(tokens.vault_token_account, false), // vault_token_account (mut)
 		AccountMeta::new(tokens.recipient_token_account, false), // recipient_token_account (mut)
 		AccountMeta::new_readonly(SPL_TOKEN_PROGRAM_ID, false), // token_program
@@ -284,18 +290,20 @@ pub fn build_poll_buffered_ix(
 
 	// Same account order as Poll, plus poll_signatures at the end.
 	let accounts = vec![
-		AccountMeta::new(*relayer, true),                        // relayer
-		AccountMeta::new(socket_config, false),                  // socket_config
-		AccountMeta::new_readonly(vault_config, false),          // vault_config
-		AccountMeta::new_readonly(prev_round, false),            // prev_round
-		AccountMeta::new(request_record, false),                 // request_record
-		AccountMeta::new_readonly(asset_config, false),          // asset_config
-		AccountMeta::new_readonly(tokens.mint, false),           // mint
-		AccountMeta::new(tokens.vault_token_account, false),     // vault_token_account
+		AccountMeta::new(*relayer, true),               // relayer
+		AccountMeta::new(socket_config, false),         // socket_config
+		AccountMeta::new_readonly(vault_config, false), // vault_config
+		AccountMeta::new_readonly(prev_round, false),   // prev_round
+		AccountMeta::new(request_record, false),        // request_record
+		AccountMeta::new_readonly(asset_config, false), // asset_config
+		// `mint` is `#[account(mut, address = asset_config.mint)]` on the
+		// on-chain `PollBuffered` — same rationale as `build_poll_ix`.
+		AccountMeta::new(tokens.mint, false), // mint (mut)
+		AccountMeta::new(tokens.vault_token_account, false), // vault_token_account
 		AccountMeta::new(tokens.recipient_token_account, false), // recipient_token_account
-		AccountMeta::new_readonly(SPL_TOKEN_PROGRAM_ID, false),  // token_program
-		AccountMeta::new_readonly(SYSTEM_PROGRAM_ID, false),     // system_program
-		AccountMeta::new(poll_sigs, false),                      // poll_signatures (close)
+		AccountMeta::new_readonly(SPL_TOKEN_PROGRAM_ID, false), // token_program
+		AccountMeta::new_readonly(SYSTEM_PROGRAM_ID, false), // system_program
+		AccountMeta::new(poll_sigs, false),   // poll_signatures (close)
 	];
 
 	let mut data = Vec::with_capacity(8 + 512);
