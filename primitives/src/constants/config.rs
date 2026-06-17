@@ -5,7 +5,7 @@ pub const NATIVE_BLOCK_TIME: u64 = 3;
 pub const ETHEREUM_BLOCK_TIME: u64 = 12;
 
 /// The block range chunk size for getLogs requests.
-pub const BOOTSTRAP_BLOCK_CHUNK_SIZE: u64 = 2000;
+pub const BOOTSTRAP_BLOCK_CHUNK_SIZE: u64 = 1000;
 
 /// The block offset used to measure the average block time at bootstrap.
 pub const BOOTSTRAP_BLOCK_OFFSET: u64 = 100;
