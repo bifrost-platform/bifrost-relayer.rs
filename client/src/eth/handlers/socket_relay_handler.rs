@@ -259,38 +259,40 @@ where
 					// do nothing if not selected
 					return Ok(());
 				}
-				// Check if we should execute the hook (Executed status with valid requirements)
-				if let Some(variants) = self.should_execute_hook(&msg).await? {
-					match self.execute_hook(&msg, variants, is_inbound).await {
-						Ok(()) => (),
-						Err(error) => {
-							// we don't propagate the error to prevent hook execution errors fail the entire relay process
-							br_primitives::log_and_capture!(
-								error,
-								&self.client.get_chain_name(),
-								SUB_LOG_TARGET,
-								self.client.address().await,
-								"❗️ Failed to execute hook: {:?}",
-								error
-							);
-						},
+				if self.bootstrap_shared_data.cccp_relay_queue_enabled {
+					// Check if we should execute the hook (Executed status with valid requirements)
+					if let Some(variants) = self.should_execute_hook(&msg).await? {
+						match self.execute_hook(&msg, variants, is_inbound).await {
+							Ok(()) => (),
+							Err(error) => {
+								// we don't propagate the error to prevent hook execution errors fail the entire relay process
+								br_primitives::log_and_capture!(
+									error,
+									&self.client.get_chain_name(),
+									SUB_LOG_TARGET,
+									self.client.address().await,
+									"❗️ Failed to execute hook: {:?}",
+									error
+								);
+							},
+						}
 					}
-				}
-				// Check if we should rollback the hook (Rollbacked status with valid requirements)
-				if let Some(variants) = self.should_rollback_hook(&msg).await? {
-					match self.rollback_hook(&msg, variants).await {
-						Ok(()) => (),
-						Err(error) => {
-							// we don't propagate the error to prevent hook rollback errors fail the entire relay process
-							br_primitives::log_and_capture!(
-								error,
-								&self.client.get_chain_name(),
-								SUB_LOG_TARGET,
-								self.client.address().await,
-								"❗️ Failed to rollback hook: {:?}",
-								error
-							);
-						},
+					// Check if we should rollback the hook (Rollbacked status with valid requirements)
+					if let Some(variants) = self.should_rollback_hook(&msg).await? {
+						match self.rollback_hook(&msg, variants).await {
+							Ok(()) => (),
+							Err(error) => {
+								// we don't propagate the error to prevent hook rollback errors fail the entire relay process
+								br_primitives::log_and_capture!(
+									error,
+									&self.client.get_chain_name(),
+									SUB_LOG_TARGET,
+									self.client.address().await,
+									"❗️ Failed to rollback hook: {:?}",
+									error
+								);
+							},
+						}
 					}
 				}
 
