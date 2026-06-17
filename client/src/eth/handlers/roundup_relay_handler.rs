@@ -501,18 +501,33 @@ where
 				.collect()
 		};
 		if !chain_ids.is_empty() {
+			// When CCCPRelayQueue pallet is absent, SocketQueuePoller is not spawned, so nobody
+			// would ever advance past BootstrapSocketRelayQueue. Skip straight to
+			// BootstrapSocketRelay so SocketRelayHandler is unblocked immediately.
+			let next_state = if self.bootstrap_shared_data.cccp_relay_queue_enabled {
+				BootstrapState::BootstrapSocketRelayQueue
+			} else {
+				BootstrapState::BootstrapSocketRelay
+			};
 			let mut bootstrap_states = self.bootstrap_shared_data.bootstrap_states.write().await;
 			for chain_id in chain_ids {
-				*bootstrap_states.get_mut(&chain_id).unwrap() =
-					BootstrapState::BootstrapSocketRelayQueue;
+				*bootstrap_states.get_mut(&chain_id).unwrap() = next_state;
 			}
 		}
 
-		log::info!(
-			target: &self.client.get_chain_name(),
-			"-[{}] ⚙️  [Bootstrap mode] BootstrapRoundUpPhase2 → BootstrapSocketRelayQueue",
-			sub_display_format(SUB_LOG_TARGET),
-		);
+		if self.bootstrap_shared_data.cccp_relay_queue_enabled {
+			log::info!(
+				target: &self.client.get_chain_name(),
+				"-[{}] ⚙️  [Bootstrap mode] BootstrapRoundUpPhase2 → BootstrapSocketRelayQueue",
+				sub_display_format(SUB_LOG_TARGET),
+			);
+		} else {
+			log::info!(
+				target: &self.client.get_chain_name(),
+				"-[{}] ⚙️  [Bootstrap mode] BootstrapRoundUpPhase2 → BootstrapSocketRelay (CCCPRelayQueue absent)",
+				sub_display_format(SUB_LOG_TARGET),
+			);
+		}
 		Ok(())
 	}
 
