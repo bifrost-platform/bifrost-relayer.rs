@@ -36,7 +36,7 @@ use crate::{
 	eth::{
 		ClientMap, EthClient,
 		events::EventMessage,
-		handlers::SocketOnflightReceiver,
+		handlers::{SocketOnflightMessage, SocketOnflightReceiver},
 		send_transaction,
 		traits::{BootstrapHandler, Handler, HookExecutor, SocketRelayBuilder},
 	},
@@ -70,7 +70,8 @@ where
 	/// The receiver that consumes new events from the block channel.
 	event_stream: BroadcastStream<EventMessage>,
 	/// The receiver for TransferPolled messages from SocketOnflightHandler.
-	onflight_receiver: SocketOnflightReceiver,
+	/// None when CCCPRelayQueue pallet is absent (legacy mode).
+	onflight_receiver: Option<SocketOnflightReceiver>,
 	/// The entire clients instantiated in the system. <chain_id, Arc<EthClient>>
 	system_clients: Arc<ClientMap<F, P, N>>,
 	/// The bifrost client.
@@ -176,9 +177,15 @@ where
 						},
 					}
 				},
-				// Handle TransferPolled messages from SocketOnflightHandler
-				// These don't need confirmation - already validated through Substrate consensus
-				onflight_msg = self.onflight_receiver.recv() => {
+				// Handle TransferPolled messages from SocketOnflightHandler.
+				// Uses std::future::pending() when the receiver is None (legacy mode) so this
+				// arm never resolves and the select loop doesn't spin.
+				onflight_msg = async {
+					match self.onflight_receiver.as_mut() {
+						Some(rx) => rx.recv().await,
+						None => std::future::pending::<Option<SocketOnflightMessage>>().await,
+					}
+				} => {
 					if let Some(msg) = onflight_msg {
 						if let Err(e) = self.process_onflight_message(msg.socket_message).await {
 							br_primitives::log_and_capture!(
@@ -221,11 +228,15 @@ where
 				let msg = decoded_socket.msg.clone();
 				let status = SocketEventStatus::from(msg.status);
 
-				// Skip Requested status - now handled by TransferPolled from Substrate
-				if status == SocketEventStatus::Requested {
+				// In relay-queue mode (CCCP-v2) the Requested status is handled by
+				// SocketOnflightHandler via the CCCPRelayQueue pallet. In legacy mode the
+				// handler processes it directly, so we only skip when the pallet is present.
+				if status == SocketEventStatus::Requested
+					&& self.bootstrap_shared_data.cccp_relay_queue_enabled
+				{
 					log::debug!(
 						target: &self.client.get_chain_name(),
-						"-[{}] Skipping Requested status (handled by TransferPolled): seq={}",
+						"-[{}] Skipping Requested status (handled by SocketOnflightHandler): seq={}",
 						sub_display_format(SUB_LOG_TARGET),
 						msg.req_id.sequence,
 					);
@@ -426,7 +437,7 @@ where
 	pub fn new(
 		id: ChainId,
 		event_receiver: Receiver<EventMessage>,
-		onflight_receiver: SocketOnflightReceiver,
+		onflight_receiver: Option<SocketOnflightReceiver>,
 		system_clients: Arc<ClientMap<F, P, N>>,
 		bifrost_client: Arc<EthClient<F, P, N>>,
 		xt_request_sender: Arc<XtRequestSender>,
