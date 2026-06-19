@@ -812,12 +812,6 @@ where
 			},
 		);
 
-		// `outbound_sender` is currently dropped at the end of this loop
-		// iteration. Once the Bifrost socket relay handler grows a Solana
-		// dst-chain branch (= the next integration step), the sender will
-		// be threaded through `manager_deps` so that branch can dispatch
-		// `SolOutboundJob`s here.
-
 		let queue_poller_label = format!("solana-queue-poller-{}", cluster_name);
 		let queue_poller_label: &'static str = Box::leak(queue_poller_label.into_boxed_str());
 		task_manager.spawn_essential_handle().spawn(
