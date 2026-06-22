@@ -40,6 +40,7 @@ use crate::{
 		send_transaction,
 		traits::{BootstrapHandler, Handler, HookExecutor, SocketRelayBuilder},
 	},
+	sol::convert::{build_sol_poll_submit, decode_solana_wallet_from_variants},
 };
 
 const SUB_LOG_TARGET: &str = "socket-handler";
@@ -78,6 +79,14 @@ where
 	bifrost_client: Arc<EthClient<F, P, N>>,
 	/// The rollback sender for each chain.
 	rollback_senders: Arc<BTreeMap<ChainId, Arc<UnboundedSender<Socket_Message>>>>,
+	/// Outbound submission senders, keyed by Solana cluster `ChainId`. The
+	/// handler dispatches to one of these whenever it would otherwise fall
+	/// off the end of `system_clients.get(chain_id)` (= the dst chain is a
+	/// non-EVM Solana cluster). The vault token accounts the cccp-solana
+	/// `poll(...)` IX needs are looked up via the
+	/// `crate::sol::pda` helpers using the per-cluster `SolClient` the
+	/// upstream wiring keeps in `SolDeps`.
+	sol_outbound_senders: Arc<BTreeMap<ChainId, crate::sol::handlers::outbound::SolOutboundSender>>,
 	/// The handle to spawn tasks.
 	handle: SpawnTaskHandle,
 	/// The bootstrap shared data.
@@ -444,6 +453,9 @@ where
 		bifrost_client: Arc<EthClient<F, P, N>>,
 		xt_request_sender: Arc<XtRequestSender>,
 		rollback_senders: Arc<BTreeMap<ChainId, Arc<UnboundedSender<Socket_Message>>>>,
+		sol_outbound_senders: Arc<
+			BTreeMap<ChainId, crate::sol::handlers::outbound::SolOutboundSender>,
+		>,
 		handle: SpawnTaskHandle,
 		bootstrap_shared_data: Arc<BootstrapSharedData>,
 		debug_mode: bool,
@@ -459,6 +471,7 @@ where
 			bifrost_client,
 			xt_request_sender,
 			rollback_senders,
+			sol_outbound_senders,
 			handle,
 			bootstrap_shared_data,
 			debug_mode,
@@ -686,6 +699,50 @@ where
 			)
 		};
 
+		// Defensive pre-check (EVM targets only): query the destination
+		// chain's Socket `poll_filter[req_id][our_addr]` for the bit at
+		// position `msg.status`. If it's already set, this relayer has
+		// already submitted a poll for that exact (rid, status) — the
+		// contract would `revert "poll filtered"`. Skipping here avoids
+		// the gas-estimate retry storm we otherwise see on restart when
+		// `socket-queue-poller` re-fetches historical events whose
+		// pollFilter bits are permanently set on chain (e.g., for
+		// transfers that already completed successfully in a prior run).
+		if let Some(client) = self.system_clients.get(&relay_tx_chain_id) {
+			let our_addr = self.client.address().await;
+			match client
+				.protocol_contracts
+				.socket
+				.get_poll_filter(socket_msg.req_id.clone(), our_addr)
+				.call()
+				.await
+			{
+				Ok(mask) => {
+					let bit_set = (mask >> U256::from(socket_msg.status)) & U256::from(1u64)
+						== U256::from(1u64);
+					if bit_set {
+						log::debug!(
+							target: &self.client.get_chain_name(),
+							"-[{}] skipping {} — pollFilter bit {} already set for relayer {}",
+							sub_display_format(SUB_LOG_TARGET),
+							metadata,
+							socket_msg.status,
+							our_addr,
+						);
+						return Ok(());
+					}
+				},
+				Err(err) => {
+					log::debug!(
+						target: &self.client.get_chain_name(),
+						"-[{}] pollFilter precheck failed for {}: {err:?}, proceeding anyway",
+						sub_display_format(SUB_LOG_TARGET),
+						metadata,
+					);
+				},
+			}
+		}
+
 		// build and send transaction request
 		if let Some(built_transaction) = self
 			.build_transaction(socket_msg.clone(), is_inbound, relay_tx_chain_id)
@@ -698,6 +755,17 @@ where
 				socket_msg,
 			)
 			.await;
+		} else if self.sol_outbound_senders.contains_key(&relay_tx_chain_id) {
+			// `build_transaction` returns `None` whenever `relay_tx_chain_id`
+			// is not in `system_clients` (the EVM client map). For Solana
+			// destinations this is normal — there is no EVM `poll()` to
+			// build, the cccp-solana `poll(...)` IX is constructed downstream
+			// by `sol-outbound` from the raw `socket_msg`. Without this
+			// fallback the inbound+Accepted (and outbound+Rejected) handoff
+			// to Solana silently drops, the Solana side never emits
+			// `Committed`/`Rollbacked`, and `cccp-relay-queue`'s
+			// `OnFlightTransfers` entry never moves to `FinalizedTransfers`.
+			self.dispatch_to_solana(relay_tx_chain_id, metadata, socket_msg).await;
 		}
 
 		Ok(())
@@ -848,6 +916,132 @@ where
 				self.debug_mode,
 				self.handle.clone(),
 			);
+			return;
+		}
+
+		// No EVM client for this `chain_id` — fall back to the Solana
+		// outbound dispatcher. The `tx_request` argument is unused on the
+		// Solana path because the cccp-solana `poll(...)` IX is built from
+		// the raw `socket_msg` (we ABI-decode it again on the Solana
+		// program), but it stays in the signature for symmetry with the
+		// EVM path.
+		let _ = tx_request;
+		self.dispatch_to_solana(chain_id, metadata, socket_msg).await;
+	}
+
+	/// Forward an outbound `Socket_Message` to the per-cluster Solana
+	/// outbound queue. Mirrors the EVM `send_transaction` path but uses
+	/// the cccp-solana `poll(...)` instruction builder instead of an
+	/// alloy contract call.
+	async fn dispatch_to_solana(
+		&self,
+		chain_id: ChainId,
+		metadata: SocketRelayMetadata,
+		socket_msg: Socket_Message,
+	) {
+		let Some(sender) = self.sol_outbound_senders.get(&chain_id) else {
+			log::debug!(
+				target: &self.client.get_chain_name(),
+				"-[{}] no EVM or Solana sender for dst chain {chain_id}; skipping {}",
+				sub_display_format(SUB_LOG_TARGET),
+				metadata,
+			);
+			return;
+		};
+
+		// Convert the EVM `Socket_Message` into the borsh-mirror used by
+		// the Solana ix builder. The cross-impl tests in
+		// `crate::sol::codec::tests::cross_impl_request_id_pack` and
+		// friends pin the byte format so this conversion can never drift.
+		let mut sol_submit = match build_sol_poll_submit(&socket_msg) {
+			Ok(s) => s,
+			Err(err) => {
+				br_primitives::log_and_capture!(
+					error,
+					&self.client.get_chain_name(),
+					SUB_LOG_TARGET,
+					self.client.address().await,
+					"❗️ Failed to convert socket message into Solana PollSubmit: {err}"
+				);
+				return;
+			},
+		};
+
+		// Populate the relayer signatures for the cccp-solana `poll(...)`
+		// IX. `build_sol_poll_submit` deliberately leaves `sigs` empty so
+		// the caller can attach the right set — for the dispatch-to-Solana
+		// leg we want the BFC-side aggregated signatures already collected
+		// in `polled_sigs[req_id][status]`. cccp-solana verifies the same
+		// secp256k1 signatures over the same encoded message, so the
+		// EVM-stored set is reusable verbatim (re-wrapped from alloy
+		// fixed-byte to plain `[u8; 32]` by `evm_to_sol_signatures`).
+		// Without this step the IX downstream would carry zero sigs,
+		// `sol-outbound`'s `submit_signatures` loop would emit nothing,
+		// and the on-chain majority check would reject the poll.
+		match self.get_sorted_signatures(socket_msg.clone()).await {
+			Ok(evm_sigs) => {
+				sol_submit.sigs = crate::sol::convert::evm_to_sol_signatures(&evm_sigs);
+			},
+			Err(err) => {
+				log::warn!(
+					target: &self.client.get_chain_name(),
+					"-[{}] (sol-route) {} skipped — failed to fetch BFC sigs: {err}",
+					sub_display_format(SUB_LOG_TARGET),
+					metadata,
+				);
+				return;
+			},
+		}
+
+		// `asset_index` for the cccp-solana `poll(...)` IX seeds the
+		// `asset_config` PDA. We re-use `params.tokenIDX0` directly —
+		// EVM-side `Vault.assets_config` and on-chain `AssetConfig` PDA
+		// are keyed by the same 32-byte index.
+		let asset_index = crate::sol::codec::AssetIndex(socket_msg.params.tokenIDX0.into());
+
+		// Solana wallet of the recipient. The CCCP Task_Params.to slot is
+		// only 20 bytes (= EVM address) so we can't fit a 32-byte
+		// solana_sdk::Pubkey there. The convention used by the cccp-solana
+		// `request` IX is to embed the depositor's Solana wallet in
+		// `Task_Params.variants[0..32]` so the BFC side can echo it back
+		// in any subsequent outbound message destined for that user.
+		let recipient_wallet = match decode_solana_wallet_from_variants(&socket_msg.params.variants)
+		{
+			Ok(pk) => pk,
+			Err(err) => {
+				log::warn!(
+					target: &self.client.get_chain_name(),
+					"-[{}] (sol-route) {} skipped — variants did not carry a Solana wallet: {err}",
+					sub_display_format(SUB_LOG_TARGET),
+					metadata,
+				);
+				return;
+			},
+		};
+
+		let job = crate::sol::handlers::outbound::SolOutboundJob::PollFromBfc {
+			submit: sol_submit,
+			asset_index,
+			recipient_wallet,
+		};
+
+		match sender.send(job) {
+			Ok(()) => log::info!(
+				target: &self.client.get_chain_name(),
+				"-[{}] 📤 (sol-route) enqueued {} for cluster {chain_id}",
+				sub_display_format(SUB_LOG_TARGET),
+				metadata,
+			),
+			Err(err) => {
+				br_primitives::log_and_capture!(
+					error,
+					&self.client.get_chain_name(),
+					SUB_LOG_TARGET,
+					self.client.address().await,
+					"❗️ Failed to enqueue {} on Solana cluster {chain_id}: {err}",
+					metadata
+				);
+			},
 		}
 	}
 

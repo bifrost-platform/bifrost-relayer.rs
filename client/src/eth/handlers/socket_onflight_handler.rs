@@ -23,6 +23,7 @@ use br_primitives::{
 };
 
 use crate::eth::{ClientMap, EthClient, traits::BootstrapHandler};
+use crate::sol::client::SolClient;
 
 const SUB_LOG_TARGET: &str = "socket-onflight-handler";
 
@@ -87,6 +88,13 @@ where
 	bifrost_client: Arc<EthClient<F, P, N>>,
 	/// The entire clients instantiated in the system. <chain_id, Arc<EthClient>>
 	system_clients: Arc<ClientMap<F, P, N>>,
+	/// Solana clients keyed by CCCP `ChainId`. Used to detect whether an
+	/// `OnFlightTransfers` entry's `src_chain_id` is a Solana cluster so the
+	/// Standard branch can skip the EVM-style block-confirmation wait
+	/// (Solana txs are read at `finalized` commitment by sol-inbound, so by
+	/// the time the BFC OnFlight entry exists the source tx is already past
+	/// reorg risk).
+	sol_clients: Arc<BTreeMap<ChainId, SolClient>>,
 	/// The Substrate client for event subscription.
 	sub_client: OnlineClient<CustomConfig>,
 	/// The legacy RPC methods for querying best block.
@@ -110,6 +118,7 @@ where
 	pub async fn new(
 		bifrost_client: Arc<EthClient<F, P, N>>,
 		system_clients: Arc<ClientMap<F, P, N>>,
+		sol_clients: Arc<BTreeMap<ChainId, SolClient>>,
 		sub_client: OnlineClient<CustomConfig>,
 		sub_rpc_url: String,
 		onflight_senders: Arc<BTreeMap<ChainId, SocketOnflightSender>>,
@@ -121,6 +130,7 @@ where
 		Ok(Self {
 			bifrost_client,
 			system_clients,
+			sol_clients,
 			sub_client,
 			sub_rpc,
 			onflight_senders,
@@ -241,6 +251,52 @@ where
 					asset_index_hash,
 					sequence_id,
 					dst_chain_id,
+				);
+
+				self.send_to_socket_relay_handler(
+					src_chain_id,
+					dst_chain_id,
+					socket_message,
+					asset_index_hash,
+					sequence_id,
+				)
+				.await;
+
+				// Mark as processed
+				self.processed_transfers.write().await.insert(msg_hash);
+			} else if self.sol_clients.contains_key(&src_chain_id) {
+				// Standard transfer from a Solana cluster — bypass the
+				// EVM-style "wait N source-block confirmations" check
+				// (Solana txs land at `finalized` commitment, so by the
+				// time this `OnFlightTransfers` entry exists the source
+				// tx is already past supermajority finality).
+				//
+				// Crucially, this Solana-source path *must* still forward
+				// to `socket-relay-handler` to advance the BFC EVM Socket
+				// contract state — empirically the substrate path alone
+				// (`on_flight_poll` + `blaze::submit_outbound_requests`)
+				// does NOT register the request in the EVM Socket, so
+				// without this forward the `get_request` stays at status
+				// 0 and `finalize_poll` later trips its
+				// `MessageStatusMismatch` precondition (which requires
+				// the EVM Socket to show Accepted/Rejected).
+				//
+				// We mark `processed_transfers` immediately after
+				// dispatching so the next BFC block's
+				// `process_substrate_block` tick doesn't re-emit a vote
+				// — `socket-relay-handler`'s own retry queue handles its
+				// own internal retries on send failure, distinct from
+				// our entry-level dedupe here.
+				log::info!(
+					target: &self.bifrost_client.get_chain_name(),
+					"-[{}] 📋 OnFlight (Standard, Solana src) approved: msg_hash={}, asset={}, seq={}, src_chain={}, dst_chain={}, src_tx={}",
+					sub_display_format(SUB_LOG_TARGET),
+					msg_hash,
+					asset_index_hash,
+					sequence_id,
+					src_chain_id,
+					dst_chain_id,
+					src_tx_id,
 				);
 
 				self.send_to_socket_relay_handler(
@@ -648,6 +704,22 @@ where
 			let src_chain_id = transfer_info.src_chain_id as ChainId;
 			let dst_chain_id = Into::<u32>::into(socket_message.ins_code.ChainIndex) as ChainId;
 			let src_tx_id = B256::from_slice(&transfer_info.src_tx_id.0);
+
+			// Solana-sourced Standard transfers don't need recovery into the
+			// pending block-confirmation queue — they're handled in
+			// `process_substrate_block`'s Solana fast-path on the next BFC
+			// block (relayed immediately, no source-block wait). Skip them
+			// here so we don't trip the same EVM-only `get_tx_block_number`
+			// failure that originally stalled them.
+			if self.sol_clients.contains_key(&src_chain_id) {
+				log::info!(
+					target: &self.bifrost_client.get_chain_name(),
+					"-[{}] Skipping Solana-sourced Standard transfer during recovery: msg_hash={} (will be relayed by next process_substrate_block tick)",
+					sub_display_format(SUB_LOG_TARGET),
+					msg_hash,
+				);
+				continue;
+			}
 
 			// Get the actual block number of the transaction from the source chain
 			let src_block_number = match self.get_tx_block_number(src_chain_id, src_tx_id).await {

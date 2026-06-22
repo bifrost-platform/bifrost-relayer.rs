@@ -98,6 +98,25 @@ handler_configs:
 
 ###  The items below are optional. ###
 
+# Solana cluster wiring. Each entry spawns a SlotManager + inbound +
+# outbound handler trio. Leave this list empty (or omit it entirely) to
+# disable the Solana track. Each cluster's `id` must also be registered
+# on Bifrost via `pallet-cccp-relay-queue` so the unsigned-extrinsic
+# submission path accepts it.
+sol_providers:
+  - name: "solana-devnet"
+    id: 1397705728
+    provider: "https://api.devnet.solana.com"
+    ws_provider: "<Optional>"
+    call_interval: 2000
+    block_confirmations: 10
+    commitment: "finalized"
+    program_id: "<YOUR_CCCP_SOLANA_PROGRAM_ID>"
+    is_relay_target: true
+    get_signatures_batch_size: 100
+    fee_payer_keypair_path: "<PATH_TO_FEE_PAYER_KEYPAIR_JSON>"
+    assets: []
+
 bootstrap_config:
   is_enabled: true
   round_offset: 3
