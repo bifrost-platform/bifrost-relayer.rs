@@ -100,3 +100,7 @@ substrate-build-script-utils = { git = "https://github.com/bifrost-platform/polk
 
 [profile.production]
 inherits = "release"
+
+[patch.crates-io]
+# TODO: remove when polkadot-sdk is updated to stable2606
+core2 = { git = "https://github.com/technocreatives/core2", branch = "main" }

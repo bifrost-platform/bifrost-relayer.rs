@@ -27,9 +27,9 @@ pub use runtime_types::{
 		},
 	},
 	pallet_btc_registration_pool::{
-		VaultKeyPreSubmission, VaultKeySubmission,
+		SetRefundsApproval, VaultKeyPreSubmission, VaultKeySubmission,
 		pallet::pallet::Call::{
-			submit_system_vault_key, submit_vault_key, vault_key_presubmission,
+			approve_set_refunds, submit_system_vault_key, submit_vault_key, vault_key_presubmission,
 		},
 	},
 	pallet_btc_socket_queue::{

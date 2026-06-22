@@ -300,6 +300,11 @@ where
 
 		// if txpool namespace is not enabled on the chain, do nothing
 		if self.txpool_status().await.is_err() {
+			log::info!(
+				target: &self.get_chain_name(),
+				"-[{}] Txpool namespace is disabled, skipping flush",
+				sub_display_format(SUB_LOG_TARGET)
+			);
 			return Ok(());
 		}
 
@@ -307,7 +312,18 @@ where
 		sleep(Duration::from_millis(self.metadata.call_interval * 2)).await;
 
 		let address = self.address().await;
-		let content = self.txpool_content().await?.remove_from(&address);
+		let content = match self.txpool_content_from(address).await {
+			Ok(content) => content,
+			Err(err) => {
+				log::warn!(
+					target: &self.get_chain_name(),
+					"-[{}] Failed to fetch txpool content, retrying with full content: {}",
+					sub_display_format(SUB_LOG_TARGET),
+					err
+				);
+				self.txpool_content().await?.remove_from(&address)
+			},
+		};
 		let mut pending = content.pending;
 		pending.extend(content.queued);
 

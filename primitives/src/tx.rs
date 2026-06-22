@@ -407,6 +407,24 @@ impl Display for SubmitFeeRateMetadata {
 }
 
 #[derive(Clone, Debug)]
+pub struct ApproveSetRefundsMetadata {
+	pub approved: usize,
+	pub denied: usize,
+}
+
+impl ApproveSetRefundsMetadata {
+	pub fn new(approved: usize, denied: usize) -> Self {
+		Self { approved, denied }
+	}
+}
+
+impl Display for ApproveSetRefundsMetadata {
+	fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+		write!(f, "ApproveSetRefunds(approved: {}, denied: {})", self.approved, self.denied)
+	}
+}
+
+#[derive(Clone, Debug)]
 pub struct RemoveOutboundMessagesMetadata {
 	pub len: usize,
 }
@@ -547,6 +565,7 @@ pub enum XtRequestMetadata {
 	SubmitOutboundRequests(SocketRelayMetadata),
 	SubmitFeeRate(SubmitFeeRateMetadata),
 	RemoveOutboundMessages(RemoveOutboundMessagesMetadata),
+	ApproveSetRefunds(ApproveSetRefundsMetadata),
 	OnFlightPoll(OnFlightPollMetadata),
 	FinalizePoll(FinalizePollMetadata),
 }
@@ -568,6 +587,7 @@ impl Display for XtRequestMetadata {
 				XtRequestMetadata::SubmitOutboundRequests(metadata) => metadata.to_string(),
 				XtRequestMetadata::SubmitFeeRate(metadata) => metadata.to_string(),
 				XtRequestMetadata::RemoveOutboundMessages(metadata) => metadata.to_string(),
+				XtRequestMetadata::ApproveSetRefunds(metadata) => metadata.to_string(),
 				XtRequestMetadata::OnFlightPoll(metadata) => metadata.to_string(),
 				XtRequestMetadata::FinalizePoll(metadata) => metadata.to_string(),
 			}
