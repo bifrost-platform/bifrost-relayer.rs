@@ -721,10 +721,11 @@ where
 	);
 
 	// ----------------------------------------------------------------
-	// Spawn per-cluster Solana workers. The merged outbound handler
-	// owns both the BFC → Solana submission loop and the Solana → BFC
-	// commit mirror, so each cluster only needs slot-manager / inbound /
-	// outbound — three spawns per `sol_providers` entry.
+	// Spawn per-cluster Solana workers. The merged outbound handler owns
+	// both the BFC → Solana submission loop and the Solana → BFC commit
+	// mirror in one task, so each cluster spawns four workers:
+	// slot-manager / inbound / outbound / queue-poller per `sol_providers`
+	// entry.
 	// ----------------------------------------------------------------
 	for SolDeps {
 		client,

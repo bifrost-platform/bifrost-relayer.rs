@@ -79,8 +79,12 @@ pub struct Event {
 	pub token_idx1: AssetIndex,
 	/// Recipient EVM address from `Task_Params.to`.
 	pub to: EvmAddress,
-	/// Refund EVM address from `Task_Params.refund` (after the on-chain
-	/// `request` IX has overwritten it with the registered user address).
+	/// Refund EVM address from `Task_Params.refund`. Flows through verbatim
+	/// — the on-chain `request` IX does NOT overwrite it (the old
+	/// `register_user` design is gone). Solana-side refund safety instead
+	/// binds to `RequestRecord.refund_owner`, a snapshot of the actual
+	/// transaction signer's pubkey taken at request time, independent of
+	/// whatever this field carries.
 	pub refund: EvmAddress,
 	/// Amount as 32-byte big-endian `uint256`.
 	pub amount: [u8; 32],
