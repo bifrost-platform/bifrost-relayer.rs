@@ -29,10 +29,9 @@
 //     chosen tx id would still collide with the real one (= pre-image
 //     resistance of keccak) so there is no vote-splitting vector.
 //   * The EVM `Socket_Message` shape is rebuilt from the decoded
-//     `sol::Event` — same mapping the inbound handler uses to submit
-//     `submit_outbound_requests`. The two handlers are intentionally
-//     kept in lockstep; any drift between them would make the BFC
-//     pallet's `msg_hash` lookups miss.
+//     `sol::Event` — the canonical mapping for lifting a Solana event
+//     into a BFC message. Any drift from the on-chain `SocketEvent`
+//     layout would make the BFC pallet's `msg_hash` lookups miss.
 
 use std::sync::Arc;
 
@@ -111,9 +110,8 @@ where
 	}
 
 	/// Rebuild the canonical EVM `Socket_Message` shape from a decoded
-	/// Solana event. Kept byte-identical to
-	/// `SolInboundHandler::build_socket_message` — the BFC pallet's
-	/// `keccak256` lookup will miss if the two drift.
+	/// Solana event. The BFC pallet's `keccak256` lookup will miss if this
+	/// mapping drifts from the on-chain `SocketEvent` layout.
 	fn build_socket_message(&self, ev: &Event) -> Socket_Message {
 		Socket_Message {
 			req_id: RequestID {
@@ -251,8 +249,8 @@ where
 		let status = SocketEventStatus::from(ev.status);
 
 		// We only care about three statuses: Requested, Committed,
-		// Rollbacked. Anything else (Accepted etc.) is handled by the
-		// inbound/outbound handlers and should be ignored here.
+		// Rollbacked. Anything else (Accepted/Executed/Reverted) is handled
+		// by the outbound path and ignored here.
 		match status {
 			SocketEventStatus::Requested => self.process_requested(ev).await,
 			SocketEventStatus::Committed | SocketEventStatus::Rollbacked => {

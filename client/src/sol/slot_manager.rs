@@ -11,8 +11,8 @@
 //      and runs `crate::sol::decoder::decode_anchor_events` over its
 //      `log_messages`.
 //   4. Wraps the decoded events into `br_primitives::sol::EventMessage`
-//      and broadcasts them on the slot channel for inbound/outbound
-//      handlers to consume.
+//      and broadcasts them on the slot channel for the handler workers
+//      to consume.
 //
 // `confirmation_depth` is informational at the moment — Solana's RPC
 // already filters by `commitment` (= `finalized` by default for cccp), so
@@ -389,8 +389,8 @@ impl SlotManager {
 		);
 
 		// Collect all pages into a single chronologically-sorted list
-		// before processing so inbound/outbound subscribers receive
-		// events in the same order live polling would produce.
+		// before processing so subscribers receive events in the same
+		// order live polling would produce.
 		let mut collected: Vec<
 			solana_client::rpc_response::RpcConfirmedTransactionStatusWithSignature,
 		> = Vec::new();

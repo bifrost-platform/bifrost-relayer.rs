@@ -5,14 +5,15 @@
 // relayer config; if no providers are configured, no Solana wiring is
 // spawned at all.
 //
-// `SolDeps` is generic in `<F, P, N>` so the inbound + outbound
-// handlers can hold the same Bifrost `EthClient` shape every other
-// relayer subsystem uses. `SolOutboundHandler` owns both the BFC →
-// Solana submission path and the Solana → BFC commit mirror in one
-// worker.
+// `SolDeps` is generic in `<F, P, N>` so the outbound handler can hold the
+// same Bifrost `EthClient` shape every other relayer subsystem uses;
+// `SolOutboundHandler` owns both the BFC → Solana submission path and the
+// Solana → BFC commit mirror.
 
 use std::path::PathBuf;
 use std::sync::Arc;
+
+use sc_service::SpawnTaskHandle;
 
 use alloy::{
 	network::Network as AlloyNetwork,
@@ -24,7 +25,6 @@ use br_client::{
 	sol::{
 		client::SolClient,
 		handlers::{
-			inbound::SolInboundHandler,
 			outbound::{SolOutboundHandler, SolOutboundSender},
 			queue_poller::SolSocketQueuePoller,
 		},
@@ -54,7 +54,6 @@ where
 	/// `0` / `None` disables catch-up.
 	pub bootstrap_offset_slots: u64,
 	pub slot_manager: SlotManager,
-	pub inbound: SolInboundHandler<F, P, N>,
 	/// Merged outbound worker: BFC → Solana IX submission + Solana → BFC
 	/// commit mirror in a single `tokio::select!` loop.
 	pub outbound: SolOutboundHandler<F, P, N>,
@@ -80,6 +79,8 @@ where
 		xt_request_sender: Arc<XtRequestSender>,
 		sub_client: OnlineClient<CustomConfig>,
 		sub_rpc: LegacyRpcMethods<subxt::config::RpcConfigFor<CustomConfig>>,
+		handle: SpawnTaskHandle,
+		debug_mode: bool,
 	) -> eyre::Result<Self> {
 		let client = SolClient::new(provider);
 
@@ -92,13 +93,6 @@ where
 			confirmation_depth,
 			provider.ws_provider.clone(),
 		);
-		let inbound = SolInboundHandler::new(
-			client.clone(),
-			bfc_client.clone(),
-			xt_request_sender.clone(),
-			slot_manager.subscribe(),
-		);
-
 		// Build the per-cluster asset registry from the static config.
 		// The vault PDA is derived from the cccp-solana program ID and is
 		// shared across every asset entry — we pre-derive each vault ATA
@@ -107,9 +101,8 @@ where
 		let registry = AssetRegistry::from_entries(&provider.assets, &vault_pda)?;
 
 		let fee_payer_path = PathBuf::from(&provider.fee_payer_keypair_path);
-		// Merged outbound worker: gets its own broadcast subscriber so
-		// lag on the commit-mirror branch doesn't starve the inbound
-		// handler (and vice versa).
+		// Own broadcast subscriber so the commit-mirror branch and the
+		// queue poller never starve each other.
 		let (outbound, outbound_sender) = SolOutboundHandler::new(
 			client.clone(),
 			fee_payer_path,
@@ -119,13 +112,14 @@ where
 			provider.confirmation_timeout_secs,
 			provider.max_send_retries,
 			bfc_client.clone(),
-			xt_request_sender.clone(),
+			handle,
+			debug_mode,
 			slot_manager.subscribe(),
 		)?;
 
 		// Queue poller gets its own broadcast subscriber — lag on BFC
 		// storage queries or xt submission must never drop events the
-		// inbound/outbound handlers also need to see.
+		// outbound handler also needs to see.
 		let queue_poller = SolSocketQueuePoller::new(
 			client.clone(),
 			bfc_client,
@@ -141,7 +135,6 @@ where
 			client,
 			bootstrap_offset_slots,
 			slot_manager,
-			inbound,
 			outbound,
 			outbound_sender,
 			queue_poller,
@@ -166,6 +159,8 @@ pub async fn build_sol_deps<F, P, N: AlloyNetwork>(
 	xt_request_sender: Arc<XtRequestSender>,
 	sub_client: OnlineClient<CustomConfig>,
 	sub_rpc_url: &str,
+	handle: SpawnTaskHandle,
+	debug_mode: bool,
 ) -> eyre::Result<Vec<SolDeps<F, P, N>>>
 where
 	F: TxFiller<N> + WalletProvider<N> + 'static,
@@ -188,6 +183,8 @@ where
 			xt_request_sender.clone(),
 			sub_client.clone(),
 			sub_rpc.clone(),
+			handle.clone(),
+			debug_mode,
 		)?;
 		let slot = deps.client.health_check().await?;
 		log::info!(

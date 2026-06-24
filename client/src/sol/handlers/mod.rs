@@ -1,14 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 //
-// Solana handler workers. Mirror of `client/src/btc/handlers/`:
-//
-//   * `inbound`  — user-originated `request(...)` events on this cluster,
-//     forwarded as unsigned Bifrost extrinsics.
-//   * `outbound` — unified worker that both submits BFC → Solana IXs
-//     (`poll(...)` / `round_control_relay(...)`) and mirrors Solana →
-//     BFC outbound-commit events (`Accepted` / `Rejected`) back to the
-//     Bifrost substrate pipeline.
+// Solana handler workers:
+//   * `outbound`     — BFC → Solana IX submission + Solana → BFC commit
+//                      mirror (relays `Executed`/`Reverted` to BFC's Socket).
+//   * `queue_poller` — Solana → BFC ingestion: `on_flight_poll` /
+//                      `finalize_poll` into `cccp-relay-queue`.
 
-pub mod inbound;
 pub mod outbound;
 pub mod queue_poller;
