@@ -218,6 +218,8 @@ pub async fn relay(config: Configuration) -> Result<TaskManager, ServiceError> {
 		substrate_deps.xt_request_sender.clone(),
 		substrate_deps.sub_client.clone(),
 		&substrate_deps.sub_rpc_url,
+		task_manager.spawn_handle(),
+		debug_mode,
 	)
 	.await
 	.map_err(|e| ServiceError::Other(format!("failed to build Solana deps: {e}")))?;
@@ -720,18 +722,13 @@ where
 		},
 	);
 
-	// ----------------------------------------------------------------
-	// Spawn per-cluster Solana workers. The merged outbound handler owns
-	// both the BFC → Solana submission loop and the Solana → BFC commit
-	// mirror in one task, so each cluster spawns four workers:
-	// slot-manager / inbound / outbound / queue-poller per `sol_providers`
-	// entry.
-	// ----------------------------------------------------------------
+	// Three workers per `sol_providers` entry: slot-manager / outbound /
+	// queue-poller. (Inbound ingestion is the queue poller's job via
+	// `cccp-relay-queue`; there is no separate inbound handler.)
 	for SolDeps {
 		client,
 		bootstrap_offset_slots,
 		mut slot_manager,
-		mut inbound,
 		mut outbound,
 		outbound_sender: _,
 		mut queue_poller,
@@ -769,24 +766,6 @@ where
 					let report = slot_manager.run().await;
 					let log_msg = format!(
 						"solana slot manager stopped: {report:?}\nRestarting in 12 seconds...",
-					);
-					log::error!("{log_msg}");
-					sentry::capture_message(&log_msg, sentry::Level::Error);
-					tokio::time::sleep(Duration::from_secs(12)).await;
-				}
-			},
-		);
-
-		let inbound_label = format!("solana-inbound-handler-{}", cluster_name);
-		let inbound_label: &'static str = Box::leak(inbound_label.into_boxed_str());
-		task_manager.spawn_essential_handle().spawn(
-			inbound_label,
-			Some("solana-inbound"),
-			async move {
-				loop {
-					let report = inbound.run().await;
-					let log_msg = format!(
-						"solana inbound handler stopped: {report:?}\nRestarting in 12 seconds...",
 					);
 					log::error!("{log_msg}");
 					sentry::capture_message(&log_msg, sentry::Level::Error);

@@ -1,38 +1,18 @@
 // SPDX-License-Identifier: Apache-2.0
 //
-// Unified Solana outbound handler. This worker owns both halves of the
-// BFC ↔ Solana cross-chain flow on the relayer side:
+// Unified Solana outbound handler. One per cluster; owns both halves of
+// the BFC ↔ Solana flow:
 //
-//   1. **BFC → Solana job submission.** The Bifrost socket relay handler
-//      routes `dst_chain_id == sol_chain_id` messages onto the `SolOutboundJob`
-//      channel; this worker drains that channel, builds the matching
-//      cccp-solana `poll(...)` / `round_control_relay(...)` instruction
-//      via `crate::sol::ix_builder`, and submits it with the relayer's
-//      Solana fee-payer keypair (with retry + priority-fee escalation).
-//   2. **Solana → BFC commit mirroring.** Once a `poll(...)` lands on
-//      the cluster, the cccp-solana program emits a
-//      `SocketEvent { req_id.chain == BFC_MAIN, status: Accepted|Rejected, ... }`.
-//      The slot manager broadcasts it as `EventType::Outbound`; this
-//      worker subscribes, reconstructs the EVM `Socket_Message` shape,
-//      signs it with the relayer's secp256k1 key, and pushes the
-//      resulting unsigned extrinsic onto `XtRequestSender` so BFC's
-//      blaze pallet can close the state machine.
+//   1. BFC → Solana: drains the `SolOutboundJob` queue and submits the
+//      cccp-solana `poll(...)` / `round_control_relay(...)` IX with the
+//      fee-payer keypair (retry + priority-fee escalation). Prepends an
+//      idempotent create-ATA IX so first-time recipients don't bounce.
+//   2. Solana → BFC commit mirror: the program emits `Executed`/`Reverted`
+//      on a `poll(...)` result; this worker relays it to BFC's EVM Socket
+//      contract (status as-is, empty sigs).
 //
-// Having a single worker own both halves simplifies wiring and lets the
-// commit-mirror branch reuse the same broadcast subscription + BFC
-// client the outbound-submission path already needs on the same cluster.
-//
-// Production wiring:
-//
-//   * The handler owns an `AssetRegistry` (built from `SolProvider.assets`)
-//     so it can map `(asset_index, recipient_wallet)` to the full
-//     `(mint, vault TA, recipient TA)` triple without an extra round-trip.
-//   * Every outbound transaction prepends a `create_associated_token_account`
-//     idempotent IX so first-time recipients don't bounce.
-//   * `is_relay_target=false` (= watch-only cluster) disables the
-//     BFC → Solana submission path **only**; the Solana → BFC commit
-//     mirror stays active so observed `Accepted`/`Rejected` events still
-//     round-trip to BFC even on non-relay-target clusters.
+// `is_relay_target = false` (watch-only) disables (1) only; the commit
+// mirror in (2) stays active.
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -43,30 +23,29 @@ use alloy::{
 	primitives::{Address, Bytes, FixedBytes, U256},
 	providers::{Provider, WalletProvider, fillers::TxFiller},
 };
-use array_bytes::Hexify;
+use sc_service::SpawnTaskHandle;
 use solana_client::nonblocking::rpc_client::RpcClient;
 use solana_sdk::instruction::Instruction;
 use solana_sdk::message::Message;
 use solana_sdk::pubkey::Pubkey;
 use solana_sdk::signature::{Keypair, Signature, Signer, read_keypair_file};
 use solana_sdk::transaction::Transaction;
-use subxt::ext::subxt_core::utils::AccountId20;
 use tokio::sync::broadcast::Receiver;
 use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
 use tokio_stream::{StreamExt, wrappers::BroadcastStream};
 
 use br_primitives::{
 	contracts::socket::Socket_Struct::{
-		Instruction as EvmInstruction, RequestID, Socket_Message, Task_Params,
+		Instruction as EvmInstruction, RequestID, Signatures as EvmSignatures, Socket_Message,
+		Task_Params,
 	},
 	eth::SocketEventStatus,
 	sol::{Event, EventMessage, EventType},
-	substrate::{SocketMessagesSubmission, bifrost_runtime},
-	tx::{SocketRelayMetadata, XtRequest, XtRequestMessage, XtRequestMetadata, XtRequestSender},
+	tx::SocketRelayMetadata,
 	utils::sub_display_format,
 };
 
-use crate::eth::EthClient;
+use crate::eth::{EthClient, send_transaction, traits::SocketRelayBuilder};
 use crate::sol::ata::{build_create_ata_idempotent_ix, derive_ata};
 use crate::sol::client::SolClient;
 use crate::sol::codec::{AssetIndex, PollSubmit, RoundUpSubmit, Signatures};
@@ -192,13 +171,8 @@ struct PendingJob {
 	next_retry_at: tokio::time::Instant,
 }
 
-/// Unified Solana outbound worker. One per Solana cluster.
-///
-/// Generic parameters mirror `SolInboundHandler` — the type matches the
-/// Bifrost EVM client the commit-mirror branch signs with. The BFC →
-/// Solana submission path doesn't use the generics, but keeping them on
-/// the struct lets the same worker own both halves without an extra
-/// wrapper.
+/// Unified Solana outbound worker. One per Solana cluster. The generics
+/// track the Bifrost `EthClient` the commit mirror relays through.
 pub struct SolOutboundHandler<F, P, N: Network>
 where
 	F: TxFiller<N> + WalletProvider<N>,
@@ -224,24 +198,29 @@ where
 	/// on its own 10-minute tick.
 	pending: Vec<PendingJob>,
 	// ---- commit-mirror state ----
-	/// Bifrost client — signs the unsigned extrinsic pushed onto BFC
-	/// when this cluster emits an outbound `SocketEvent` (Accepted /
-	/// Rejected). Mirror of `SolInboundHandler.bfc_client`.
+	/// Bifrost client — relays the commit-mirror `poll(...)` to BFC's Socket.
 	bfc_client: Arc<EthClient<F, P, N>>,
-	/// BFC unsigned-tx queue. The commit-mirror branch builds
-	/// `submit_outbound_requests(...)` calls and sends them here.
-	xt_request_sender: Arc<XtRequestSender>,
-	/// Slot-manager broadcast subscription. `EventType::Outbound`
-	/// messages carry BFC-origin `SocketEvent`s that must be mirrored
-	/// back to BFC so the state machine closes without a rollback
-	/// timeout.
+	/// Spawn handle + debug flag for the commit-mirror `send_transaction`.
+	handle: SpawnTaskHandle,
+	debug_mode: bool,
+	/// Slot-manager broadcast subscription (`EventType::Outbound` events).
 	event_stream: BroadcastStream<EventMessage>,
+}
+
+impl<F, P, N: Network> SocketRelayBuilder<F, P, N> for SolOutboundHandler<F, P, N>
+where
+	F: TxFiller<N> + WalletProvider<N>,
+	P: Provider<N>,
+{
+	fn get_client(&self) -> Arc<EthClient<F, P, N>> {
+		self.bfc_client.clone()
+	}
 }
 
 impl<F, P, N: Network> SolOutboundHandler<F, P, N>
 where
-	F: TxFiller<N> + WalletProvider<N>,
-	P: Provider<N>,
+	F: TxFiller<N> + WalletProvider<N> + 'static,
+	P: Provider<N> + 'static,
 {
 	/// Create a new handler. Returns the `(handler, sender)` pair so the
 	/// service-deps wiring can hand the sender to upstream workers.
@@ -255,7 +234,8 @@ where
 		confirmation_timeout_secs: Option<u64>,
 		max_send_retries: Option<u32>,
 		bfc_client: Arc<EthClient<F, P, N>>,
-		xt_request_sender: Arc<XtRequestSender>,
+		handle: SpawnTaskHandle,
+		debug_mode: bool,
 		event_receiver: Receiver<EventMessage>,
 	) -> eyre::Result<(Self, SolOutboundSender)> {
 		let fee_payer = read_keypair_file(&fee_payer_keypair_path).map_err(|err| {
@@ -283,7 +263,8 @@ where
 				max_send_retries: max_send_retries.unwrap_or(DEFAULT_MAX_SEND_RETRIES),
 				pending: Vec::new(),
 				bfc_client,
-				xt_request_sender,
+				handle,
+				debug_mode,
 				event_stream: BroadcastStream::new(event_receiver),
 			},
 			sender,
@@ -589,13 +570,12 @@ where
 		}
 	}
 
-	/// Reconstruct the EVM `Socket_Message` shape from the decoded Solana
-	/// event and, if the status closes the outbound half of the state
-	/// machine (`Accepted` / `Rejected`), submit it back to BFC as an
-	/// unsigned `submit_outbound_requests` extrinsic.
+	/// Relay a terminal outbound result (`Executed` / `Reverted`) to BFC's
+	/// EVM Socket — status as-is, empty sigs (the EVM `SocketRelayHandler`
+	/// convention for a destination execution result).
 	async fn handle_commit_event(&self, ev: &Event) {
 		let status = SocketEventStatus::from(ev.status);
-		if !matches!(status, SocketEventStatus::Accepted | SocketEventStatus::Rejected) {
+		if !matches!(status, SocketEventStatus::Executed | SocketEventStatus::Reverted) {
 			log::debug!(
 				target: &self.client.get_chain_name(),
 				"-[{}] skipping non-terminal outbound event status={:?} seq={} sig={}",
@@ -607,8 +587,8 @@ where
 			return;
 		}
 
-		// Avoid the RPC round-trip + signing work if we can't participate
-		// this round.
+		// Avoid the RPC round-trip + tx build if we can't participate this
+		// round.
 		match self.bfc_client.is_selected_relayer().await {
 			Ok(true) => {},
 			Ok(false) => {
@@ -631,42 +611,36 @@ where
 			},
 		}
 
-		let (call, metadata) = match self.build_commit_unsigned_tx(ev).await {
-			Ok(x) => x,
-			Err(err) => {
-				br_primitives::log_and_capture!(
-					error,
-					&self.client.get_chain_name(),
-					SUB_LOG_TARGET,
-					self.bfc_client.address().await,
-					"❗️ Failed to build outbound-commit extrinsic for sig={} seq={}: {err}",
-					ev.signature,
-					ev.sequence
-				);
-				return;
-			},
-		};
+		let socket_msg = self.build_commit_socket_message(ev);
+		let tx_request = self.build_poll_request(socket_msg, EvmSignatures::default());
 
-		match self.xt_request_sender.send(XtRequestMessage::new(
-			call,
-			XtRequestMetadata::SubmitOutboundRequests(metadata.clone()),
-		)) {
-			Ok(_) => log::info!(
-				target: &self.client.get_chain_name(),
-				"-[{}] 🔖 Request unsigned tx (sol outbound-commit): {} sig={}",
-				sub_display_format(SUB_LOG_TARGET),
-				metadata,
-				ev.signature,
-			),
-			Err(error) => br_primitives::log_and_capture!(
-				error,
-				&self.client.get_chain_name(),
-				SUB_LOG_TARGET,
-				self.bfc_client.address().await,
-				"❗️ Failed to send outbound-commit unsigned tx for {}: {error}",
-				metadata
-			),
-		}
+		// src = BFC, dst = this Solana cluster; is_inbound = false.
+		let metadata = SocketRelayMetadata::new(
+			false,
+			status,
+			ev.sequence,
+			self.bfc_client.chain_id(),
+			self.client.chain_id,
+			Address::from(ev.to),
+			false,
+		);
+
+		log::info!(
+			target: &self.client.get_chain_name(),
+			"-[{}] 🔖 relaying sol outbound-commit to BFC Socket: {} sig={}",
+			sub_display_format(SUB_LOG_TARGET),
+			metadata,
+			ev.signature,
+		);
+
+		send_transaction(
+			self.bfc_client.clone(),
+			tx_request,
+			format!("{} ({})", SUB_LOG_TARGET, self.client.get_chain_name()),
+			Arc::new(metadata),
+			self.debug_mode,
+			self.handle.clone(),
+		);
 	}
 
 	fn build_commit_socket_message(&self, ev: &Event) -> Socket_Message {
@@ -690,44 +664,6 @@ where
 				variants: Bytes::from(ev.variants.clone()),
 			},
 		}
-	}
-
-	async fn build_commit_unsigned_tx(
-		&self,
-		ev: &Event,
-	) -> eyre::Result<(XtRequest, SocketRelayMetadata)> {
-		let socket_msg = self.build_commit_socket_message(ev);
-		let encoded_msg: Vec<u8> = socket_msg.clone().into();
-
-		let signature = self
-			.bfc_client
-			.sign_message(encoded_msg.hexify_prefixed().as_bytes())
-			.await
-			.map_err(|e| eyre::eyre!("sign_message: {e}"))?
-			.into();
-
-		let call: XtRequest = Arc::new(bifrost_runtime::tx().blaze().submit_outbound_requests(
-			SocketMessagesSubmission {
-				authority_id: AccountId20(self.bfc_client.address().await.0.0),
-				messages: vec![encoded_msg],
-			},
-			signature,
-		));
-
-		// For outbound-commit: src = BFC (originator), dst = this Solana
-		// cluster (where the poll just landed). `is_inbound=false` so the
-		// metadata prints as "Outbound" in logs.
-		let metadata = SocketRelayMetadata::new(
-			false,
-			SocketEventStatus::from(ev.status),
-			ev.sequence,
-			self.bfc_client.chain_id(),
-			self.client.chain_id,
-			Address::from(ev.to),
-			false,
-		);
-
-		Ok((call, metadata))
 	}
 
 	async fn handle(&self, job: SolOutboundJob) -> eyre::Result<()> {
