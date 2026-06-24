@@ -9,7 +9,7 @@ use br_primitives::{
 };
 
 use std::{error::Error, sync::Arc, time::Duration};
-use subxt::{Config, OnlineClient, blocks::ExtrinsicEvents};
+use subxt::{Config, OnlineClient, extrinsics::ExtrinsicEvents};
 use tokio::time::sleep;
 
 use crate::eth::EthClient;

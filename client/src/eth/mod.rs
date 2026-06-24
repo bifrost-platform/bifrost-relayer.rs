@@ -19,7 +19,9 @@ use br_primitives::{
 use alloy::{
 	consensus::{BlockHeader, Transaction, TxType, Typed2718},
 	eips::BlockNumberOrTag,
-	network::{BlockResponse, Network, TransactionBuilder, TransactionResponse},
+	network::{
+		BlockResponse, Network, NetworkTransactionBuilder, TransactionBuilder, TransactionResponse,
+	},
 	primitives::{
 		Address, ChainId, FixedBytes, U64, keccak256,
 		utils::{Unit, format_units},

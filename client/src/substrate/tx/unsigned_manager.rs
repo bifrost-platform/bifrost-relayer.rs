@@ -147,7 +147,33 @@ where
 			return;
 		}
 
-		match self.sub_client.tx().create_unsigned::<XtRequest>(&msg.call) {
+		let tx_client = match self.sub_client.tx().await {
+			Ok(client) => client,
+			Err(error) => {
+				return self.handle_failed_tx_creation(SUB_LOG_TARGET, msg, &error).await;
+			},
+		};
+		macro_rules! create_unsigned {
+			($payload:expr) => {
+				tx_client.create_unsigned($payload)
+			};
+		}
+		let created = match &msg.call {
+			XtRequest::VaultKeyPresubmission(p) => create_unsigned!(p),
+			XtRequest::SubmitSystemVaultKey(p) => create_unsigned!(p),
+			XtRequest::SubmitVaultKey(p) => create_unsigned!(p),
+			XtRequest::SubmitExecutedRequest(p) => create_unsigned!(p),
+			XtRequest::SubmitRollbackPoll(p) => create_unsigned!(p),
+			XtRequest::SubmitSignedPsbt(p) => create_unsigned!(p),
+			XtRequest::BroadcastPoll(p) => create_unsigned!(p),
+			XtRequest::SubmitFeeRate(p) => create_unsigned!(p),
+			XtRequest::SubmitUtxos(p) => create_unsigned!(p),
+			XtRequest::SubmitOutboundRequests(p) => create_unsigned!(p),
+			XtRequest::OnFlightPoll(p) => create_unsigned!(p),
+			XtRequest::FinalizePoll(p) => create_unsigned!(p),
+		};
+
+		match created {
 			Ok(xt) => match xt.submit_and_watch().await {
 				Ok(progress) => match progress.wait_for_finalized_success().await {
 					Ok(events) => {

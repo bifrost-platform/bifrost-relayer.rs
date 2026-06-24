@@ -11,7 +11,7 @@ use alloy::{
 use array_bytes::Hexify;
 use eyre::Result;
 use sc_service::SpawnTaskHandle;
-use subxt::{OnlineClient, ext::subxt_core::utils::AccountId20};
+use subxt::{OnlineClient, utils::eth::AccountId20};
 use tokio::sync::{broadcast::Receiver, mpsc::UnboundedSender};
 use tokio_stream::{StreamExt, wrappers::BroadcastStream};
 
@@ -27,7 +27,7 @@ use br_primitives::{
 	},
 	eth::{BootstrapState, BuiltRelayTransaction, RelayDirection, SocketEventStatus},
 	substrate::{CustomConfig, SocketMessagesSubmission, bifrost_runtime},
-	tx::{SocketRelayMetadata, XtRequestMessage, XtRequestMetadata, XtRequestSender},
+	tx::{SocketRelayMetadata, XtRequest, XtRequestMessage, XtRequestMetadata, XtRequestSender},
 	utils::sub_display_format,
 };
 
@@ -916,13 +916,15 @@ where
 			let encoded_msg: Vec<u8> = msg.into();
 			let signature =
 				self.client.sign_message(encoded_msg.hexify_prefixed().as_bytes()).await?.into();
-			let call = Arc::new(bifrost_runtime::tx().blaze().submit_outbound_requests(
-				SocketMessagesSubmission {
-					authority_id: AccountId20(self.client.address().await.0.0),
-					messages: vec![encoded_msg],
-				},
-				signature,
-			));
+			let call = XtRequest::SubmitOutboundRequests(
+				bifrost_runtime::tx().blaze().submit_outbound_requests(
+					SocketMessagesSubmission {
+						authority_id: AccountId20(self.client.address().await.0.0),
+						messages: vec![encoded_msg],
+					},
+					signature,
+				),
+			);
 			match self.xt_request_sender.send(XtRequestMessage::new(
 				call,
 				XtRequestMetadata::SubmitOutboundRequests(metadata.clone()),

@@ -9,11 +9,11 @@ use br_primitives::{
 use clap::Parser;
 use miniscript::bitcoin::Network;
 use sc_cli::Error as CliError;
-use secrecy::SecretString;
 use sp_application_crypto::{
 	ByteArray,
 	ecdsa::{AppPair, AppPublic},
 };
+use sp_core::crypto::SecretString;
 use std::{process::Command, sync::Arc};
 
 use crate::cli::{MAINNET_CONFIG_FILE_PATH, TESTNET_CONFIG_FILE_PATH};
