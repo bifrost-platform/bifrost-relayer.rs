@@ -22,7 +22,7 @@ use br_primitives::{
 		SocketContract::RoundUp,
 	},
 	eth::{BootstrapState, RoundUpEventStatus},
-	tx::{TxRequestMetadata, VSPPhase1Metadata},
+	tx::VSPPhase1Metadata,
 	utils::{encode_roundup_param, sub_display_format},
 };
 use eyre::Result;
@@ -176,7 +176,7 @@ where
 			self.client.clone(),
 			tx_request,
 			SUB_LOG_TARGET.to_string(),
-			TxRequestMetadata::VSPPhase1(metadata),
+			Arc::new(metadata),
 			self.debug_mode,
 			self.handle.clone(),
 		);
@@ -362,6 +362,13 @@ where
 					bootstrap_config.round_offset.unwrap_or(DEFAULT_BOOTSTRAP_ROUND_OFFSET)
 				);
 			}
+
+			// Always overwrite the cache so RoundupRelayHandler receives the most
+			// recent snapshot (this method may be called multiple times while waiting
+			// for quorum; the last write is what matters).
+			self.bootstrap_shared_data
+				.set_bootstrap_roundup_logs(round_up_events.clone())
+				.await;
 		}
 
 		Ok(round_up_events)

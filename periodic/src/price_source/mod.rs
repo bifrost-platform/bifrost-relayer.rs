@@ -6,28 +6,29 @@ use alloy::{
 };
 use async_trait::async_trait;
 use eyre::Result;
+use reqwest::Client;
 
 use br_client::eth::EthClient;
 use br_primitives::periodic::{PriceResponse, PriceSource};
 
 use crate::{
 	price_source::{
-		binance::BinancePriceFetcher, chainlink::ChainlinkPriceFetcher,
-		coingecko::CoingeckoPriceFetcher, exchange_rate::ExchangeRatePriceFetcher,
-		gateio::GateioPriceFetcher, kucoin::KucoinPriceFetcher, upbit::UpbitPriceFetcher,
+		binance::BinancePriceFetcher, bithumb::BithumbPriceFetcher,
+		chainlink::ChainlinkPriceFetcher, coinbase::CoinbasePriceFetcher,
+		exchange_rate::ExchangeRatePriceFetcher, gateio::GateioPriceFetcher,
+		kucoin::KucoinPriceFetcher, upbit::UpbitPriceFetcher,
 	},
 	traits::PriceFetcher,
 };
 
 mod binance;
+mod bithumb;
 mod chainlink;
-mod coingecko;
-mod exchange_rate;
+mod coinbase;
+pub mod exchange_rate;
 mod gateio;
 mod kucoin;
 mod upbit;
-
-const LOG_TARGET: &str = "price-fetcher";
 
 #[derive(Clone, PartialEq, Debug)]
 pub enum FetchMode {
@@ -44,11 +45,12 @@ where
 	P: Provider<N>,
 {
 	Binance(BinancePriceFetcher),
+	Bithumb(BithumbPriceFetcher),
 	Chainlink(ChainlinkPriceFetcher<F, P, N>),
-	CoinGecko(CoingeckoPriceFetcher),
 	Gateio(GateioPriceFetcher),
 	Kucoin(KucoinPriceFetcher),
 	Upbit(UpbitPriceFetcher),
+	Coinbase(CoinbasePriceFetcher),
 	ExchangeRate(ExchangeRatePriceFetcher),
 }
 
@@ -59,22 +61,28 @@ where
 {
 	pub async fn new(
 		exchange: PriceSource,
-		client: Option<Arc<EthClient<F, P, N>>>,
+		eth_client: Option<Arc<EthClient<F, P, N>>>,
+		http_client: Client,
 		mode: FetchMode,
 	) -> Result<Self> {
 		match exchange {
-			PriceSource::Binance => Ok(PriceFetchers::Binance(BinancePriceFetcher::new().await?)),
+			PriceSource::Binance => {
+				Ok(PriceFetchers::Binance(BinancePriceFetcher::new(http_client)))
+			},
+			PriceSource::Bithumb => {
+				Ok(PriceFetchers::Bithumb(BithumbPriceFetcher::new(http_client)))
+			},
 			PriceSource::Chainlink => {
-				Ok(PriceFetchers::Chainlink(ChainlinkPriceFetcher::new(client, mode).await))
+				Ok(PriceFetchers::Chainlink(ChainlinkPriceFetcher::new(eth_client, mode).await))
 			},
-			PriceSource::Coingecko => {
-				Ok(PriceFetchers::CoinGecko(CoingeckoPriceFetcher::new().await?))
+			PriceSource::Gateio => Ok(PriceFetchers::Gateio(GateioPriceFetcher::new(http_client))),
+			PriceSource::Kucoin => Ok(PriceFetchers::Kucoin(KucoinPriceFetcher::new(http_client))),
+			PriceSource::Upbit => Ok(PriceFetchers::Upbit(UpbitPriceFetcher::new(http_client))),
+			PriceSource::Coinbase => {
+				Ok(PriceFetchers::Coinbase(CoinbasePriceFetcher::new(http_client)))
 			},
-			PriceSource::Gateio => Ok(PriceFetchers::Gateio(GateioPriceFetcher::new().await?)),
-			PriceSource::Kucoin => Ok(PriceFetchers::Kucoin(KucoinPriceFetcher::new().await?)),
-			PriceSource::Upbit => Ok(PriceFetchers::Upbit(UpbitPriceFetcher::new().await?)),
 			PriceSource::ExchangeRate => {
-				Ok(PriceFetchers::ExchangeRate(ExchangeRatePriceFetcher::new(mode)))
+				Ok(PriceFetchers::ExchangeRate(ExchangeRatePriceFetcher::new(http_client, mode)))
 			},
 		}
 	}
@@ -82,11 +90,12 @@ where
 	pub fn mode(&self) -> FetchMode {
 		match self {
 			PriceFetchers::Binance(_) => FetchMode::Standard,
+			PriceFetchers::Bithumb(_) => FetchMode::Standard,
 			PriceFetchers::Chainlink(fetcher) => fetcher.mode.clone(),
-			PriceFetchers::CoinGecko(_) => FetchMode::Standard,
 			PriceFetchers::Gateio(_) => FetchMode::Standard,
 			PriceFetchers::Kucoin(_) => FetchMode::Standard,
 			PriceFetchers::Upbit(_) => FetchMode::Standard,
+			PriceFetchers::Coinbase(_) => FetchMode::Standard,
 			PriceFetchers::ExchangeRate(fetcher) => fetcher.mode.clone(),
 		}
 	}
@@ -101,11 +110,12 @@ where
 	async fn get_ticker_with_symbol(&self, symbol: String) -> Result<PriceResponse> {
 		match self {
 			PriceFetchers::Binance(fetcher) => fetcher.get_ticker_with_symbol(symbol).await,
+			PriceFetchers::Bithumb(fetcher) => fetcher.get_ticker_with_symbol(symbol).await,
 			PriceFetchers::Chainlink(fetcher) => fetcher.get_ticker_with_symbol(symbol).await,
-			PriceFetchers::CoinGecko(fetcher) => fetcher.get_ticker_with_symbol(symbol).await,
 			PriceFetchers::Gateio(fetcher) => fetcher.get_ticker_with_symbol(symbol).await,
 			PriceFetchers::Kucoin(fetcher) => fetcher.get_ticker_with_symbol(symbol).await,
 			PriceFetchers::Upbit(fetcher) => fetcher.get_ticker_with_symbol(symbol).await,
+			PriceFetchers::Coinbase(fetcher) => fetcher.get_ticker_with_symbol(symbol).await,
 			PriceFetchers::ExchangeRate(fetcher) => fetcher.get_ticker_with_symbol(symbol).await,
 		}
 	}
@@ -113,11 +123,12 @@ where
 	async fn get_tickers(&self) -> Result<BTreeMap<String, PriceResponse>> {
 		match self {
 			PriceFetchers::Binance(fetcher) => fetcher.get_tickers().await,
+			PriceFetchers::Bithumb(fetcher) => fetcher.get_tickers().await,
 			PriceFetchers::Chainlink(fetcher) => fetcher.get_tickers().await,
-			PriceFetchers::CoinGecko(fetcher) => fetcher.get_tickers().await,
 			PriceFetchers::Gateio(fetcher) => fetcher.get_tickers().await,
 			PriceFetchers::Kucoin(fetcher) => fetcher.get_tickers().await,
 			PriceFetchers::Upbit(fetcher) => fetcher.get_tickers().await,
+			PriceFetchers::Coinbase(fetcher) => fetcher.get_tickers().await,
 			PriceFetchers::ExchangeRate(fetcher) => fetcher.get_tickers().await,
 		}
 	}

@@ -3,7 +3,7 @@ use std::{collections::BTreeMap, fmt::Error};
 use alloy::primitives::utils::parse_ether;
 use br_primitives::periodic::PriceResponse;
 use eyre::Result;
-use reqwest::Url;
+use reqwest::{Client, Url};
 use serde::Deserialize;
 
 use crate::traits::PriceFetcher;
@@ -25,6 +25,7 @@ struct KucoinResponse {
 pub struct KucoinPriceFetcher {
 	base_url: Url,
 	symbols: Vec<String>,
+	client: Client,
 }
 
 #[async_trait::async_trait]
@@ -35,7 +36,7 @@ impl PriceFetcher for KucoinPriceFetcher {
 
 		let res = &self._send_request(url).await?.data;
 
-		Ok(PriceResponse { price: parse_ether(&res.last)?, volume: parse_ether(&res.vol)?.into() })
+		Ok(PriceResponse { price: parse_ether(&res.last)?, volume: parse_ether(&res.vol)? })
 	}
 
 	async fn get_tickers(&self) -> Result<BTreeMap<String, PriceResponse>> {
@@ -49,18 +50,19 @@ impl PriceFetcher for KucoinPriceFetcher {
 }
 
 impl KucoinPriceFetcher {
-	pub async fn new() -> Result<Self, Error> {
+	pub fn new(client: Client) -> Self {
 		let symbols: Vec<String> = vec!["ETH".into(), "BFC".into(), "BNB".into(), "POL".into()];
 
-		Ok(Self {
+		Self {
 			base_url: Url::parse("https://api.kucoin.com/api/v1/")
 				.expect("Failed to parse KuCoin URL"),
 			symbols,
-		})
+			client,
+		}
 	}
 
 	async fn _send_request(&self, url: Url) -> Result<KucoinResponse, Error> {
-		match reqwest::get(url).await {
+		match self.client.get(url).send().await {
 			Ok(response) => match response.json::<KucoinResponse>().await {
 				Ok(response) => Ok(response),
 				Err(_) => Err(Error),
@@ -72,11 +74,17 @@ impl KucoinPriceFetcher {
 
 #[cfg(test)]
 mod tests {
+	use std::time::Duration;
+
 	use super::*;
+
+	fn test_client() -> Client {
+		Client::builder().timeout(Duration::from_secs(10)).build().unwrap()
+	}
 
 	#[tokio::test]
 	async fn fetch_price() {
-		let kucoin_fetcher: KucoinPriceFetcher = KucoinPriceFetcher::new().await.unwrap();
+		let kucoin_fetcher = KucoinPriceFetcher::new(test_client());
 		let res = kucoin_fetcher.get_ticker_with_symbol("BFC".to_string()).await;
 
 		println!("{:#?}", res);
@@ -84,7 +92,7 @@ mod tests {
 
 	#[tokio::test]
 	async fn fetch_prices() {
-		let kucoin_fetcher: KucoinPriceFetcher = KucoinPriceFetcher::new().await.unwrap();
+		let kucoin_fetcher = KucoinPriceFetcher::new(test_client());
 		let res = kucoin_fetcher.get_tickers().await;
 
 		println!("{:#?}", res);

@@ -77,9 +77,17 @@ where
 	}
 
 	/// Verify whether the current relayer is an executive.
+	///
+	/// PSBT signing must only be performed by relay executives of the current round.
+	/// Note that the `relay_executives` precompile holds only the realtime (current) members.
+	/// During vault migration, when the new executive set is being established
+	/// (members replaced, removed, or added), the round *before* migration must be
+	/// used to identify who is authorized to sign — not the incoming round's members.
 	async fn is_relay_executive(&self) -> Result<bool> {
-		let relay_exec = self.client.protocol_contracts.relay_executive.as_ref().unwrap();
-		Ok(relay_exec.is_member(self.client.address().await).call().await?)
+		let round = self.get_current_round().await?;
+		let registration_pool = self.client.protocol_contracts.registration_pool.as_ref().unwrap();
+		let relay_executives = registration_pool.relay_executives(round).call().await?;
+		Ok(relay_executives.contains(&self.client.address().await))
 	}
 
 	/// Build the payload for the unsigned transaction. (`submit_signed_psbt()`)
@@ -156,7 +164,7 @@ where
 		if let Some((msg, signature)) = self.build_payload(unsigned_psbt).await? {
 			let metadata = SubmitSignedPsbtMetadata::new(hash_bytes(&msg.unsigned_psbt));
 			return Ok(Some((
-				XtRequest::from(
+				Arc::new(
 					bifrost_runtime::tx().btc_socket_queue().submit_signed_psbt(msg, signature),
 				),
 				metadata,

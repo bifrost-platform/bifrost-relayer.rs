@@ -61,6 +61,12 @@ where
 						"Executed notification has been collected, no need to retry"
 					);
 					return;
+				} else if error_str.contains("BtcSocketQueue::BroadcastAlreadyConfirmed") {
+					log::info!(
+						target: &self.get_bfc_client().get_chain_name(),
+						"Broadcast already confirmed, no need to retry"
+					);
+					return;
 				}
 			},
 			XtRequestMetadata::BroadcastPoll(_) => {
@@ -68,6 +74,24 @@ where
 					log::info!(
 						target: &self.get_bfc_client().get_chain_name(),
 						"UTXO has been spent, no need to retry"
+					);
+					return;
+				}
+			},
+			XtRequestMetadata::OnFlightPoll(_) => {
+				if error_str.contains("CCCPRelayQueue::TransferAlreadyOnFlight") {
+					log::info!(
+						target: &self.get_bfc_client().get_chain_name(),
+						"Transfer already on flight, no need to retry"
+					);
+					return;
+				}
+			},
+			XtRequestMetadata::FinalizePoll(_) => {
+				if error_str.contains("CCCPRelayQueue::TransferAlreadyFinalized") {
+					log::info!(
+						target: &self.get_bfc_client().get_chain_name(),
+						"Transfer already finalized, no need to retry"
 					);
 					return;
 				}

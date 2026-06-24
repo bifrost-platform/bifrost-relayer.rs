@@ -3,6 +3,7 @@
 mod bitcoin_rollback_verifier;
 mod heartbeat_sender;
 mod keypair_migrator;
+mod price_deviation_checker;
 mod price_feeder;
 mod price_source;
 mod psbt_broadcaster;
@@ -16,6 +17,7 @@ pub mod traits;
 pub use bitcoin_rollback_verifier::*;
 pub use heartbeat_sender::*;
 pub use keypair_migrator::*;
+pub use price_deviation_checker::*;
 pub use price_feeder::*;
 pub use psbt_broadcaster::*;
 pub use psbt_signer::*;

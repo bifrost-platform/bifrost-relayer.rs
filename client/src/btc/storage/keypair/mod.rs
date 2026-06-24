@@ -29,7 +29,7 @@ use miniscript::bitcoin::{
 	Network, Psbt,
 	psbt::{SigningErrors, SigningKeysMap},
 };
-use rand::Rng;
+use rand::RngExt;
 use sc_keystore::{Keystore, LocalKeystore};
 use sp_application_crypto::{
 	Pair,

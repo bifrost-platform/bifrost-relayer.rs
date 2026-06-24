@@ -4,8 +4,14 @@ use br_primitives::{
 		errors::{INVALID_CHAIN_ID, PROVIDER_INTERNAL_ERROR},
 		tx::DEFAULT_TX_TIMEOUT_MS,
 	},
-	contracts::authority::BfcStaking::round_meta_data,
-	eth::{AggregatorContracts, GasCoefficient, ProtocolContracts, ProviderMetadata, Signers},
+	contracts::{
+		authority::BfcStaking::round_meta_data,
+		erc20::{Erc20Contract, Erc20Instance},
+	},
+	eth::{
+		AggregatorContracts, ContractCache, GasCoefficient, ProtocolContracts, ProviderMetadata,
+		Signers,
+	},
 	tx::TxRequestMetadata,
 	utils::sub_display_format,
 };
@@ -15,7 +21,7 @@ use alloy::{
 	eips::BlockNumberOrTag,
 	network::{BlockResponse, Network, TransactionBuilder, TransactionResponse},
 	primitives::{
-		Address, ChainId, U64, keccak256,
+		Address, ChainId, FixedBytes, U64, keccak256,
 		utils::{Unit, format_units},
 	},
 	providers::{
@@ -27,7 +33,7 @@ use alloy::{
 	transports::TransportResult,
 };
 use eyre::{Result, eyre};
-use rand::Rng as _;
+use rand::RngExt;
 use sc_service::SpawnTaskHandle;
 use std::{
 	cmp::max,
@@ -67,6 +73,8 @@ where
 	pub protocol_contracts: ProtocolContracts<F, P, N>,
 	/// The aggregator contracts.
 	pub aggregator_contracts: AggregatorContracts<F, P, N>,
+	/// Contract cache for oracle and ERC20 instances.
+	pub contract_cache: Arc<ContractCache<F, P, N>>,
 	/// flushing not allowed to work concurrently.
 	pub martial_law: Arc<Mutex<()>>,
 }
@@ -92,8 +100,14 @@ where
 			metadata,
 			protocol_contracts,
 			aggregator_contracts,
+			contract_cache: Arc::new(ContractCache::new()),
 			martial_law: Arc::new(Mutex::new(())),
 		}
+	}
+
+	/// Get the inner provider.
+	pub fn provider(&self) -> Arc<FillProvider<F, P, N>> {
+		self.inner.clone()
 	}
 
 	/// Verifies whether the configured chain id and the provider's chain id match.
@@ -286,6 +300,11 @@ where
 
 		// if txpool namespace is not enabled on the chain, do nothing
 		if self.txpool_status().await.is_err() {
+			log::info!(
+				target: &self.get_chain_name(),
+				"-[{}] Txpool namespace is disabled, skipping flush",
+				sub_display_format(SUB_LOG_TARGET)
+			);
 			return Ok(());
 		}
 
@@ -293,7 +312,18 @@ where
 		sleep(Duration::from_millis(self.metadata.call_interval * 2)).await;
 
 		let address = self.address().await;
-		let content = self.txpool_content_from(address).await?;
+		let content = match self.txpool_content_from(address).await {
+			Ok(content) => content,
+			Err(err) => {
+				log::warn!(
+					target: &self.get_chain_name(),
+					"-[{}] Failed to fetch txpool content, retrying with full content: {}",
+					sub_display_format(SUB_LOG_TARGET),
+					err
+				);
+				self.txpool_content().await?.remove_from(&address)
+			},
+		};
 		let mut pending = content.pending;
 		pending.extend(content.queued);
 
@@ -400,26 +430,45 @@ where
 	}
 
 	/// Fill the gas-related fields for the given transaction.
+	/// Skips gas estimation if gas limit is already set (e.g., for hook execution).
 	async fn fill_gas(&self, request: &mut N::TransactionRequest) -> Result<()> {
 		if request.from().is_none() {
 			request.set_from(self.address().await);
 		}
 
-		let gas = self.estimate_gas(request.clone()).await?;
-		let coefficient: f64 = GasCoefficient::from(self.metadata.is_native).into();
-		// max gas limit for a single transaction is 52,000,000 on bifrost network
-		let estimated_gas = (gas as f64 * coefficient).min(52_000_000_f64);
-		request.set_gas_limit(estimated_gas.ceil() as u64);
+		// Skip gas estimation if gas limit is already set (pre-filled by caller)
+		if request.gas_limit().is_some() {
+			log::debug!(
+				target: &self.get_chain_name(),
+				"-[{}] ⏭️  Skipping gas estimation - gas limit already set: {}",
+				sub_display_format(SUB_LOG_TARGET),
+				request.gas_limit().unwrap()
+			);
+		} else {
+			if !self.metadata.is_native {
+				avoid_race_condition().await;
+			}
+
+			let gas = self.estimate_gas(request.clone()).await?;
+			let coefficient: f64 = GasCoefficient::from(self.metadata.is_native).into();
+			// max gas limit for a single transaction is 52,000,000 on bifrost network
+			let estimated_gas = (gas as f64 * coefficient).min(52_000_000_f64);
+
+			log::info!(
+				target: &self.get_chain_name(),
+				"-[{}] 🔍 Estimated gas: {} -> {}",
+				sub_display_format(SUB_LOG_TARGET),
+				gas, estimated_gas
+			);
+
+			request.set_gas_limit(estimated_gas.ceil() as u64);
+		}
 
 		if self.metadata.is_native {
 			// gas price is fixed to 1000 Gwei on bifrost network
 			request.set_max_fee_per_gas(1000 * Unit::GWEI.wei().to::<u128>());
 			request.set_max_priority_fee_per_gas(0);
 		} else {
-			// to avoid duplicate(will revert) external networks transactions
-			let duration = Duration::from_millis(rand::rng().random_range(0..=12000));
-			sleep(duration).await;
-
 			if !self.metadata.eip1559 {
 				request.set_gas_price(self.get_gas_price().await?);
 			}
@@ -429,7 +478,7 @@ where
 	}
 
 	/// Send a transaction synchronously.
-	async fn sync_send_transaction(
+	pub async fn sync_send_transaction(
 		&self,
 		mut request: N::TransactionRequest,
 		requester: String,
@@ -441,7 +490,16 @@ where
 
 		self.fill_gas(&mut request).await?;
 		let pending = match self.send_transaction(request).await {
-			Ok(pending) => pending,
+			Ok(pending) => {
+				log::info!(
+					target: &requester,
+					" 🔖 Transaction submitted ({} tx:{}): {}",
+					self.get_chain_name(),
+					pending.tx_hash(),
+					metadata
+				);
+				pending
+			},
 			Err(err) => {
 				br_primitives::log_and_capture_simple!(
 					error,
@@ -463,7 +521,7 @@ where
 			Ok(tx_hash) => {
 				log::info!(
 					target: &requester,
-					" 🔖 Transaction confirmed ({} tx:{}): {}",
+					" ✅ Transaction confirmed ({} tx:{}): {}",
 					self.get_chain_name(),
 					tx_hash,
 					metadata
@@ -475,6 +533,66 @@ where
 				Ok(())
 			},
 		}
+	}
+
+	/// Get or create an ERC20 contract instance from cache.
+	pub async fn get_erc20(&self, address: Address) -> Arc<Erc20Instance<F, P, N>> {
+		// Check cache first
+		{
+			let cache = self.contract_cache.erc20s.read().await;
+			if let Some(erc20) = cache.get(&address) {
+				return erc20.clone();
+			}
+		}
+
+		// Create new instance and cache it
+		let erc20 = Arc::new(Erc20Contract::new(address, self.inner.clone()));
+		self.contract_cache.erc20s.write().await.insert(address, erc20.clone());
+		erc20
+	}
+
+	/// Get asset address from Vault contract.
+	pub async fn get_asset_address_by_index(
+		&self,
+		asset_index_hash: FixedBytes<32>,
+		is_inbound: bool,
+	) -> Result<Address> {
+		let remote_asset_index =
+			self.protocol_contracts.vault.remote_asset_pair(asset_index_hash).call().await?;
+		if is_inbound {
+			Ok(self
+				.protocol_contracts
+				.vault
+				.assets_config(remote_asset_index)
+				.call()
+				.await?
+				.unified)
+		} else {
+			Ok(self
+				.protocol_contracts
+				.vault
+				.assets_config(remote_asset_index)
+				.call()
+				.await?
+				.target)
+		}
+	}
+
+	/// Get ERC20 token decimals from cache or fetch and cache if not present.
+	pub async fn get_erc20_decimals(&self, address: Address) -> Result<u8> {
+		// Check cache first
+		{
+			let cache = self.contract_cache.erc20_decimals.read().await;
+			if let Some(&decimals) = cache.get(&address) {
+				return Ok(decimals);
+			}
+		}
+
+		// Fetch and cache
+		let erc20 = self.get_erc20(address).await;
+		let decimals = erc20.decimals().call().await?;
+		self.contract_cache.erc20_decimals.write().await.insert(address, decimals);
+		Ok(decimals)
 	}
 }
 
@@ -504,6 +622,12 @@ where
 	) -> TransportResult<PendingTransactionBuilder<N>> {
 		self.inner.send_transaction_internal(tx).await
 	}
+}
+
+pub async fn avoid_race_condition() {
+	// to avoid duplicate(will revert) external networks transactions
+	let duration = Duration::from_millis(rand::rng().random_range(0..=12000));
+	sleep(duration).await;
 }
 
 /// Send a transaction asynchronously.
@@ -547,7 +671,7 @@ pub fn send_transaction<F, P, N: Network>(
 			Ok(pending) => {
 				log::info!(
 					target: &requester,
-					" 🔖 Send transaction ({} tx:{}): {}",
+					" 🔖 Transaction submitted ({} tx:{}): {}",
 					client.get_chain_name(),
 					pending.tx_hash(),
 					metadata
@@ -561,7 +685,7 @@ pub fn send_transaction<F, P, N: Network>(
 					Ok(tx_hash) => {
 						log::info!(
 							target: &requester,
-							" 🔖 Transaction confirmed ({} tx:{}): {}",
+							" ✅ Transaction confirmed ({} tx:{}): {}",
 							client.get_chain_name(),
 							tx_hash,
 							metadata

@@ -290,9 +290,7 @@ where
 		let metadata = SubmitRollbackPollMetadata::new(txid, is_approved);
 
 		Ok((
-			XtRequest::from(
-				bifrost_runtime::tx().btc_socket_queue().submit_rollback_poll(msg, signature),
-			),
+			Arc::new(bifrost_runtime::tx().btc_socket_queue().submit_rollback_poll(msg, signature)),
 			metadata,
 		))
 	}

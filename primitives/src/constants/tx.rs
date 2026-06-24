@@ -18,3 +18,6 @@ pub const MAX_FEE_COEFFICIENT: u64 = 2;
 
 /// The coefficient that will be multiplied on the max priority fee.
 pub const MAX_PRIORITY_FEE_COEFFICIENT: u64 = 2;
+
+/// The interval in milliseconds before retrying a failed roundup relay to an external chain.
+pub const ROUNDUP_RELAY_RETRY_INTERVAL_MS: u64 = 600_000; // 10 minutes

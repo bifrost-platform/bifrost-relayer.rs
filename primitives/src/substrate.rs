@@ -3,9 +3,13 @@
 	derive_for_all_types = "Clone",
 	derive_for_type(
 		path = "bounded_collections::bounded_vec::BoundedVec",
-		derive = "Ord, PartialOrd, Eq, PartialEq"
+		derive = "Ord, PartialOrd, Eq, PartialEq, ::subxt::ext::codec::Encode"
 	),
-	derive_for_type(path = "bp_btc_relay::MigrationSequence", derive = "Eq, PartialEq")
+	derive_for_type(path = "bp_btc_relay::MigrationSequence", derive = "Eq, PartialEq"),
+	derive_for_type(
+		path = "fp_account::EthereumSignature",
+		derive = "::subxt::ext::codec::Encode, ::subxt::ext::codec::Decode"
+	)
 )]
 pub mod bifrost_runtime {}
 
@@ -23,34 +27,41 @@ pub use runtime_types::{
 		},
 	},
 	pallet_btc_registration_pool::{
-		VaultKeyPreSubmission, VaultKeySubmission,
+		SetRefundsApproval, VaultKeyPreSubmission, VaultKeySubmission,
 		pallet::pallet::Call::{
-			submit_system_vault_key, submit_vault_key, vault_key_presubmission,
+			approve_set_refunds, submit_system_vault_key, submit_vault_key, vault_key_presubmission,
 		},
 	},
 	pallet_btc_socket_queue::{
 		ExecutedPsbtMessage, RollbackPollMessage, SignedPsbtMessage,
 		pallet::pallet::Call::submit_unsigned_psbt,
 	},
+	pallet_cccp_relay_queue::{FinalizePollSubmission, OnFlightPollSubmission},
 };
 
+#[allow(ambiguous_glob_reexports)]
 pub use bifrost_runtime::{
 	blaze::calls::types::*, btc_registration_pool::calls::types::*,
-	btc_socket_queue::calls::types::*,
+	btc_socket_queue::calls::types::*, cccp_relay_queue::calls::types::*,
 };
 
 use super::constants::errors::INVALID_PROVIDER_URL;
+use jsonrpsee::ws_client::WsClientBuilder;
 use subxt::{
 	OnlineClient,
+	backend::rpc::RpcClient,
 	config::{Config, DefaultExtrinsicParams, SubstrateConfig},
 };
 use url::Url;
+
+/// Maximum WebSocket response body size (128 MB).
+/// The default jsonrpsee limit is 10 MB, which can be exceeded by large Substrate blocks.
+const MAX_WS_RESPONSE_BODY_SIZE: u32 = 128 * 1024 * 1024;
 
 #[derive(Debug, Clone)]
 pub enum CustomConfig {}
 
 impl Config for CustomConfig {
-	type Hash = <SubstrateConfig as Config>::Hash;
 	type AccountId = <SubstrateConfig as Config>::AccountId;
 	type Address = Self::AccountId;
 	type Signature = EthereumSignature;
@@ -67,7 +78,26 @@ pub async fn initialize_sub_client(mut url: Url) -> OnlineClient<CustomConfig> {
 		url.set_scheme("ws").expect(INVALID_PROVIDER_URL);
 	};
 
-	OnlineClient::<CustomConfig>::from_insecure_url(url.as_str())
+	let rpc_client = create_rpc_client(url.as_str()).await.expect(INVALID_PROVIDER_URL);
+	OnlineClient::<CustomConfig>::from_rpc_client(rpc_client)
 		.await
 		.expect(INVALID_PROVIDER_URL)
+}
+
+/// Create an `RpcClient` with an increased max WebSocket response body size.
+pub async fn create_rpc_client(url: &str) -> Result<RpcClient, jsonrpsee::core::ClientError> {
+	let ws_client = WsClientBuilder::default()
+		.max_response_size(MAX_WS_RESPONSE_BODY_SIZE)
+		.build(url)
+		.await?;
+	Ok(RpcClient::new(ws_client))
+}
+
+pub fn get_sub_rpc_url(mut url: Url) -> String {
+	if url.scheme() == "https" {
+		url.set_scheme("wss").expect(INVALID_PROVIDER_URL);
+	} else {
+		url.set_scheme("ws").expect(INVALID_PROVIDER_URL);
+	}
+	url.to_string()
 }

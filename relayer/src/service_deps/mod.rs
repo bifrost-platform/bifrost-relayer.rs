@@ -32,8 +32,9 @@ use br_client::{
 	substrate::tx::UnsignedTransactionManager,
 };
 use br_periodic::{
-	BitcoinRollbackVerifier, HeartbeatSender, KeypairMigrator, OraclePriceFeeder, PsbtSigner,
-	PubKeyPreSubmitter, PubKeySubmitter, RoundupEmitter, SocketRollbackEmitter,
+	BitcoinRollbackVerifier, HeartbeatSender, KeypairMigrator, OraclePriceFeeder,
+	PriceDeviationChecker, PsbtSigner, PubKeyPreSubmitter, PubKeySubmitter, RoundupEmitter,
+	SocketRollbackEmitter,
 };
 use br_primitives::{
 	bootstrap::BootstrapSharedData,

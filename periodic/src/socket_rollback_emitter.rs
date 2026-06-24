@@ -21,7 +21,7 @@ use br_primitives::{
 	},
 	eth::{RelayDirection, SocketEventStatus},
 	periodic::{RawRequestID, RollbackableMessage},
-	tx::{RollbackMetadata, TxRequestMetadata},
+	tx::RollbackMetadata,
 	utils::sub_display_format,
 };
 
@@ -259,7 +259,7 @@ where
 			self.client.clone(),
 			tx_request,
 			SUB_LOG_TARGET.to_string(),
-			TxRequestMetadata::Rollback(metadata),
+			Arc::new(metadata),
 			self.debug_mode,
 			self.handle.clone(),
 		);

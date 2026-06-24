@@ -4,7 +4,7 @@ use alloy::{
 };
 use br_primitives::{
 	constants::errors::INVALID_PROVIDER_URL,
-	substrate::CustomConfig,
+	substrate::{CustomConfig, create_rpc_client},
 	tx::{XtRequest, XtRequestMessage},
 	utils::sub_display_format,
 };
@@ -66,8 +66,9 @@ where
 			url.set_scheme("ws").expect(INVALID_PROVIDER_URL);
 		}
 
+		let rpc_client = create_rpc_client(url.as_str()).await.expect(INVALID_PROVIDER_URL);
 		self.sub_client = Some(
-			OnlineClient::<CustomConfig>::from_insecure_url(url.as_str())
+			OnlineClient::<CustomConfig>::from_rpc_client(rpc_client)
 				.await
 				.expect(INVALID_PROVIDER_URL),
 		);

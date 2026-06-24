@@ -30,3 +30,6 @@ pub const PSBT_SIGNER_SCHEDULE: &str = "*/9 * * * * * *";
 
 /// The schedule definition for PSBT broadcaster. This will trigger on every 9th second.
 pub const PSBT_BROADCASTER_SCHEDULE: &str = "*/9 * * * * * *";
+
+/// The schedule definition for price deviation checks. This will trigger on every 30th second.
+pub const PRICE_DEVIATION_CHECK_SCHEDULE: &str = "*/30 * * * * * *";

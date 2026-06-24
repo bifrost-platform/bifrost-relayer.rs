@@ -70,7 +70,7 @@ You should prepare RPC endpoints for the following blockchain networks. There ar
 - [Polygon](https://wiki.polygon.technology/docs/pos/reference/rpc-endpoints/)
 - [Base](https://docs.base.org/tools/node-providers/)
 - [Arbitrum](https://docs.arbitrum.io/node-running/node-providers)
-- [Bitcoin](https://bitcoin.org/en/full-node)
+- [Bitcoin](https://bitcoin.org/en/full-node) (**For testnet, the RPC must be testnet4**)
 - [Core](https://docs.coredao.org/docs/Dev-Guide/rpc-list)
 - [Oasys](https://docs.oasys.games/docs/staking/rpc-endpoint/1-1-rpc-endpoint)
 

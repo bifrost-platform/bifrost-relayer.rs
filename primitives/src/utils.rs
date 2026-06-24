@@ -35,14 +35,13 @@ pub fn hash_bytes(bytes: &Vec<u8>) -> B256 {
 }
 
 /// Recovers the address from the given signature and message.
-pub fn recover_message(sig: PrimitiveSignature, msg: &[u8]) -> Address {
+pub fn recover_message(sig: PrimitiveSignature, msg: &[u8]) -> Result<Address, k256::ecdsa::Error> {
 	let v = sig.recid();
-	let rs = sig.to_k256().unwrap();
+	let rs = sig.to_k256()?;
 
-	let verify_key =
-		VerifyingKey::recover_from_digest(Keccak256::new_with_prefix(msg), &rs, v).unwrap();
+	let verify_key = VerifyingKey::recover_from_digest(Keccak256::new_with_prefix(msg), &rs, v)?;
 	let public_key = k256::PublicKey::from(&verify_key).to_encoded_point(false);
 	let hash = keccak256(&public_key.as_bytes()[1..]);
 
-	Address::from_slice(&hash[12..])
+	Ok(Address::from_slice(&hash[12..]))
 }

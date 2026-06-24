@@ -9,6 +9,8 @@ where
 	pub heartbeat_sender: HeartbeatSender<F, P, N>,
 	/// The `OraclePriceFeeder` used for price feeding.
 	pub oracle_price_feeder: OraclePriceFeeder<F, P, N>,
+	/// The `PriceDeviationChecker` used for detecting price deviations.
+	pub price_deviation_checker: PriceDeviationChecker<F, P, N>,
 	/// The `RoundupEmitter` used for detecting and emitting new round updates.
 	pub roundup_emitter: RoundupEmitter<F, P, N>,
 	/// The `SocketRollbackEmitter`'s for each specified chain.
@@ -42,6 +44,14 @@ where
 
 		// initialize the oracle price feeder
 		let oracle_price_feeder = OraclePriceFeeder::new(
+			bfc_client.clone(),
+			clients.clone(),
+			task_manager.spawn_handle(),
+			debug_mode,
+		);
+
+		// initialize the price deviation checker
+		let price_deviation_checker = PriceDeviationChecker::new(
 			bfc_client.clone(),
 			clients.clone(),
 			task_manager.spawn_handle(),
@@ -85,6 +95,7 @@ where
 		Self {
 			heartbeat_sender,
 			oracle_price_feeder,
+			price_deviation_checker,
 			roundup_emitter,
 			rollback_emitters,
 			rollback_senders: Arc::new(rollback_senders),

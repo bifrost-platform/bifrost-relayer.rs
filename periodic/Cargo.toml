@@ -26,6 +26,7 @@ subxt = { workspace = true }
 array-bytes = { workspace = true }
 miniscript = { workspace = true }
 eyre = { workspace = true }
+futures = { workspace = true }
 sc-service = { workspace = true }
 
 # Bifrost Relayer
