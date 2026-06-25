@@ -241,6 +241,10 @@ where
 	pub authority: AuthorityInstance<F, P, N>,
 	/// VaultContract
 	pub vault: VaultInstance<F, P, N>,
+	/// Legacy SocketContract (L-Socket, external chains only during N-contract migration)
+	pub legacy_socket: Option<SocketInstance<F, P, N>>,
+	/// Legacy VaultContract (L-Vault, external chains only during N-contract migration)
+	pub legacy_vault: Option<VaultInstance<F, P, N>>,
 	/// HooksContract
 	pub hooks: Option<HooksInstance<F, P, N>>,
 	/// RelayerManagerContract (Bifrost only)
@@ -280,6 +284,8 @@ where
 				Address::from_str(&evm_provider.vault_address).expect(INVALID_CONTRACT_ADDRESS),
 				provider.clone(),
 			),
+			legacy_socket: None,
+			legacy_vault: None,
 			hooks: evm_provider.hooks_address.map(|address| {
 				HooksContract::new(
 					Address::from_str(&address).expect(INVALID_CONTRACT_ADDRESS),
@@ -332,6 +338,21 @@ where
 			contracts.blaze = Some(BlazeContract::new(
 				Address::from_str(&evm_provider.blaze_address.expect(MISSING_CONTRACT_ADDRESS))
 					.expect(INVALID_CONTRACT_ADDRESS),
+				provider.clone(),
+			));
+		} else {
+			contracts.legacy_socket = Some(SocketContract::new(
+				Address::from_str(
+					&evm_provider.legacy_socket_address.expect(MISSING_CONTRACT_ADDRESS),
+				)
+				.expect(INVALID_CONTRACT_ADDRESS),
+				provider.clone(),
+			));
+			contracts.legacy_vault = Some(VaultContract::new(
+				Address::from_str(
+					&evm_provider.legacy_vault_address.expect(MISSING_CONTRACT_ADDRESS),
+				)
+				.expect(INVALID_CONTRACT_ADDRESS),
 				provider.clone(),
 			));
 		}

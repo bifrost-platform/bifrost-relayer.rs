@@ -554,6 +554,8 @@ where
 	}
 
 	/// Get asset address from Vault contract.
+	/// Queries N-Vault first; if the asset is unregistered (remote_asset_index is zero),
+	/// falls back to L-Vault (present during the Stage 1/2 migration period).
 	pub async fn get_asset_address_by_index(
 		&self,
 		asset_index_hash: FixedBytes<32>,
@@ -561,23 +563,20 @@ where
 	) -> Result<Address> {
 		let remote_asset_index =
 			self.protocol_contracts.vault.remote_asset_pair(asset_index_hash).call().await?;
-		if is_inbound {
-			Ok(self
-				.protocol_contracts
-				.vault
-				.assets_config(remote_asset_index)
-				.call()
-				.await?
-				.unified)
+
+		let config = if remote_asset_index.is_zero() {
+			if let Some(legacy_vault) = &self.protocol_contracts.legacy_vault {
+				let legacy_asset_index =
+					legacy_vault.remote_asset_pair(asset_index_hash).call().await?;
+				legacy_vault.assets_config(legacy_asset_index).call().await?
+			} else {
+				self.protocol_contracts.vault.assets_config(remote_asset_index).call().await?
+			}
 		} else {
-			Ok(self
-				.protocol_contracts
-				.vault
-				.assets_config(remote_asset_index)
-				.call()
-				.await?
-				.target)
-		}
+			self.protocol_contracts.vault.assets_config(remote_asset_index).call().await?
+		};
+
+		if is_inbound { Ok(config.unified) } else { Ok(config.target) }
 	}
 
 	/// Get ERC20 token decimals from cache or fetch and cache if not present.
