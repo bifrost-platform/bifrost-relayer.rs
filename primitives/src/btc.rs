@@ -1,5 +1,5 @@
-use bitcoincore_rpc::bitcoin::address::NetworkUnchecked;
-use bitcoincore_rpc::bitcoin::{Address, Amount, Txid};
+use miniscript::bitcoin::address::NetworkUnchecked;
+use miniscript::bitcoin::{Address, Amount, Txid};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Serialize, Deserialize)]

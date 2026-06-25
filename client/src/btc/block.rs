@@ -5,26 +5,16 @@ use alloy::{
 	providers::{Provider, WalletProvider, fillers::TxFiller},
 };
 use br_primitives::{
-	bootstrap::BootstrapSharedData,
-	constants::{
-		cli::DEFAULT_BITCOIN_BOOTSTRAP_BLOCK_OFFSET,
-		errors::PROVIDER_INTERNAL_ERROR,
-		tx::{DEFAULT_CALL_RETRIES, DEFAULT_CALL_RETRY_INTERVAL_MS},
-	},
-	eth::BootstrapState,
-	utils::sub_display_format,
+	bootstrap::BootstrapSharedData, constants::cli::DEFAULT_BITCOIN_BOOTSTRAP_BLOCK_OFFSET,
+	eth::BootstrapState, utils::sub_display_format,
 };
 use eyre::Result;
 
 use super::handlers::BootstrapHandler;
+use crate::btc::client::{BtcClient, RawTransactionOutput};
 use alloy::network::Network;
-use bitcoincore_rpc::{
-	Client as BtcClient, RpcApi, bitcoincore_rpc_json::GetRawTransactionResultVout,
-};
 use br_primitives::btc::{Event, EventMessage};
-use miniscript::bitcoin::{Address, Txid, address::NetworkUnchecked};
-use serde::Deserialize;
-use serde_json::Value;
+use miniscript::bitcoin::{Address, Amount, Txid, address::NetworkUnchecked};
 use std::{collections::BTreeSet, str::FromStr, sync::Arc};
 use tokio::{
 	sync::broadcast::{self, Receiver, Sender},
@@ -58,38 +48,6 @@ where
 	bootstrap_offset: u32,
 	/// The API endpoint for fetching Bitcoin block height.
 	block_height_api: &'static str,
-}
-
-#[async_trait::async_trait]
-impl<F, P, N: Network> RpcApi for BlockManager<F, P, N>
-where
-	F: TxFiller<N> + WalletProvider<N>,
-	P: Provider<N>,
-{
-	async fn call<T: for<'a> Deserialize<'a> + Send>(
-		&self,
-		cmd: &str,
-		args: &[Value],
-	) -> bitcoincore_rpc::Result<T> {
-		let mut error_msg = String::default();
-		for _ in 0..DEFAULT_CALL_RETRIES {
-			match self.btc_client.call(cmd, args).await {
-				Ok(ret) => return Ok(ret),
-				Err(e) => {
-					error_msg = e.to_string();
-				},
-			}
-			sleep(Duration::from_millis(DEFAULT_CALL_RETRY_INTERVAL_MS)).await;
-		}
-		panic!(
-			"[{}]-[{}] {} [cmd: {}]: {}",
-			LOG_TARGET,
-			crate::btc::SUB_LOG_TARGET,
-			PROVIDER_INTERNAL_ERROR,
-			cmd,
-			error_msg
-		);
-	}
 }
 
 impl<F, P, N: Network> BlockManager<F, P, N>
@@ -146,7 +104,7 @@ where
 
 	/// Initialize the block manager.
 	pub async fn initialize(&mut self) {
-		let latest_block = self.get_block_count().await.unwrap();
+		let latest_block = self.btc_client.get_block_count().await.unwrap();
 		self.waiting_block = latest_block.saturating_add(1);
 
 		log::info!(
@@ -161,7 +119,7 @@ where
 	pub async fn wait_provider_sync(&self) -> Result<()> {
 		let mut is_first_check = true;
 		loop {
-			let info = self.get_blockchain_info().await.unwrap();
+			let info = self.btc_client.get_blockchain_info().await.unwrap();
 			match info.initial_block_download {
 				true => {
 					if is_first_check {
@@ -238,7 +196,7 @@ where
 
 		let mut stream = IntervalStream::new(interval(Duration::from_millis(self.call_interval)));
 		while (stream.next().await).is_some() {
-			let latest_block_num = self.get_block_count().await?;
+			let latest_block_num = self.btc_client.get_block_count().await?;
 			if self.is_block_confirmed(latest_block_num) {
 				let (vault_set, refund_set) = self.fetch_registration_sets().await?;
 				self.process_confirmed_block(
@@ -337,12 +295,13 @@ where
 			let (mut inbound, mut outbound) =
 				(EventMessage::inbound(num), EventMessage::outbound(num));
 
-			let block_hash = self.get_block_hash(num).await.unwrap();
-			let txs = self.get_block_info_with_txs(&block_hash).await.unwrap().tx;
-			for tx in txs {
+			let block_hash = self.btc_client.get_block_hash(num).await.unwrap();
+			let block = self.btc_client.get_block_info_with_txs(&block_hash).await.unwrap();
+			for tx in block.tx {
+				let txid = tx.transaction.txid.parse::<Txid>().unwrap();
 				self.filter(
-					tx.txid,
-					&tx.vout,
+					txid,
+					&tx.transaction.outputs,
 					&mut inbound.events,
 					&mut outbound.events,
 					vault_set,
@@ -373,27 +332,30 @@ where
 	async fn filter(
 		&self,
 		txid: Txid,
-		vouts: &[GetRawTransactionResultVout],
+		vouts: &[RawTransactionOutput],
 		inbound_events: &mut Vec<Event>,
 		outbound_events: &mut Vec<Event>,
 		vault_set: &BTreeSet<Address<NetworkUnchecked>>,
 		refund_set: &BTreeSet<Address<NetworkUnchecked>>,
 	) {
 		for vout in vouts {
-			if let Some(address) = vout.script_pub_key.address.clone() {
-				// address can only be contained in either one set.
-				if vault_set.contains(&address) {
-					inbound_events.push(Event { txid, index: vout.n, address, amount: vout.value });
-					continue;
-				}
-				if refund_set.contains(&address) {
-					outbound_events.push(Event {
-						txid,
-						index: vout.n,
-						address,
-						amount: vout.value,
-					});
-				}
+			let Some(address) = &vout.script_pubkey.address else {
+				continue;
+			};
+			let Ok(address) = address.parse::<Address<NetworkUnchecked>>() else {
+				continue;
+			};
+			let Ok(amount) = Amount::from_btc(vout.value) else {
+				continue;
+			};
+			let index = vout.index as u32;
+			// address can only be contained in either one set.
+			if vault_set.contains(&address) {
+				inbound_events.push(Event { txid, index, address, amount });
+				continue;
+			}
+			if refund_set.contains(&address) {
+				outbound_events.push(Event { txid, index, address, amount });
 			}
 		}
 	}
@@ -446,12 +408,13 @@ where
 		let mut outbound = EventMessage::outbound(to_block);
 
 		for i in from_block..=to_block {
-			let block_hash = self.get_block_hash(i).await?;
-			let txs = self.get_block_info_with_txs(&block_hash).await?.tx;
-			for tx in txs {
+			let block_hash = self.btc_client.get_block_hash(i).await?;
+			let block = self.btc_client.get_block_info_with_txs(&block_hash).await?;
+			for tx in block.tx {
+				let txid = tx.transaction.txid.parse::<Txid>()?;
 				self.filter(
-					tx.txid,
-					&tx.vout,
+					txid,
+					&tx.transaction.outputs,
 					&mut inbound.events,
 					&mut outbound.events,
 					&vault_set,

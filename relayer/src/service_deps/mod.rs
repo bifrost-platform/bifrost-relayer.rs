@@ -17,7 +17,7 @@ use alloy::{
 	primitives::ChainId,
 	providers::{Provider, WalletProvider, fillers::TxFiller},
 };
-use bitcoincore_rpc::{Auth, Client as BitcoinClient};
+use br_client::btc::{Auth, BtcClient as BitcoinClient};
 use br_client::{
 	btc::{
 		block::BlockManager,

@@ -5,7 +5,7 @@ use alloy::{
 	primitives::{Bytes, keccak256},
 	providers::{Provider, WalletProvider, fillers::TxFiller},
 };
-use bitcoincore_rpc::{Client as BtcClient, RpcApi};
+use br_client::btc::BtcClient;
 use br_client::{btc::handlers::XtRequester, eth::EthClient};
 use br_primitives::{
 	constants::{errors::INVALID_PERIODIC_SCHEDULE, schedule::PSBT_BROADCASTER_SCHEDULE},
@@ -65,7 +65,7 @@ where
 
 	/// Check if the transaction is already broadcasted
 	async fn is_transaction_broadcasted(&self, txid: Txid) -> Result<bool> {
-		let tx = self.btc_client.get_raw_transaction(&txid, None).await;
+		let tx = self.btc_client.get_raw_transaction(&txid).await;
 		Ok(tx.is_ok())
 	}
 
@@ -102,7 +102,7 @@ where
 		let tx = psbt.clone().extract_tx().expect("fee rate too high");
 
 		// First test if the transaction would be accepted
-		match self.btc_client.test_mempool_accept(&[&tx]).await {
+		match self.btc_client.test_mempool_accept(std::slice::from_ref(&tx)).await {
 			Ok(results) => {
 				if let Some(result) = results.first() {
 					if result.allowed {

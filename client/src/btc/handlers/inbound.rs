@@ -10,7 +10,6 @@ use alloy::{
 	providers::{Provider, WalletProvider, fillers::TxFiller},
 };
 use array_bytes::Hexify;
-use bitcoincore_rpc::bitcoin::Txid;
 use br_primitives::{
 	bootstrap::BootstrapSharedData,
 	btc::{Event, EventMessage as BTCEventMessage, EventType},
@@ -23,6 +22,7 @@ use br_primitives::{
 	utils::sub_display_format,
 };
 use eyre::Result;
+use miniscript::bitcoin::Txid;
 use miniscript::bitcoin::{Address as BtcAddress, address::NetworkUnchecked, hashes::Hash};
 use parity_scale_codec::Encode;
 use sc_service::SpawnTaskHandle;

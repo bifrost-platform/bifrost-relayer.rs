@@ -5,8 +5,9 @@ use std::{
 };
 
 use alloy::primitives::{Address, B256, Bytes, ChainId, U256};
-use bitcoincore_rpc::bitcoin::PublicKey;
-use miniscript::bitcoin::{Address as BtcAddress, Amount, Txid, address::NetworkUnchecked};
+use miniscript::bitcoin::{
+	Address as BtcAddress, Amount, PublicKey, Txid, address::NetworkUnchecked,
+};
 use subxt::tx::StaticPayload;
 use tokio::sync::mpsc::{UnboundedSender, error::SendError};
 

@@ -24,7 +24,6 @@ tokio = { workspace = true, features = [
     "parking_lot",
 ] }
 miniscript = { workspace = true }
-bitcoincore-rpc = { workspace = true }
 sentry = { workspace = true }
 aws-sdk-kms = { workspace = true }
 aws-config = { workspace = true }
