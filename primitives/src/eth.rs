@@ -341,20 +341,18 @@ where
 				provider.clone(),
 			));
 		} else {
-			contracts.legacy_socket = Some(SocketContract::new(
-				Address::from_str(
-					&evm_provider.legacy_socket_address.expect(MISSING_CONTRACT_ADDRESS),
+			contracts.legacy_socket = evm_provider.legacy_socket_address.map(|address| {
+				SocketContract::new(
+					Address::from_str(&address).expect(INVALID_CONTRACT_ADDRESS),
+					provider.clone(),
 				)
-				.expect(INVALID_CONTRACT_ADDRESS),
-				provider.clone(),
-			));
-			contracts.legacy_vault = Some(VaultContract::new(
-				Address::from_str(
-					&evm_provider.legacy_vault_address.expect(MISSING_CONTRACT_ADDRESS),
+			});
+			contracts.legacy_vault = evm_provider.legacy_vault_address.map(|address| {
+				VaultContract::new(
+					Address::from_str(&address).expect(INVALID_CONTRACT_ADDRESS),
+					provider.clone(),
 				)
-				.expect(INVALID_CONTRACT_ADDRESS),
-				provider.clone(),
-			));
+			});
 		}
 		contracts
 	}
