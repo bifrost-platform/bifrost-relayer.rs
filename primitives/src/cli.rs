@@ -97,6 +97,10 @@ pub struct EVMProvider {
 	pub authority_address: String,
 	/// Vault contract address
 	pub vault_address: String,
+	/// Legacy socket contract address (L-Socket, external chains only during N-contract migration)
+	pub legacy_socket_address: Option<String>,
+	/// Legacy vault contract address (L-Vault, external chains only during N-contract migration)
+	pub legacy_vault_address: Option<String>,
 	/// Hooks contract address (Only for chains that support hooks)
 	pub hooks_address: Option<String>,
 	/// Relayer manager contract address (Bifrost only)

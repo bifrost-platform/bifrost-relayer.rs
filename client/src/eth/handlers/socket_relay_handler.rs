@@ -320,13 +320,11 @@ where
 
 	#[inline]
 	fn is_target_contract(&self, log: &Log) -> bool {
-		match self.client.protocol_contracts.bitcoin_socket.as_ref() {
-			Some(bitcoin_socket) => {
-				log.address() == *self.client.protocol_contracts.socket.address()
-					|| log.address() == *bitcoin_socket.address()
-			},
-			_ => log.address() == *self.client.protocol_contracts.socket.address(),
-		}
+		let addr = log.address();
+		let contracts = &self.client.protocol_contracts;
+		addr == *contracts.socket.address()
+			|| contracts.legacy_socket.as_ref().is_some_and(|ls| addr == *ls.address())
+			|| contracts.bitcoin_socket.as_ref().is_some_and(|bs| addr == *bs.address())
 	}
 
 	#[inline]
@@ -1033,21 +1031,19 @@ where
 				let chunk_to_block =
 					std::cmp::min(from_block + BOOTSTRAP_BLOCK_CHUNK_SIZE - 1, to_block);
 
-				let filter = match &self.client.protocol_contracts.bitcoin_socket {
-					Some(bitcoin_socket) => Filter::new()
-						.address(vec![
-							*self.client.protocol_contracts.socket.address(),
-							*bitcoin_socket.address(),
-						])
-						.event_signature(Socket::SIGNATURE_HASH)
-						.from_block(from_block)
-						.to_block(chunk_to_block),
-					_ => Filter::new()
-						.address(*self.client.protocol_contracts.socket.address())
-						.event_signature(Socket::SIGNATURE_HASH)
-						.from_block(from_block)
-						.to_block(chunk_to_block),
-				};
+				let contracts = &self.client.protocol_contracts;
+				let mut addresses = vec![*contracts.socket.address()];
+				if let Some(ls) = &contracts.legacy_socket {
+					addresses.push(*ls.address());
+				}
+				if let Some(bs) = &contracts.bitcoin_socket {
+					addresses.push(*bs.address());
+				}
+				let filter = Filter::new()
+					.address(addresses)
+					.event_signature(Socket::SIGNATURE_HASH)
+					.from_block(from_block)
+					.to_block(chunk_to_block);
 				let target_logs_chunk = self.client.get_logs(&filter).await?;
 				logs.extend(target_logs_chunk);
 
