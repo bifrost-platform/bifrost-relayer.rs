@@ -50,7 +50,7 @@ use solana_sdk::message::Message;
 use solana_sdk::pubkey::Pubkey;
 use solana_sdk::signature::{Keypair, Signature, Signer, read_keypair_file};
 use solana_sdk::transaction::Transaction;
-use subxt::ext::subxt_core::utils::AccountId20;
+use subxt::utils::eth::AccountId20;
 use tokio::sync::broadcast::Receiver;
 use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
 use tokio_stream::{StreamExt, wrappers::BroadcastStream};
@@ -706,13 +706,15 @@ where
 			.map_err(|e| eyre::eyre!("sign_message: {e}"))?
 			.into();
 
-		let call: XtRequest = Arc::new(bifrost_runtime::tx().blaze().submit_outbound_requests(
-			SocketMessagesSubmission {
-				authority_id: AccountId20(self.bfc_client.address().await.0.0),
-				messages: vec![encoded_msg],
-			},
-			signature,
-		));
+		let call = XtRequest::SubmitOutboundRequests(
+			bifrost_runtime::tx().blaze().submit_outbound_requests(
+				SocketMessagesSubmission {
+					authority_id: AccountId20(self.bfc_client.address().await.0.0),
+					messages: vec![encoded_msg],
+				},
+				signature,
+			),
+		);
 
 		// For outbound-commit: src = BFC (originator), dst = this Solana
 		// cluster (where the poll just landed). `is_inbound=false` so the

@@ -1,8 +1,11 @@
 use br_client::btc::handlers::FeeRateFeeder;
 use br_periodic::PsbtBroadcaster;
-use br_primitives::constants::btc::{
-	MEMPOOL_SPACE_BLOCK_HEIGHT_ENDPOINT, MEMPOOL_SPACE_FEE_RATE_ENDPOINT,
-	MEMPOOL_SPACE_TESTNET_BLOCK_HEIGHT_ENDPOINT, MEMPOOL_SPACE_TESTNET_FEE_RATE_ENDPOINT,
+use br_primitives::constants::{
+	btc::{
+		MEMPOOL_SPACE_BLOCK_HEIGHT_ENDPOINT, MEMPOOL_SPACE_FEE_RATE_ENDPOINT,
+		MEMPOOL_SPACE_TESTNET_BLOCK_HEIGHT_ENDPOINT, MEMPOOL_SPACE_TESTNET_FEE_RATE_ENDPOINT,
+	},
+	tx::{DEFAULT_CALL_RETRIES, DEFAULT_CALL_RETRY_INTERVAL_MS},
 };
 
 use super::*;
@@ -53,9 +56,14 @@ where
 			(Some(username), Some(password)) => Auth::UserPass(username, password),
 			_ => Auth::None,
 		};
-		let btc_client =
-			BitcoinClient::new(&btc_provider.provider, auth, btc_provider.wallet.clone(), Some(60))
-				.expect(INVALID_PROVIDER_URL);
+		let btc_client = BitcoinClient::new(
+			&btc_provider.provider,
+			auth,
+			btc_provider.wallet.clone(),
+			DEFAULT_CALL_RETRIES,
+			DEFAULT_CALL_RETRY_INTERVAL_MS,
+		)
+		.expect(INVALID_PROVIDER_URL);
 
 		let block_manager = BlockManager::new(
 			btc_client.clone(),
@@ -95,7 +103,7 @@ where
 		);
 		let psbt_broadcaster = PsbtBroadcaster::new(
 			bfc_client.clone(),
-			btc_client.clone(),
+			btc_client.with_retries(1),
 			substrate_deps.xt_request_sender.clone(),
 		);
 		let pub_key_submitter = PubKeySubmitter::new(
@@ -111,7 +119,7 @@ where
 		);
 		let fee_rate_feeder = FeeRateFeeder::new(
 			bfc_client.clone(),
-			btc_client.clone(),
+			btc_client.with_retries(1),
 			substrate_deps.xt_request_sender.clone(),
 			block_manager.subscribe(),
 			if network == Network::Bitcoin {

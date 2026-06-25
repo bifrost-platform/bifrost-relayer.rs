@@ -5,9 +5,10 @@ use std::{
 };
 
 use alloy::primitives::{Address, B256, Bytes, ChainId, U256};
-use bitcoincore_rpc::bitcoin::PublicKey;
-use miniscript::bitcoin::{Address as BtcAddress, Amount, Txid, address::NetworkUnchecked};
-use subxt::tx::Payload;
+use miniscript::bitcoin::{
+	Address as BtcAddress, Amount, PublicKey, Txid, address::NetworkUnchecked,
+};
+use subxt::tx::StaticPayload;
 use tokio::sync::mpsc::{UnboundedSender, error::SendError};
 
 use crate::{
@@ -15,6 +16,7 @@ use crate::{
 	constants::tx::{DEFAULT_TX_RETRIES, DEFAULT_TX_RETRY_INTERVAL_MS},
 	eth::SocketEventStatus,
 	periodic::PriceResponse,
+	substrate::bifrost_runtime,
 };
 
 #[derive(Clone, Debug)]
@@ -595,7 +597,28 @@ impl Display for XtRequestMetadata {
 	}
 }
 
-pub type XtRequest = Arc<dyn Payload + Send + Sync>;
+/// A type-erased unsigned extrinsic request.
+#[derive(Clone)]
+pub enum XtRequest {
+	VaultKeyPresubmission(
+		StaticPayload<bifrost_runtime::btc_registration_pool::calls::VaultKeyPresubmission>,
+	),
+	SubmitSystemVaultKey(
+		StaticPayload<bifrost_runtime::btc_registration_pool::calls::SubmitSystemVaultKey>,
+	),
+	SubmitVaultKey(StaticPayload<bifrost_runtime::btc_registration_pool::calls::SubmitVaultKey>),
+	SubmitExecutedRequest(
+		StaticPayload<bifrost_runtime::btc_socket_queue::calls::SubmitExecutedRequest>,
+	),
+	SubmitRollbackPoll(StaticPayload<bifrost_runtime::btc_socket_queue::calls::SubmitRollbackPoll>),
+	SubmitSignedPsbt(StaticPayload<bifrost_runtime::btc_socket_queue::calls::SubmitSignedPsbt>),
+	BroadcastPoll(StaticPayload<bifrost_runtime::blaze::calls::BroadcastPoll>),
+	SubmitFeeRate(StaticPayload<bifrost_runtime::blaze::calls::SubmitFeeRate>),
+	SubmitUtxos(StaticPayload<bifrost_runtime::blaze::calls::SubmitUtxos>),
+	SubmitOutboundRequests(StaticPayload<bifrost_runtime::blaze::calls::SubmitOutboundRequests>),
+	OnFlightPoll(StaticPayload<bifrost_runtime::cccp_relay_queue::calls::OnFlightPoll>),
+	FinalizePoll(StaticPayload<bifrost_runtime::cccp_relay_queue::calls::FinalizePoll>),
+}
 
 pub struct XtRequestMessage {
 	/// The remaining retries of the transaction request.

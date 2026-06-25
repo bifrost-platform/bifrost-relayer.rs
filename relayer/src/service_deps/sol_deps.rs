@@ -38,7 +38,7 @@ use br_primitives::{
 	substrate::{CustomConfig, create_rpc_client},
 	tx::XtRequestSender,
 };
-use subxt::{OnlineClient, backend::legacy::LegacyRpcMethods};
+use subxt::{OnlineClient, rpcs::LegacyRpcMethods};
 
 const DEFAULT_SOL_CONFIRMATION_DEPTH: u64 = 32;
 
@@ -79,7 +79,7 @@ where
 		bfc_client: Arc<EthClient<F, P, N>>,
 		xt_request_sender: Arc<XtRequestSender>,
 		sub_client: OnlineClient<CustomConfig>,
-		sub_rpc: LegacyRpcMethods<CustomConfig>,
+		sub_rpc: LegacyRpcMethods<subxt::config::RpcConfigFor<CustomConfig>>,
 	) -> eyre::Result<Self> {
 		let client = SolClient::new(provider);
 
@@ -177,7 +177,7 @@ where
 		let rpc_client = create_rpc_client(sub_rpc_url)
 			.await
 			.map_err(|e| eyre::eyre!("create substrate RPC client for queue poller: {e}"))?;
-		LegacyRpcMethods::<CustomConfig>::new(rpc_client)
+		LegacyRpcMethods::<subxt::config::RpcConfigFor<CustomConfig>>::new(rpc_client)
 	};
 
 	let mut out = Vec::with_capacity(providers.len());

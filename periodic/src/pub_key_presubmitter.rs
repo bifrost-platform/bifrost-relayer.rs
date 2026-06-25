@@ -4,7 +4,6 @@ use alloy::{
 	providers::{Provider, WalletProvider, fillers::TxFiller},
 };
 use array_bytes::Hexify;
-use bitcoincore_rpc::bitcoin::PublicKey;
 use br_client::{
 	btc::storage::keypair::{KeypairStorage, KeypairStorageT},
 	eth::EthClient,
@@ -14,7 +13,7 @@ use br_primitives::{
 	substrate::{
 		CustomConfig, EthereumSignature, MigrationSequence, Public, VaultKeyPreSubmission,
 		bifrost_runtime::{
-			self, btc_registration_pool::storage::types::service_state::ServiceState,
+			self, btc_registration_pool::storage::service_state::Output as ServiceState,
 		},
 		initialize_sub_client,
 	},
@@ -26,8 +25,9 @@ use br_primitives::{
 };
 use cron::Schedule;
 use eyre::Result;
+use miniscript::bitcoin::PublicKey;
 use std::{str::FromStr, sync::Arc, time::Duration};
-use subxt::{OnlineClient, ext::subxt_core::utils::AccountId20, storage::Storage};
+use subxt::{OnlineClient, utils::eth::AccountId20};
 use tokio::sync::RwLock;
 
 const SUB_LOG_TARGET: &str = "pubkey-presubmitter";
@@ -122,7 +122,7 @@ where
 		let metadata = VaultKeyPresubmissionMetadata { keys: pub_keys.len() };
 
 		Ok((
-			Arc::new(
+			XtRequest::VaultKeyPresubmission(
 				bifrost_runtime::tx()
 					.btc_registration_pool()
 					.vault_key_presubmission(msg, signature),
@@ -216,10 +216,10 @@ where
 		Ok(relay_exec.is_member(self.bfc_client.address().await).call().await?)
 	}
 
-	async fn get_latest_storage(&self) -> Storage<CustomConfig, OnlineClient<CustomConfig>> {
+	async fn get_latest_block(&self) -> subxt::client::OnlineClientAtBlock<CustomConfig> {
 		loop {
-			match self.sub_client.as_ref().unwrap().storage().at_latest().await {
-				Ok(storage) => return storage,
+			match self.sub_client.as_ref().unwrap().at_current_block().await {
+				Ok(at) => return at,
 				Err(_) => {
 					tokio::time::sleep(Duration::from_millis(DEFAULT_CALL_RETRY_INTERVAL_MS)).await;
 					continue;
@@ -230,20 +230,30 @@ where
 
 	async fn get_presubmittable_amount(&self) -> usize {
 		loop {
-			let storage = self.get_latest_storage().await;
+			let at = self.get_latest_block().await;
+			let storage = at.storage();
 			let max_presubmission = storage
-				.fetch(&bifrost_runtime::storage().btc_registration_pool().max_pre_submission())
+				.try_fetch(
+					bifrost_runtime::storage().btc_registration_pool().max_pre_submission(),
+					(),
+				)
 				.await
 				.unwrap()
+				.unwrap()
+				.decode()
 				.unwrap() as usize;
 			match storage
-				.fetch(&bifrost_runtime::storage().btc_registration_pool().pre_submitted_pub_keys(
-					self.get_current_round().await,
-					AccountId20(self.bfc_client.address().await.0.0),
-				))
+				.try_fetch(
+					bifrost_runtime::storage().btc_registration_pool().pre_submitted_pub_keys(),
+					(
+						self.get_current_round().await,
+						AccountId20(self.bfc_client.address().await.0.0),
+					),
+				)
 				.await
 			{
 				Ok(Some(submitted)) => {
+					let submitted = submitted.decode().unwrap();
 					return if submitted.len() > max_presubmission {
 						0
 					} else {
@@ -261,12 +271,13 @@ where
 	/// Get the current round number.
 	async fn get_current_round(&self) -> u32 {
 		loop {
-			let storage = self.get_latest_storage().await;
+			let at = self.get_latest_block().await;
+			let storage = at.storage();
 			match storage
-				.fetch(&bifrost_runtime::storage().btc_registration_pool().current_round())
+				.try_fetch(bifrost_runtime::storage().btc_registration_pool().current_round(), ())
 				.await
 			{
-				Ok(Some(round)) => return round,
+				Ok(Some(round)) => return round.decode().unwrap(),
 				Ok(None) => {
 					unreachable!("The current round number should always be available.")
 				},

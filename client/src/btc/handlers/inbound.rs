@@ -10,7 +10,6 @@ use alloy::{
 	providers::{Provider, WalletProvider, fillers::TxFiller},
 };
 use array_bytes::Hexify;
-use bitcoincore_rpc::bitcoin::Txid;
 use br_primitives::{
 	bootstrap::BootstrapSharedData,
 	btc::{Event, EventMessage as BTCEventMessage, EventType},
@@ -23,11 +22,12 @@ use br_primitives::{
 	utils::sub_display_format,
 };
 use eyre::Result;
+use miniscript::bitcoin::Txid;
 use miniscript::bitcoin::{Address as BtcAddress, address::NetworkUnchecked, hashes::Hash};
 use parity_scale_codec::Encode;
 use sc_service::SpawnTaskHandle;
 use std::sync::Arc;
-use subxt::ext::subxt_core::utils::AccountId20;
+use subxt::utils::eth::AccountId20;
 use tokio::sync::broadcast::Receiver;
 use tokio_stream::{StreamExt, wrappers::BroadcastStream};
 
@@ -152,7 +152,10 @@ where
 	async fn build_unsigned_tx(&self, event: &Event) -> Result<(XtRequest, SubmitUtxoMetadata)> {
 		let (msg, signature) = self.build_payload(event).await?;
 		let metadata = SubmitUtxoMetadata::new(event);
-		Ok((Arc::new(bifrost_runtime::tx().blaze().submit_utxos(msg, signature)), metadata))
+		Ok((
+			XtRequest::SubmitUtxos(bifrost_runtime::tx().blaze().submit_utxos(msg, signature)),
+			metadata,
+		))
 	}
 
 	/// Send the transaction request message to the channel.

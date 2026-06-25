@@ -23,26 +23,21 @@ repository = "https://github.com/bifrost-platform/bifrost-relayer.rs"
 # General
 log = "0.4.29"
 env_logger = "0.11.9"
-sentry = { version = "0.46", default-features = false, features = [
+sentry = { version = "0.48.2", default-features = false, features = [
 	"reqwest",
 	"rustls",
 	"backtrace",
 	"contexts",
 	"panic",
 ] }
-secrecy = { version = "0.8.0", default-features = false, features = [
-	"alloc",
-	"serde",
-] }
-
 async-trait = "0.1.89"
 clap = "4.5.58"
-cron = "0.15.0"
+cron = "0.17.0"
 chrono = "0.4.43"
 thiserror = "2.0.18"
 futures = "0.3.31"
-reqwest = { version = "0.12", default-features = false, features = [
-	"rustls-tls",
+reqwest = { version = "0.13.4", default-features = false, features = [
+	"rustls",
 	"json",
 	"http2",
 ] }
@@ -58,7 +53,7 @@ serde = "1.0.228"
 serde_json = "1.0.149"
 
 hex = "0.4.3"
-alloy = { version = "1.7", default-features = false, features = [
+alloy = { version = "2.1", default-features = false, features = [
 	"full",
 	"reqwest-rustls-tls",
 	"json-rpc",
@@ -72,7 +67,7 @@ aws-sdk-kms = "1.100.0"
 aws-config = { version = "1.8.14", features = ["behavior-version-latest"] }
 
 miniscript = "13.0.0"
-bitcoincore-rpc = { git = "https://github.com/bifrost-platform/rust-bitcoincore-rpc", branch = "0.19.0-reqwest" }
+corepc-client = { version = "0.16", features = ["client-sync"] }
 
 tokio = "1.49"
 tokio-stream = "0.1.18"
@@ -89,8 +84,8 @@ borsh = { version = "1.5", features = ["derive"] }
 base64 = "0.22"
 sha2 = "0.10"
 
-subxt = "0.44.2"
-jsonrpsee = { version = "0.24.10", features = ["ws-client"] }
+subxt = "0.50.1"
+jsonrpsee = { version = "0.24", features = ["ws-client"] }
 
 # Substrate Clients
 sc-cli = { git = "https://github.com/bifrost-platform/polkadot-sdk", default-features = false, branch = "bifrost-polkadot-stable2512" }

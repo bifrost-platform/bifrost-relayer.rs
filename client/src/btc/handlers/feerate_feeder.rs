@@ -1,10 +1,10 @@
 use super::{Event, EventMessage, EventType, Handler, LOG_TARGET, XtRequester};
+use crate::btc::client::BtcClient;
 use crate::eth::EthClient;
 use alloy::{
 	network::Network,
 	providers::{Provider, WalletProvider, fillers::TxFiller},
 };
-use bitcoincore_rpc::{Client as BtcClient, RpcApi};
 use br_primitives::{
 	btc::FeeRateResponse,
 	constants::{btc::MEMPOOL_SPACE_FEE_RATE_MULTIPLIER, tx::DEFAULT_CALL_RETRY_INTERVAL_MS},
@@ -15,8 +15,9 @@ use br_primitives::{
 	utils::sub_display_format,
 };
 use eyre::Result;
+use miniscript::bitcoin::Amount;
 use std::sync::Arc;
-use subxt::{OnlineClient, ext::subxt_core::utils::AccountId20};
+use subxt::{OnlineClient, utils::eth::AccountId20};
 use tokio::{
 	sync::broadcast::Receiver,
 	time::{Duration, sleep},
@@ -149,15 +150,28 @@ where
 	/// Check if the fee rate has been submitted by this authority.
 	async fn is_fee_rate_submitted(&self) -> bool {
 		loop {
-			match self.sub_client.as_ref().unwrap().storage().at_latest().await {
-				Ok(storage) => {
-					match storage.fetch(&bifrost_runtime::storage().blaze().fee_rates()).await {
-						Ok(Some(fee_rates)) => {
-							let address = self.bfc_client.address().await.0.0;
-							if fee_rates.0.iter().any(|(key, _)| key.0 == address) {
-								return true;
-							}
-							return false;
+			match self.sub_client.as_ref().unwrap().at_current_block().await {
+				Ok(at) => {
+					let storage = at.storage();
+					match storage
+						.try_fetch(bifrost_runtime::storage().blaze().fee_rates(), ())
+						.await
+					{
+						Ok(Some(fee_rates)) => match fee_rates.decode() {
+							Ok(fee_rates) => {
+								let address = self.bfc_client.address().await.0.0;
+								if fee_rates.0.iter().any(|(key, _)| key.0 == address) {
+									return true;
+								}
+								return false;
+							},
+							Err(_) => {
+								tokio::time::sleep(Duration::from_millis(
+									DEFAULT_CALL_RETRY_INTERVAL_MS,
+								))
+								.await;
+								continue;
+							},
 						},
 						Ok(None) => {
 							unreachable!("The fee rate should always be available.")
@@ -181,16 +195,18 @@ where
 
 	/// Fallback method to estimate fee rate if the mempool.space API is not available.
 	async fn fallback_estimate_fee(&self) -> Result<(u64, u64)> {
-		let st_fee_result = self.btc_client.estimate_smart_fee(1, None).await?;
-		let lt_fee_result = self.btc_client.estimate_smart_fee(6, None).await?;
+		let st_fee_result = self.btc_client.estimate_smart_fee(1).await?;
+		let lt_fee_result = self.btc_client.estimate_smart_fee(6).await?;
 
-		let st_fee_rate = st_fee_result
-			.fee_rate
-			.ok_or_else(|| eyre::eyre!("Failed to get short-term fee rate from Bitcoin node"))?
+		let st_fee_rate =
+			Amount::from_btc(st_fee_result.fee_rate.ok_or_else(|| {
+				eyre::eyre!("Failed to get short-term fee rate from Bitcoin node")
+			})?)?
 			.to_sat() / 1000;
-		let lt_fee_rate = lt_fee_result
-			.fee_rate
-			.ok_or_else(|| eyre::eyre!("Failed to get long-term fee rate from Bitcoin node"))?
+		let lt_fee_rate =
+			Amount::from_btc(lt_fee_result.fee_rate.ok_or_else(|| {
+				eyre::eyre!("Failed to get long-term fee rate from Bitcoin node")
+			})?)?
 			.to_sat() / 1000;
 
 		if self.debug_mode {
@@ -230,7 +246,10 @@ where
 	) -> Result<(XtRequest, SubmitFeeRateMetadata)> {
 		let (msg, signature) = self.build_payload(lt_fee_rate, fee_rate).await?;
 		let metadata = SubmitFeeRateMetadata::new(lt_fee_rate, fee_rate);
-		Ok((Arc::new(bifrost_runtime::tx().blaze().submit_fee_rate(msg, signature)), metadata))
+		Ok((
+			XtRequest::SubmitFeeRate(bifrost_runtime::tx().blaze().submit_fee_rate(msg, signature)),
+			metadata,
+		))
 	}
 
 	async fn submit_fee_rate(&self, lt_fee_rate: u64, fee_rate: u64) -> Result<()> {

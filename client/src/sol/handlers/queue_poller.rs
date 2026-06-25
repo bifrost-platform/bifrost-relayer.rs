@@ -41,8 +41,8 @@ use std::str::FromStr;
 use alloy::primitives::{Address, Bytes, ChainId, FixedBytes, U256, keccak256};
 use eyre::Result;
 use solana_sdk::signature::Signature;
-use subxt::ext::subxt_core::utils::AccountId20;
-use subxt::{OnlineClient, backend::legacy::LegacyRpcMethods};
+use subxt::utils::eth::AccountId20;
+use subxt::{OnlineClient, rpcs::LegacyRpcMethods};
 use tokio::sync::broadcast::Receiver;
 use tokio_stream::{StreamExt, wrappers::BroadcastStream};
 
@@ -57,7 +57,7 @@ use br_primitives::{
 	sol::{Event, EventMessage, EventType},
 	substrate::{CustomConfig, FinalizePollSubmission, OnFlightPollSubmission, bifrost_runtime},
 	tx::{
-		FinalizePollMetadata, OnFlightPollMetadata, XtRequestMessage, XtRequestMetadata,
+		FinalizePollMetadata, OnFlightPollMetadata, XtRequest, XtRequestMessage, XtRequestMetadata,
 		XtRequestSender,
 	},
 	utils::sub_display_format,
@@ -82,7 +82,7 @@ where
 	/// relayer's secp256k1 key.
 	pub bfc_client: Arc<EthClient<F, P, N>>,
 	sub_client: OnlineClient<CustomConfig>,
-	sub_rpc: LegacyRpcMethods<CustomConfig>,
+	sub_rpc: LegacyRpcMethods<subxt::config::RpcConfigFor<CustomConfig>>,
 	xt_request_sender: Arc<XtRequestSender>,
 	event_stream: BroadcastStream<EventMessage>,
 }
@@ -96,7 +96,7 @@ where
 		client: SolClient,
 		bfc_client: Arc<EthClient<F, P, N>>,
 		sub_client: OnlineClient<CustomConfig>,
-		sub_rpc: LegacyRpcMethods<CustomConfig>,
+		sub_rpc: LegacyRpcMethods<subxt::config::RpcConfigFor<CustomConfig>>,
 		xt_request_sender: Arc<XtRequestSender>,
 		event_stream: Receiver<EventMessage>,
 	) -> Self {
@@ -177,30 +177,37 @@ where
 		src_tx_id: subxt::utils::H256,
 	) -> Result<bool> {
 		let best_hash = self.sub_rpc.chain_get_block_hash(None).await?.unwrap_or_default();
-		let storage = self.sub_client.storage().at(best_hash);
+		let at = self.sub_client.at_block(subxt::backend::BlockRef::from_hash(best_hash)).await?;
+		let storage = at.storage();
 
 		let on_flight = storage
-			.fetch(&bifrost_runtime::storage().cccp_relay_queue().on_flight_transfers(msg_hash))
+			.try_fetch(
+				bifrost_runtime::storage().cccp_relay_queue().on_flight_transfers(),
+				(msg_hash,),
+			)
 			.await?;
 		if on_flight.is_some() {
 			return Ok(true);
 		}
 
 		let finalized = storage
-			.fetch(&bifrost_runtime::storage().cccp_relay_queue().finalized_transfers(msg_hash))
+			.try_fetch(
+				bifrost_runtime::storage().cccp_relay_queue().finalized_transfers(),
+				(msg_hash,),
+			)
 			.await?;
 		if finalized.is_some() {
 			return Ok(true);
 		}
 
-		let pending = storage
-			.fetch(
-				&bifrost_runtime::storage()
-					.cccp_relay_queue()
-					.pending_transfers(msg_hash, src_tx_id),
+		if let Some(sv) = storage
+			.try_fetch(
+				bifrost_runtime::storage().cccp_relay_queue().pending_transfers(),
+				(msg_hash, src_tx_id),
 			)
-			.await?;
-		if let Some(pending) = pending {
+			.await?
+		{
+			let pending = sv.decode()?;
 			let voter = AccountId20(self.bfc_client.address().await.0.0);
 			if pending.on_flight_voters.0.iter().any(|v| v == &voter) {
 				return Ok(true);
@@ -211,19 +218,27 @@ where
 
 	async fn should_skip_finalize_poll(&self, msg_hash: subxt::utils::H256) -> Result<bool> {
 		let best_hash = self.sub_rpc.chain_get_block_hash(None).await?.unwrap_or_default();
-		let storage = self.sub_client.storage().at(best_hash);
+		let at = self.sub_client.at_block(subxt::backend::BlockRef::from_hash(best_hash)).await?;
+		let storage = at.storage();
 
 		let finalized = storage
-			.fetch(&bifrost_runtime::storage().cccp_relay_queue().finalized_transfers(msg_hash))
+			.try_fetch(
+				bifrost_runtime::storage().cccp_relay_queue().finalized_transfers(),
+				(msg_hash,),
+			)
 			.await?;
 		if finalized.is_some() {
 			return Ok(true);
 		}
 
-		let on_flight = storage
-			.fetch(&bifrost_runtime::storage().cccp_relay_queue().on_flight_transfers(msg_hash))
-			.await?;
-		if let Some(on_flight) = on_flight {
+		if let Some(sv) = storage
+			.try_fetch(
+				bifrost_runtime::storage().cccp_relay_queue().on_flight_transfers(),
+				(msg_hash,),
+			)
+			.await?
+		{
+			let on_flight = sv.decode()?;
 			let voter = AccountId20(self.bfc_client.address().await.0.0);
 			if on_flight.finalization_voters.0.iter().any(|v| v == &voter) {
 				return Ok(true);
@@ -332,7 +347,7 @@ where
 			.map_err(|e| eyre::eyre!("sign_message: {e}"))?
 			.into();
 
-		let call = Arc::new(bifrost_runtime::tx().cccp_relay_queue().on_flight_poll(
+		let call = XtRequest::OnFlightPoll(bifrost_runtime::tx().cccp_relay_queue().on_flight_poll(
 			OnFlightPollSubmission {
 				authority_id: AccountId20(self.bfc_client.address().await.0.0),
 				msg: encoded_msg.into(),
@@ -387,7 +402,7 @@ where
 			.map_err(|e| eyre::eyre!("sign_message: {e}"))?
 			.into();
 
-		let call = Arc::new(bifrost_runtime::tx().cccp_relay_queue().finalize_poll(
+		let call = XtRequest::FinalizePoll(bifrost_runtime::tx().cccp_relay_queue().finalize_poll(
 			FinalizePollSubmission {
 				authority_id: AccountId20(self.bfc_client.address().await.0.0),
 				msg: encoded_msg.into(),

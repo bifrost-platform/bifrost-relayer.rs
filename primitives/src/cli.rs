@@ -1,6 +1,6 @@
 use alloy::primitives::ChainId;
-use secrecy::SecretString;
-use serde::Deserialize;
+use serde::{Deserialize, Deserializer};
+use sp_core::crypto::SecretString;
 use std::borrow::Cow;
 pub type Result<T> = std::result::Result<T, Error>;
 
@@ -295,7 +295,19 @@ pub struct KeystoreConfig {
 	/// Path of the keystore. (default: `./keys`)
 	pub path: Option<String>,
 	/// Password of the keystore. (default: `None`)
+	#[serde(default, deserialize_with = "deserialize_optional_secret")]
 	pub password: Option<SecretString>,
 	/// AWS KMS key ID. (to use keystore encryption/decryption)
 	pub kms_key_id: Option<String>,
+}
+
+/// Deserialize an optional keystore password into a [`SecretString`].
+fn deserialize_optional_secret<'de, D>(
+	deserializer: D,
+) -> std::result::Result<Option<SecretString>, D::Error>
+where
+	D: Deserializer<'de>,
+{
+	let raw = Option::<String>::deserialize(deserializer)?;
+	Ok(raw.map(SecretString::new))
 }
