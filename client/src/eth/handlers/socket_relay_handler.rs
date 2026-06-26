@@ -765,9 +765,22 @@ where
 		if let Some(src_client) = &self.system_clients.get(&src) {
 			let request =
 				src_client.protocol_contracts.socket.get_request(req_id.clone()).call().await?;
+			let status = SocketEventStatus::from(&request.field[0]);
+
+			// If the primary (N) socket has no record of this request, it may have originated
+			// on the legacy (L) socket. Fall back to query the legacy socket in that case.
+			if status == SocketEventStatus::None {
+				if let Some(legacy_socket) = &src_client.protocol_contracts.legacy_socket {
+					let legacy_request = legacy_socket.get_request(req_id.clone()).call().await?;
+					return Ok(matches!(
+						SocketEventStatus::from(&legacy_request.field[0]),
+						SocketEventStatus::Committed | SocketEventStatus::Rollbacked
+					));
+				}
+			}
 
 			return Ok(matches!(
-				SocketEventStatus::from(&request.field[0]),
+				status,
 				SocketEventStatus::Committed | SocketEventStatus::Rollbacked
 			));
 		}
@@ -1143,7 +1156,9 @@ mod tests {
 
 	#[test]
 	fn test_socket_event_decode() {
-		let data = bytes!("");
+		let data = bytes!(
+			"000000000000000000000000000000000000000000000000000000000000002000014a3400000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000266100000000000000000000000000000000000000000000000000000000000001ac00000000000000000000000000000000000000000000000000000000000000050000bfc000000000000000000000000000000000000000000000000000000000030101020000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000e0000000040000000100014a34ffffffffffffffffffffffffffffffffffffffff000000000000000000000000000000000000000000000000000000000000000000000000000000000000000055b57a7a0f41d668c584b2246d373b639084eaed00000000000000000000000055b57a7a0f41d668c584b2246d373b639084eaed0000000000000000000000000000000000000000000000000007c1c5cf6a93af00000000000000000000000000000000000000000000000000000000000000c00000000000000000000000000000000000000000000000000000000000000000"
+		);
 
 		match Socket::abi_decode_data(&data) {
 			Ok(socket) => {

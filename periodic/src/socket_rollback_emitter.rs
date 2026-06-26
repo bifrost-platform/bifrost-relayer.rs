@@ -148,9 +148,19 @@ where
 		chain_id: ChainId,
 	) -> Result<Option<RequestInfo>> {
 		if let Some(client) = self.system_clients.get(&chain_id) {
-			return Ok(Some(
-				client.protocol_contracts.socket.get_request(req_id.clone()).call().await?,
-			));
+			let request =
+				client.protocol_contracts.socket.get_request(req_id.clone()).call().await?;
+
+			// If the primary (N) socket has no record of this request, fall back to the legacy (L)
+			// socket which may have handled the original request.
+			if SocketEventStatus::from(&request.field[0]) == SocketEventStatus::None {
+				if let Some(legacy_socket) = &client.protocol_contracts.legacy_socket {
+					let legacy_request = legacy_socket.get_request(req_id.clone()).call().await?;
+					return Ok(Some(legacy_request));
+				}
+			}
+
+			return Ok(Some(request));
 		}
 		Ok(None)
 	}
