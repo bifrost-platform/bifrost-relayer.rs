@@ -1,16 +1,22 @@
-use std::{collections::BTreeMap, str::FromStr, sync::Arc};
+use std::{collections::BTreeMap, str::FromStr, sync::Arc, time::Duration};
 
 use alloy::{
 	network::Network,
 	primitives::{Address as EvmAddress, B256, Bytes, keccak256},
 	providers::{Provider, WalletProvider, fillers::TxFiller},
 };
-use br_client::{
-	btc::{BtcClient, client::GetRawTransactionVerbose, handlers::XtRequester},
-	eth::EthClient,
+use bitcoincore_rpc::{
+	Client as BtcClient, Error, RpcApi,
+	bitcoin::{Address, Amount, Psbt, Txid, hashes::sha256d::Hash},
+	bitcoincore_rpc_json::GetRawTransactionResult,
 };
+use br_client::{btc::handlers::XtRequester, eth::EthClient};
 use br_primitives::{
-	constants::{errors::INVALID_PERIODIC_SCHEDULE, schedule::BITCOIN_ROLLBACK_CHECK_SCHEDULE},
+	constants::{
+		errors::{INVALID_PERIODIC_SCHEDULE, PROVIDER_INTERNAL_ERROR},
+		schedule::BITCOIN_ROLLBACK_CHECK_SCHEDULE,
+		tx::{DEFAULT_CALL_RETRIES, DEFAULT_CALL_RETRY_INTERVAL_MS},
+	},
 	contracts::socket_queue::{SocketQueueContract::rollback_requestReturn, SocketQueueInstance},
 	substrate::{EthereumSignature, RollbackPollMessage, bifrost_runtime},
 	tx::{SubmitRollbackPollMetadata, XtRequest, XtRequestMetadata, XtRequestSender},
@@ -18,10 +24,10 @@ use br_primitives::{
 };
 use cron::Schedule;
 use eyre::Result;
-use miniscript::bitcoin::{
-	Address, Amount, Psbt, Txid, address::NetworkUnchecked, hashes::sha256d::Hash,
-};
+use serde::Deserialize;
+use serde_json::Value;
 use subxt::{utils::H256, utils::eth::AccountId20};
+use tokio::time::sleep;
 
 use crate::traits::PeriodicWorker;
 
@@ -86,6 +92,31 @@ where
 }
 
 #[async_trait::async_trait]
+impl<F, P, N: Network> RpcApi for BitcoinRollbackVerifier<F, P, N>
+where
+	F: TxFiller<N> + WalletProvider<N>,
+	P: Provider<N>,
+{
+	async fn call<T: for<'a> Deserialize<'a> + Send>(
+		&self,
+		cmd: &str,
+		args: &[Value],
+	) -> bitcoincore_rpc::Result<T> {
+		let mut latest_error = Error::ReturnedError(PROVIDER_INTERNAL_ERROR.to_string());
+		for _ in 0..DEFAULT_CALL_RETRIES {
+			match self.btc_client.call(cmd, args).await {
+				Ok(ret) => return Ok(ret),
+				Err(e) => {
+					latest_error = e;
+				},
+			}
+			sleep(Duration::from_millis(DEFAULT_CALL_RETRY_INTERVAL_MS)).await;
+		}
+		Err(latest_error)
+	}
+}
+
+#[async_trait::async_trait]
 impl<F, P, N: Network> XtRequester<F, P, N> for BitcoinRollbackVerifier<F, P, N>
 where
 	F: TxFiller<N> + WalletProvider<N>,
@@ -140,7 +171,7 @@ where
 
 					let mut is_approved = false;
 
-					match self.btc_client.get_raw_transaction_info(&request.txid).await {
+					match self.btc_client.get_raw_transaction_info(&request.txid, None).await {
 						Ok(tx) => {
 							if self.is_rollback_valid(tx, &request) {
 								is_approved = true;
@@ -199,7 +230,7 @@ where
 	}
 
 	/// Verifies whether the pending request information matches with on-chain data.
-	fn is_rollback_valid(&self, tx: GetRawTransactionVerbose, request: &RollbackRequest) -> bool {
+	fn is_rollback_valid(&self, tx: GetRawTransactionResult, request: &RollbackRequest) -> bool {
 		// confirmations must be satisfied (we consider at least 6 blocks of confirmation)
 		if let Some(confirmations) = tx.confirmations {
 			if confirmations < 6 {
@@ -207,23 +238,17 @@ where
 			}
 		}
 		// output[index] must exist
-		if tx.outputs.len() < request.vout {
+		if tx.vout.len() < request.vout {
 			return false;
 		}
-		let output = &tx.outputs[request.vout];
-		if let Some(address) = &output.script_pubkey.address {
+		let output = tx.vout[request.vout].clone();
+		if let Some(to) = output.script_pub_key.address {
 			// output.to must match
-			let Ok(to) = address.parse::<Address<NetworkUnchecked>>() else {
-				return false;
-			};
 			if to != request.to.clone().into_unchecked() {
 				return false;
 			}
 			// output.amount must match
-			let Ok(value) = Amount::from_btc(output.value) else {
-				return false;
-			};
-			if value != request.amount {
+			if output.value != request.amount {
 				return false;
 			}
 			return true;

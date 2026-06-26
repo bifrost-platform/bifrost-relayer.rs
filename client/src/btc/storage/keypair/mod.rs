@@ -11,6 +11,12 @@ use aes_gcm::{
 };
 use alloy::primitives::keccak256;
 use aws_sdk_kms::{Client as KmsClient, primitives::Blob};
+use bitcoincore_rpc::bitcoin::{
+	PrivateKey, PublicKey,
+	key::Secp256k1,
+	psbt::{GetKey, GetKeyError, KeyRequest},
+	secp256k1::Signing,
+};
 use br_primitives::{
 	constants::errors::{
 		INVALID_KEYSTORE_PASSWORD, INVALID_KEYSTORE_PATH, KEYSTORE_DECRYPTION_ERROR,
@@ -22,12 +28,6 @@ use eyre::Result;
 use miniscript::bitcoin::{
 	Network, Psbt,
 	psbt::{SigningErrors, SigningKeysMap},
-};
-use miniscript::bitcoin::{
-	PrivateKey, PublicKey,
-	key::Secp256k1,
-	psbt::{GetKey, GetKeyError, KeyRequest},
-	secp256k1::Signing,
 };
 use rand::RngExt;
 use sc_keystore::{Keystore, LocalKeystore};
