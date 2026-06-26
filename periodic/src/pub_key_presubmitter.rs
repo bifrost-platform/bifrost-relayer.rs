@@ -4,6 +4,7 @@ use alloy::{
 	providers::{Provider, WalletProvider, fillers::TxFiller},
 };
 use array_bytes::Hexify;
+use bitcoincore_rpc::bitcoin::PublicKey;
 use br_client::{
 	btc::storage::keypair::{KeypairStorage, KeypairStorageT},
 	eth::EthClient,
@@ -25,7 +26,6 @@ use br_primitives::{
 };
 use cron::Schedule;
 use eyre::Result;
-use miniscript::bitcoin::PublicKey;
 use std::{str::FromStr, sync::Arc, time::Duration};
 use subxt::{OnlineClient, utils::eth::AccountId20};
 use tokio::sync::RwLock;
