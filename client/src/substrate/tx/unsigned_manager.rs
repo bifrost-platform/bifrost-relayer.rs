@@ -171,6 +171,9 @@ where
 			XtRequest::SubmitOutboundRequests(p) => create_unsigned!(p),
 			XtRequest::OnFlightPoll(p) => create_unsigned!(p),
 			XtRequest::FinalizePoll(p) => create_unsigned!(p),
+			XtRequest::SubmitUnsignedPsbt(p) => create_unsigned!(p),
+			XtRequest::RemoveOutboundMessages(p) => create_unsigned!(p),
+			XtRequest::ApproveSetRefunds(p) => create_unsigned!(p),
 		};
 
 		match created {

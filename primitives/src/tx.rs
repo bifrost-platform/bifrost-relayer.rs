@@ -617,6 +617,11 @@ pub enum XtRequest {
 	SubmitOutboundRequests(StaticPayload<bifrost_runtime::blaze::calls::SubmitOutboundRequests>),
 	OnFlightPoll(StaticPayload<bifrost_runtime::cccp_relay_queue::calls::OnFlightPoll>),
 	FinalizePoll(StaticPayload<bifrost_runtime::cccp_relay_queue::calls::FinalizePoll>),
+	SubmitUnsignedPsbt(StaticPayload<bifrost_runtime::btc_socket_queue::calls::SubmitUnsignedPsbt>),
+	RemoveOutboundMessages(StaticPayload<bifrost_runtime::blaze::calls::RemoveOutboundMessages>),
+	ApproveSetRefunds(
+		StaticPayload<bifrost_runtime::btc_registration_pool::calls::ApproveSetRefunds>,
+	),
 }
 
 pub struct XtRequestMessage {
