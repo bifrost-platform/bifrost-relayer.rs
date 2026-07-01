@@ -22,8 +22,9 @@ use br_primitives::{
 		errors::INVALID_CHAIN_ID,
 	},
 	contracts::socket::{
-		Socket_Struct::{Instruction, RequestID, Signatures, Socket_Message},
+		Socket_Struct::{Signatures, Socket_Message},
 		SocketContract::Socket,
+		compute_msg_hash,
 	},
 	eth::{BootstrapState, BuiltRelayTransaction, RelayDirection, SocketEventStatus},
 	substrate::{CustomConfig, SocketMessagesSubmission, bifrost_runtime},
@@ -302,7 +303,7 @@ where
 					}
 				}
 
-				if self.is_sequence_ended(&msg.req_id, &msg.ins_code, metadata.status).await? {
+				if self.is_sequence_ended(&msg, metadata.status).await? {
 					// do nothing if protocol sequence ended
 					return Ok(());
 				}
@@ -651,7 +652,7 @@ where
 		}
 
 		// Check if sequence already ended
-		if self.is_sequence_ended(&msg.req_id, &msg.ins_code, metadata.status).await? {
+		if self.is_sequence_ended(&msg, metadata.status).await? {
 			log::debug!(
 				target: &self.client.get_chain_name(),
 				"-[{}] Sequence already ended, skipping",
@@ -754,12 +755,11 @@ where
 	/// event has already been committed or rollbacked.
 	async fn is_sequence_ended(
 		&self,
-		req_id: &RequestID,
-		ins_code: &Instruction,
+		socket_msg: &Socket_Message,
 		status: SocketEventStatus,
 	) -> Result<bool> {
-		let src = Into::<u32>::into(req_id.ChainIndex) as ChainId;
-		let dst = Into::<u32>::into(ins_code.ChainIndex) as ChainId;
+		let src = Into::<u32>::into(socket_msg.req_id.ChainIndex) as ChainId;
+		let dst = Into::<u32>::into(socket_msg.ins_code.ChainIndex) as ChainId;
 
 		// if inbound::accepted and relaying to bitcoin we consider as ended
 		if let Some(bitcoin_chain_id) = self.client.get_bitcoin_chain_id() {
@@ -769,26 +769,44 @@ where
 		}
 
 		if let Some(src_client) = &self.system_clients.get(&src) {
-			let request =
-				src_client.protocol_contracts.socket.get_request(req_id.clone()).call().await?;
-			let status = SocketEventStatus::from(&request.field[0]);
+			let request = src_client
+				.protocol_contracts
+				.socket
+				.get_request(socket_msg.req_id.clone())
+				.call()
+				.await?;
 
-			// If the primary (N) socket has no record of this request, it may have originated
-			// on the legacy (L) socket. Fall back to query the legacy socket in that case.
-			if status == SocketEventStatus::None {
-				if let Some(legacy_socket) = &src_client.protocol_contracts.legacy_socket {
-					let legacy_request = legacy_socket.get_request(req_id.clone()).call().await?;
-					return Ok(matches!(
-						SocketEventStatus::from(&legacy_request.field[0]),
-						SocketEventStatus::Committed | SocketEventStatus::Rollbacked
-					));
-				}
+			// No legacy socket on this chain (e.g. Bifrost) — single contract, use directly.
+			let Some(legacy_socket) = &src_client.protocol_contracts.legacy_socket else {
+				return Ok(matches!(
+					SocketEventStatus::from(&request.field[0]),
+					SocketEventStatus::Committed | SocketEventStatus::Rollbacked
+				));
+			};
+
+			// Use msg_hash to identify which contract owns this request unambiguously.
+			let msg_hash = compute_msg_hash(socket_msg);
+
+			if request.msg_hash == msg_hash {
+				// Request belongs to N-Socket.
+				return Ok(matches!(
+					SocketEventStatus::from(&request.field[0]),
+					SocketEventStatus::Committed | SocketEventStatus::Rollbacked
+				));
 			}
 
-			return Ok(matches!(
-				status,
-				SocketEventStatus::Committed | SocketEventStatus::Rollbacked
-			));
+			// N-Socket hash mismatch — check L-Socket.
+			let legacy_request =
+				legacy_socket.get_request(socket_msg.req_id.clone()).call().await?;
+			if legacy_request.msg_hash == msg_hash {
+				return Ok(matches!(
+					SocketEventStatus::from(&legacy_request.field[0]),
+					SocketEventStatus::Committed | SocketEventStatus::Rollbacked
+				));
+			}
+
+			// Neither contract owns this request yet.
+			return Ok(false);
 		}
 		Ok(false)
 	}
