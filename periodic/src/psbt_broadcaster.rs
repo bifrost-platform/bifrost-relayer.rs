@@ -16,7 +16,7 @@ use br_primitives::{
 use cron::Schedule;
 use eyre::Result;
 use miniscript::bitcoin::{Psbt, Txid, hashes::Hash};
-use subxt::ext::subxt_core::utils::AccountId20;
+use subxt::utils::eth::AccountId20;
 
 use crate::traits::PeriodicWorker;
 
@@ -91,7 +91,10 @@ where
 		let payload =
 			bifrost_runtime::tx().btc_socket_queue().submit_executed_request(msg, signature);
 
-		Ok((Arc::new(payload), XtRequestMetadata::SubmitExecutedRequest(metadata)))
+		Ok((
+			XtRequest::SubmitExecutedRequest(payload),
+			XtRequestMetadata::SubmitExecutedRequest(metadata),
+		))
 	}
 
 	/// Try to broadcast the transaction

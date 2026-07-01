@@ -29,7 +29,7 @@ use eyre::Result;
 use miniscript::bitcoin::{Txid, hashes::Hash};
 use sc_service::SpawnTaskHandle;
 use std::{collections::HashSet, sync::Arc};
-use subxt::ext::subxt_core::utils::AccountId20;
+use subxt::utils::eth::AccountId20;
 use tokio::sync::broadcast::Receiver;
 use tokio_stream::{StreamExt, wrappers::BroadcastStream};
 
@@ -137,7 +137,10 @@ where
 	async fn build_unsigned_tx(&self, txid: Txid) -> Result<(XtRequest, BroadcastPollMetadata)> {
 		let (msg, signature) = self.build_payload(txid).await?;
 		let metadata = BroadcastPollMetadata::new(txid);
-		Ok((Arc::new(bifrost_runtime::tx().blaze().broadcast_poll(msg, signature)), metadata))
+		Ok((
+			XtRequest::BroadcastPoll(bifrost_runtime::tx().blaze().broadcast_poll(msg, signature)),
+			metadata,
+		))
 	}
 
 	/// Send the transaction request message to the channel.

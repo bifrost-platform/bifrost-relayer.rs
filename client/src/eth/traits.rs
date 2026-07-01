@@ -235,19 +235,19 @@ where
 
 	/// Checks if the given token index is hookable.
 	async fn is_hookable(&self, asset_index_hash: B256) -> Result<bool> {
-		match self
-			.get_sub_client()
-			.storage()
-			.at_latest()
-			.await?
-			.fetch(
-				&bifrost_runtime::storage()
-					.cccp_relay_queue()
-					.asset_indexes_hook_state(SubH256(asset_index_hash.0)),
+		let at = self.get_sub_client().at_current_block().await?;
+		let storage = at.storage();
+		match storage
+			.try_fetch(
+				bifrost_runtime::storage().cccp_relay_queue().asset_indexes_hook_state(),
+				(SubH256(asset_index_hash.0),),
 			)
 			.await
 		{
-			Ok(Some(is_hookable)) => Ok(is_hookable),
+			Ok(Some(sv)) => match sv.decode() {
+				Ok(is_hookable) => Ok(is_hookable),
+				Err(e) => Err(e.into()),
+			},
 			Ok(None) => Ok(false),
 			Err(e) => Err(e.into()),
 		}
@@ -255,13 +255,13 @@ where
 
 	/// Fetches an oracle ID from `OracleRegistry.Oracles` using the typed subxt storage API.
 	async fn fetch_oracle_oid(&self, oracle_key: OracleKey) -> Result<Option<B256>> {
-		let result = self
-			.get_sub_client()
-			.storage()
-			.at_latest()
+		let at = self.get_sub_client().at_current_block().await?;
+		let storage = at.storage();
+		let result = storage
+			.try_fetch(bifrost_runtime::storage().oracle_registry().oracles(), (oracle_key,))
 			.await?
-			.fetch(&bifrost_runtime::storage().oracle_registry().oracles(oracle_key))
-			.await?;
+			.map(|sv| sv.decode())
+			.transpose()?;
 		Ok(result.map(|oid| B256::from_slice(&oid.0)))
 	}
 
@@ -274,17 +274,16 @@ where
 		&self,
 		asset_index_hash: B256,
 	) -> Result<Option<Address>> {
-		let result = self
-			.get_sub_client()
-			.storage()
-			.at_latest()
-			.await?
-			.fetch(
-				&bifrost_runtime::storage()
-					.cccp_relay_queue()
-					.asset_indexes(SubH256(asset_index_hash.0)),
+		let at = self.get_sub_client().at_current_block().await?;
+		let storage = at.storage();
+		let result = storage
+			.try_fetch(
+				bifrost_runtime::storage().cccp_relay_queue().asset_indexes(),
+				(SubH256(asset_index_hash.0),),
 			)
-			.await?;
+			.await?
+			.map(|sv| sv.decode())
+			.transpose()?;
 		Ok(result.map(|h160| Address::from_slice(&h160.0)))
 	}
 
@@ -293,13 +292,16 @@ where
 	///
 	/// Returns `(aggregator_address, decimal)` if found, or `None` if no aggregator is registered.
 	async fn fetch_aggregator_info(&self, asset_id: Address) -> Result<Option<(Address, u8)>> {
-		let result = self
-			.get_sub_client()
-			.storage()
-			.at_latest()
+		let at = self.get_sub_client().at_current_block().await?;
+		let storage = at.storage();
+		let result = storage
+			.try_fetch(
+				bifrost_runtime::storage().oracle_registry().aggregators(),
+				(SubH160(asset_id.0.0),),
+			)
 			.await?
-			.fetch(&bifrost_runtime::storage().oracle_registry().aggregators(SubH160(asset_id.0.0)))
-			.await?;
+			.map(|sv| sv.decode())
+			.transpose()?;
 		Ok(result.map(|info| (Address::from_slice(&info.address.0), info.decimal)))
 	}
 

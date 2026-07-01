@@ -35,8 +35,14 @@ where
 		// Probe the live runtime metadata to determine if CCCPRelayQueue pallet is active.
 		// OnlineClient fetches this metadata from the connected node at startup, so this
 		// reflects the actual runtime — not the compile-time .scale snapshot.
-		let cccp_relay_queue_enabled =
-			substrate_deps.sub_client.metadata().pallet_by_name("CCCPRelayQueue").is_some();
+		let cccp_relay_queue_enabled = substrate_deps
+			.sub_client
+			.at_current_block()
+			.await
+			.expect("Failed to fetch runtime metadata from the Bifrost node")
+			.metadata()
+			.pallet_by_name("CCCPRelayQueue")
+			.is_some();
 
 		bootstrap_shared_data.cccp_relay_queue_enabled = cccp_relay_queue_enabled;
 

@@ -8,8 +8,8 @@ use alloy::{
 	sol_types::SolEvent,
 };
 use eyre::Result;
-use subxt::ext::subxt_core::utils::AccountId20;
-use subxt::{OnlineClient, backend::legacy::LegacyRpcMethods};
+use subxt::utils::eth::AccountId20;
+use subxt::{OnlineClient, rpcs::LegacyRpcMethods};
 use tokio::sync::broadcast::Receiver;
 use tokio_stream::{StreamExt, wrappers::BroadcastStream};
 
@@ -23,7 +23,7 @@ use br_primitives::{
 		create_rpc_client,
 	},
 	tx::{
-		FinalizePollMetadata, OnFlightPollMetadata, XtRequestMessage, XtRequestMetadata,
+		FinalizePollMetadata, OnFlightPollMetadata, XtRequest, XtRequestMessage, XtRequestMetadata,
 		XtRequestSender,
 	},
 	utils::sub_display_format,
@@ -53,7 +53,7 @@ where
 	/// The substrate client for storage queries.
 	sub_client: OnlineClient<CustomConfig>,
 	/// The legacy RPC methods for querying best block.
-	sub_rpc: LegacyRpcMethods<CustomConfig>,
+	sub_rpc: LegacyRpcMethods<subxt::config::RpcConfigFor<CustomConfig>>,
 	/// The unsigned transaction message sender.
 	xt_request_sender: Arc<XtRequestSender>,
 	/// The receiver that consumes new events from the block channel.
@@ -77,7 +77,8 @@ where
 		bootstrap_shared_data: Arc<BootstrapSharedData>,
 	) -> Result<Self> {
 		let rpc_client = create_rpc_client(&sub_rpc_url).await?;
-		let sub_rpc = LegacyRpcMethods::<CustomConfig>::new(rpc_client);
+		let sub_rpc =
+			LegacyRpcMethods::<subxt::config::RpcConfigFor<CustomConfig>>::new(rpc_client);
 
 		Ok(Self {
 			client,
@@ -126,11 +127,15 @@ where
 	) -> Result<bool> {
 		// Query at best block (including unfinalized) instead of latest finalized
 		let best_hash = self.sub_rpc.chain_get_block_hash(None).await?.unwrap_or_default();
-		let storage = self.sub_client.storage().at(best_hash);
+		let at = self.sub_client.at_block(subxt::backend::BlockRef::from_hash(best_hash)).await?;
+		let storage = at.storage();
 
 		// Check if already in OnFlightTransfers (approved)
 		let on_flight = storage
-			.fetch(&bifrost_runtime::storage().cccp_relay_queue().on_flight_transfers(msg_hash))
+			.try_fetch(
+				bifrost_runtime::storage().cccp_relay_queue().on_flight_transfers(),
+				(msg_hash,),
+			)
 			.await?;
 		if on_flight.is_some() {
 			return Ok(true);
@@ -138,21 +143,24 @@ where
 
 		// Check if already in FinalizedTransfers (finalized)
 		let finalized = storage
-			.fetch(&bifrost_runtime::storage().cccp_relay_queue().finalized_transfers(msg_hash))
+			.try_fetch(
+				bifrost_runtime::storage().cccp_relay_queue().finalized_transfers(),
+				(msg_hash,),
+			)
 			.await?;
 		if finalized.is_some() {
 			return Ok(true);
 		}
 
 		// Check if already voted for this transfer
-		let pending = storage
-			.fetch(
-				&bifrost_runtime::storage()
-					.cccp_relay_queue()
-					.pending_transfers(msg_hash, src_tx_id),
+		if let Some(sv) = storage
+			.try_fetch(
+				bifrost_runtime::storage().cccp_relay_queue().pending_transfers(),
+				(msg_hash, src_tx_id),
 			)
-			.await?;
-		if let Some(pending) = pending {
+			.await?
+		{
+			let pending = sv.decode()?;
 			let voter = AccountId20(self.client.address().await.0.0);
 			if pending.on_flight_voters.0.iter().any(|v| v == &voter) {
 				return Ok(true);
@@ -165,21 +173,29 @@ where
 
 	async fn should_skip_finalize_poll(&self, msg_hash: subxt::utils::H256) -> Result<bool> {
 		let best_hash = self.sub_rpc.chain_get_block_hash(None).await?.unwrap_or_default();
-		let storage = self.sub_client.storage().at(best_hash);
+		let at = self.sub_client.at_block(subxt::backend::BlockRef::from_hash(best_hash)).await?;
+		let storage = at.storage();
 
 		// Check if already in FinalizedTransfers
 		let finalized = storage
-			.fetch(&bifrost_runtime::storage().cccp_relay_queue().finalized_transfers(msg_hash))
+			.try_fetch(
+				bifrost_runtime::storage().cccp_relay_queue().finalized_transfers(),
+				(msg_hash,),
+			)
 			.await?;
 		if finalized.is_some() {
 			return Ok(true);
 		}
 
 		// Check if already voted for this transfer
-		let on_flight = storage
-			.fetch(&bifrost_runtime::storage().cccp_relay_queue().on_flight_transfers(msg_hash))
-			.await?;
-		if let Some(on_flight) = on_flight {
+		if let Some(sv) = storage
+			.try_fetch(
+				bifrost_runtime::storage().cccp_relay_queue().on_flight_transfers(),
+				(msg_hash,),
+			)
+			.await?
+		{
+			let on_flight = sv.decode()?;
 			let voter = AccountId20(self.client.address().await.0.0);
 			if on_flight.finalization_voters.0.iter().any(|v| v == &voter) {
 				return Ok(true);
@@ -423,15 +439,16 @@ where
 		let message_to_sign = [prefix.as_slice(), &encoded_data].concat();
 		let signature = self.client.sign_message(&message_to_sign).await?.into();
 
-		let call = Arc::new(bifrost_runtime::tx().cccp_relay_queue().on_flight_poll(
-			OnFlightPollSubmission {
-				authority_id: AccountId20(self.client.address().await.0.0),
-				msg: encoded_msg.into(),
-				msg_hash,
-				src_tx_id: src_tx_id_h256,
-			},
-			signature,
-		));
+		let call =
+			XtRequest::OnFlightPoll(bifrost_runtime::tx().cccp_relay_queue().on_flight_poll(
+				OnFlightPollSubmission {
+					authority_id: AccountId20(self.client.address().await.0.0),
+					msg: encoded_msg.into(),
+					msg_hash,
+					src_tx_id: src_tx_id_h256,
+				},
+				signature,
+			));
 
 		match self
 			.xt_request_sender
@@ -470,7 +487,7 @@ where
 		let message_to_sign = [prefix.as_slice(), &encoded_msg].concat();
 		let signature = self.client.sign_message(&message_to_sign).await?.into();
 
-		let call = Arc::new(bifrost_runtime::tx().cccp_relay_queue().finalize_poll(
+		let call = XtRequest::FinalizePoll(bifrost_runtime::tx().cccp_relay_queue().finalize_poll(
 			FinalizePollSubmission {
 				authority_id: AccountId20(self.client.address().await.0.0),
 				msg: encoded_msg.into(),
