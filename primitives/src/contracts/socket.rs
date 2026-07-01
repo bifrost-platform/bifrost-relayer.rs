@@ -125,6 +125,35 @@ impl From<Socket_Message> for Vec<u8> {
 }
 
 use SocketContract::SocketContractInstance;
-use alloy::{dyn_abi::DynSolValue, primitives::U256};
+use alloy::{
+	dyn_abi::DynSolValue,
+	primitives::{FixedBytes, U256, keccak256},
+};
 
 pub type SocketInstance<F, P, N> = SocketContractInstance<Arc<FillProvider<F, P, N>>, N>;
+
+/// Computes the `msg_hash` that the socket contract stores in `RequestInfo` for a given message.
+/// This matches the on-chain encoding: `keccak256(abi.encode(UserRequest { ins_code, params }))`.
+pub fn compute_msg_hash(msg: &Socket_Struct::Socket_Message) -> FixedBytes<32> {
+	let user_request = DynSolValue::Tuple(vec![
+		DynSolValue::Tuple(vec![
+			DynSolValue::FixedBytes(
+				FixedBytes::<32>::right_padding_from(msg.ins_code.ChainIndex.as_slice()),
+				4,
+			),
+			DynSolValue::FixedBytes(
+				FixedBytes::<32>::right_padding_from(msg.ins_code.RBCmethod.as_slice()),
+				16,
+			),
+		]),
+		DynSolValue::Tuple(vec![
+			DynSolValue::FixedBytes(msg.params.tokenIDX0, 32),
+			DynSolValue::FixedBytes(msg.params.tokenIDX1, 32),
+			DynSolValue::Address(msg.params.refund),
+			DynSolValue::Address(msg.params.to),
+			DynSolValue::Uint(msg.params.amount, 256),
+			DynSolValue::Bytes(msg.params.variants.to_vec()),
+		]),
+	]);
+	keccak256(user_request.abi_encode())
+}

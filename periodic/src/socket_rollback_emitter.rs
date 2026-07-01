@@ -1,7 +1,7 @@
 use alloy::{
 	consensus::BlockHeader as _,
 	network::{BlockResponse, Network},
-	primitives::{ChainId, U256},
+	primitives::{ChainId, FixedBytes, U256},
 	providers::{Provider, WalletProvider, fillers::TxFiller},
 };
 use cron::Schedule;
@@ -16,8 +16,9 @@ use br_primitives::{
 		errors::{INVALID_BIFROST_NATIVENESS, INVALID_PERIODIC_SCHEDULE},
 		schedule::{ROLLBACK_CHECK_MINIMUM_INTERVAL, ROLLBACK_CHECK_SCHEDULE},
 	},
-	contracts::socket::Socket_Struct::{
-		Poll_Submit, RequestID, RequestInfo, Signatures, Socket_Message,
+	contracts::socket::{
+		Socket_Struct::{Poll_Submit, RequestID, RequestInfo, Signatures, Socket_Message},
+		compute_msg_hash,
 	},
 	eth::{RelayDirection, SocketEventStatus},
 	periodic::{RawRequestID, RollbackableMessage},
@@ -44,7 +45,9 @@ where
 	/// The receiver connected to the socket rollback channel.
 	rollback_receiver: UnboundedReceiver<Socket_Message>,
 	/// The local storage saving emitted `Socket` event messages.
-	rollback_msgs: BTreeMap<RawRequestID, RollbackableMessage>,
+	/// Keyed by `(sequence, msg_hash)` so that requests with the same sequence number on
+	/// different contracts (L-Socket vs N-Socket) are stored as distinct entries.
+	rollback_msgs: BTreeMap<(RawRequestID, FixedBytes<32>), RollbackableMessage>,
 	/// The time schedule that represents when to check heartbeat pulsed.
 	schedule: Schedule,
 	/// The handle to spawn tasks.
@@ -84,16 +87,19 @@ where
 
 	/// Verifies whether the given socket message has been executed.
 	async fn is_request_executed(&self, socket_msg: &Socket_Message) -> Result<bool> {
+		let msg_hash = compute_msg_hash(socket_msg);
 		let src_request = self
 			.get_socket_request(
 				&socket_msg.req_id,
 				Into::<u32>::into(socket_msg.req_id.ChainIndex) as ChainId,
+				msg_hash,
 			)
 			.await?;
 		let dst_request = self
 			.get_socket_request(
 				&socket_msg.req_id,
 				Into::<u32>::into(socket_msg.ins_code.ChainIndex) as ChainId,
+				msg_hash,
 			)
 			.await?;
 
@@ -142,24 +148,39 @@ where
 	}
 
 	/// Get the current state of the socket request on the target chain.
+	///
+	/// When both L-Socket and N-Socket exist, `msg_hash` is used to identify which contract owns
+	/// this request: we query N-Socket first and return it if the hash matches; otherwise we query
+	/// L-Socket and return it if its hash matches. If neither matches we return a default result
+	/// with `None` status, which is treated as "not yet registered" by the callers.
 	async fn get_socket_request(
 		&self,
 		req_id: &RequestID,
 		chain_id: ChainId,
+		msg_hash: alloy::primitives::FixedBytes<32>,
 	) -> Result<Option<RequestInfo>> {
 		if let Some(client) = self.system_clients.get(&chain_id) {
 			let request =
 				client.protocol_contracts.socket.get_request(req_id.clone()).call().await?;
 
-			// If the primary (N) socket has no record of this request, fall back to the legacy (L)
-			// socket which may have handled the original request.
-			if SocketEventStatus::from(&request.field[0]) == SocketEventStatus::None {
-				if let Some(legacy_socket) = &client.protocol_contracts.legacy_socket {
-					let legacy_request = legacy_socket.get_request(req_id.clone()).call().await?;
-					return Ok(Some(legacy_request));
-				}
+			// No legacy socket (e.g. Bifrost) — single contract, return directly.
+			let Some(legacy_socket) = &client.protocol_contracts.legacy_socket else {
+				return Ok(Some(request));
+			};
+
+			// N-Socket hash matches: this request belongs to N-Socket.
+			if request.msg_hash == msg_hash {
+				return Ok(Some(request));
 			}
 
+			// N-Socket hash mismatch (different request at this sequence, or empty slot).
+			// Check L-Socket.
+			let legacy_request = legacy_socket.get_request(req_id.clone()).call().await?;
+			if legacy_request.msg_hash == msg_hash {
+				return Ok(Some(legacy_request));
+			}
+
+			// Neither contract owns this request yet; return the N-Socket result (None status).
 			return Ok(Some(request));
 		}
 		Ok(None)
@@ -242,19 +263,21 @@ where
 				}
 			}
 
-			let req_id = msg.req_id.sequence;
+			let sequence = msg.req_id.sequence;
+			let msg_hash = compute_msg_hash(&msg);
+			let key = (sequence, msg_hash);
+
 			// ignore if the request already exists.
-			if self.rollback_msgs.contains_key(&req_id) {
+			if self.rollback_msgs.contains_key(&key) {
 				continue;
 			}
-			self.rollback_msgs
-				.insert(req_id, RollbackableMessage::new(current_timestamp, msg));
+			self.rollback_msgs.insert(key, RollbackableMessage::new(current_timestamp, msg));
 
 			log::info!(
 				target: &self.client.get_chain_name(),
 				"-[{}] 🔃 Received Rollbackable Socket message: {}",
 				sub_display_format(SUB_LOG_TARGET),
-				req_id,
+				sequence,
 			);
 		}
 	}
@@ -308,8 +331,8 @@ where
 		loop {
 			self.wait_until_next_time().await;
 
-			// executed or rollback handled request ID's.
-			let mut handled_req_ids = vec![];
+			// executed or rollback handled keys (sequence, msg_hash).
+			let mut handled_keys: Vec<(RawRequestID, FixedBytes<32>)> = vec![];
 
 			if let Some(latest_block) = self
 				.client
@@ -319,11 +342,11 @@ where
 			{
 				self.receive(latest_block.header().timestamp());
 
-				for (req_id, rollback_msg) in self.rollback_msgs.clone() {
+				for (key, rollback_msg) in self.rollback_msgs.clone() {
 					// ignore if the request has already been processed.
 					// it should be removed from the local storage.
 					if self.is_request_executed(&rollback_msg.socket_msg).await? {
-						handled_req_ids.push(req_id);
+						handled_keys.push(key);
 						continue;
 					}
 					// ignore if the required interval didn't pass.
@@ -335,11 +358,11 @@ where
 					}
 					// the pending request has not been processed in the waiting period. rollback should be handled.
 					self.try_rollback(&rollback_msg.socket_msg).await?;
-					handled_req_ids.push(req_id);
+					handled_keys.push(key);
 				}
 			}
-			for req_id in handled_req_ids {
-				self.rollback_msgs.remove(&req_id);
+			for key in handled_keys {
+				self.rollback_msgs.remove(&key);
 			}
 
 			log::info!(
