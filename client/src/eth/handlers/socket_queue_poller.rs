@@ -224,6 +224,20 @@ where
 				let is_inbound = self.is_inbound(dst_chain_id);
 				let src_tx_id = log.transaction_hash.unwrap_or_default();
 
+				if self.client.is_asset_migrated_to_n_rail(&msg, log.address(), is_inbound).await? {
+					br_primitives::log_and_capture!(
+						warn,
+						&self.client.get_chain_name(),
+						SUB_LOG_TARGET,
+						self.client.address().await,
+						"⚠️  Ignoring L-Socket event: asset migrated to N-Vault (asset={}, seq={}, tx={:?})",
+						msg.params.tokenIDX0,
+						sequence_id,
+						log.transaction_hash,
+					);
+					return Ok(());
+				}
+
 				match status {
 					SocketEventStatus::Requested => {
 						self.process_requested(

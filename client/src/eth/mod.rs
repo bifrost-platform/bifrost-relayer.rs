@@ -579,6 +579,38 @@ where
 		if is_inbound { Ok(config.unified) } else { Ok(config.target) }
 	}
 
+	/// Returns true if a Socket event emitted by L-Socket should be ignored because the asset
+	/// has already migrated to the N rail on this chain.
+	///
+	/// - Outbound: `N-Vault.remote_asset_pair(tokenIDX0) != zero`
+	/// - Inbound:  `N-Vault.assets_config(tokenIDX0).unified != zero`
+	pub async fn is_asset_migrated_to_n_rail(
+		&self,
+		msg: &br_primitives::contracts::socket::Socket_Struct::Socket_Message,
+		log_address: Address,
+		is_inbound: bool,
+	) -> Result<bool> {
+		let Some(legacy_socket) = &self.protocol_contracts.legacy_socket else {
+			return Ok(false);
+		};
+		if log_address != *legacy_socket.address() {
+			return Ok(false);
+		}
+		if is_inbound {
+			let config =
+				self.protocol_contracts.vault.assets_config(msg.params.tokenIDX0).call().await?;
+			Ok(!config.unified.is_zero())
+		} else {
+			let local_asset = self
+				.protocol_contracts
+				.vault
+				.remote_asset_pair(msg.params.tokenIDX0)
+				.call()
+				.await?;
+			Ok(!local_asset.is_zero())
+		}
+	}
+
 	/// Get ERC20 token decimals from cache or fetch and cache if not present.
 	pub async fn get_erc20_decimals(&self, address: Address) -> Result<u8> {
 		// Check cache first
