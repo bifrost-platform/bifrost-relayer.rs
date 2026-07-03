@@ -24,7 +24,6 @@ use br_primitives::{
 	contracts::socket::{
 		Socket_Struct::{Signatures, Socket_Message},
 		SocketContract::Socket,
-		compute_msg_hash,
 	},
 	eth::{BootstrapState, BuiltRelayTransaction, RelayDirection, SocketEventStatus},
 	substrate::{CustomConfig, SocketMessagesSubmission, bifrost_runtime},
@@ -767,6 +766,10 @@ where
 
 	/// Compare the request status recorded in source chain with event status to determine if the
 	/// event has already been committed or rollbacked.
+	///
+	/// The source chain's owning contract (L-Socket or N-Socket) is resolved via the asset's
+	/// migration state (`tokenIDX0`), which is correct regardless of which chain's event is
+	/// currently being processed — unlike relying on the observed log's address.
 	async fn is_sequence_ended(
 		&self,
 		socket_msg: &Socket_Message,
@@ -783,44 +786,33 @@ where
 		}
 
 		if let Some(src_client) = &self.system_clients.get(&src) {
-			let request = src_client
-				.protocol_contracts
-				.socket
-				.get_request(socket_msg.req_id.clone())
-				.call()
-				.await?;
+			let src_socket_address =
+				src_client.resolve_socket_address(socket_msg.params.tokenIDX0, true).await?;
 
-			// No legacy socket on this chain (e.g. Bifrost) — single contract, use directly.
-			let Some(legacy_socket) = &src_client.protocol_contracts.legacy_socket else {
-				return Ok(matches!(
-					SocketEventStatus::from(&request.field[0]),
-					SocketEventStatus::Committed | SocketEventStatus::Rollbacked
-				));
+			let request = if let Some(legacy_socket) = &src_client.protocol_contracts.legacy_socket
+			{
+				if src_socket_address == *legacy_socket.address() {
+					legacy_socket.get_request(socket_msg.req_id.clone()).call().await?
+				} else {
+					src_client
+						.protocol_contracts
+						.socket
+						.get_request(socket_msg.req_id.clone())
+						.call()
+						.await?
+				}
+			} else {
+				src_client
+					.protocol_contracts
+					.socket
+					.get_request(socket_msg.req_id.clone())
+					.call()
+					.await?
 			};
-
-			// Use msg_hash to identify which contract owns this request unambiguously.
-			let msg_hash = compute_msg_hash(socket_msg);
-
-			if request.msg_hash == msg_hash {
-				// Request belongs to N-Socket.
-				return Ok(matches!(
-					SocketEventStatus::from(&request.field[0]),
-					SocketEventStatus::Committed | SocketEventStatus::Rollbacked
-				));
-			}
-
-			// N-Socket hash mismatch — check L-Socket.
-			let legacy_request =
-				legacy_socket.get_request(socket_msg.req_id.clone()).call().await?;
-			if legacy_request.msg_hash == msg_hash {
-				return Ok(matches!(
-					SocketEventStatus::from(&legacy_request.field[0]),
-					SocketEventStatus::Committed | SocketEventStatus::Rollbacked
-				));
-			}
-
-			// Neither contract owns this request yet.
-			return Ok(false);
+			return Ok(matches!(
+				SocketEventStatus::from(&request.field[0]),
+				SocketEventStatus::Committed | SocketEventStatus::Rollbacked
+			));
 		}
 		Ok(false)
 	}

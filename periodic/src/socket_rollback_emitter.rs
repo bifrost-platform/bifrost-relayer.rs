@@ -1,7 +1,7 @@
 use alloy::{
 	consensus::BlockHeader as _,
 	network::{BlockResponse, Network},
-	primitives::{ChainId, FixedBytes, U256},
+	primitives::{Address, ChainId, FixedBytes, U256},
 	providers::{Provider, WalletProvider, fillers::TxFiller},
 };
 use cron::Schedule;
@@ -16,9 +16,8 @@ use br_primitives::{
 		errors::{INVALID_BIFROST_NATIVENESS, INVALID_PERIODIC_SCHEDULE},
 		schedule::{ROLLBACK_CHECK_MINIMUM_INTERVAL, ROLLBACK_CHECK_SCHEDULE},
 	},
-	contracts::socket::{
-		Socket_Struct::{Poll_Submit, RequestID, RequestInfo, Signatures, Socket_Message},
-		compute_msg_hash,
+	contracts::socket::Socket_Struct::{
+		Poll_Submit, RequestID, RequestInfo, Signatures, Socket_Message,
 	},
 	eth::{RelayDirection, SocketEventStatus},
 	periodic::{RawRequestID, RollbackableMessage},
@@ -45,8 +44,9 @@ where
 	/// The receiver connected to the socket rollback channel.
 	rollback_receiver: UnboundedReceiver<Socket_Message>,
 	/// The local storage saving emitted `Socket` event messages.
-	/// Keyed by `(sequence, msg_hash)` so that requests with the same sequence number on
-	/// different contracts (L-Socket vs N-Socket) are stored as distinct entries.
+	/// Keyed by `(sequence, tokenIDX0)` so that requests with the same sequence number but
+	/// different assets (which may live on different contracts, L-Socket vs N-Socket) are
+	/// stored as distinct entries.
 	rollback_msgs: BTreeMap<(RawRequestID, FixedBytes<32>), RollbackableMessage>,
 	/// The time schedule that represents when to check heartbeat pulsed.
 	schedule: Schedule,
@@ -87,20 +87,29 @@ where
 
 	/// Verifies whether the given socket message has been executed.
 	async fn is_request_executed(&self, socket_msg: &Socket_Message) -> Result<bool> {
-		let msg_hash = compute_msg_hash(socket_msg);
+		let src_chain_id = Into::<u32>::into(socket_msg.req_id.ChainIndex) as ChainId;
+		let dst_chain_id = Into::<u32>::into(socket_msg.ins_code.ChainIndex) as ChainId;
+
+		// Resolve which contract (L-Socket or N-Socket) owns this asset on each chain.
+		// `src` is treated as the local perspective (tokenIDX0 is that chain's own asset index),
+		// `dst` as the remote perspective (tokenIDX0 needs `remote_asset_pair` mapping there).
+		// Chains without a legacy socket (e.g. Bifrost) always resolve to the single N-Socket.
+		let Some(src_client) = self.system_clients.get(&src_chain_id) else {
+			return Ok(false);
+		};
+		let Some(dst_client) = self.system_clients.get(&dst_chain_id) else {
+			return Ok(false);
+		};
+		let src_socket_address =
+			src_client.resolve_socket_address(socket_msg.params.tokenIDX0, true).await?;
+		let dst_socket_address =
+			dst_client.resolve_socket_address(socket_msg.params.tokenIDX0, false).await?;
+
 		let src_request = self
-			.get_socket_request(
-				&socket_msg.req_id,
-				Into::<u32>::into(socket_msg.req_id.ChainIndex) as ChainId,
-				msg_hash,
-			)
+			.get_socket_request(&socket_msg.req_id, src_chain_id, src_socket_address)
 			.await?;
 		let dst_request = self
-			.get_socket_request(
-				&socket_msg.req_id,
-				Into::<u32>::into(socket_msg.ins_code.ChainIndex) as ChainId,
-				msg_hash,
-			)
+			.get_socket_request(&socket_msg.req_id, dst_chain_id, dst_socket_address)
 			.await?;
 
 		if let (Some(src_request), Some(dst_request)) = (src_request, dst_request) {
@@ -147,40 +156,24 @@ where
 		false
 	}
 
-	/// Get the current state of the socket request on the target chain.
-	///
-	/// When both L-Socket and N-Socket exist, `msg_hash` is used to identify which contract owns
-	/// this request: we query N-Socket first and return it if the hash matches; otherwise we query
-	/// L-Socket and return it if its hash matches. If neither matches we return a default result
-	/// with `None` status, which is treated as "not yet registered" by the callers.
+	/// Get the current state of the socket request on the target chain, querying whichever
+	/// contract (L-Socket or N-Socket) matches the already-resolved `socket_address`.
 	async fn get_socket_request(
 		&self,
 		req_id: &RequestID,
 		chain_id: ChainId,
-		msg_hash: alloy::primitives::FixedBytes<32>,
+		socket_address: Address,
 	) -> Result<Option<RequestInfo>> {
 		if let Some(client) = self.system_clients.get(&chain_id) {
-			let request =
-				client.protocol_contracts.socket.get_request(req_id.clone()).call().await?;
-
-			// No legacy socket (e.g. Bifrost) — single contract, return directly.
-			let Some(legacy_socket) = &client.protocol_contracts.legacy_socket else {
-				return Ok(Some(request));
+			let request = if let Some(legacy_socket) = &client.protocol_contracts.legacy_socket {
+				if socket_address == *legacy_socket.address() {
+					legacy_socket.get_request(req_id.clone()).call().await?
+				} else {
+					client.protocol_contracts.socket.get_request(req_id.clone()).call().await?
+				}
+			} else {
+				client.protocol_contracts.socket.get_request(req_id.clone()).call().await?
 			};
-
-			// N-Socket hash matches: this request belongs to N-Socket.
-			if request.msg_hash == msg_hash {
-				return Ok(Some(request));
-			}
-
-			// N-Socket hash mismatch (different request at this sequence, or empty slot).
-			// Check L-Socket.
-			let legacy_request = legacy_socket.get_request(req_id.clone()).call().await?;
-			if legacy_request.msg_hash == msg_hash {
-				return Ok(Some(legacy_request));
-			}
-
-			// Neither contract owns this request yet; return the N-Socket result (None status).
 			return Ok(Some(request));
 		}
 		Ok(None)
@@ -264,8 +257,7 @@ where
 			}
 
 			let sequence = msg.req_id.sequence;
-			let msg_hash = compute_msg_hash(&msg);
-			let key = (sequence, msg_hash);
+			let key = (sequence, msg.params.tokenIDX0);
 
 			// ignore if the request already exists.
 			if self.rollback_msgs.contains_key(&key) {
@@ -331,7 +323,7 @@ where
 		loop {
 			self.wait_until_next_time().await;
 
-			// executed or rollback handled keys (sequence, msg_hash).
+			// executed or rollback handled keys (sequence, tokenIDX0).
 			let mut handled_keys: Vec<(RawRequestID, FixedBytes<32>)> = vec![];
 
 			if let Some(latest_block) = self

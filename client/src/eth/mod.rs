@@ -611,6 +611,37 @@ where
 		}
 	}
 
+	/// Determines which socket contract (Legacy or New) currently owns requests for the given
+	/// asset on this chain. If this chain has no legacy socket, the single N-Socket address is
+	/// always returned.
+	///
+	/// `treat_as_local` should be `true` when `token_idx0` is this chain's own local asset index
+	/// (i.e. this chain is the source of an inbound sequence), and `false` when `token_idx0` is a
+	/// remote index that needs mapping via `remote_asset_pair` (i.e. this chain is the destination
+	/// of an outbound sequence).
+	pub async fn resolve_socket_address(
+		&self,
+		token_idx0: FixedBytes<32>,
+		treat_as_local: bool,
+	) -> Result<Address> {
+		let Some(legacy_socket) = &self.protocol_contracts.legacy_socket else {
+			return Ok(*self.protocol_contracts.socket.address());
+		};
+		let migrated_to_n = if treat_as_local {
+			let config = self.protocol_contracts.vault.assets_config(token_idx0).call().await?;
+			!config.unified.is_zero()
+		} else {
+			let local_asset =
+				self.protocol_contracts.vault.remote_asset_pair(token_idx0).call().await?;
+			!local_asset.is_zero()
+		};
+		Ok(if migrated_to_n {
+			*self.protocol_contracts.socket.address()
+		} else {
+			*legacy_socket.address()
+		})
+	}
+
 	/// Get ERC20 token decimals from cache or fetch and cache if not present.
 	pub async fn get_erc20_decimals(&self, address: Address) -> Result<u8> {
 		// Check cache first
