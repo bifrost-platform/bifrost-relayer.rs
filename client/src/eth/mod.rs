@@ -583,7 +583,7 @@ where
 	/// has already migrated to the N rail on this chain.
 	///
 	/// - Outbound: `N-Vault.remote_asset_pair(tokenIDX0) != zero`
-	/// - Inbound:  `N-Vault.assets_config(tokenIDX0).unified != zero`
+	/// - Inbound:  `N-Vault.assets_config(tokenIDX0).unified != zero && .target != zero`
 	pub async fn is_asset_migrated_to_n_rail(
 		&self,
 		msg: &br_primitives::contracts::socket::Socket_Struct::Socket_Message,
@@ -599,7 +599,7 @@ where
 		if is_inbound {
 			let config =
 				self.protocol_contracts.vault.assets_config(msg.params.tokenIDX0).call().await?;
-			Ok(!config.unified.is_zero())
+			Ok(!config.unified.is_zero() && !config.target.is_zero())
 		} else {
 			let local_asset = self
 				.protocol_contracts
@@ -629,11 +629,11 @@ where
 		};
 		let migrated_to_n = if treat_as_local {
 			let config = self.protocol_contracts.vault.assets_config(token_idx0).call().await?;
-			!config.unified.is_zero()
+			!config.unified.is_zero() && !config.target.is_zero()
 		} else {
-			let local_asset =
+			let remote_asset =
 				self.protocol_contracts.vault.remote_asset_pair(token_idx0).call().await?;
-			!local_asset.is_zero()
+			!remote_asset.is_zero()
 		};
 		Ok(if migrated_to_n {
 			*self.protocol_contracts.socket.address()
