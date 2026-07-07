@@ -786,21 +786,14 @@ where
 		}
 
 		if let Some(src_client) = &self.system_clients.get(&src) {
-			log::info!(
-				"is_sequence_ended: msg.params.tokenIDX0: {:?}",
-				socket_msg.params.tokenIDX0
-			);
 			let src_socket_address =
 				src_client.resolve_socket_address(socket_msg.params.tokenIDX0, true).await?;
-			log::info!("is_sequence_ended: src_socket_address: {:?}", src_socket_address);
 
 			let request = if let Some(legacy_socket) = &src_client.protocol_contracts.legacy_socket
 			{
 				if src_socket_address == *legacy_socket.address() {
-					log::info!("is_sequence_ended: using legacy socket");
 					legacy_socket.get_request(socket_msg.req_id.clone()).call().await?
 				} else {
-					log::info!("is_sequence_ended: using n socket");
 					src_client
 						.protocol_contracts
 						.socket
@@ -809,7 +802,6 @@ where
 						.await?
 				}
 			} else {
-				log::info!("is_sequence_ended: using n socket");
 				src_client
 					.protocol_contracts
 					.socket
@@ -817,7 +809,6 @@ where
 					.call()
 					.await?
 			};
-			log::info!("is_sequence_ended: request: {:?}", request);
 			return Ok(matches!(
 				SocketEventStatus::from(&request.field[0]),
 				SocketEventStatus::Committed | SocketEventStatus::Rollbacked

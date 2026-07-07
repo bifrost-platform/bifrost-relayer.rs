@@ -599,7 +599,7 @@ where
 		if is_inbound {
 			let config =
 				self.protocol_contracts.vault.assets_config(msg.params.tokenIDX0).call().await?;
-			Ok(!config.unified.is_zero() && !config.target.is_zero())
+			Ok(!config.target.is_zero())
 		} else {
 			let local_asset = self
 				.protocol_contracts
@@ -625,32 +625,19 @@ where
 		treat_as_local: bool,
 	) -> Result<Address> {
 		let Some(legacy_socket) = &self.protocol_contracts.legacy_socket else {
-			log::info!("resolve_socket_address: legacy_socket is None");
-			log::info!(
-				"resolve_socket_address: socket address: {:?}",
-				self.protocol_contracts.socket.address()
-			);
 			return Ok(*self.protocol_contracts.socket.address());
 		};
 		let migrated_to_n = if treat_as_local {
 			let config = self.protocol_contracts.vault.assets_config(token_idx0).call().await?;
-			log::info!("resolve_socket_address: config: {:?}", config);
-			!config.unified.is_zero() && !config.target.is_zero()
+			!config.target.is_zero()
 		} else {
 			let remote_asset =
 				self.protocol_contracts.vault.remote_asset_pair(token_idx0).call().await?;
-			log::info!("resolve_socket_address: remote_asset: {:?}", remote_asset);
 			!remote_asset.is_zero()
 		};
-		log::info!("resolve_socket_address: migrated_to_n: {:?}", migrated_to_n);
 		Ok(if migrated_to_n {
-			log::info!(
-				"resolve_socket_address: final address: {:?}",
-				*self.protocol_contracts.socket.address()
-			);
 			*self.protocol_contracts.socket.address()
 		} else {
-			log::info!("resolve_socket_address: final address: {:?}", *legacy_socket.address());
 			*legacy_socket.address()
 		})
 	}
