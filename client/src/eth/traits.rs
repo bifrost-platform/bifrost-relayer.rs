@@ -11,7 +11,7 @@ use alloy::{
 };
 use br_primitives::{
 	bootstrap::BootstrapSharedData,
-	constants::{cccp, config::CHAINLINK_STALENESS_THRESHOLD_VOLATILE},
+	constants::{cccp, config::HOOK_STALENESS_THRESHOLD},
 	contracts::{
 		chainlink_aggregator::ChainlinkContract,
 		oracle::{OracleManagerContract, OracleManagerInstance},
@@ -626,7 +626,7 @@ where
 		let dnc_price = match oracle_manager.last_oracle_info(dnc_oid).call().await {
 			Ok(info) => {
 				let staleness = now.saturating_sub(info._1.time);
-				if staleness > CHAINLINK_STALENESS_THRESHOLD_VOLATILE {
+				if staleness > HOOK_STALENESS_THRESHOLD {
 					br_primitives::log_and_capture!(
 						warn,
 						&self.get_client().get_chain_name(),
@@ -634,7 +634,7 @@ where
 						self.get_client().address().await,
 						"⚠️  DNC oracle price is stale (last updated {}s ago, threshold: {}s). Skipping hook execution.",
 						staleness,
-						CHAINLINK_STALENESS_THRESHOLD_VOLATILE
+						HOOK_STALENESS_THRESHOLD
 					);
 					return Ok((U256::ZERO, 0));
 				}
@@ -691,7 +691,7 @@ where
 				Ok(round_data) => {
 					let staleness =
 						now.saturating_sub(round_data.updatedAt.try_into().unwrap_or_default());
-					if staleness > CHAINLINK_STALENESS_THRESHOLD_VOLATILE {
+					if staleness > HOOK_STALENESS_THRESHOLD {
 						br_primitives::log_and_capture!(
 							warn,
 							&self.get_client().get_chain_name(),
@@ -699,7 +699,7 @@ where
 							self.get_client().address().await,
 							"⚠️  Oracle aggregator price is stale (last updated {}s ago, threshold: {}s) for {:?}. Skipping hook execution.",
 							staleness,
-							CHAINLINK_STALENESS_THRESHOLD_VOLATILE,
+							HOOK_STALENESS_THRESHOLD,
 							bridged_asset_id
 						);
 						return Ok((U256::ZERO, 0));
@@ -763,7 +763,7 @@ where
 			match oracle_manager.last_oracle_info(bridged_oid).call().await {
 				Ok(info) => {
 					let staleness = now.saturating_sub(info._1.time);
-					if staleness > CHAINLINK_STALENESS_THRESHOLD_VOLATILE {
+					if staleness > HOOK_STALENESS_THRESHOLD {
 						br_primitives::log_and_capture!(
 							warn,
 							&self.get_client().get_chain_name(),
@@ -771,7 +771,7 @@ where
 							self.get_client().address().await,
 							"⚠️  Bridged asset oracle price is stale (last updated {}s ago, threshold: {}s). Skipping hook execution.",
 							staleness,
-							CHAINLINK_STALENESS_THRESHOLD_VOLATILE
+							HOOK_STALENESS_THRESHOLD
 						);
 						return Ok((U256::ZERO, 0));
 					}

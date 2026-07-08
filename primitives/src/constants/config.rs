@@ -18,6 +18,9 @@ pub const CHAINLINK_STALENESS_THRESHOLD_VOLATILE: u64 = 3600;
 /// (e.g. USDC, USDT, DAI, JPYC). Chainlink heartbeat for stablecoins is typically ~24 hours.
 pub const CHAINLINK_STALENESS_THRESHOLD_STABLE: u64 = 86400;
 
+/// The maximum allowed staleness duration (in seconds) for hook execution.
+pub const HOOK_STALENESS_THRESHOLD: u64 = u64::MAX;
+
 /// The HTTP request timeout (in seconds) for external price source API calls.
 pub const PRICE_FETCHER_REQUEST_TIMEOUT: u64 = 30;
 
