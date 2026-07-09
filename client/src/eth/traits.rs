@@ -56,6 +56,56 @@ pub trait Handler {
 }
 
 #[async_trait::async_trait]
+/// Provides a reusable check for whether a `SocketMessage`'s encoded byte size exceeds
+/// `BtcSocketQueue::MaxSocketMessageBytes`.
+pub trait SocketMessageSizeGuard {
+	/// The substrate client used to query the configured byte size limit.
+	fn sub_client(&self) -> &OnlineClient<CustomConfig>;
+
+	/// The chain name to attribute the skip-log to.
+	fn chain_name(&self) -> String;
+
+	/// Fetches the configured maximum allowed byte size of a single socket message from
+	/// `BtcSocketQueue::MaxSocketMessageBytes`.
+	async fn fetch_max_socket_message_bytes(&self) -> Result<u32> {
+		Ok(self
+			.sub_client()
+			.storage()
+			.at_latest()
+			.await?
+			.fetch_or_default(
+				&bifrost_runtime::storage().btc_socket_queue().max_socket_message_bytes(),
+			)
+			.await?)
+	}
+
+	/// Checks whether the encoded `SocketMessage` byte size exceeds the configured limit,
+	/// logging a warning under `sub_log_target` when it does.
+	async fn exceeds_max_socket_message_bytes(
+		&self,
+		msg: &Socket_Message,
+		sub_log_target: &str,
+	) -> Result<bool> {
+		let encoded_len = Vec::<u8>::from(msg.clone()).len();
+		let max_bytes = self.fetch_max_socket_message_bytes().await? as usize;
+
+		if encoded_len > max_bytes {
+			br_primitives::log_and_capture!(
+				warn,
+				&self.chain_name(),
+				sub_log_target,
+				"⚠️ Skipping oversized SocketMessage: seq={}, size={} bytes (limit={} bytes)",
+				msg.req_id.sequence,
+				encoded_len,
+				max_bytes,
+			);
+			return Ok(true);
+		}
+		Ok(false)
+	}
+}
+
+#[async_trait::async_trait]
 /// The client to interact with the `Socket` contract instance.
 pub trait SocketRelayBuilder<F, P, N: Network>
 where

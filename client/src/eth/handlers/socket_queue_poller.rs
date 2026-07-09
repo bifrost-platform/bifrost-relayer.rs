@@ -32,7 +32,7 @@ use br_primitives::{
 use crate::eth::{
 	EthClient,
 	events::EventMessage,
-	traits::{BootstrapHandler, Handler},
+	traits::{BootstrapHandler, Handler, SocketMessageSizeGuard},
 };
 
 const SUB_LOG_TARGET: &str = "socket-queue-poller";
@@ -210,6 +210,11 @@ where
 		match log.log_decode::<Socket>() {
 			Ok(decoded_log) => {
 				let msg = decoded_log.inner.data.msg.clone();
+
+				if self.exceeds_max_socket_message_bytes(&msg, SUB_LOG_TARGET).await? {
+					return Ok(());
+				}
+
 				let status = SocketEventStatus::from(msg.status);
 
 				let asset_index_hash = self.get_asset_index_hash(&msg);
@@ -695,5 +700,19 @@ where
 		}
 
 		Ok(logs)
+	}
+}
+
+impl<F, P, N: Network> SocketMessageSizeGuard for SocketQueuePoller<F, P, N>
+where
+	F: TxFiller<N> + WalletProvider<N>,
+	P: Provider<N>,
+{
+	fn sub_client(&self) -> &OnlineClient<CustomConfig> {
+		&self.sub_client
+	}
+
+	fn chain_name(&self) -> String {
+		self.client.get_chain_name()
 	}
 }
