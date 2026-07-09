@@ -38,7 +38,9 @@ use crate::{
 		events::EventMessage,
 		handlers::{SocketOnflightMessage, SocketOnflightReceiver},
 		send_transaction,
-		traits::{BootstrapHandler, Handler, HookExecutor, SocketRelayBuilder},
+		traits::{
+			BootstrapHandler, Handler, HookExecutor, SocketMessageSizeGuard, SocketRelayBuilder,
+		},
 	},
 };
 
@@ -227,6 +229,10 @@ where
 
 				let msg = decoded_socket.msg.clone();
 				let status = SocketEventStatus::from(msg.status);
+
+				if self.exceeds_max_socket_message_bytes(&msg, SUB_LOG_TARGET).await? {
+					return Ok(());
+				}
 
 				// In relay-queue mode (CCCP-v2) the Requested status is handled by
 				// SocketOnflightHandler via the CCCPRelayQueue pallet. In legacy mode the
@@ -1102,6 +1108,20 @@ where
 
 	fn get_sub_client(&self) -> OnlineClient<CustomConfig> {
 		self.sub_client.clone()
+	}
+}
+
+impl<F, P, N: Network> SocketMessageSizeGuard for SocketRelayHandler<F, P, N>
+where
+	F: TxFiller<N> + WalletProvider<N>,
+	P: Provider<N>,
+{
+	fn sub_client(&self) -> &OnlineClient<CustomConfig> {
+		&self.sub_client
+	}
+
+	fn chain_name(&self) -> String {
+		self.client.get_chain_name()
 	}
 }
 
