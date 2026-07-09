@@ -721,11 +721,12 @@ pub fn send_transaction<F, P, N: Network>(
 				}
 
 				let msg = format!(
-					" ❗️ Failed to estimate gas ({} address:{}): {}, Error: {}",
+					" ❗️ Failed to estimate gas ({} address:{}): {}, Error: {}, Request: {:?}",
 					client.get_chain_name(),
 					client.address().await,
 					metadata,
-					err
+					err,
+					request
 				);
 				log::error!(target: &requester, "{msg}");
 
@@ -773,11 +774,12 @@ pub fn send_transaction<F, P, N: Network>(
 					Err(err) => {
 						br_primitives::log_and_capture_simple!(
 							error,
-							" ❗️ Transaction failed to register ({} address:{}): {}, Error: {}",
+							" ❗️ Transaction failed to register ({} address:{}): {}, Error: {}, Request: {:?}",
 							client.get_chain_name(),
 							client.address().await,
 							metadata,
-							err
+							err,
+							request
 						);
 
 						client.flush_stalled_transactions().await.unwrap();
@@ -787,11 +789,12 @@ pub fn send_transaction<F, P, N: Network>(
 			Err(err) => {
 				br_primitives::log_and_capture_simple!(
 					error,
-					" ❗️ Failed to send transaction ({} address:{}): {}, Error: {}",
+					" ❗️ Failed to send transaction ({} address:{}): {}, Error: {}, Request: {:?}",
 					client.get_chain_name(),
 					client.address().await,
 					metadata,
-					err
+					err,
+					request
 				);
 
 				if err.to_string().to_lowercase().contains("nonce too low") {
