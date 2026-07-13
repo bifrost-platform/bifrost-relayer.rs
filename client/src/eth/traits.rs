@@ -70,13 +70,12 @@ pub trait SocketMessageSizeGuard {
 	async fn fetch_max_socket_message_bytes(&self) -> Result<u32> {
 		Ok(self
 			.sub_client()
-			.storage()
-			.at_latest()
+			.at_current_block()
 			.await?
-			.fetch_or_default(
-				&bifrost_runtime::storage().btc_socket_queue().max_socket_message_bytes(),
-			)
-			.await?)
+			.storage()
+			.fetch(bifrost_runtime::storage().btc_socket_queue().max_socket_message_bytes(), ())
+			.await?
+			.decode()?)
 	}
 
 	/// Checks whether the encoded `SocketMessage` byte size exceeds the configured limit,
