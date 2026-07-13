@@ -609,13 +609,9 @@ where
 	}
 
 	fn estimate_gas(&self, tx: N::TransactionRequest) -> EthCall<N, U64, u64> {
-		let call = EthCall::gas_estimate(self.inner.weak_client(), tx);
-
-		if self.chain_id() == 56 || self.chain_id() == 97 {
-			call.map_resp(|r| r.to::<u64>())
-		} else {
-			call.block(BlockNumberOrTag::Pending.into()).map_resp(|r| r.to::<u64>())
-		}
+		EthCall::gas_estimate(self.inner.weak_client(), tx)
+			.block(BlockNumberOrTag::Latest.into())
+			.map_resp(|r| r.to::<u64>())
 	}
 
 	async fn send_transaction_internal(
