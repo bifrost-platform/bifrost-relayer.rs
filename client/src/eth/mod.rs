@@ -652,7 +652,9 @@ pub fn send_transaction<F, P, N: Network>(
 	this_handle.spawn("send_transaction", None, async move {
 		if let Err(err) = client.fill_gas(&mut request).await {
 			if debug_mode {
-				if err.to_string().contains("revert tx already executed") {
+				let err_string = err.to_string();
+
+				if err_string.contains("revert tx already executed") {
 					return;
 				}
 
@@ -664,7 +666,20 @@ pub fn send_transaction<F, P, N: Network>(
 					err
 				);
 				log::error!(target: &requester, "{msg}");
-				sentry::capture_message(&msg, sentry::Level::Error);
+
+				const SENTRY_IGNORE_PATTERNS: [&str; 4] = [
+					// roundup already executed on external chain through round_control_relay()
+					"latest round",
+					// outbound aggregated relay already executed
+					"_outbound_exec_relay status",
+					// inbound aggregated relay already executed
+					"phase3",
+					// bridge request already committed
+					"revert poll filtered",
+				];
+				if !SENTRY_IGNORE_PATTERNS.iter().any(|pattern| err_string.contains(pattern)) {
+					sentry::capture_message(&msg, sentry::Level::Error);
+				}
 			}
 			return;
 		}
