@@ -11,7 +11,7 @@ use alloy::{
 	sol_types::SolType,
 };
 use eyre::Result;
-use subxt::{OnlineClient, backend::legacy::LegacyRpcMethods, utils::H256};
+use subxt::{OnlineClient, rpcs::LegacyRpcMethods, utils::H256};
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 
 use br_primitives::{
@@ -90,7 +90,7 @@ where
 	/// The Substrate client for event subscription.
 	sub_client: OnlineClient<CustomConfig>,
 	/// The legacy RPC methods for querying best block.
-	sub_rpc: LegacyRpcMethods<CustomConfig>,
+	sub_rpc: LegacyRpcMethods<subxt::config::RpcConfigFor<CustomConfig>>,
 	/// The senders for each chain's SocketRelayHandler. <chain_id, Sender>
 	onflight_senders: Arc<BTreeMap<ChainId, SocketOnflightSender>>,
 	/// The bootstrap shared data.
@@ -116,7 +116,8 @@ where
 		bootstrap_shared_data: Arc<BootstrapSharedData>,
 	) -> Result<Self> {
 		let rpc_client = create_rpc_client(&sub_rpc_url).await?;
-		let sub_rpc = LegacyRpcMethods::<CustomConfig>::new(rpc_client);
+		let sub_rpc =
+			LegacyRpcMethods::<subxt::config::RpcConfigFor<CustomConfig>>::new(rpc_client);
 
 		Ok(Self {
 			bifrost_client,
@@ -142,7 +143,7 @@ where
 		// This allows us to catch TransferPolled events that occur during other handlers' bootstrap.
 
 		// Subscribe to Substrate blocks for TransferPolled events
-		let mut sub_block_stream = self.sub_client.blocks().subscribe_best().await?;
+		let mut sub_block_stream = self.sub_client.stream_best_blocks().await?;
 
 		log::info!(
 			target: &self.bifrost_client.get_chain_name(),
@@ -169,7 +170,7 @@ where
 	/// Process a Substrate block by querying OnFlightTransfers storage directly.
 	async fn process_substrate_block(
 		&self,
-		block: subxt::blocks::Block<CustomConfig, OnlineClient<CustomConfig>>,
+		block: subxt::client::Block<CustomConfig>,
 	) -> Result<()> {
 		use bifrost_runtime::runtime_types::pallet_cccp_relay_queue::TransferOption;
 
@@ -178,17 +179,21 @@ where
 
 		// Query OnFlightTransfers storage directly instead of relying on events
 		let block_hash = block.hash();
-		let storage = self.sub_client.storage().at(block_hash);
+		let at = self
+			.sub_client
+			.at_block(subxt::backend::BlockRef::from_hash(block_hash))
+			.await?;
+		let storage = at.storage();
 
-		let storage_query =
-			bifrost_runtime::storage().cccp_relay_queue().on_flight_transfers_iter();
-		let mut iter = storage.iter(storage_query).await?;
+		let storage_query = bifrost_runtime::storage().cccp_relay_queue().on_flight_transfers();
+		let mut iter = storage.iter(storage_query, ()).await?;
 
 		// Collect current OnFlight transfer keys from storage for cleanup
 		let mut current_storage_keys: HashSet<H256> = HashSet::new();
 
-		while let Some(Ok(kv)) = iter.next().await {
-			let transfer_info = kv.value;
+		while let Some(item) = iter.next().await {
+			let kv = item?;
+			let transfer_info = kv.value().decode()?;
 
 			// Compute msg_hash from the socket message (msg_hash = keccak256(socket_message))
 			let msg_hash = H256(keccak256(&transfer_info.socket_message).0);
@@ -608,16 +613,17 @@ where
 		use bifrost_runtime::runtime_types::pallet_cccp_relay_queue::TransferOption;
 
 		let best_hash = self.sub_rpc.chain_get_block_hash(None).await?.unwrap_or_default();
-		let storage = self.sub_client.storage().at(best_hash);
+		let at = self.sub_client.at_block(subxt::backend::BlockRef::from_hash(best_hash)).await?;
+		let storage = at.storage();
 
-		let storage_query =
-			bifrost_runtime::storage().cccp_relay_queue().on_flight_transfers_iter();
-		let mut iter = storage.iter(storage_query).await?;
+		let storage_query = bifrost_runtime::storage().cccp_relay_queue().on_flight_transfers();
+		let mut iter = storage.iter(storage_query, ()).await?;
 
 		let mut recovered_count = 0u32;
 
-		while let Some(Ok(kv)) = iter.next().await {
-			let transfer_info = kv.value;
+		while let Some(item) = iter.next().await {
+			let kv = item?;
+			let transfer_info = kv.value().decode()?;
 
 			// Compute msg_hash from the socket message (msg_hash = keccak256(socket_message))
 			let msg_hash = H256(keccak256(&transfer_info.socket_message).0);

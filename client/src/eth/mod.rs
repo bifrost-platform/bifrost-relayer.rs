@@ -19,7 +19,9 @@ use br_primitives::{
 use alloy::{
 	consensus::{BlockHeader, Transaction, TxType, Typed2718},
 	eips::BlockNumberOrTag,
-	network::{BlockResponse, Network, TransactionBuilder, TransactionResponse},
+	network::{
+		BlockResponse, Network, NetworkTransactionBuilder, TransactionBuilder, TransactionResponse,
+	},
 	primitives::{
 		Address, ChainId, FixedBytes, U64, keccak256,
 		utils::{Unit, format_units},
@@ -607,13 +609,9 @@ where
 	}
 
 	fn estimate_gas(&self, tx: N::TransactionRequest) -> EthCall<N, U64, u64> {
-		let call = EthCall::gas_estimate(self.inner.weak_client(), tx);
-
-		if self.chain_id() == 56 || self.chain_id() == 97 {
-			call.map_resp(|r| r.to::<u64>())
-		} else {
-			call.block(BlockNumberOrTag::Pending.into()).map_resp(|r| r.to::<u64>())
-		}
+		EthCall::gas_estimate(self.inner.weak_client(), tx)
+			.block(BlockNumberOrTag::Latest.into())
+			.map_resp(|r| r.to::<u64>())
 	}
 
 	async fn send_transaction_internal(
@@ -650,7 +648,9 @@ pub fn send_transaction<F, P, N: Network>(
 	this_handle.spawn("send_transaction", None, async move {
 		if let Err(err) = client.fill_gas(&mut request).await {
 			if debug_mode {
-				if err.to_string().contains("revert tx already executed") {
+				let err_string = err.to_string();
+
+				if err_string.contains("revert tx already executed") {
 					return;
 				}
 
@@ -662,7 +662,20 @@ pub fn send_transaction<F, P, N: Network>(
 					err
 				);
 				log::error!(target: &requester, "{msg}");
-				sentry::capture_message(&msg, sentry::Level::Error);
+
+				const SENTRY_IGNORE_PATTERNS: [&str; 4] = [
+					// roundup already executed on external chain through round_control_relay()
+					"latest round",
+					// outbound aggregated relay already executed
+					"_outbound_exec_relay status",
+					// inbound aggregated relay already executed
+					"phase3",
+					// bridge request already committed
+					"revert poll filtered",
+				];
+				if !SENTRY_IGNORE_PATTERNS.iter().any(|pattern| err_string.contains(pattern)) {
+					sentry::capture_message(&msg, sentry::Level::Error);
+				}
 			}
 			return;
 		}

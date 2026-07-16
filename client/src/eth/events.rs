@@ -114,7 +114,7 @@ where
 
 		while (stream.next().await).is_some() {
 			let latest_block = self.client.get_block_number().await?;
-			while self.has_new_block(latest_block) {
+			while self.is_batch_ready(latest_block) {
 				self.process_new_block().await?;
 
 				if self.is_balance_sync_enabled {
@@ -180,9 +180,12 @@ where
 		br_metrics::set_block_height(&self.client.get_chain_name(), self.waiting_block);
 	}
 
-	/// Verifies if there are new blocks to process.
+	/// Verifies if the next batch of blocks has fully mined and is ready to process.
+	/// Note: This does not wait for confirmations, only for `get_logs_batch_size` blocks to
+	/// exist, so the `eth_getLogs` batch range never reaches past the chain head. Handlers that
+	/// need confirmation (e.g., SocketRelayHandler) implement their own waiting logic.
 	#[inline]
-	fn has_new_block(&self, latest_block: u64) -> bool {
+	fn is_batch_ready(&self, latest_block: u64) -> bool {
 		if self.waiting_block > latest_block {
 			// difference is greater than 100 blocks
 			// if it suddenly rollbacked to an old block
@@ -197,8 +200,10 @@ where
 			}
 			return false;
 		}
-		// Process immediately without waiting for confirmations
-		self.waiting_block <= latest_block
+		let to = self
+			.waiting_block
+			.saturating_add(self.client.metadata.get_logs_batch_size.saturating_sub(1u64));
+		latest_block >= to
 	}
 
 	/// Bootstrap phase 0-1.
