@@ -12,12 +12,13 @@
 
 use std::sync::Arc;
 
+use sha2::{Digest, Sha256};
 use solana_client::nonblocking::rpc_client::RpcClient;
 use solana_commitment_config::{CommitmentConfig, CommitmentLevel};
 use solana_sdk::pubkey::Pubkey;
 use std::str::FromStr;
 
-use br_primitives::cli::SolProvider;
+use br_primitives::{cli::SolProvider, sol::is_sol_chain_index};
 
 use crate::sol::pda;
 
@@ -43,6 +44,7 @@ use crate::sol::pda;
 /// so the relayer reads the 8 bytes starting at offset 104 and decodes
 /// them with `u64::from_le_bytes`.
 const SOCKET_CONFIG_LATEST_ROUND_ID_OFFSET: usize = 104;
+const SOCKET_CONFIG_THIS_CHAIN_OFFSET: usize = 72;
 
 /// Byte offset of the `active_rounds_size: u64` field inside the Anchor-
 /// serialized `SocketConfig` account (immediately after `latest_round_id`,
@@ -99,6 +101,13 @@ fn decode_round_info_payer(data: &[u8]) -> Option<Pubkey> {
 }
 
 #[derive(Clone)]
+struct AssetAttestation {
+	index: [u8; 32],
+	mint: Pubkey,
+	expected_decimals: Option<u8>,
+}
+
+#[derive(Clone)]
 pub struct SolClient {
 	/// Free-form cluster name (e.g. `solana-devnet`). Used in logs and
 	/// metrics labels.
@@ -115,6 +124,9 @@ pub struct SolClient {
 	pub is_relay_target: bool,
 	/// `getSignaturesForAddress` page size.
 	pub get_signatures_batch_size: u64,
+	expected_upgrade_authority: Option<Pubkey>,
+	expected_program_data_sha256: Option<[u8; 32]>,
+	asset_attestations: Vec<AssetAttestation>,
 	/// Underlying nonblocking RPC client. Pre-configured with the
 	/// `commitment` level from the provider config.
 	rpc: Arc<RpcClient>,
@@ -130,6 +142,33 @@ impl SolClient {
 
 		let commitment = parse_commitment(provider.commitment.as_deref());
 		let rpc = Arc::new(RpcClient::new_with_commitment(provider.provider.clone(), commitment));
+		let expected_upgrade_authority =
+			provider.expected_upgrade_authority.as_deref().map(|value| {
+				Pubkey::from_str(value).expect("invalid SolProvider.expected_upgrade_authority")
+			});
+		let expected_program_data_sha256 =
+			provider.expected_program_data_sha256.as_deref().map(|value| {
+				let value = value.strip_prefix("0x").unwrap_or(value);
+				let mut out = [0u8; 32];
+				hex::decode_to_slice(value, &mut out)
+					.expect("invalid SolProvider.expected_program_data_sha256");
+				out
+			});
+		let asset_attestations = provider
+			.assets
+			.iter()
+			.map(|entry| {
+				let index = entry.index.strip_prefix("0x").unwrap_or(&entry.index);
+				let mut index_bytes = [0u8; 32];
+				hex::decode_to_slice(index, &mut index_bytes)
+					.expect("invalid SolProvider.assets[].index");
+				AssetAttestation {
+					index: index_bytes,
+					mint: Pubkey::from_str(&entry.mint).expect("invalid SolProvider.assets[].mint"),
+					expected_decimals: entry.decimals,
+				}
+			})
+			.collect();
 
 		Self {
 			name: provider.name.clone(),
@@ -139,6 +178,9 @@ impl SolClient {
 			program_id,
 			is_relay_target: provider.is_relay_target,
 			get_signatures_batch_size: provider.get_signatures_batch_size.unwrap_or(100),
+			expected_upgrade_authority,
+			expected_program_data_sha256,
+			asset_attestations,
 			rpc,
 		}
 	}
@@ -154,10 +196,10 @@ impl SolClient {
 		self.name.clone()
 	}
 
-	/// Boot-time health check. Verifies that:
-	///   1. the configured RPC endpoint is reachable + returns a valid slot,
-	///   2. the configured `program_id` actually has an account on chain
-	///      (= the cccp-solana program is deployed to this cluster).
+	/// Boot-time deployment attestation. Verifies the executable loader and
+	/// ProgramData linkage, optional upgrade-authority/binary hash pins,
+	/// singleton account ownership/layout, and every configured asset mint's
+	/// address, decimals, initialization state, and mint authority.
 	///
 	/// Returns the latest slot on success. Should be called once during
 	/// `service::relay()` setup so misconfigurations fail fast at boot
@@ -169,14 +211,178 @@ impl SolClient {
 			.await
 			.map_err(|e| eyre::eyre!("get_slot probe failed for {}: {e}", self.name))?;
 
-		match self.rpc.get_account(&self.program_id).await {
-			Ok(_) => Ok(slot),
-			Err(err) => Err(eyre::eyre!(
+		let upgradeable_loader = Pubkey::from_str("BPFLoaderUpgradeab1e11111111111111111111111")
+			.expect("canonical upgradeable loader id");
+		let token_program = Pubkey::from_str("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA")
+			.expect("canonical token program id");
+		let program = self.rpc.get_account(&self.program_id).await.map_err(|err| {
+			eyre::eyre!(
 				"cccp-solana program {} not found on {} (slot={slot}): {err}",
 				self.program_id,
 				self.name
-			)),
+			)
+		})?;
+		if !program.executable || program.owner != upgradeable_loader {
+			eyre::bail!(
+				"program {} on {} is not executable under the upgradeable loader",
+				self.program_id,
+				self.name,
+			);
 		}
+		if program.data.len() < 36 || program.data[..4] != 2u32.to_le_bytes() {
+			eyre::bail!("program {} has invalid upgradeable-loader state", self.program_id);
+		}
+		let mut program_data_key = [0u8; 32];
+		program_data_key.copy_from_slice(&program.data[4..36]);
+		let program_data_key = Pubkey::new_from_array(program_data_key);
+		let program_data = self.rpc.get_account(&program_data_key).await.map_err(|err| {
+			eyre::eyre!("ProgramData {program_data_key} missing on {}: {err}", self.name)
+		})?;
+		if program_data.owner != upgradeable_loader
+			|| program_data.data.len() < 13
+			|| program_data.data[..4] != 3u32.to_le_bytes()
+		{
+			eyre::bail!("ProgramData {program_data_key} has invalid loader state");
+		}
+		let (upgrade_authority, code_offset) = match program_data.data[12] {
+			0 => (None, 13usize),
+			1 if program_data.data.len() >= 45 => {
+				let mut authority = [0u8; 32];
+				authority.copy_from_slice(&program_data.data[13..45]);
+				(Some(Pubkey::new_from_array(authority)), 45usize)
+			},
+			other => {
+				eyre::bail!("ProgramData {program_data_key} has invalid authority tag {other}")
+			},
+		};
+		if let Some(expected) = self.expected_upgrade_authority
+			&& upgrade_authority != Some(expected)
+		{
+			eyre::bail!(
+				"ProgramData upgrade authority mismatch on {}: expected {expected}, got {:?}",
+				self.name,
+				upgrade_authority,
+			);
+		}
+		let binary_hash: [u8; 32] = Sha256::digest(&program_data.data[code_offset..]).into();
+		if let Some(expected) = self.expected_program_data_sha256
+			&& binary_hash != expected
+		{
+			eyre::bail!(
+				"ProgramData bytecode hash mismatch on {}: expected {}, got {}",
+				self.name,
+				hex::encode(expected),
+				hex::encode(binary_hash),
+			);
+		}
+
+		let (socket_key, _) = pda::socket_config(&self.program_id);
+		let (vault_key, _) = pda::vault_config(&self.program_id);
+		let socket = self.rpc.get_account(&socket_key).await.map_err(|err| {
+			eyre::eyre!("socket_config {socket_key} missing on {}: {err}", self.name)
+		})?;
+		let vault = self.rpc.get_account(&vault_key).await.map_err(|err| {
+			eyre::eyre!("vault_config {vault_key} missing on {}: {err}", self.name)
+		})?;
+		attest_anchor_account(
+			"SocketConfig",
+			&socket_key,
+			&socket.owner,
+			&socket.data,
+			&self.program_id,
+			121,
+		)?;
+		attest_anchor_account(
+			"VaultConfig",
+			&vault_key,
+			&vault.owner,
+			&vault.data,
+			&self.program_id,
+			141,
+		)?;
+		if socket.data[40..72] != vault_key.to_bytes()
+			|| vault.data[40..72] != socket_key.to_bytes()
+			|| socket.data[8..40] != vault.data[8..40]
+		{
+			eyre::bail!("socket/vault singleton linkage is inconsistent on {}", self.name);
+		}
+		let expected_this_chain = u32::try_from(self.chain_id)
+			.map_err(|_| eyre::eyre!("Solana chain id {} does not fit ChainIndex", self.chain_id))?
+			.to_be_bytes();
+		if !is_sol_chain_index(expected_this_chain) {
+			eyre::bail!(
+				"Solana chain id {} is not a canonical SOL_DEV/SOL_TEST/SOL_MAIN value",
+				self.chain_id,
+			);
+		}
+		let actual_this_chain =
+			&socket.data[SOCKET_CONFIG_THIS_CHAIN_OFFSET..SOCKET_CONFIG_THIS_CHAIN_OFFSET + 4];
+		if actual_this_chain != expected_this_chain {
+			eyre::bail!(
+				"socket_config this_chain mismatch on {}: config expects 0x{}, on-chain is 0x{}",
+				self.name,
+				hex::encode(expected_this_chain),
+				hex::encode(actual_this_chain),
+			);
+		}
+		if !matches!(&socket.data[76..80], [0, 0, 0x0b, 0xfc] | [0, 0, 0xbf, 0xc0]) {
+			eyre::bail!("socket_config has an unsupported BFC ChainIndex on {}", self.name);
+		}
+
+		for spec in &self.asset_attestations {
+			let (asset_key, _) = pda::asset_config(&self.program_id, &spec.index);
+			let asset = self.rpc.get_account(&asset_key).await.map_err(|err| {
+				eyre::eyre!("asset_config {asset_key} missing on {}: {err}", self.name)
+			})?;
+			attest_anchor_account(
+				"AssetConfig",
+				&asset_key,
+				&asset.owner,
+				&asset.data,
+				&self.program_id,
+				42,
+			)?;
+			if asset.data[8..40] != spec.mint.to_bytes() {
+				eyre::bail!("asset {asset_key} mint does not match configured {}", spec.mint);
+			}
+			let mint = self.rpc.get_account(&spec.mint).await.map_err(|err| {
+				eyre::eyre!("configured mint {} missing on {}: {err}", spec.mint, self.name)
+			})?;
+			if mint.owner != token_program || mint.data.len() < 46 || mint.data[45] == 0 {
+				eyre::bail!("configured mint {} is not an initialized SPL Mint", spec.mint);
+			}
+			let decimals = mint.data[44];
+			if asset.data[40] != decimals || spec.expected_decimals.is_some_and(|d| d != decimals) {
+				eyre::bail!(
+					"mint decimals mismatch for {} on {}: mint={decimals}, asset={}, expected={:?}",
+					spec.mint,
+					self.name,
+					asset.data[40],
+					spec.expected_decimals,
+				);
+			}
+			let asset_kind = asset.data[41];
+			if asset_kind == 1 && vault.data[104..136] != spec.mint.to_bytes() {
+				eyre::bail!("native asset mint does not match vault_config.native_mint");
+			}
+			if asset_kind == 3 {
+				let authority_tag = u32::from_le_bytes(mint.data[0..4].try_into().unwrap());
+				if authority_tag != 1 || mint.data[4..36] != vault_key.to_bytes() {
+					eyre::bail!("mintable asset {} is not controlled by the vault PDA", spec.mint);
+				}
+			}
+		}
+
+		log::info!(
+			target: &self.name,
+			"cccp-solana attested: program={} program_data={} sha256={} upgrade_authority={:?} assets={}",
+			self.program_id,
+			program_data_key,
+			hex::encode(binary_hash),
+			upgrade_authority,
+			self.asset_attestations.len(),
+		);
+		Ok(slot)
 	}
 
 	/// Read the on-chain `socket_config.latest_round_id`.
@@ -272,6 +478,32 @@ impl SolClient {
 		}
 		Ok(out)
 	}
+}
+
+fn attest_anchor_account(
+	name: &str,
+	key: &Pubkey,
+	owner: &Pubkey,
+	data: &[u8],
+	program_id: &Pubkey,
+	minimum_size: usize,
+) -> eyre::Result<()> {
+	if owner != program_id {
+		eyre::bail!("{name} {key} is owned by {owner}, expected {program_id}");
+	}
+	if data.len() < minimum_size {
+		eyre::bail!("{name} {key} is too small: {} < {minimum_size}", data.len());
+	}
+	let expected = {
+		let digest = Sha256::digest(format!("account:{name}").as_bytes());
+		let mut out = [0u8; 8];
+		out.copy_from_slice(&digest[..8]);
+		out
+	};
+	if data[..8] != expected {
+		eyre::bail!("{name} {key} has the wrong Anchor discriminator");
+	}
+	Ok(())
 }
 
 fn parse_commitment(s: Option<&str>) -> CommitmentConfig {

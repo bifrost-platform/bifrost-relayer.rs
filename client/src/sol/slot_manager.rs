@@ -19,22 +19,32 @@
 // any tx returned by `getSignaturesForAddress` is already finalized when
 // the commitment level is `finalized`.
 
-use std::sync::Arc;
+use std::path::PathBuf;
+use std::sync::{
+	Arc, Mutex,
+	atomic::{AtomicUsize, Ordering},
+};
 
+use serde::{Deserialize, Serialize};
 use solana_client::nonblocking::rpc_client::RpcClient;
 use solana_client::rpc_client::GetConfirmedSignaturesForAddress2Config;
+use solana_client::rpc_config::RpcTransactionConfig;
+use solana_commitment_config::CommitmentConfig;
 use solana_pubsub_client::nonblocking::pubsub_client::PubsubClient;
 use solana_sdk::signature::Signature;
 use solana_transaction_status_client_types::{
 	EncodedConfirmedTransactionWithStatusMeta, UiTransactionEncoding,
 };
 use std::str::FromStr;
-use tokio::sync::broadcast::{self, Receiver, Sender};
+use tokio::sync::{
+	mpsc::{self, UnboundedReceiver, UnboundedSender},
+	oneshot,
+};
 
 use br_primitives::sol::{Event, EventMessage, EventType};
 
 use crate::sol::client::SolClient;
-use crate::sol::decoder::{DecodedAnchorEvent, decode_anchor_events};
+use crate::sol::decoder::{DecodedAnchorEvent, decode_successful_anchor_events};
 
 const SUB_LOG_TARGET: &str = "slot-manager";
 /// How long to run HTTP polling before retrying a dropped WS connection.
@@ -47,12 +57,47 @@ const WS_RECONNECT_INTERVAL: std::time::Duration = std::time::Duration::from_sec
 /// enough to recover from a silently-dead WS pipe within one cycle.
 const WS_NOTIFICATION_WATCHDOG: std::time::Duration = std::time::Duration::from_secs(10);
 
+#[derive(Debug, Serialize, Deserialize)]
+struct SlotCursorCheckpoint {
+	program_id: String,
+	last_seen_signature: Option<String>,
+	last_processed_slot: u64,
+	/// Decoded but not yet acknowledged by every registered consumer.
+	/// Persisting this outbox alongside the source cursor closes the crash
+	/// window between queueing an event and the handlers consuming it.
+	#[serde(default)]
+	pending_messages: Vec<EventMessage>,
+}
+
+/// One at-least-once delivery from `SlotManager` to a consumer. Dropping a
+/// delivery without calling `acknowledge` keeps the durable outbox intact,
+/// so the same message is replayed after the next tick or process restart.
+pub struct EventDelivery {
+	pub message: EventMessage,
+	ack: Option<oneshot::Sender<()>>,
+}
+
+impl EventDelivery {
+	pub fn acknowledge(mut self) {
+		if let Some(ack) = self.ack.take() {
+			let _ = ack.send(());
+		}
+	}
+}
+
 /// Slot poller — produces `EventMessage` items from the configured
 /// Solana cluster.
 pub struct SlotManager {
 	pub client: SolClient,
 	rpc: Arc<RpcClient>,
-	sender: Sender<EventMessage>,
+	/// Per-consumer unbounded queues. A slow consumer retains its own
+	/// backlog instead of causing `broadcast::Lagged` and silently losing
+	/// an irrevocable bridge event.
+	subscribers: Mutex<Vec<UnboundedSender<EventDelivery>>>,
+	/// Number of consumers registered for this manager. Cursor advancement
+	/// requires an ACK from every one; a closed queue therefore stalls
+	/// ingestion safely instead of silently dropping one side of the bridge.
+	required_subscribers: AtomicUsize,
 	/// Slot polling interval in milliseconds.
 	call_interval: u64,
 	/// Slot confirmation depth — informational. With `commitment=finalized`
@@ -67,6 +112,11 @@ pub struct SlotManager {
 	/// Most recent slot we've already streamed events for. Used as a
 	/// monotonic checkpoint for `NewSlot` heartbeats.
 	last_processed_slot: u64,
+	/// Durable at-least-once outbox restored from the cursor file.
+	pending_messages: Vec<EventMessage>,
+	/// Durable source cursor. Written atomically only after every fetched
+	/// transaction has been decoded and queued for all consumers.
+	cursor_path: Option<PathBuf>,
 	/// Optional WebSocket URL for `slotSubscribe`. When set, the manager
 	/// uses real-time WS notifications to trigger ticks instead of polling
 	/// `getSlot` over HTTP. Falls back to HTTP on WS failure.
@@ -79,26 +129,115 @@ impl SlotManager {
 		call_interval: u64,
 		confirmation_depth: u64,
 		ws_url: Option<String>,
-	) -> Self {
+		cursor_path: Option<PathBuf>,
+	) -> eyre::Result<Self> {
 		let rpc = client.rpc();
-		let (sender, _receiver) = broadcast::channel(512);
-		Self {
+		let (last_seen_signature, last_processed_slot, pending_messages) =
+			load_cursor(cursor_path.as_ref(), &client.program_id)?;
+		Ok(Self {
 			client,
 			rpc,
-			sender,
+			subscribers: Mutex::new(Vec::new()),
+			required_subscribers: AtomicUsize::new(0),
 			call_interval,
 			confirmation_depth,
-			last_seen_signature: None,
-			last_processed_slot: 0,
+			last_seen_signature,
+			last_processed_slot,
+			pending_messages,
+			cursor_path,
 			ws_url,
-		}
+		})
 	}
 
 	/// Subscribe to the slot event channel. Multiple consumers (inbound
 	/// handler, outbound roundup handler, metrics worker) can subscribe
 	/// in parallel.
-	pub fn subscribe(&self) -> Receiver<EventMessage> {
-		self.sender.subscribe()
+	pub fn subscribe(&self) -> UnboundedReceiver<EventDelivery> {
+		let (sender, receiver) = mpsc::unbounded_channel();
+		self.subscribers.lock().expect("subscriber mutex poisoned").push(sender);
+		self.required_subscribers.fetch_add(1, Ordering::Relaxed);
+		receiver
+	}
+
+	async fn publish(&self, message: EventMessage) -> eyre::Result<()> {
+		let required = self.required_subscribers.load(Ordering::Relaxed);
+		if required == 0 {
+			eyre::bail!("no Solana event consumers are registered");
+		}
+
+		let mut acknowledgements = Vec::with_capacity(required);
+		let mut send_failed = false;
+		{
+			let mut subscribers = self.subscribers.lock().expect("subscriber mutex poisoned");
+			subscribers.retain(|sender| {
+				let (ack, received) = oneshot::channel();
+				match sender.send(EventDelivery { message: message.clone(), ack: Some(ack) }) {
+					Ok(()) => {
+						acknowledgements.push(received);
+						true
+					},
+					Err(_) => {
+						send_failed = true;
+						false
+					},
+				}
+			});
+		}
+
+		if send_failed || acknowledgements.len() != required {
+			eyre::bail!(
+				"Solana event delivery reached {}/{} required consumers",
+				acknowledgements.len(),
+				required
+			);
+		}
+		for acknowledgement in acknowledgements {
+			acknowledgement
+				.await
+				.map_err(|_| eyre::eyre!("Solana event consumer dropped delivery without ACK"))?;
+		}
+		Ok(())
+	}
+
+	async fn persist_cursor(
+		&self,
+		last_seen_signature: Option<Signature>,
+		last_processed_slot: u64,
+		pending_messages: &[EventMessage],
+	) -> eyre::Result<()> {
+		let Some(path) = &self.cursor_path else { return Ok(()) };
+		let checkpoint = SlotCursorCheckpoint {
+			program_id: self.client.program_id.to_string(),
+			last_seen_signature: last_seen_signature.map(|sig| sig.to_string()),
+			last_processed_slot,
+			pending_messages: pending_messages.to_vec(),
+		};
+		let encoded = serde_json::to_vec_pretty(&checkpoint)
+			.map_err(|e| eyre::eyre!("serialize Solana cursor: {e}"))?;
+		let temp_path = path.with_extension("tmp");
+		tokio::fs::write(&temp_path, encoded)
+			.await
+			.map_err(|e| eyre::eyre!("write cursor {}: {e}", temp_path.display()))?;
+		tokio::fs::rename(&temp_path, path)
+			.await
+			.map_err(|e| eyre::eyre!("commit cursor {}: {e}", path.display()))
+	}
+
+	/// Deliver the restored/current outbox and clear it only after every
+	/// registered consumer ACKs every message. If the process exits at any
+	/// point before the second atomic cursor write, restart replays the batch.
+	async fn replay_pending(&mut self) -> eyre::Result<()> {
+		if self.pending_messages.is_empty() {
+			return Ok(());
+		}
+
+		for message in self.pending_messages.clone() {
+			self.publish(message).await?;
+		}
+		self.persist_cursor(self.last_seen_signature, self.last_processed_slot, &[])
+			.await?;
+		self.pending_messages.clear();
+		Ok(())
 	}
 
 	/// Run the slot manager. If a `ws_url` is configured, the manager
@@ -277,18 +416,45 @@ impl SlotManager {
 	/// Process a specific slot: fetch new signatures, decode each
 	/// transaction's logs, broadcast the resulting events.
 	pub async fn tick_at_slot(&mut self, latest_slot: u64) -> eyre::Result<()> {
-		// fetch every signature touching the program since `last_seen`
-		let cfg = GetConfirmedSignaturesForAddress2Config {
-			before: None,
-			until: self.last_seen_signature,
-			limit: Some(self.client.get_signatures_batch_size as usize),
-			commitment: None, // inherits from rpc client
-		};
-		let sigs = self
-			.rpc
-			.get_signatures_for_address_with_config(&self.client.program_id, cfg)
-			.await
-			.map_err(|e| eyre::eyre!("get_signatures_for_address: {e}"))?;
+		// A prior process may have advanced the source cursor only after
+		// atomically recording an unacknowledged outbox. Redeliver that batch
+		// before fetching anything newer.
+		self.replay_pending().await?;
+
+		// Fetch every signature touching the program since `last_seen`.
+		// `getSignaturesForAddress` is page-limited, so walk `before` until
+		// the prior cursor is reached. On the first process start we keep the
+		// original one-page-at-tip behavior; historical replay is controlled
+		// explicitly through `bootstrap_catchup`.
+		let batch = (self.client.get_signatures_batch_size as usize).clamp(1, 1_000);
+		let until = self.last_seen_signature;
+		let mut before = None;
+		let mut sigs = Vec::new();
+		loop {
+			let cfg = GetConfirmedSignaturesForAddress2Config {
+				before,
+				until,
+				limit: Some(batch),
+				commitment: Some(CommitmentConfig::finalized()),
+			};
+			let page = self
+				.rpc
+				.get_signatures_for_address_with_config(&self.client.program_id, cfg)
+				.await
+				.map_err(|e| eyre::eyre!("get_signatures_for_address: {e}"))?;
+			let page_len = page.len();
+			if page_len == 0 {
+				break;
+			}
+			before = Some(
+				Signature::from_str(&page.last().expect("non-empty page").signature)
+					.map_err(|e| eyre::eyre!("RPC returned invalid signature: {e}"))?,
+			);
+			sigs.extend(page);
+			if until.is_none() || page_len < batch {
+				break;
+			}
+		}
 
 		// Publish slot as a `block_height` gauge so the existing EVM
 		// Grafana panels pick up the Solana cluster alongside the EVM
@@ -299,8 +465,9 @@ impl SlotManager {
 		if sigs.is_empty() {
 			// Nothing happened — emit a NewSlot heartbeat so handlers can
 			// tell apart "no events yet" from "RPC stalled".
-			let _ = self.sender.send(EventMessage::new_slot(latest_slot));
+			self.publish(EventMessage::new_slot(latest_slot)).await?;
 			br_metrics::increase_sol_events(&self.client.name, "new_slot");
+			self.persist_cursor(self.last_seen_signature, latest_slot, &[]).await?;
 			self.last_processed_slot = latest_slot;
 			return Ok(());
 		}
@@ -310,45 +477,49 @@ impl SlotManager {
 		let mut new_signatures: Vec<_> = sigs.into_iter().collect();
 		new_signatures.reverse();
 
+		let mut pending_messages = Vec::new();
 		for entry in &new_signatures {
 			let sig_str = entry.signature.clone();
 			let slot = entry.slot;
-			let signature = match Signature::from_str(&sig_str) {
-				Ok(s) => s,
-				Err(err) => {
-					log::warn!(
-						target: &self.client.get_chain_name(),
-						"[{}] skipping unparseable signature {sig_str}: {err}",
-						SUB_LOG_TARGET,
-					);
-					continue;
-				},
-			};
+			if let Some(err) = &entry.err {
+				log::debug!(
+					target: &self.client.get_chain_name(),
+					"[{}] ignoring failed transaction {sig_str}: {err:?}",
+					SUB_LOG_TARGET,
+				);
+				continue;
+			}
+			let signature = Signature::from_str(&sig_str)
+				.map_err(|err| eyre::eyre!("unparseable signature {sig_str}: {err}"))?;
 
-			let tx = match self.rpc.get_transaction(&signature, UiTransactionEncoding::Json).await {
-				Ok(tx) => tx,
-				Err(err) => {
-					log::warn!(
-						target: &self.client.get_chain_name(),
-						"[{}] get_transaction({sig_str}) failed: {err}",
-						SUB_LOG_TARGET,
-					);
-					continue;
-				},
-			};
+			let tx = self
+				.rpc
+				.get_transaction_with_config(
+					&signature,
+					RpcTransactionConfig {
+						encoding: Some(UiTransactionEncoding::Json),
+						commitment: Some(CommitmentConfig::finalized()),
+						max_supported_transaction_version: Some(0),
+					},
+				)
+				.await
+				.map_err(|err| eyre::eyre!("get_transaction({sig_str}): {err}"))?;
 
-			self.process_transaction(slot, &sig_str, &tx);
+			pending_messages.extend(self.decode_transaction(slot, &sig_str, &tx)?);
 		}
 
 		// Update the cursor to the newest sig (which is the last in our
 		// chronologically-sorted list).
-		if let Some(latest) =
-			new_signatures.last().and_then(|e| Signature::from_str(&e.signature).ok())
-		{
-			self.last_seen_signature = Some(latest);
-		}
+		let latest = Signature::from_str(&new_signatures.last().expect("non-empty list").signature)
+			.map_err(|e| eyre::eyre!("invalid newest signature from RPC: {e}"))?;
+		// First atomic write: advance the source cursor and persist the full
+		// undelivered outbox together. A crash from this point onward replays
+		// the messages instead of silently skipping them.
+		self.persist_cursor(Some(latest), latest_slot, &pending_messages).await?;
+		self.last_seen_signature = Some(latest);
 		self.last_processed_slot = latest_slot;
-		Ok(())
+		self.pending_messages = pending_messages;
+		self.replay_pending().await
 	}
 
 	/// Walk backwards from the current slot until we cross the requested
@@ -372,6 +543,16 @@ impl SlotManager {
 	/// newest signature we saw (so the next live tick starts from that
 	/// cursor, not duplicate what we already replayed).
 	pub async fn bootstrap_catchup(&mut self, offset_slots: u64) -> eyre::Result<()> {
+		self.replay_pending().await?;
+		if self.last_seen_signature.is_some() {
+			log::info!(
+				target: &self.client.get_chain_name(),
+				"[{}] durable cursor loaded at slot {}; skipping offset replay",
+				SUB_LOG_TARGET,
+				self.last_processed_slot,
+			);
+			return Ok(());
+		}
 		if offset_slots == 0 {
 			return Ok(());
 		}
@@ -394,7 +575,7 @@ impl SlotManager {
 		let mut collected: Vec<
 			solana_client::rpc_response::RpcConfirmedTransactionStatusWithSignature,
 		> = Vec::new();
-		let batch = self.client.get_signatures_batch_size as usize;
+		let batch = (self.client.get_signatures_batch_size as usize).clamp(1, 1_000);
 		let mut before: Option<Signature> = None;
 
 		loop {
@@ -402,7 +583,7 @@ impl SlotManager {
 				before,
 				until: None,
 				limit: Some(batch),
-				commitment: None,
+				commitment: Some(CommitmentConfig::finalized()),
 			};
 			let page = self
 				.rpc
@@ -444,6 +625,7 @@ impl SlotManager {
 				"[{}] bootstrap catch-up: no cccp-solana traffic in the last {offset_slots} slots",
 				SUB_LOG_TARGET,
 			);
+			self.persist_cursor(self.last_seen_signature, tip, &[]).await?;
 			self.last_processed_slot = tip;
 			return Ok(());
 		}
@@ -460,59 +642,67 @@ impl SlotManager {
 			collected.last().map(|e| e.slot).unwrap_or(0),
 		);
 
+		let mut pending_messages = Vec::new();
 		for entry in &collected {
 			let sig_str = entry.signature.clone();
 			let slot = entry.slot;
-			let Ok(signature) = Signature::from_str(&sig_str) else {
-				log::warn!(
+			if let Some(err) = &entry.err {
+				log::debug!(
 					target: &self.client.get_chain_name(),
-					"[{}] bootstrap: unparseable signature {sig_str}",
+					"[{}] bootstrap: ignoring failed transaction {sig_str}: {err:?}",
 					SUB_LOG_TARGET,
 				);
 				continue;
-			};
+			}
+			let signature = Signature::from_str(&sig_str)
+				.map_err(|err| eyre::eyre!("bootstrap unparseable signature {sig_str}: {err}"))?;
 
-			let tx = match self.rpc.get_transaction(&signature, UiTransactionEncoding::Json).await {
-				Ok(tx) => tx,
-				Err(err) => {
-					log::warn!(
-						target: &self.client.get_chain_name(),
-						"[{}] bootstrap get_transaction({sig_str}) failed: {err}",
-						SUB_LOG_TARGET,
-					);
-					continue;
-				},
-			};
+			let tx = self
+				.rpc
+				.get_transaction_with_config(
+					&signature,
+					RpcTransactionConfig {
+						encoding: Some(UiTransactionEncoding::Json),
+						commitment: Some(CommitmentConfig::finalized()),
+						max_supported_transaction_version: Some(0),
+					},
+				)
+				.await
+				.map_err(|err| eyre::eyre!("bootstrap get_transaction({sig_str}): {err}"))?;
 
-			self.process_transaction(slot, &sig_str, &tx);
+			pending_messages.extend(self.decode_transaction(slot, &sig_str, &tx)?);
 		}
 
 		// Advance cursors so the live tick picks up from where catch-up
 		// left off — i.e. the newest signature we saw, and the tip slot.
-		if let Some(newest) = collected.last().and_then(|e| Signature::from_str(&e.signature).ok())
-		{
-			self.last_seen_signature = Some(newest);
-		}
+		let newest = Signature::from_str(&collected.last().expect("non-empty list").signature)
+			.map_err(|e| eyre::eyre!("invalid newest bootstrap signature: {e}"))?;
+		self.persist_cursor(Some(newest), tip, &pending_messages).await?;
+		self.last_seen_signature = Some(newest);
 		self.last_processed_slot = tip;
-		Ok(())
+		self.pending_messages = pending_messages;
+		self.replay_pending().await
 	}
 
-	fn process_transaction(
+	fn decode_transaction(
 		&self,
 		slot: u64,
 		signature: &str,
 		tx: &EncodedConfirmedTransactionWithStatusMeta,
-	) {
-		let logs: Vec<String> = tx
+	) -> eyre::Result<Vec<EventMessage>> {
+		let meta = tx
 			.transaction
 			.meta
 			.as_ref()
-			.and_then(|meta| Option::<Vec<String>>::from(meta.log_messages.clone()))
-			.unwrap_or_default();
+			.ok_or_else(|| eyre::eyre!("transaction {signature} has no status metadata"))?;
+		let transaction_failed = meta.err.is_some();
+		let logs: Vec<String> =
+			Option::<Vec<String>>::from(meta.log_messages.clone()).unwrap_or_default();
 
-		let decoded = decode_anchor_events(&logs);
+		let decoded =
+			decode_successful_anchor_events(&self.client.program_id, transaction_failed, &logs);
 		if decoded.is_empty() {
-			return;
+			return Ok(Vec::new());
 		}
 
 		let mut inbound_events: Vec<Event> = Vec::new();
@@ -552,7 +742,8 @@ impl SlotManager {
 			// recognized BFC ChainIndex (mainnet `0x00000bfc` or
 			// testnet `0x0000bfc0`) means "outbound" and anything else
 			// means "inbound" (the user-side `request` IX always sets
-			// req_id.chain = SOL_MAIN). The matching test on the
+			// req_id.chain = the cluster's SOL_DEV/SOL_TEST/SOL_MAIN value).
+			// The matching test on the
 			// on-chain side is `code_chain == SocketConfig.bfc_chain_index`
 			// — that locks the pairing to one BFC at deploy time, but
 			// the relayer accepts either so a single binary works on
@@ -566,19 +757,111 @@ impl SlotManager {
 			}
 		}
 
+		let mut messages = Vec::with_capacity(2);
 		if !inbound_events.is_empty() {
 			let count = inbound_events.len() as u64;
-			let _ = self.sender.send(EventMessage::new(slot, EventType::Inbound, inbound_events));
+			messages.push(EventMessage::new(slot, EventType::Inbound, inbound_events));
 			for _ in 0..count {
 				br_metrics::increase_sol_events(&self.client.name, "inbound");
 			}
 		}
 		if !outbound_events.is_empty() {
 			let count = outbound_events.len() as u64;
-			let _ = self.sender.send(EventMessage::new(slot, EventType::Outbound, outbound_events));
+			messages.push(EventMessage::new(slot, EventType::Outbound, outbound_events));
 			for _ in 0..count {
 				br_metrics::increase_sol_events(&self.client.name, "outbound");
 			}
 		}
+		Ok(messages)
+	}
+}
+
+fn load_cursor(
+	path: Option<&PathBuf>,
+	program_id: &solana_sdk::pubkey::Pubkey,
+) -> eyre::Result<(Option<Signature>, u64, Vec<EventMessage>)> {
+	let Some(path) = path else { return Ok((None, 0, Vec::new())) };
+	if let Some(parent) = path.parent().filter(|p| !p.as_os_str().is_empty()) {
+		std::fs::create_dir_all(parent)
+			.map_err(|e| eyre::eyre!("create cursor directory {}: {e}", parent.display()))?;
+	}
+	if !path.exists() {
+		return Ok((None, 0, Vec::new()));
+	}
+	let bytes =
+		std::fs::read(path).map_err(|e| eyre::eyre!("read cursor {}: {e}", path.display()))?;
+	let checkpoint: SlotCursorCheckpoint = serde_json::from_slice(&bytes)
+		.map_err(|e| eyre::eyre!("decode cursor {}: {e}", path.display()))?;
+	if checkpoint.program_id != program_id.to_string() {
+		eyre::bail!(
+			"cursor {} belongs to program {}, configured program is {}",
+			path.display(),
+			checkpoint.program_id,
+			program_id,
+		);
+	}
+	let signature = checkpoint
+		.last_seen_signature
+		.map(|value| {
+			Signature::from_str(&value)
+				.map_err(|e| eyre::eyre!("invalid signature in cursor {}: {e}", path.display()))
+		})
+		.transpose()?;
+	Ok((signature, checkpoint.last_processed_slot, checkpoint.pending_messages))
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+	use solana_sdk::pubkey::Pubkey;
+
+	#[test]
+	fn durable_cursor_restores_signature_and_rejects_other_program() {
+		let program_id = Pubkey::new_unique();
+		let signature = Signature::from([0x42; 64]);
+		let path = std::env::temp_dir().join(format!("cccp-solana-{program_id}.cursor-test.json"));
+		let checkpoint = SlotCursorCheckpoint {
+			program_id: program_id.to_string(),
+			last_seen_signature: Some(signature.to_string()),
+			last_processed_slot: 123,
+			pending_messages: vec![EventMessage::new_slot(123)],
+		};
+		std::fs::write(&path, serde_json::to_vec(&checkpoint).unwrap()).unwrap();
+
+		assert_eq!(
+			load_cursor(Some(&path), &program_id).unwrap(),
+			(Some(signature), 123, vec![EventMessage::new_slot(123)])
+		);
+		assert!(load_cursor(Some(&path), &Pubkey::new_unique()).is_err());
+
+		let _ = std::fs::remove_file(path);
+	}
+
+	#[test]
+	fn legacy_cursor_without_outbox_remains_readable() {
+		let program_id = Pubkey::new_unique();
+		let path =
+			std::env::temp_dir().join(format!("cccp-solana-{program_id}.legacy-cursor.json"));
+		let legacy = serde_json::json!({
+			"program_id": program_id.to_string(),
+			"last_seen_signature": null,
+			"last_processed_slot": 77
+		});
+		std::fs::write(&path, serde_json::to_vec(&legacy).unwrap()).unwrap();
+
+		assert_eq!(load_cursor(Some(&path), &program_id).unwrap(), (None, 77, Vec::new()));
+		let _ = std::fs::remove_file(path);
+	}
+
+	#[tokio::test]
+	async fn delivery_requires_explicit_consumer_ack() {
+		let (ack, received) = oneshot::channel();
+		let delivery = EventDelivery { message: EventMessage::new_slot(1), ack: Some(ack) };
+		delivery.acknowledge();
+		assert!(received.await.is_ok());
+
+		let (ack, received) = oneshot::channel();
+		drop(EventDelivery { message: EventMessage::new_slot(2), ack: Some(ack) });
+		assert!(received.await.is_err());
 	}
 }

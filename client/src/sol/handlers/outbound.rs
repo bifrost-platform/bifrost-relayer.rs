@@ -30,9 +30,9 @@ use solana_sdk::message::Message;
 use solana_sdk::pubkey::Pubkey;
 use solana_sdk::signature::{Keypair, Signature, Signer, read_keypair_file};
 use solana_sdk::transaction::Transaction;
-use tokio::sync::broadcast::Receiver;
+use solana_transaction_status_client_types::TransactionConfirmationStatus;
 use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
-use tokio_stream::{StreamExt, wrappers::BroadcastStream};
+use tokio_stream::{StreamExt, wrappers::UnboundedReceiverStream};
 
 use br_primitives::{
 	contracts::socket::Socket_Struct::{
@@ -50,10 +50,15 @@ use crate::sol::ata::{build_create_ata_idempotent_ix, derive_ata};
 use crate::sol::client::SolClient;
 use crate::sol::codec::{AssetIndex, PollSubmit, RoundUpSubmit, Signatures};
 use crate::sol::ix_builder::{
-	PollTokenAccounts, SIGS_PER_CHUNK, build_close_round_ix, build_poll_buffered_ix, build_poll_ix,
-	build_round_control_relay_ix, build_submit_signatures_ix,
+	MAX_ROUND_RELAYER_COUNT, PollTokenAccounts, RELAYERS_PER_CHUNK, SIGS_PER_CHUNK,
+	build_close_poll_signatures_ix, build_close_round_ix, build_close_roundup_signatures_ix,
+	build_poll_buffered_ix, build_poll_ix, build_round_control_relay_buffered_ix,
+	build_round_control_relay_ix, build_submit_roundup_relayers_ix,
+	build_submit_roundup_signatures_ix, build_submit_signatures_ix,
 };
+use crate::sol::pda;
 use crate::sol::registry::AssetRegistry;
+use crate::sol::slot_manager::EventDelivery;
 
 const SUB_LOG_TARGET: &str = "sol-outbound";
 
@@ -76,6 +81,29 @@ const INITIAL_PENDING_BACKOFF: Duration = Duration::from_secs(30);
 
 /// Upper bound on the per-job backoff window.
 const MAX_PENDING_BACKOFF: Duration = Duration::from_secs(15 * 60);
+
+fn build_commit_socket_message(ev: &Event) -> Socket_Message {
+	Socket_Message {
+		req_id: RequestID {
+			ChainIndex: FixedBytes::from(ev.req_chain),
+			round_id: ev.round_id,
+			sequence: ev.sequence,
+		},
+		status: ev.status,
+		ins_code: EvmInstruction {
+			ChainIndex: FixedBytes::from(ev.ins_code_chain),
+			RBCmethod: FixedBytes::from(ev.ins_code_method),
+		},
+		params: Task_Params {
+			tokenIDX0: FixedBytes::from(ev.asset_index),
+			tokenIDX1: FixedBytes::from(ev.token_idx1),
+			refund: Address::from(ev.refund),
+			to: Address::from(ev.to),
+			amount: U256::from_be_bytes(ev.amount),
+			variants: Bytes::from(ev.variants.clone()),
+		},
+	}
+}
 
 // ── Compute Budget Program ──────────────────────────────────────────
 // We construct the IX data by hand to avoid pulling in an extra crate.
@@ -203,8 +231,8 @@ where
 	/// Spawn handle + debug flag for the commit-mirror `send_transaction`.
 	handle: SpawnTaskHandle,
 	debug_mode: bool,
-	/// Slot-manager broadcast subscription (`EventType::Outbound` events).
-	event_stream: BroadcastStream<EventMessage>,
+	/// Lossless per-consumer slot-manager queue (`EventType::Outbound`).
+	event_stream: UnboundedReceiverStream<EventDelivery>,
 }
 
 impl<F, P, N: Network> SocketRelayBuilder<F, P, N> for SolOutboundHandler<F, P, N>
@@ -236,7 +264,7 @@ where
 		bfc_client: Arc<EthClient<F, P, N>>,
 		handle: SpawnTaskHandle,
 		debug_mode: bool,
-		event_receiver: Receiver<EventMessage>,
+		event_receiver: UnboundedReceiver<EventDelivery>,
 	) -> eyre::Result<(Self, SolOutboundSender)> {
 		let fee_payer = read_keypair_file(&fee_payer_keypair_path).map_err(|err| {
 			eyre::eyre!(
@@ -265,7 +293,7 @@ where
 				bfc_client,
 				handle,
 				debug_mode,
-				event_stream: BroadcastStream::new(event_receiver),
+				event_stream: UnboundedReceiverStream::new(event_receiver),
 			},
 			sender,
 		))
@@ -371,12 +399,10 @@ where
 					item = self.event_stream.next() => {
 						match item {
 							None => return Ok(()),
-							Some(Ok(msg)) => self.handle_commit_event_message(&msg).await,
-							Some(Err(err)) => log::warn!(
-								target: &self.client.get_chain_name(),
-								"[{}] commit event stream lag/error: {err:?}",
-								SUB_LOG_TARGET,
-							),
+							Some(delivery) => {
+								self.handle_commit_event_message(&delivery.message).await;
+								delivery.acknowledge();
+							},
 						}
 					},
 					maybe_job = self.receiver.recv() => {
@@ -417,12 +443,10 @@ where
 							self.drain_pending().await;
 							return Ok(());
 						}
-						Some(Ok(msg)) => self.handle_commit_event_message(&msg).await,
-						Some(Err(err)) => log::warn!(
-							target: &self.client.get_chain_name(),
-							"[{}] commit event stream lag/error: {err:?}",
-							SUB_LOG_TARGET,
-						),
+						Some(delivery) => {
+							self.handle_commit_event_message(&delivery.message).await;
+							delivery.acknowledge();
+						},
 					}
 				},
 				maybe_job = self.receiver.recv() => {
@@ -611,7 +635,7 @@ where
 			},
 		}
 
-		let socket_msg = self.build_commit_socket_message(ev);
+		let socket_msg = build_commit_socket_message(ev);
 		let tx_request = self.build_poll_request(socket_msg, EvmSignatures::default());
 
 		// src = BFC, dst = this Solana cluster; is_inbound = false.
@@ -643,29 +667,6 @@ where
 		);
 	}
 
-	fn build_commit_socket_message(&self, ev: &Event) -> Socket_Message {
-		Socket_Message {
-			req_id: RequestID {
-				ChainIndex: FixedBytes::from(ev.req_chain),
-				round_id: ev.round_id,
-				sequence: ev.sequence,
-			},
-			status: ev.status,
-			ins_code: EvmInstruction {
-				ChainIndex: FixedBytes::from(ev.ins_code_chain),
-				RBCmethod: FixedBytes::from(ev.ins_code_method),
-			},
-			params: Task_Params {
-				tokenIDX0: FixedBytes::from(ev.asset_index),
-				tokenIDX1: FixedBytes::from([0u8; 32]),
-				refund: Address::from(ev.refund),
-				to: Address::from(ev.to),
-				amount: U256::from_be_bytes(ev.amount),
-				variants: Bytes::from(ev.variants.clone()),
-			},
-		}
-	}
-
 	async fn handle(&self, job: SolOutboundJob) -> eyre::Result<()> {
 		// Check if we need the buffered path (too many sigs for a single tx).
 		let needs_buffer = match &job {
@@ -677,6 +678,12 @@ where
 
 		if needs_buffer {
 			return self.handle_buffered(job).await;
+		}
+		// Always use the fully buffered roundup path. Even a small signature
+		// set can accompany 64 new EVM addresses (1280 bytes before any
+		// transaction framing), so signature count alone is not a safe switch.
+		if let SolOutboundJob::RoundControlRelay { submit } = &job {
+			return self.handle_roundup_buffered(submit).await;
 		}
 
 		let app_ixs = match &job {
@@ -816,8 +823,9 @@ where
 				if let Some(ref err) = status.err {
 					return Err(eyre::eyre!("tx failed on-chain: {err:?}"));
 				}
-				// Transaction succeeded (has confirmations, no error).
-				return Ok(());
+				if status.confirmation_status == Some(TransactionConfirmationStatus::Finalized) {
+					return Ok(());
+				}
 			}
 			// `None` → not yet seen by the cluster, keep polling.
 		}
@@ -856,12 +864,42 @@ where
 
 		let req_id_pack = submit.msg.req_id.pack();
 		let total_sigs = submit.sigs.r.len();
+		let fee_payer = self.fee_payer.pubkey();
 
 		log::info!(
 			target: &self.client.get_chain_name(),
 			"[{}] using buffered path for {total_sigs} signatures",
 			SUB_LOG_TARGET,
 		);
+
+		// A prior attempt may have finalized only some chunks before an RPC
+		// timeout or process-level retry. Appending the full bundle again
+		// would duplicate signatures and permanently poison the buffer, so
+		// every attempt starts from a clean payer-scoped PDA.
+		let (poll_sigs_pda, _) = pda::poll_signatures_raw(
+			&self.client.program_id,
+			&req_id_pack,
+			submit.msg.status,
+			&fee_payer,
+		);
+		let existing = self
+			.rpc
+			.get_account_with_commitment(
+				&poll_sigs_pda,
+				solana_commitment_config::CommitmentConfig::finalized(),
+			)
+			.await
+			.map_err(|e| eyre::eyre!("probe signature buffer {poll_sigs_pda}: {e}"))?;
+		if existing.value.is_some() {
+			self.send_single_ix(build_close_poll_signatures_ix(
+				&self.client.program_id,
+				&fee_payer,
+				&req_id_pack,
+				submit.msg.status,
+			))
+			.await
+			.map_err(|e| eyre::eyre!("reset stale signature buffer {poll_sigs_pda}: {e}"))?;
+		}
 
 		// Phase 1: submit signature chunks
 		for chunk_start in (0..total_sigs).step_by(SIGS_PER_CHUNK) {
@@ -874,7 +912,7 @@ where
 
 			let ix = build_submit_signatures_ix(
 				&self.client.program_id,
-				&self.fee_payer.pubkey(),
+				&fee_payer,
 				&chunk,
 				&req_id_pack,
 				submit.msg.status,
@@ -902,7 +940,7 @@ where
 		// the real ATA which may not exist yet.
 		let poll_buf = build_poll_buffered_ix(
 			&self.client.program_id,
-			&self.fee_payer.pubkey(),
+			&fee_payer,
 			&submit.msg,
 			&submit.option,
 			asset_index,
@@ -914,11 +952,7 @@ where
 			compute_budget_set_cu_price(self.base_priority_fee),
 		];
 		if let Some(wallet) = recipient_wallet {
-			ixs.push(build_create_ata_idempotent_ix(
-				&self.fee_payer.pubkey(),
-				&wallet,
-				&tokens.mint,
-			));
+			ixs.push(build_create_ata_idempotent_ix(&fee_payer, &wallet, &tokens.mint));
 		}
 		ixs.push(poll_buf);
 
@@ -948,13 +982,104 @@ where
 		Ok(())
 	}
 
+	/// Buffered relayer-set rotation. This mirrors `handle_buffered` but
+	/// uses the dedicated roundup PDA and finalizer instructions.
+	async fn handle_roundup_buffered(&self, submit: &RoundUpSubmit) -> eyre::Result<()> {
+		if submit.sigs.r.len() != submit.sigs.s.len() || submit.sigs.s.len() != submit.sigs.v.len()
+		{
+			return Err(eyre::eyre!("roundup signature component lengths differ"));
+		}
+		if submit.new_relayers.is_empty() || submit.new_relayers.len() > MAX_ROUND_RELAYER_COUNT {
+			return Err(eyre::eyre!(
+				"roundup relayer count must be 1..={MAX_ROUND_RELAYER_COUNT}, got {}",
+				submit.new_relayers.len()
+			));
+		}
+		let mut round_bytes = [0u8; 8];
+		round_bytes.copy_from_slice(&submit.round[24..32]);
+		let round_id = u64::from_be_bytes(round_bytes);
+		let fee_payer = self.fee_payer.pubkey();
+		let (buffer_pda, _) =
+			pda::roundup_signatures(&self.client.program_id, round_id, &fee_payer);
+
+		let existing = self
+			.rpc
+			.get_account_with_commitment(
+				&buffer_pda,
+				solana_commitment_config::CommitmentConfig::finalized(),
+			)
+			.await
+			.map_err(|e| eyre::eyre!("probe roundup buffer {buffer_pda}: {e}"))?;
+		if existing.value.is_some() {
+			self.send_single_ix(build_close_roundup_signatures_ix(
+				&self.client.program_id,
+				&fee_payer,
+				round_id,
+			))
+			.await
+			.map_err(|e| eyre::eyre!("reset stale roundup buffer {buffer_pda}: {e}"))?;
+		}
+
+		for chunk_start in (0..submit.sigs.r.len()).step_by(SIGS_PER_CHUNK) {
+			let chunk_end = (chunk_start + SIGS_PER_CHUNK).min(submit.sigs.r.len());
+			let chunk = Signatures {
+				r: submit.sigs.r[chunk_start..chunk_end].to_vec(),
+				s: submit.sigs.s[chunk_start..chunk_end].to_vec(),
+				v: submit.sigs.v[chunk_start..chunk_end].to_vec(),
+			};
+			self.send_single_ix(build_submit_roundup_signatures_ix(
+				&self.client.program_id,
+				&fee_payer,
+				&chunk,
+				round_id,
+			))
+			.await
+			.map_err(|e| {
+				eyre::eyre!(
+					"submit_roundup_signatures chunk {chunk_start}..{chunk_end} failed: {e}"
+				)
+			})?;
+		}
+
+		for chunk_start in (0..submit.new_relayers.len()).step_by(RELAYERS_PER_CHUNK) {
+			let chunk_end = (chunk_start + RELAYERS_PER_CHUNK).min(submit.new_relayers.len());
+			self.send_single_ix(build_submit_roundup_relayers_ix(
+				&self.client.program_id,
+				&fee_payer,
+				&submit.new_relayers[chunk_start..chunk_end],
+				round_id,
+			))
+			.await
+			.map_err(|e| {
+				eyre::eyre!("submit_roundup_relayers chunk {chunk_start}..{chunk_end} failed: {e}")
+			})?;
+		}
+
+		self.send_single_ix(build_round_control_relay_buffered_ix(
+			&self.client.program_id,
+			&fee_payer,
+			submit,
+		))
+		.await
+		.map_err(|e| eyre::eyre!("round_control_relay_buffered({round_id}) failed: {e}"))
+	}
+
 	/// Send a single instruction as a transaction, wait for confirmation.
 	async fn send_single_ix(&self, ix: Instruction) -> eyre::Result<()> {
 		let ixs = vec![
-			compute_budget_set_cu_limit(200_000),
+			compute_budget_set_cu_limit(DEFAULT_COMPUTE_UNIT_LIMIT),
 			compute_budget_set_cu_price(self.base_priority_fee),
 			ix,
 		];
+
+		let message = Message::new(&ixs, Some(&self.fee_payer.pubkey()));
+		let message_data = message.serialize();
+		let tx_size = 1 + message.header.num_required_signatures as usize * 64 + message_data.len();
+		if tx_size > SOLANA_MAX_TX_SIZE {
+			return Err(eyre::eyre!(
+				"transaction exceeds Solana's {SOLANA_MAX_TX_SIZE}B limit (actual: {tx_size}B)"
+			));
+		}
 
 		let recent_blockhash = self
 			.rpc
@@ -962,7 +1087,6 @@ where
 			.await
 			.map_err(|e| eyre::eyre!("get_latest_blockhash: {e}"))?;
 
-		let message = Message::new(&ixs, Some(&self.fee_payer.pubkey()));
 		let tx = Transaction::new(&[&self.fee_payer], message, recent_blockhash);
 
 		let signature = self
@@ -1038,6 +1162,7 @@ mod tests {
 				index: "0x0100010000000000000000000000000000000000000000000000000000000008".into(),
 				mint: "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA".into(),
 				name: Some("usdc".into()),
+				decimals: Some(6),
 			}],
 			&vault_pda,
 		)
@@ -1169,6 +1294,30 @@ mod tests {
 				recipient_token_account: Pubkey::new_unique(),
 			},
 		};
+	}
+
+	#[test]
+	fn commit_message_preserves_secondary_asset_index() {
+		let token_idx1 = [0x7a; 32];
+		let event = Event {
+			signature: "test-signature".into(),
+			slot: 42,
+			req_chain: [0, 0, 0x0b, 0xfc],
+			round_id: 1,
+			sequence: 7,
+			status: 3,
+			ins_code_chain: *b"SOL\0",
+			ins_code_method: [0; 16],
+			asset_index: [0x11; 32],
+			token_idx1,
+			to: [0x22; 20],
+			refund: [0x33; 20],
+			amount: [0x44; 32],
+			variants: vec![1, 2, 3],
+		};
+
+		let msg = build_commit_socket_message(&event);
+		assert_eq!(<[u8; 32]>::from(msg.params.tokenIDX1), token_idx1);
 	}
 
 	/// Pure helper mirroring `SolOutboundHandler::schedule_retry`'s

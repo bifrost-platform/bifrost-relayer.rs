@@ -45,5 +45,6 @@ pub mod seeds {
 	pub const POLL_FILTER: &[u8] = b"filter";
 	pub const ROUNDUP_HIST: &[u8] = b"rup";
 	pub const ROUNDUP_FILTER: &[u8] = b"rupf";
+	pub const ROUNDUP_SIGS: &[u8] = b"rupsigs";
 	pub const ASSET_CONFIG: &[u8] = b"asset";
 }

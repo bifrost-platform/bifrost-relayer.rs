@@ -170,6 +170,22 @@ pub const CLOSE_POLL_SIGNATURES_IX_DISCRIMINATOR: [u8; 8] =
 /// `sha256("global:close_round")[..8]`
 pub const CLOSE_ROUND_IX_DISCRIMINATOR: [u8; 8] = [0x95, 0x0e, 0x51, 0x58, 0xe6, 0xe2, 0xea, 0x25];
 
+/// `sha256("global:submit_roundup_signatures")[..8]`
+pub const SUBMIT_ROUNDUP_SIGNATURES_IX_DISCRIMINATOR: [u8; 8] =
+	[0x50, 0x7b, 0xb5, 0x7c, 0x2c, 0xd8, 0xf6, 0xf8];
+
+/// `sha256("global:submit_roundup_relayers")[..8]`
+pub const SUBMIT_ROUNDUP_RELAYERS_IX_DISCRIMINATOR: [u8; 8] =
+	[0x36, 0xa7, 0x22, 0xae, 0x91, 0x38, 0x35, 0x2c];
+
+/// `sha256("global:round_control_relay_buffered")[..8]`
+pub const ROUND_CONTROL_RELAY_BUFFERED_IX_DISCRIMINATOR: [u8; 8] =
+	[0x1b, 0xfc, 0x14, 0x2e, 0x27, 0x74, 0x99, 0x3e];
+
+/// `sha256("global:close_roundup_signatures")[..8]`
+pub const CLOSE_ROUNDUP_SIGNATURES_IX_DISCRIMINATOR: [u8; 8] =
+	[0xa5, 0x9b, 0x41, 0x23, 0x70, 0x8a, 0x7b, 0xea];
+
 /// Compute an Anchor sighash at runtime. Used by the regression tests
 /// below; production paths use the const values above.
 pub fn anchor_sighash(namespace: &str, name: &str) -> [u8; 8] {
@@ -223,6 +239,22 @@ mod tests {
 			CLOSE_POLL_SIGNATURES_IX_DISCRIMINATOR
 		);
 		assert_eq!(anchor_sighash("global", "close_round"), CLOSE_ROUND_IX_DISCRIMINATOR);
+		assert_eq!(
+			anchor_sighash("global", "submit_roundup_signatures"),
+			SUBMIT_ROUNDUP_SIGNATURES_IX_DISCRIMINATOR
+		);
+		assert_eq!(
+			anchor_sighash("global", "submit_roundup_relayers"),
+			SUBMIT_ROUNDUP_RELAYERS_IX_DISCRIMINATOR
+		);
+		assert_eq!(
+			anchor_sighash("global", "round_control_relay_buffered"),
+			ROUND_CONTROL_RELAY_BUFFERED_IX_DISCRIMINATOR
+		);
+		assert_eq!(
+			anchor_sighash("global", "close_roundup_signatures"),
+			CLOSE_ROUNDUP_SIGNATURES_IX_DISCRIMINATOR
+		);
 	}
 
 	/// Borsh round-trip a SocketMessage and assert the byte length is

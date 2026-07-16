@@ -92,7 +92,8 @@ where
 			provider.call_interval,
 			confirmation_depth,
 			provider.ws_provider.clone(),
-		);
+			provider.cursor_path.as_ref().map(PathBuf::from),
+		)?;
 		// Build the per-cluster asset registry from the static config.
 		// The vault PDA is derived from the cccp-solana program ID and is
 		// shared across every asset entry — we pre-derive each vault ATA
