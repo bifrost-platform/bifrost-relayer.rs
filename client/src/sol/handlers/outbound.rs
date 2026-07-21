@@ -134,6 +134,10 @@ fn compute_budget_set_cu_price(micro_lamports: u64) -> Instruction {
 
 // ── Defaults ────────────────────────────────────────────────────────
 const DEFAULT_COMPUTE_UNIT_LIMIT: u32 = 400_000;
+/// Verifying a 33-of-64 quorum exhausts the default 400k limit before the
+/// buffered finalizer reaches settlement. Reserve Solana's transaction-level
+/// ceiling for poll and roundup finalizers, whose cost scales with signatures.
+const BUFFERED_FINALIZE_COMPUTE_UNIT_LIMIT: u32 = 1_400_000;
 const DEFAULT_BASE_PRIORITY_FEE: u64 = 1_000;
 const DEFAULT_MAX_PRIORITY_FEE: u64 = 1_000_000;
 const DEFAULT_CONFIRMATION_TIMEOUT_SECS: u64 = 30;
@@ -948,7 +952,7 @@ where
 		);
 
 		let mut ixs = vec![
-			compute_budget_set_cu_limit(DEFAULT_COMPUTE_UNIT_LIMIT),
+			compute_budget_set_cu_limit(BUFFERED_FINALIZE_COMPUTE_UNIT_LIMIT),
 			compute_budget_set_cu_price(self.base_priority_fee),
 		];
 		if let Some(wallet) = recipient_wallet {
@@ -1055,19 +1059,28 @@ where
 			})?;
 		}
 
-		self.send_single_ix(build_round_control_relay_buffered_ix(
-			&self.client.program_id,
-			&fee_payer,
-			submit,
-		))
+		self.send_single_ix_with_limit(
+			build_round_control_relay_buffered_ix(&self.client.program_id, &fee_payer, submit),
+			BUFFERED_FINALIZE_COMPUTE_UNIT_LIMIT,
+		)
 		.await
 		.map_err(|e| eyre::eyre!("round_control_relay_buffered({round_id}) failed: {e}"))
 	}
 
 	/// Send a single instruction as a transaction, wait for confirmation.
 	async fn send_single_ix(&self, ix: Instruction) -> eyre::Result<()> {
+		self.send_single_ix_with_limit(ix, DEFAULT_COMPUTE_UNIT_LIMIT).await
+	}
+
+	/// Send a single instruction with an explicit compute limit. Buffered
+	/// finalizers need a larger budget because EVM recovery scales with quorum.
+	async fn send_single_ix_with_limit(
+		&self,
+		ix: Instruction,
+		compute_unit_limit: u32,
+	) -> eyre::Result<()> {
 		let ixs = vec![
-			compute_budget_set_cu_limit(DEFAULT_COMPUTE_UNIT_LIMIT),
+			compute_budget_set_cu_limit(compute_unit_limit),
 			compute_budget_set_cu_price(self.base_priority_fee),
 			ix,
 		];
