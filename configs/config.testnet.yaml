@@ -105,6 +105,7 @@ handler_configs:
 # submission path accepts it.
 sol_providers:
   - name: "solana-devnet"
+    # SOL_DEV = b"SOL\0" = 0x534f4c00; paired with the Bifrost testbed.
     id: 1397705728
     provider: "https://api.devnet.solana.com"
     ws_provider: "<Optional>"
@@ -112,9 +113,14 @@ sol_providers:
     block_confirmations: 10
     commitment: "finalized"
     program_id: "<YOUR_CCCP_SOLANA_PROGRAM_ID>"
+    expected_upgrade_authority: "<YOUR_GOVERNANCE_MULTISIG_PUBKEY>"
+    expected_program_data_sha256: "<DEPLOYED_SBF_SHA256_HEX>"
     is_relay_target: true
     get_signatures_batch_size: 100
+    cursor_path: "/var/lib/bifrost-relayer/solana-devnet.cursor.json"
+    bootstrap_offset_slots: 256
     fee_payer_keypair_path: "<PATH_TO_FEE_PAYER_KEYPAIR_JSON>"
+    # Every production asset entry must also pin `decimals`.
     assets: []
 
 bootstrap_config:

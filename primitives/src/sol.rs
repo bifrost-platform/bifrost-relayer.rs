@@ -15,8 +15,23 @@
 use serde::{Deserialize, Serialize};
 
 /// 4-byte CCCP `ChainIndex` mirror of cccp-solana's `ChainIndex` newtype.
-/// Solana uses `0x534F4C00` ("SOL\0") as a self-documenting placeholder.
 pub type ChainIndex = [u8; 4];
+
+/// Solana devnet paired with the Bifrost testbed.
+pub const SOL_DEV: ChainIndex = *b"SOL\0";
+/// Solana testnet paired with the Bifrost testnet.
+pub const SOL_TEST: ChainIndex = *b"SOL\x01";
+/// Solana mainnet-beta paired with the Bifrost mainnet.
+pub const SOL_MAIN: ChainIndex = *b"SOL\x02";
+
+/// Numeric `ChainId` forms used by relayer routing and BFC registration.
+pub const SOL_DEV_CHAIN_ID: u64 = u32::from_be_bytes(SOL_DEV) as u64;
+pub const SOL_TEST_CHAIN_ID: u64 = u32::from_be_bytes(SOL_TEST) as u64;
+pub const SOL_MAIN_CHAIN_ID: u64 = u32::from_be_bytes(SOL_MAIN) as u64;
+
+pub fn is_sol_chain_index(index: ChainIndex) -> bool {
+	index == SOL_DEV || index == SOL_TEST || index == SOL_MAIN
+}
 
 /// 32-byte CCCP `AssetIndex` mirror of cccp-solana's `AssetIndex`.
 pub type AssetIndex = [u8; 32];
@@ -38,7 +53,7 @@ pub enum EventType {
 	NewSlot,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
 /// One CCCP socket message decoded from a confirmed Solana transaction.
 ///
 /// This is the Solana counterpart to `bp-cccp::SocketMessage` and is
@@ -49,7 +64,7 @@ pub struct Event {
 	pub signature: String,
 	/// Slot in which the transaction was confirmed.
 	pub slot: u64,
-	/// Decoded `RequestId` chain bytes (= the Solana ChainIndex for inbound,
+	/// Decoded `RequestId` chain bytes (= SOL_DEV/SOL_TEST/SOL_MAIN for inbound,
 	/// or BFC_MAIN for outbound).
 	pub req_chain: ChainIndex,
 	/// `RequestId.round_id`.
@@ -92,7 +107,7 @@ pub struct Event {
 	pub variants: Vec<u8>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
 /// Channel-broadcast message for slot polling. Mirrors the BTC
 /// `EventMessage` shape so the same orchestration patterns apply.
 pub struct EventMessage {
@@ -119,5 +134,24 @@ impl EventMessage {
 
 	pub fn new_slot(slot: u64) -> Self {
 		Self::new(slot, EventType::NewSlot, vec![])
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	#[test]
+	fn sol_environment_indices_and_chain_ids_are_canonical() {
+		assert_eq!(SOL_DEV, *b"SOL\0");
+		assert_eq!(SOL_TEST, *b"SOL\x01");
+		assert_eq!(SOL_MAIN, *b"SOL\x02");
+		assert_eq!(SOL_DEV_CHAIN_ID, 1_397_705_728);
+		assert_eq!(SOL_TEST_CHAIN_ID, 1_397_705_729);
+		assert_eq!(SOL_MAIN_CHAIN_ID, 1_397_705_730);
+		assert!(is_sol_chain_index(SOL_DEV));
+		assert!(is_sol_chain_index(SOL_TEST));
+		assert!(is_sol_chain_index(SOL_MAIN));
+		assert!(!is_sol_chain_index(*b"SOL\x03"));
 	}
 }

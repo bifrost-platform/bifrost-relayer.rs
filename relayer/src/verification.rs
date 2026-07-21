@@ -10,6 +10,7 @@ use br_primitives::{
 		},
 		errors::PARAMETER_OUT_OF_RANGE,
 	},
+	sol::{SOL_DEV_CHAIN_ID, SOL_MAIN_CHAIN_ID, SOL_TEST_CHAIN_ID},
 };
 
 /// Verifies whether the certain numeric parameters specified in the configuration YAML file are valid.
@@ -74,9 +75,16 @@ pub(super) fn assert_configuration_validity(config: &Configuration) {
 /// relayer fails fast at boot — every check below corresponds to a
 /// runtime failure mode the operator would otherwise hit hours later.
 fn assert_sol_provider_validity(p: &SolProvider) {
-	// 1) name + chain id must not be empty / zero
+	// 1) name + chain id must identify one canonical Solana environment.
 	assert!(!p.name.trim().is_empty(), "sol_provider.name must not be empty");
-	assert!(p.id != 0, "sol_provider.id must not be zero (cluster {})", p.name);
+	let allowed_chain_ids = [SOL_DEV_CHAIN_ID, SOL_TEST_CHAIN_ID, SOL_MAIN_CHAIN_ID];
+	assert!(
+		allowed_chain_ids.contains(&p.id),
+		"sol_provider.id for {} must be one of {:?}, got {}",
+		p.name,
+		allowed_chain_ids,
+		p.id,
+	);
 
 	// 2) JSON-RPC endpoint must parse as a URL
 	assert!(
@@ -122,6 +130,53 @@ fn assert_sol_provider_validity(p: &SolProvider) {
 		p.name,
 		p.program_id
 	);
+	let authority = p.expected_upgrade_authority.as_deref().unwrap_or_else(|| {
+		panic!("sol_provider.expected_upgrade_authority is required for {}", p.name)
+	});
+	assert!(
+		solana_sdk::pubkey::Pubkey::from_str(authority).is_ok(),
+		"sol_provider.expected_upgrade_authority for {} is not a valid pubkey: {}",
+		p.name,
+		authority,
+	);
+	let hash = p.expected_program_data_sha256.as_deref().unwrap_or_else(|| {
+		panic!("sol_provider.expected_program_data_sha256 is required for {}", p.name)
+	});
+	let hash = hash.strip_prefix("0x").unwrap_or(hash);
+	assert!(
+		hash.len() == 64 && hex::decode(hash).is_ok(),
+		"sol_provider.expected_program_data_sha256 for {} must be 32-byte hex",
+		p.name,
+	);
+	let cursor_path = p
+		.cursor_path
+		.as_deref()
+		.unwrap_or_else(|| panic!("sol_provider.cursor_path is required for {}", p.name));
+	assert!(
+		!cursor_path.trim().is_empty(),
+		"sol_provider.cursor_path must not be empty for {}",
+		p.name,
+	);
+	assert!(
+		p.bootstrap_offset_slots.unwrap_or(0) > 0,
+		"sol_provider.bootstrap_offset_slots must be non-zero for initial replay on {}",
+		p.name,
+	);
+	if p.is_relay_target {
+		assert!(
+			!p.assets.is_empty(),
+			"sol_provider.assets must not be empty for relay target {}",
+			p.name,
+		);
+	}
+	for asset in &p.assets {
+		assert!(
+			asset.decimals.is_some(),
+			"sol_provider asset {} on {} must pin decimals",
+			asset.index,
+			p.name,
+		);
+	}
 
 	// 6) fee_payer keypair file must exist on disk. We do NOT try to
 	// load it here because that would surface secret-handling concerns

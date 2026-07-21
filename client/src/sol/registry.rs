@@ -108,11 +108,13 @@ mod tests {
 				index: "0x0100010000000000000000000000000000000000000000000000000000000008".into(),
 				mint: "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA".into(),
 				name: Some("usdc".into()),
+				decimals: Some(6),
 			},
 			SolAssetEntry {
 				index: "010001000000000000000000000000000000000000000000000000000000000a".into(),
 				mint: "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA".into(),
 				name: None,
+				decimals: None,
 			},
 		]
 	}
@@ -161,6 +163,7 @@ mod tests {
 			index: "0x0000000000000000000000000000000000000000000000000000000000000001".into(),
 			mint: "not-a-valid-pubkey".into(),
 			name: None,
+			decimals: None,
 		}];
 		assert!(AssetRegistry::from_entries(&entries, &vault_pda).is_err());
 	}

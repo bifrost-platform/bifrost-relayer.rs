@@ -161,11 +161,22 @@ pub struct SolProvider {
 	pub commitment: Option<String>,
 	/// `cccp-solana` program id (base58).
 	pub program_id: String,
+	/// Optional expected upgrade authority for the deployed ProgramData.
+	/// Production onboarding should set this to the governance multisig so
+	/// an RPC endpoint cannot silently point the relayer at another build.
+	pub expected_upgrade_authority: Option<String>,
+	/// Optional SHA-256 of the deployed SBF bytecode (hex, with or without
+	/// `0x`). When set, the boot health check hashes ProgramData code bytes.
+	pub expected_program_data_sha256: Option<String>,
 	/// Whether the relayer should send outbound `poll(...)` IXs to this
 	/// cluster. Mirror of `EVMProvider.is_relay_target`.
 	pub is_relay_target: bool,
 	/// Optional `getSignaturesForAddress` page size.
 	pub get_signatures_batch_size: Option<u64>,
+	/// Durable slot-manager cursor checkpoint. Relay targets must configure
+	/// this on persistent storage so restarts resume after the last fully
+	/// decoded signature instead of jumping to the current tip.
+	pub cursor_path: Option<String>,
 	/// Path to the local Solana keypair JSON used for fee payment + relayer
 	/// signature submissions. The relayer's CCCP signing key remains
 	/// secp256k1 — this is the Ed25519 wallet used to *pay fees* and to
@@ -210,6 +221,9 @@ pub struct SolAssetEntry {
 	/// Optional human-readable name (e.g. `usdc`). Used in logs only.
 	#[serde(default)]
 	pub name: Option<String>,
+	/// Expected SPL mint decimals. Production entries should set this so
+	/// bridge amount units are attested at boot rather than trusted manually.
+	pub decimals: Option<u8>,
 }
 
 #[derive(Debug, Clone, Deserialize)]

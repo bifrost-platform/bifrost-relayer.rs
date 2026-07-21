@@ -92,7 +92,8 @@ where
 			provider.call_interval,
 			confirmation_depth,
 			provider.ws_provider.clone(),
-		);
+			provider.cursor_path.as_ref().map(PathBuf::from),
+		)?;
 		// Build the per-cluster asset registry from the static config.
 		// The vault PDA is derived from the cccp-solana program ID and is
 		// shared across every asset entry — we pre-derive each vault ATA
@@ -101,8 +102,8 @@ where
 		let registry = AssetRegistry::from_entries(&provider.assets, &vault_pda)?;
 
 		let fee_payer_path = PathBuf::from(&provider.fee_payer_keypair_path);
-		// Own broadcast subscriber so the commit-mirror branch and the
-		// queue poller never starve each other.
+		// Give the commit mirror its own lossless consumer queue so it cannot
+		// be starved by the queue poller's BFC storage queries.
 		let (outbound, outbound_sender) = SolOutboundHandler::new(
 			client.clone(),
 			fee_payer_path,
@@ -117,9 +118,8 @@ where
 			slot_manager.subscribe(),
 		)?;
 
-		// Queue poller gets its own broadcast subscriber — lag on BFC
-		// storage queries or xt submission must never drop events the
-		// outbound handler also needs to see.
+		// The queue poller gets a separate acknowledged delivery stream;
+		// cursor advancement waits for both consumers.
 		let queue_poller = SolSocketQueuePoller::new(
 			client.clone(),
 			bfc_client,

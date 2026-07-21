@@ -42,8 +42,8 @@ use eyre::Result;
 use solana_sdk::signature::Signature;
 use subxt::utils::eth::AccountId20;
 use subxt::{OnlineClient, rpcs::LegacyRpcMethods};
-use tokio::sync::broadcast::Receiver;
-use tokio_stream::{StreamExt, wrappers::BroadcastStream};
+use tokio::sync::mpsc::UnboundedReceiver;
+use tokio_stream::{StreamExt, wrappers::UnboundedReceiverStream};
 
 use alloy::{
 	network::Network,
@@ -53,7 +53,7 @@ use alloy::{
 use br_primitives::{
 	contracts::socket::Socket_Struct::{Instruction, RequestID, Socket_Message, Task_Params},
 	eth::SocketEventStatus,
-	sol::{Event, EventMessage, EventType},
+	sol::{Event, EventType},
 	substrate::{CustomConfig, FinalizePollSubmission, OnFlightPollSubmission, bifrost_runtime},
 	tx::{
 		FinalizePollMetadata, OnFlightPollMetadata, XtRequest, XtRequestMessage, XtRequestMetadata,
@@ -64,6 +64,7 @@ use br_primitives::{
 
 use crate::eth::EthClient;
 use crate::sol::client::SolClient;
+use crate::sol::slot_manager::EventDelivery;
 
 const SUB_LOG_TARGET: &str = "sol-queue-poller";
 
@@ -83,7 +84,7 @@ where
 	sub_client: OnlineClient<CustomConfig>,
 	sub_rpc: LegacyRpcMethods<subxt::config::RpcConfigFor<CustomConfig>>,
 	xt_request_sender: Arc<XtRequestSender>,
-	event_stream: BroadcastStream<EventMessage>,
+	event_stream: UnboundedReceiverStream<EventDelivery>,
 }
 
 impl<F, P, N: Network> SolSocketQueuePoller<F, P, N>
@@ -97,7 +98,7 @@ where
 		sub_client: OnlineClient<CustomConfig>,
 		sub_rpc: LegacyRpcMethods<subxt::config::RpcConfigFor<CustomConfig>>,
 		xt_request_sender: Arc<XtRequestSender>,
-		event_stream: Receiver<EventMessage>,
+		event_stream: UnboundedReceiver<EventDelivery>,
 	) -> Self {
 		Self {
 			client,
@@ -105,7 +106,7 @@ where
 			sub_client,
 			sub_rpc,
 			xt_request_sender,
-			event_stream: BroadcastStream::new(event_stream),
+			event_stream: UnboundedReceiverStream::new(event_stream),
 		}
 	}
 
@@ -345,15 +346,16 @@ where
 			.map_err(|e| eyre::eyre!("sign_message: {e}"))?
 			.into();
 
-		let call = XtRequest::OnFlightPoll(bifrost_runtime::tx().cccp_relay_queue().on_flight_poll(
-			OnFlightPollSubmission {
-				authority_id: AccountId20(self.bfc_client.address().await.0.0),
-				msg: encoded_msg.into(),
-				msg_hash,
-				src_tx_id,
-			},
-			signature,
-		));
+		let call =
+			XtRequest::OnFlightPoll(bifrost_runtime::tx().cccp_relay_queue().on_flight_poll(
+				OnFlightPollSubmission {
+					authority_id: AccountId20(self.bfc_client.address().await.0.0),
+					msg: encoded_msg.into(),
+					msg_hash,
+					src_tx_id,
+				},
+				signature,
+			));
 
 		match self
 			.xt_request_sender
@@ -444,27 +446,20 @@ where
 			sub_display_format(SUB_LOG_TARGET),
 		);
 
-		while let Some(item) = self.event_stream.next().await {
-			let msg = match item {
-				Ok(m) => m,
-				Err(err) => {
-					log::warn!(
-						target: &self.client.get_chain_name(),
-						"-[{}] event stream lag/error: {err:?}",
-						sub_display_format(SUB_LOG_TARGET),
-					);
-					continue;
-				},
-			};
+		while let Some(delivery) = self.event_stream.next().await {
+			let msg = &delivery.message;
 
 			// Only socket events carry state transitions we care about;
 			// NewSlot heartbeats pass through without action.
 			if matches!(msg.event_type, EventType::NewSlot) {
+				delivery.acknowledge();
 				continue;
 			}
 
+			let mut all_processed = true;
 			for ev in &msg.events {
 				if let Err(err) = self.process_event(ev).await {
+					all_processed = false;
 					log::warn!(
 						target: &self.client.get_chain_name(),
 						"-[{}] process_event(sig={}) failed: {err:?}",
@@ -472,6 +467,9 @@ where
 						ev.signature,
 					);
 				}
+			}
+			if all_processed {
+				delivery.acknowledge();
 			}
 		}
 		Ok(())

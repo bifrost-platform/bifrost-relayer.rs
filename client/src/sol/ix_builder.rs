@@ -19,9 +19,11 @@ use solana_sdk::pubkey::Pubkey;
 
 use crate::sol::codec::{
 	AssetIndex, CLOSE_POLL_SIGNATURES_IX_DISCRIMINATOR, CLOSE_ROUND_IX_DISCRIMINATOR,
-	POLL_BUFFERED_IX_DISCRIMINATOR, POLL_IX_DISCRIMINATOR, PollSubmit,
-	ROUND_CONTROL_RELAY_IX_DISCRIMINATOR, RoundUpSubmit, SUBMIT_SIGNATURES_IX_DISCRIMINATOR,
-	Signatures, SocketMessage,
+	CLOSE_ROUNDUP_SIGNATURES_IX_DISCRIMINATOR, EvmAddress, POLL_BUFFERED_IX_DISCRIMINATOR,
+	POLL_IX_DISCRIMINATOR, PollSubmit, ROUND_CONTROL_RELAY_BUFFERED_IX_DISCRIMINATOR,
+	ROUND_CONTROL_RELAY_IX_DISCRIMINATOR, RoundUpSubmit, SUBMIT_ROUNDUP_RELAYERS_IX_DISCRIMINATOR,
+	SUBMIT_ROUNDUP_SIGNATURES_IX_DISCRIMINATOR, SUBMIT_SIGNATURES_IX_DISCRIMINATOR, Signatures,
+	SocketMessage,
 };
 use crate::sol::pda;
 
@@ -171,9 +173,118 @@ pub fn build_round_control_relay_ix(
 	SolanaIx { program_id: *program_id, accounts, data }
 }
 
+/// Append one chunk to the payer-scoped roundup signature buffer.
+pub fn build_submit_roundup_signatures_ix(
+	program_id: &Pubkey,
+	relayer: &Pubkey,
+	sigs: &Signatures,
+	round_id: u64,
+) -> SolanaIx {
+	let (roundup_sigs, _) = pda::roundup_signatures(program_id, round_id, relayer);
+	let accounts = vec![
+		AccountMeta::new(*relayer, true),
+		AccountMeta::new(roundup_sigs, false),
+		AccountMeta::new_readonly(SYSTEM_PROGRAM_ID, false),
+	];
+
+	let mut data = Vec::with_capacity(8 + 256);
+	data.extend_from_slice(&SUBMIT_ROUNDUP_SIGNATURES_IX_DISCRIMINATOR);
+	sigs.serialize(&mut data)
+		.expect("borsh serialization of Signatures must not fail");
+	round_id
+		.to_le_bytes()
+		.serialize(&mut data)
+		.expect("borsh serialization of round seed must not fail");
+
+	SolanaIx { program_id: *program_id, accounts, data }
+}
+
+/// Append one chunk of EVM addresses to the payer-scoped roundup buffer.
+pub fn build_submit_roundup_relayers_ix(
+	program_id: &Pubkey,
+	relayer: &Pubkey,
+	new_relayers: &[EvmAddress],
+	round_id: u64,
+) -> SolanaIx {
+	let (roundup_sigs, _) = pda::roundup_signatures(program_id, round_id, relayer);
+	let accounts = vec![
+		AccountMeta::new(*relayer, true),
+		AccountMeta::new(roundup_sigs, false),
+		AccountMeta::new_readonly(SYSTEM_PROGRAM_ID, false),
+	];
+
+	let mut data = Vec::with_capacity(8 + 4 + new_relayers.len() * 20 + 8);
+	data.extend_from_slice(&SUBMIT_ROUNDUP_RELAYERS_IX_DISCRIMINATOR);
+	new_relayers
+		.to_vec()
+		.serialize(&mut data)
+		.expect("borsh serialization of relayer addresses must not fail");
+	round_id
+		.to_le_bytes()
+		.serialize(&mut data)
+		.expect("borsh serialization of round seed must not fail");
+
+	SolanaIx { program_id: *program_id, accounts, data }
+}
+
+/// Finalize a relayer rotation using a fully pre-populated roundup buffer.
+pub fn build_round_control_relay_buffered_ix(
+	program_id: &Pubkey,
+	relayer: &Pubkey,
+	submit: &RoundUpSubmit,
+) -> SolanaIx {
+	let (socket_config, _) = pda::socket_config(program_id);
+	let new_round_id = round_id_from_submit(submit);
+	let (current_round, _) = pda::round_info(program_id, new_round_id.saturating_sub(1));
+	let (new_round, _) = pda::round_info(program_id, new_round_id);
+	let (roundup_sigs, _) = pda::roundup_signatures(program_id, new_round_id, relayer);
+	let accounts = vec![
+		AccountMeta::new(*relayer, true),
+		AccountMeta::new(socket_config, false),
+		AccountMeta::new_readonly(current_round, false),
+		AccountMeta::new(new_round, false),
+		AccountMeta::new(roundup_sigs, false),
+		AccountMeta::new_readonly(SYSTEM_PROGRAM_ID, false),
+	];
+
+	let mut data = Vec::with_capacity(8 + 256);
+	data.extend_from_slice(&ROUND_CONTROL_RELAY_BUFFERED_IX_DISCRIMINATOR);
+	submit
+		.round
+		.serialize(&mut data)
+		.expect("borsh serialization of round must not fail");
+
+	SolanaIx { program_id: *program_id, accounts, data }
+}
+
+/// Clear a partially-filled payer-scoped roundup signature buffer.
+pub fn build_close_roundup_signatures_ix(
+	program_id: &Pubkey,
+	caller: &Pubkey,
+	round_id: u64,
+) -> SolanaIx {
+	let (roundup_sigs, _) = pda::roundup_signatures(program_id, round_id, caller);
+	let accounts = vec![AccountMeta::new(*caller, true), AccountMeta::new(roundup_sigs, false)];
+	let mut data = Vec::with_capacity(16);
+	data.extend_from_slice(&CLOSE_ROUNDUP_SIGNATURES_IX_DISCRIMINATOR);
+	round_id
+		.to_le_bytes()
+		.serialize(&mut data)
+		.expect("borsh serialization of round seed must not fail");
+
+	SolanaIx { program_id: *program_id, accounts, data }
+}
+
 /// Maximum number of signatures per `submit_signatures` chunk.
 /// With 8 sigs the tx is ~766 bytes — well under 1232.
 pub const SIGS_PER_CHUNK: usize = 8;
+
+/// 32 EVM addresses occupy 640 bytes plus Borsh framing, leaving ample
+/// room for the payer, PDA, system-program accounts and transaction header.
+pub const RELAYERS_PER_CHUNK: usize = 32;
+
+/// Must mirror `cccp-solana::constants::MAX_RELAYERS_PER_ROUND`.
+pub const MAX_ROUND_RELAYER_COUNT: usize = 64;
 
 /// Build a `submit_signatures(sigs, req_id_pack, status)` instruction.
 /// The relayer calls this in a loop to fill the `PollSignatures` PDA
@@ -185,12 +296,10 @@ pub fn build_submit_signatures_ix(
 	req_id_pack: &[u8; 32],
 	status: u8,
 ) -> SolanaIx {
-	let (socket_config, _) = pda::socket_config(program_id);
-	let (poll_sigs, _) = pda::poll_signatures_raw(program_id, req_id_pack, status);
+	let (poll_sigs, _) = pda::poll_signatures_raw(program_id, req_id_pack, status, relayer);
 
 	let accounts = vec![
-		AccountMeta::new(*relayer, true), // relayer (signer, mut)
-		AccountMeta::new_readonly(socket_config, false), // socket_config
+		AccountMeta::new(*relayer, true),   // relayer (signer, mut)
 		AccountMeta::new(poll_sigs, false), // poll_signatures (init_if_needed, mut)
 		AccountMeta::new_readonly(SYSTEM_PROGRAM_ID, false), // system_program
 	];
@@ -216,7 +325,7 @@ pub fn build_close_poll_signatures_ix(
 	req_id_pack: &[u8; 32],
 	status: u8,
 ) -> SolanaIx {
-	let (poll_sigs, _) = pda::poll_signatures_raw(program_id, req_id_pack, status);
+	let (poll_sigs, _) = pda::poll_signatures_raw(program_id, req_id_pack, status, caller);
 
 	// Account meta order MUST match the on-chain `ClosePollSignatures`
 	// struct: (caller signer+mut, poll_signatures mut).
@@ -286,7 +395,7 @@ pub fn build_poll_buffered_ix(
 		},
 	);
 	let (asset_config, _) = pda::asset_config(program_id, &asset_index.0);
-	let (poll_sigs, _) = pda::poll_signatures_raw(program_id, &rid_pack, msg.status);
+	let (poll_sigs, _) = pda::poll_signatures_raw(program_id, &rid_pack, msg.status, relayer);
 
 	// Same account order as Poll, plus poll_signatures at the end.
 	let accounts = vec![
@@ -354,7 +463,7 @@ mod close_poll_signatures_tests {
 		assert!(ix.accounts[0].is_writable);
 		assert_eq!(
 			ix.accounts[1].pubkey,
-			pda::poll_signatures_raw(&program_id, &rid_pack, status).0
+			pda::poll_signatures_raw(&program_id, &rid_pack, status, &caller).0
 		);
 		assert!(ix.accounts[1].is_writable);
 
@@ -418,10 +527,10 @@ mod close_poll_signatures_tests {
 			status,
 		);
 
-		// submit_signatures puts poll_signatures at index 2; close puts
+		// submit_signatures puts poll_signatures at index 1; close puts
 		// it at index 1. Compare by pubkey, not by position.
 		let close_pda = close_ix.accounts[1].pubkey;
-		let submit_pda = submit_ix.accounts[2].pubkey;
+		let submit_pda = submit_ix.accounts[1].pubkey;
 		assert_eq!(close_pda, submit_pda);
 	}
 }
@@ -496,6 +605,60 @@ mod tests {
 		// The remaining bytes must round-trip into AssetIndex.
 		let _decoded_idx = AssetIndex::deserialize(&mut tail).expect("borsh roundtrip AssetIndex");
 		assert!(tail.is_empty(), "no trailing bytes after asset_index");
+	}
+
+	#[test]
+	fn submit_signatures_accounts_match_onchain_layout() {
+		let pid = fake_program_id();
+		let relayer = Pubkey::new_unique();
+		let rid_pack = [0x42; 32];
+		let ix = build_submit_signatures_ix(&pid, &relayer, &Signatures::default(), &rid_pack, 5);
+
+		assert_eq!(ix.accounts.len(), 3);
+		assert_eq!(ix.accounts[0].pubkey, relayer);
+		assert_eq!(ix.accounts[1].pubkey, pda::poll_signatures_raw(&pid, &rid_pack, 5, &relayer).0);
+		assert_eq!(ix.accounts[2].pubkey, SYSTEM_PROGRAM_ID);
+	}
+
+	#[test]
+	fn roundup_buffered_builders_share_payer_scoped_pda() {
+		let pid = fake_program_id();
+		let relayer = Pubkey::new_unique();
+		let mut round = [0u8; 32];
+		round[31] = 2;
+		let submit =
+			RoundUpSubmit { round, new_relayers: vec![[0x22; 20]], sigs: Signatures::default() };
+		let expected = pda::roundup_signatures(&pid, 2, &relayer).0;
+
+		let append = build_submit_roundup_signatures_ix(&pid, &relayer, &Signatures::default(), 2);
+		let append_relayers =
+			build_submit_roundup_relayers_ix(&pid, &relayer, &submit.new_relayers, 2);
+		let finalize = build_round_control_relay_buffered_ix(&pid, &relayer, &submit);
+		let close = build_close_roundup_signatures_ix(&pid, &relayer, 2);
+
+		assert_eq!(append.accounts[1].pubkey, expected);
+		assert_eq!(append_relayers.accounts[1].pubkey, expected);
+		assert_eq!(finalize.accounts[4].pubkey, expected);
+		assert_eq!(close.accounts[1].pubkey, expected);
+		assert_eq!(&append.data[..8], &SUBMIT_ROUNDUP_SIGNATURES_IX_DISCRIMINATOR);
+		assert_eq!(&append_relayers.data[..8], &SUBMIT_ROUNDUP_RELAYERS_IX_DISCRIMINATOR);
+		assert_eq!(&finalize.data[..8], &ROUND_CONTROL_RELAY_BUFFERED_IX_DISCRIMINATOR);
+		assert_eq!(finalize.data.len(), 8 + 32, "finalizer must carry only round bytes");
+		assert_eq!(&close.data[..8], &CLOSE_ROUNDUP_SIGNATURES_IX_DISCRIMINATOR);
+	}
+
+	#[test]
+	fn roundup_relayer_chunks_cover_protocol_max_without_oversized_instruction_data() {
+		let pid = fake_program_id();
+		let relayer = Pubkey::new_unique();
+		let addresses = vec![[0x33; 20]; MAX_ROUND_RELAYER_COUNT];
+		let chunks: Vec<_> = addresses
+			.chunks(RELAYERS_PER_CHUNK)
+			.map(|chunk| build_submit_roundup_relayers_ix(&pid, &relayer, chunk, 2))
+			.collect();
+
+		assert_eq!(chunks.len(), 2);
+		assert!(chunks.iter().all(|ix| ix.data.len() < 700));
 	}
 
 	#[test]

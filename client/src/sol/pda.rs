@@ -79,6 +79,10 @@ pub fn roundup_filter(program_id: &Pubkey, round_id: u64, updater: &EvmAddress) 
 	find(&[seeds::ROUNDUP_FILTER, &round_id.to_le_bytes(), updater], program_id)
 }
 
+pub fn roundup_signatures(program_id: &Pubkey, round_id: u64, relayer: &Pubkey) -> (Pubkey, u8) {
+	find(&[seeds::ROUNDUP_SIGS, &round_id.to_le_bytes(), relayer.as_ref()], program_id)
+}
+
 // ---------------------------------------------------------------------------
 // Per-request PDAs
 // ---------------------------------------------------------------------------
@@ -88,15 +92,25 @@ pub fn request_record(program_id: &Pubkey, rid: &RequestId) -> (Pubkey, u8) {
 	find(&[seeds::REQUEST_RECORD, &packed], program_id)
 }
 
-pub fn poll_signatures(program_id: &Pubkey, rid: &RequestId, status: u8) -> (Pubkey, u8) {
+pub fn poll_signatures(
+	program_id: &Pubkey,
+	rid: &RequestId,
+	status: u8,
+	relayer: &Pubkey,
+) -> (Pubkey, u8) {
 	let packed = rid.pack();
-	poll_signatures_raw(program_id, &packed, status)
+	poll_signatures_raw(program_id, &packed, status, relayer)
 }
 
 /// Variant that accepts a pre-packed `[u8; 32]` rid instead of a
 /// `RequestId`. Used by the IX builder which already has the packed form.
-pub fn poll_signatures_raw(program_id: &Pubkey, rid_pack: &[u8; 32], status: u8) -> (Pubkey, u8) {
-	find(&[seeds::POLL_SIGS, rid_pack, &[status]], program_id)
+pub fn poll_signatures_raw(
+	program_id: &Pubkey,
+	rid_pack: &[u8; 32],
+	status: u8,
+	relayer: &Pubkey,
+) -> (Pubkey, u8) {
+	find(&[seeds::POLL_SIGS, rid_pack, &[status], relayer.as_ref()], program_id)
 }
 
 pub fn poll_filter(program_id: &Pubkey, rid: &RequestId, signer: &EvmAddress) -> (Pubkey, u8) {
@@ -170,6 +184,23 @@ mod tests {
 	}
 
 	#[test]
+	fn signature_buffers_are_isolated_by_fee_payer() {
+		let program_id = Pubkey::new_unique();
+		let relayer_a = Pubkey::new_unique();
+		let relayer_b = Pubkey::new_unique();
+		let rid = RequestId { chain: *b"SOL\0", round_id: 7, sequence: 9 };
+
+		assert_ne!(
+			poll_signatures(&program_id, &rid, 5, &relayer_a).0,
+			poll_signatures(&program_id, &rid, 5, &relayer_b).0,
+		);
+		assert_ne!(
+			roundup_signatures(&program_id, 8, &relayer_a).0,
+			roundup_signatures(&program_id, 8, &relayer_b).0,
+		);
+	}
+
+	#[test]
 	fn singleton_seeds_match_cccp_solana_constants() {
 		// These literal byte strings MUST mirror cccp-solana::constants::SEED_*.
 		// The test will fail at compile time if any of the imports drift.
@@ -181,6 +212,7 @@ mod tests {
 		assert_eq!(seeds::POLL_FILTER, b"filter");
 		assert_eq!(seeds::ROUNDUP_HIST, b"rup");
 		assert_eq!(seeds::ROUNDUP_FILTER, b"rupf");
+		assert_eq!(seeds::ROUNDUP_SIGS, b"rupsigs");
 		assert_eq!(seeds::ASSET_CONFIG, b"asset");
 	}
 }
