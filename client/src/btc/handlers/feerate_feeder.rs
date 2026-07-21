@@ -16,7 +16,7 @@ use br_primitives::{
 };
 use eyre::Result;
 use std::sync::Arc;
-use subxt::{OnlineClient, ext::subxt_core::utils::AccountId20};
+use subxt::{OnlineClient, utils::eth::AccountId20};
 use tokio::{
 	sync::broadcast::Receiver,
 	time::{Duration, sleep},
@@ -149,15 +149,28 @@ where
 	/// Check if the fee rate has been submitted by this authority.
 	async fn is_fee_rate_submitted(&self) -> bool {
 		loop {
-			match self.sub_client.as_ref().unwrap().storage().at_latest().await {
-				Ok(storage) => {
-					match storage.fetch(&bifrost_runtime::storage().blaze().fee_rates()).await {
-						Ok(Some(fee_rates)) => {
-							let address = self.bfc_client.address().await.0.0;
-							if fee_rates.0.iter().any(|(key, _)| key.0 == address) {
-								return true;
-							}
-							return false;
+			match self.sub_client.as_ref().unwrap().at_current_block().await {
+				Ok(at) => {
+					let storage = at.storage();
+					match storage
+						.try_fetch(bifrost_runtime::storage().blaze().fee_rates(), ())
+						.await
+					{
+						Ok(Some(fee_rates)) => match fee_rates.decode() {
+							Ok(fee_rates) => {
+								let address = self.bfc_client.address().await.0.0;
+								if fee_rates.0.iter().any(|(key, _)| key.0 == address) {
+									return true;
+								}
+								return false;
+							},
+							Err(_) => {
+								tokio::time::sleep(Duration::from_millis(
+									DEFAULT_CALL_RETRY_INTERVAL_MS,
+								))
+								.await;
+								continue;
+							},
 						},
 						Ok(None) => {
 							unreachable!("The fee rate should always be available.")
@@ -230,7 +243,10 @@ where
 	) -> Result<(XtRequest, SubmitFeeRateMetadata)> {
 		let (msg, signature) = self.build_payload(lt_fee_rate, fee_rate).await?;
 		let metadata = SubmitFeeRateMetadata::new(lt_fee_rate, fee_rate);
-		Ok((Arc::new(bifrost_runtime::tx().blaze().submit_fee_rate(msg, signature)), metadata))
+		Ok((
+			XtRequest::SubmitFeeRate(bifrost_runtime::tx().blaze().submit_fee_rate(msg, signature)),
+			metadata,
+		))
 	}
 
 	async fn submit_fee_rate(&self, lt_fee_rate: u64, fee_rate: u64) -> Result<()> {

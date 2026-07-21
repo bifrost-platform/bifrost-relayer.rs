@@ -11,7 +11,7 @@ use alloy::{
 use array_bytes::Hexify;
 use eyre::Result;
 use sc_service::SpawnTaskHandle;
-use subxt::{OnlineClient, ext::subxt_core::utils::AccountId20};
+use subxt::{OnlineClient, utils::eth::AccountId20};
 use tokio::sync::{broadcast::Receiver, mpsc::UnboundedSender};
 use tokio_stream::{StreamExt, wrappers::BroadcastStream};
 
@@ -27,7 +27,7 @@ use br_primitives::{
 	},
 	eth::{BootstrapState, BuiltRelayTransaction, RelayDirection, SocketEventStatus},
 	substrate::{CustomConfig, SocketMessagesSubmission, bifrost_runtime},
-	tx::{SocketRelayMetadata, XtRequestMessage, XtRequestMetadata, XtRequestSender},
+	tx::{SocketRelayMetadata, XtRequest, XtRequestMessage, XtRequestMetadata, XtRequestSender},
 	utils::sub_display_format,
 };
 
@@ -38,7 +38,9 @@ use crate::{
 		events::EventMessage,
 		handlers::{SocketOnflightMessage, SocketOnflightReceiver},
 		send_transaction,
-		traits::{BootstrapHandler, Handler, HookExecutor, SocketRelayBuilder},
+		traits::{
+			BootstrapHandler, Handler, HookExecutor, SocketMessageSizeGuard, SocketRelayBuilder,
+		},
 	},
 };
 
@@ -227,6 +229,10 @@ where
 
 				let msg = decoded_socket.msg.clone();
 				let status = SocketEventStatus::from(msg.status);
+
+				if self.exceeds_max_socket_message_bytes(&msg, SUB_LOG_TARGET).await? {
+					return Ok(());
+				}
 
 				// In relay-queue mode (CCCP-v2) the Requested status is handled by
 				// SocketOnflightHandler via the CCCPRelayQueue pallet. In legacy mode the
@@ -916,13 +922,15 @@ where
 			let encoded_msg: Vec<u8> = msg.into();
 			let signature =
 				self.client.sign_message(encoded_msg.hexify_prefixed().as_bytes()).await?.into();
-			let call = Arc::new(bifrost_runtime::tx().blaze().submit_outbound_requests(
-				SocketMessagesSubmission {
-					authority_id: AccountId20(self.client.address().await.0.0),
-					messages: vec![encoded_msg],
-				},
-				signature,
-			));
+			let call = XtRequest::SubmitOutboundRequests(
+				bifrost_runtime::tx().blaze().submit_outbound_requests(
+					SocketMessagesSubmission {
+						authority_id: AccountId20(self.client.address().await.0.0),
+						messages: vec![encoded_msg],
+					},
+					signature,
+				),
+			);
 			match self.xt_request_sender.send(XtRequestMessage::new(
 				call,
 				XtRequestMetadata::SubmitOutboundRequests(metadata.clone()),
@@ -1102,6 +1110,20 @@ where
 
 	fn get_sub_client(&self) -> OnlineClient<CustomConfig> {
 		self.sub_client.clone()
+	}
+}
+
+impl<F, P, N: Network> SocketMessageSizeGuard for SocketRelayHandler<F, P, N>
+where
+	F: TxFiller<N> + WalletProvider<N>,
+	P: Provider<N>,
+{
+	fn sub_client(&self) -> &OnlineClient<CustomConfig> {
+		&self.sub_client
+	}
+
+	fn chain_name(&self) -> String {
+		self.client.get_chain_name()
 	}
 }
 
