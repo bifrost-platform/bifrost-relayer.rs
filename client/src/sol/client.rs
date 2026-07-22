@@ -10,7 +10,7 @@
 // work (slot polling, signature decoding, transaction submission) lives
 // in `slot_manager.rs` and `handlers/`.
 
-use std::sync::Arc;
+use std::{collections::HashMap, sync::Arc};
 
 use sha2::{Digest, Sha256};
 use solana_client::nonblocking::rpc_client::RpcClient;
@@ -105,6 +105,13 @@ struct AssetAttestation {
 	index: [u8; 32],
 	mint: Pubkey,
 	expected_decimals: Option<u8>,
+}
+
+#[derive(Debug, Clone)]
+pub struct SolHealthReport {
+	pub slot: u64,
+	pub native_coin_index: [u8; 32],
+	pub asset_kinds: HashMap<[u8; 32], u8>,
 }
 
 #[derive(Clone)]
@@ -204,7 +211,7 @@ impl SolClient {
 	/// Returns the latest slot on success. Should be called once during
 	/// `service::relay()` setup so misconfigurations fail fast at boot
 	/// instead of silently producing zero traffic at runtime.
-	pub async fn health_check(&self) -> eyre::Result<u64> {
+	pub async fn health_check(&self) -> eyre::Result<SolHealthReport> {
 		let slot = self
 			.rpc
 			.get_slot()
@@ -329,6 +336,7 @@ impl SolClient {
 			eyre::bail!("socket_config has an unsupported BFC ChainIndex on {}", self.name);
 		}
 
+		let mut asset_kinds = HashMap::with_capacity(self.asset_attestations.len());
 		for spec in &self.asset_attestations {
 			let (asset_key, _) = pda::asset_config(&self.program_id, &spec.index);
 			let asset = self.rpc.get_account(&asset_key).await.map_err(|err| {
@@ -362,6 +370,10 @@ impl SolClient {
 				);
 			}
 			let asset_kind = asset.data[41];
+			if !matches!(asset_kind, 1..=3) {
+				eyre::bail!("asset {asset_key} has unsupported kind {asset_kind}");
+			}
+			asset_kinds.insert(spec.index, asset_kind);
 			if asset_kind == 1 && vault.data[104..136] != spec.mint.to_bytes() {
 				eyre::bail!("native asset mint does not match vault_config.native_mint");
 			}
@@ -382,7 +394,9 @@ impl SolClient {
 			upgrade_authority,
 			self.asset_attestations.len(),
 		);
-		Ok(slot)
+		let mut native_coin_index = [0u8; 32];
+		native_coin_index.copy_from_slice(&vault.data[72..104]);
+		Ok(SolHealthReport { slot, native_coin_index, asset_kinds })
 	}
 
 	/// Read the on-chain `socket_config.latest_round_id`.

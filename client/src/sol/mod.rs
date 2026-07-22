@@ -39,6 +39,7 @@ pub const SUB_LOG_TARGET: &str = "sol-client";
 pub mod seeds {
 	pub const SOCKET_CONFIG: &[u8] = b"socket";
 	pub const VAULT_CONFIG: &[u8] = b"vault";
+	pub const NATIVE_VAULT: &[u8] = b"native_vault";
 	pub const ROUND_INFO: &[u8] = b"round";
 	pub const REQUEST_RECORD: &[u8] = b"req";
 	pub const POLL_SIGS: &[u8] = b"poll";

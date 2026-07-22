@@ -52,12 +52,13 @@ use crate::sol::codec::{AssetIndex, PollSubmit, RoundUpSubmit, Signatures};
 use crate::sol::ix_builder::{
 	MAX_ROUND_RELAYER_COUNT, PollTokenAccounts, RELAYERS_PER_CHUNK, SIGS_PER_CHUNK,
 	build_close_poll_signatures_ix, build_close_round_ix, build_close_roundup_signatures_ix,
-	build_poll_buffered_ix, build_poll_ix, build_round_control_relay_buffered_ix,
-	build_round_control_relay_ix, build_submit_roundup_relayers_ix,
-	build_submit_roundup_signatures_ix, build_submit_signatures_ix,
+	build_poll_buffered_ix, build_poll_buffered_native_ix, build_poll_ix, build_poll_native_ix,
+	build_round_control_relay_buffered_ix, build_round_control_relay_ix,
+	build_submit_roundup_relayers_ix, build_submit_roundup_signatures_ix,
+	build_submit_signatures_ix,
 };
 use crate::sol::pda;
-use crate::sol::registry::AssetRegistry;
+use crate::sol::registry::{AssetKind, AssetRegistry};
 use crate::sol::slot_manager::EventDelivery;
 
 const SUB_LOG_TARGET: &str = "sol-outbound";
@@ -836,15 +837,17 @@ where
 	}
 
 	/// Buffered path: split signatures into chunks, submit each chunk
-	/// as a separate `submit_signatures` tx, then send `poll_buffered`.
+	/// as a separate `submit_signatures` tx, then send the SPL or native
+	/// buffered poll instruction selected from the attested asset kind.
 	async fn handle_buffered(&self, job: SolOutboundJob) -> eyre::Result<()> {
-		// `Some(wallet)` = build a `create_associated_token_account` IX so
+		// For SPL, `Some(wallet)` builds a `create_associated_token_account` IX so
 		// the recipient ATA is materialized on first use (`PollFromBfc`
 		// path). `None` = the caller already produced the ATA in
 		// `tokens.recipient_token_account` and cannot tell us the owning
 		// wallet (`Poll` path, used by tests/round-trips) — in that case we
-		// skip create_ata and rely on the ATA existing already.
-		let (submit, asset_index, tokens, recipient_wallet) = match &job {
+		// skip create_ata and rely on the ATA existing already. NativeCoin
+		// also carries the wallet here but bypasses all ATA handling.
+		let (submit, asset_index, tokens, recipient_wallet, is_native) = match &job {
 			SolOutboundJob::PollFromBfc { submit, asset_index, recipient_wallet } => {
 				let entry = self.registry.get(&asset_index.0).ok_or_else(|| {
 					eyre::eyre!(
@@ -852,16 +855,23 @@ where
 						hex::encode(asset_index.0)
 					)
 				})?;
-				let recipient_ata = derive_ata(recipient_wallet, &entry.mint);
-				let tokens = PollTokenAccounts {
-					mint: entry.mint,
-					vault_token_account: entry.vault_token_account,
-					recipient_token_account: recipient_ata,
-				};
-				(submit, asset_index, tokens, Some(*recipient_wallet))
+				match entry.kind.ok_or_else(|| eyre::eyre!("asset kind was not attested"))? {
+					AssetKind::NativeCoin => {
+						(submit, asset_index, None, Some(*recipient_wallet), true)
+					},
+					AssetKind::SplToken | AssetKind::SplTokenMintable => {
+						let recipient_ata = derive_ata(recipient_wallet, &entry.mint);
+						let tokens = PollTokenAccounts {
+							mint: entry.mint,
+							vault_token_account: entry.vault_token_account,
+							recipient_token_account: recipient_ata,
+						};
+						(submit, asset_index, Some(tokens), Some(*recipient_wallet), false)
+					},
+				}
 			},
 			SolOutboundJob::Poll { submit, asset_index, tokens } => {
-				(submit, asset_index, *tokens, None)
+				(submit, asset_index, Some(*tokens), None, false)
 			},
 			_ => return Err(eyre::eyre!("handle_buffered called for non-poll job")),
 		};
@@ -942,20 +952,33 @@ where
 		// recipient's wallet, and the resulting tx fails because the
 		// `recipient_token_account` slot of `poll_buffered` still points at
 		// the real ATA which may not exist yet.
-		let poll_buf = build_poll_buffered_ix(
-			&self.client.program_id,
-			&fee_payer,
-			&submit.msg,
-			&submit.option,
-			asset_index,
-			&tokens,
-		);
+		let poll_buf = if is_native {
+			build_poll_buffered_native_ix(
+				&self.client.program_id,
+				&fee_payer,
+				&submit.msg,
+				&submit.option,
+				asset_index,
+				&self.registry.native_coin_index()?,
+				&recipient_wallet.expect("native PollFromBfc always has recipient wallet"),
+			)
+		} else {
+			build_poll_buffered_ix(
+				&self.client.program_id,
+				&fee_payer,
+				&submit.msg,
+				&submit.option,
+				asset_index,
+				&tokens.expect("SPL poll always has token accounts"),
+			)
+		};
 
 		let mut ixs = vec![
 			compute_budget_set_cu_limit(BUFFERED_FINALIZE_COMPUTE_UNIT_LIMIT),
 			compute_budget_set_cu_price(self.base_priority_fee),
 		];
-		if let Some(wallet) = recipient_wallet {
+		if !is_native && let Some(wallet) = recipient_wallet {
+			let tokens = tokens.expect("SPL poll always has token accounts");
 			ixs.push(build_create_ata_idempotent_ix(&fee_payer, &wallet, &tokens.mint));
 		}
 		ixs.push(poll_buf);
@@ -1111,10 +1134,9 @@ where
 		self.await_confirmation(&signature).await
 	}
 
-	/// Build the IX list for a `PollFromBfc` job. Resolves the token
-	/// accounts from the asset registry + the supplied recipient wallet,
-	/// and prepends a `create_associated_token_account` idempotent IX so
-	/// the recipient ATA is materialized if it doesn't already exist.
+	/// Build the IX list for a `PollFromBfc` job. NativeCoin settles directly
+	/// to the supplied wallet. SPL kinds resolve token accounts from the asset
+	/// registry and prepend an idempotent ATA-create instruction.
 	fn build_poll_ix_from_bfc(
 		&self,
 		submit: &PollSubmit,
@@ -1127,6 +1149,20 @@ where
 				hex::encode(asset_index.0)
 			)
 		})?;
+		let kind = entry.kind.ok_or_else(|| {
+			eyre::eyre!("asset 0x{} kind was not attested", hex::encode(asset_index.0))
+		})?;
+
+		if kind == AssetKind::NativeCoin {
+			return Ok(vec![build_poll_native_ix(
+				&self.client.program_id,
+				&self.fee_payer.pubkey(),
+				submit,
+				asset_index,
+				&self.registry.native_coin_index()?,
+				recipient_wallet,
+			)]);
+		}
 
 		let recipient_ata = derive_ata(recipient_wallet, &entry.mint);
 
