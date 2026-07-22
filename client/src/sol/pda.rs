@@ -63,6 +63,10 @@ pub fn vault_config(program_id: &Pubkey) -> (Pubkey, u8) {
 	find(&[seeds::VAULT_CONFIG], program_id)
 }
 
+pub fn native_vault(program_id: &Pubkey) -> (Pubkey, u8) {
+	find(&[seeds::NATIVE_VAULT], program_id)
+}
+
 // ---------------------------------------------------------------------------
 // Per-round PDAs
 // ---------------------------------------------------------------------------
@@ -205,6 +209,7 @@ mod tests {
 		// These literal byte strings MUST mirror cccp-solana::constants::SEED_*.
 		// The test will fail at compile time if any of the imports drift.
 		assert_eq!(seeds::SOCKET_CONFIG, b"socket");
+		assert_eq!(seeds::NATIVE_VAULT, b"native_vault");
 		assert_eq!(seeds::VAULT_CONFIG, b"vault");
 		assert_eq!(seeds::ROUND_INFO, b"round");
 		assert_eq!(seeds::REQUEST_RECORD, b"req");

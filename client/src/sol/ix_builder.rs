@@ -20,7 +20,8 @@ use solana_sdk::pubkey::Pubkey;
 use crate::sol::codec::{
 	AssetIndex, CLOSE_POLL_SIGNATURES_IX_DISCRIMINATOR, CLOSE_ROUND_IX_DISCRIMINATOR,
 	CLOSE_ROUNDUP_SIGNATURES_IX_DISCRIMINATOR, EvmAddress, POLL_BUFFERED_IX_DISCRIMINATOR,
-	POLL_IX_DISCRIMINATOR, PollSubmit, ROUND_CONTROL_RELAY_BUFFERED_IX_DISCRIMINATOR,
+	POLL_BUFFERED_NATIVE_IX_DISCRIMINATOR, POLL_IX_DISCRIMINATOR, POLL_NATIVE_IX_DISCRIMINATOR,
+	PollSubmit, ROUND_CONTROL_RELAY_BUFFERED_IX_DISCRIMINATOR,
 	ROUND_CONTROL_RELAY_IX_DISCRIMINATOR, RoundUpSubmit, SUBMIT_ROUNDUP_RELAYERS_IX_DISCRIMINATOR,
 	SUBMIT_ROUNDUP_SIGNATURES_IX_DISCRIMINATOR, SUBMIT_SIGNATURES_IX_DISCRIMINATOR, Signatures,
 	SocketMessage,
@@ -130,6 +131,52 @@ pub fn build_poll_ix(
 		.serialize(&mut data)
 		.expect("borsh serialization of AssetIndex must not fail");
 
+	SolanaIx { program_id: *program_id, accounts, data }
+}
+
+/// Build `poll_native(submit, asset_index)`. Native settlement has no mint or
+/// token accounts: it supplies the native-vault PDA and the signed recipient
+/// system wallet instead.
+pub fn build_poll_native_ix(
+	program_id: &Pubkey,
+	relayer: &Pubkey,
+	submit: &PollSubmit,
+	asset_index: &AssetIndex,
+	native_coin_index: &AssetIndex,
+	recipient: &Pubkey,
+) -> SolanaIx {
+	let (socket_config, _) = pda::socket_config(program_id);
+	let (vault_config, _) = pda::vault_config(program_id);
+	let (prev_round, _) = pda::round_info(program_id, submit.msg.req_id.round_id);
+	let (request_record, _) = pda::request_record(
+		program_id,
+		&pda::RequestId {
+			chain: submit.msg.req_id.chain.0,
+			round_id: submit.msg.req_id.round_id,
+			sequence: submit.msg.req_id.sequence,
+		},
+	);
+	let (asset_config, _) = pda::asset_config(program_id, &asset_index.0);
+	let (native_fee_asset_config, _) = pda::asset_config(program_id, &native_coin_index.0);
+	let (native_vault, _) = pda::native_vault(program_id);
+
+	let accounts = vec![
+		AccountMeta::new(*relayer, true),
+		AccountMeta::new(socket_config, false),
+		AccountMeta::new_readonly(vault_config, false),
+		AccountMeta::new_readonly(prev_round, false),
+		AccountMeta::new(request_record, false),
+		AccountMeta::new_readonly(asset_config, false),
+		AccountMeta::new_readonly(native_fee_asset_config, false),
+		AccountMeta::new(native_vault, false),
+		AccountMeta::new(*recipient, false),
+		AccountMeta::new_readonly(SYSTEM_PROGRAM_ID, false),
+	];
+
+	let mut data = Vec::with_capacity(8 + 256);
+	data.extend_from_slice(&POLL_NATIVE_IX_DISCRIMINATOR);
+	submit.serialize(&mut data).expect("borsh PollSubmit");
+	asset_index.serialize(&mut data).expect("borsh AssetIndex");
 	SolanaIx { program_id: *program_id, accounts, data }
 }
 
@@ -429,6 +476,55 @@ pub fn build_poll_buffered_ix(
 	SolanaIx { program_id: *program_id, accounts, data }
 }
 
+/// Build `poll_buffered_native(msg, option, asset_index)`.
+pub fn build_poll_buffered_native_ix(
+	program_id: &Pubkey,
+	relayer: &Pubkey,
+	msg: &SocketMessage,
+	option: &[u8; 32],
+	asset_index: &AssetIndex,
+	native_coin_index: &AssetIndex,
+	recipient: &Pubkey,
+) -> SolanaIx {
+	let (socket_config, _) = pda::socket_config(program_id);
+	let (vault_config, _) = pda::vault_config(program_id);
+	let (prev_round, _) = pda::round_info(program_id, msg.req_id.round_id);
+	let rid_pack = msg.req_id.pack();
+	let (request_record, _) = pda::request_record(
+		program_id,
+		&pda::RequestId {
+			chain: msg.req_id.chain.0,
+			round_id: msg.req_id.round_id,
+			sequence: msg.req_id.sequence,
+		},
+	);
+	let (asset_config, _) = pda::asset_config(program_id, &asset_index.0);
+	let (native_fee_asset_config, _) = pda::asset_config(program_id, &native_coin_index.0);
+	let (native_vault, _) = pda::native_vault(program_id);
+	let (poll_sigs, _) = pda::poll_signatures_raw(program_id, &rid_pack, msg.status, relayer);
+
+	let accounts = vec![
+		AccountMeta::new(*relayer, true),
+		AccountMeta::new(socket_config, false),
+		AccountMeta::new_readonly(vault_config, false),
+		AccountMeta::new_readonly(prev_round, false),
+		AccountMeta::new(request_record, false),
+		AccountMeta::new_readonly(asset_config, false),
+		AccountMeta::new_readonly(native_fee_asset_config, false),
+		AccountMeta::new(native_vault, false),
+		AccountMeta::new(*recipient, false),
+		AccountMeta::new_readonly(SYSTEM_PROGRAM_ID, false),
+		AccountMeta::new(poll_sigs, false),
+	];
+
+	let mut data = Vec::with_capacity(8 + 512);
+	data.extend_from_slice(&POLL_BUFFERED_NATIVE_IX_DISCRIMINATOR);
+	msg.serialize(&mut data).expect("borsh SocketMessage");
+	option.serialize(&mut data).expect("borsh option");
+	asset_index.serialize(&mut data).expect("borsh AssetIndex");
+	SolanaIx { program_id: *program_id, accounts, data }
+}
+
 /// Read the low 8 bytes of `submit.round` (uint256 BE) as a `u64`. The
 /// CCCP protocol only allocates 64 bits of round id so any high bits
 /// being set is a programming error in the relayer.
@@ -704,6 +800,46 @@ mod tests {
 
 		// [10] system_program — readonly
 		assert_eq!(ix.accounts[10].pubkey, SYSTEM_PROGRAM_ID);
+	}
+
+	#[test]
+	fn native_poll_builders_use_wallet_and_native_vault_without_token_program() {
+		let pid = fake_program_id();
+		let relayer = Pubkey::new_unique();
+		let recipient = Pubkey::new_unique();
+		let submit = sample_submit();
+		let asset_index = AssetIndex([0xab; 32]);
+		let native_index = AssetIndex([0xcd; 32]);
+
+		let inline =
+			build_poll_native_ix(&pid, &relayer, &submit, &asset_index, &native_index, &recipient);
+		assert_eq!(&inline.data[..8], &POLL_NATIVE_IX_DISCRIMINATOR);
+		assert_eq!(inline.accounts.len(), 10);
+		assert_eq!(inline.accounts[6].pubkey, pda::asset_config(&pid, &native_index.0).0);
+		assert_eq!(inline.accounts[7].pubkey, pda::native_vault(&pid).0);
+		assert_eq!(inline.accounts[8].pubkey, recipient);
+		assert_eq!(inline.accounts[9].pubkey, SYSTEM_PROGRAM_ID);
+		assert!(!inline.accounts.iter().any(|meta| meta.pubkey == SPL_TOKEN_PROGRAM_ID));
+
+		let buffered = build_poll_buffered_native_ix(
+			&pid,
+			&relayer,
+			&submit.msg,
+			&submit.option,
+			&asset_index,
+			&native_index,
+			&recipient,
+		);
+		assert_eq!(&buffered.data[..8], &POLL_BUFFERED_NATIVE_IX_DISCRIMINATOR);
+		assert_eq!(buffered.accounts.len(), 11);
+		assert_eq!(buffered.accounts[7].pubkey, pda::native_vault(&pid).0);
+		assert_eq!(buffered.accounts[8].pubkey, recipient);
+		assert_eq!(
+			buffered.accounts[10].pubkey,
+			pda::poll_signatures_raw(&pid, &submit.msg.req_id.pack(), submit.msg.status, &relayer,)
+				.0
+		);
+		assert!(!buffered.accounts.iter().any(|meta| meta.pubkey == SPL_TOKEN_PROGRAM_ID));
 	}
 
 	#[test]

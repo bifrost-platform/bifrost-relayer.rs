@@ -96,8 +96,9 @@ where
 		)?;
 		// Build the per-cluster asset registry from the static config.
 		// The vault PDA is derived from the cccp-solana program ID and is
-		// shared across every asset entry — we pre-derive each vault ATA
-		// so the outbound hot path is allocation-free.
+		// shared across every asset entry — we pre-derive each SPL vault ATA
+		// so the outbound hot path is allocation-free. NativeCoin entries
+		// switch to the native-vault PDA after on-chain kind attestation.
 		let (vault_pda, _vault_bump) = pda::vault_config(&client.program_id);
 		let registry = AssetRegistry::from_entries(&provider.assets, &vault_pda)?;
 
@@ -177,7 +178,7 @@ where
 
 	let mut out = Vec::with_capacity(providers.len());
 	for p in providers {
-		let deps = SolDeps::new(
+		let mut deps = SolDeps::new(
 			p,
 			bfc_client.clone(),
 			xt_request_sender.clone(),
@@ -186,7 +187,11 @@ where
 			handle.clone(),
 			debug_mode,
 		)?;
-		let slot = deps.client.health_check().await?;
+		let report = deps.client.health_check().await?;
+		deps.outbound
+			.registry
+			.apply_attestation(&report.asset_kinds, report.native_coin_index)?;
+		let slot = report.slot;
 		log::info!(
 			target: &deps.client.get_chain_name(),
 			"[sol-bootstrap] cluster {} healthy at slot {} (program={})",

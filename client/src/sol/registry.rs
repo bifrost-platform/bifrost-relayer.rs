@@ -6,8 +6,9 @@
 //   * the SPL `Mint` pubkey held by the cccp-solana vault, and
 //   * the vault PDA's pre-derived associated token account.
 //
-// Recipient ATAs are derived on the fly from `(recipient_wallet, mint)`
-// because we cannot enumerate them at boot.
+// SPL recipient ATAs are derived on the fly from `(recipient_wallet, mint)`
+// because we cannot enumerate them at boot. NativeCoin entries use the direct
+// wallet and native-vault PDA; their mint remains attested metadata.
 //
 // Operators must keep `sol_provider.assets` in sync with the on-chain
 // `init_asset_config` state. If the Bifrost-side Vault gains a 32B
@@ -24,26 +25,49 @@ use br_primitives::cli::SolAssetEntry;
 use crate::sol::ata::derive_ata;
 use crate::sol::codec::AssetIndex;
 
-/// One row in the asset registry. The vault ATA is pre-derived against
-/// the cluster's vault PDA so the outbound handler doesn't have to
-/// re-derive it for every IX it builds.
+/// One row in the asset registry. The vault ATA is pre-derived for SPL
+/// settlement and ignored when the attested kind is `NativeCoin`.
 #[derive(Debug, Clone)]
 pub struct AssetEntry {
 	pub asset_index: AssetIndex,
 	pub mint: Pubkey,
 	pub vault_token_account: Pubkey,
 	pub name: Option<String>,
+	/// Populated exclusively from the boot-time on-chain AssetConfig
+	/// attestation. `None` means startup attestation has not been applied yet.
+	pub kind: Option<AssetKind>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AssetKind {
+	NativeCoin,
+	SplToken,
+	SplTokenMintable,
+}
+
+impl TryFrom<u8> for AssetKind {
+	type Error = eyre::Error;
+
+	fn try_from(value: u8) -> Result<Self, Self::Error> {
+		match value {
+			1 => Ok(Self::NativeCoin),
+			2 => Ok(Self::SplToken),
+			3 => Ok(Self::SplTokenMintable),
+			_ => eyre::bail!("unsupported on-chain Solana asset kind {value}"),
+		}
+	}
 }
 
 /// Per-cluster registry. Built once at boot from `SolProvider.assets`.
 #[derive(Debug, Clone, Default)]
 pub struct AssetRegistry {
 	by_index: HashMap<[u8; 32], AssetEntry>,
+	native_coin_index: Option<AssetIndex>,
 }
 
 impl AssetRegistry {
 	/// Build a registry from a config-supplied asset list. Pre-derives
-	/// every vault ATA against the supplied vault PDA so the outbound
+	/// every SPL vault ATA against the supplied vault PDA so the outbound
 	/// hot path is allocation-free.
 	pub fn from_entries(entries: &[SolAssetEntry], vault_pda: &Pubkey) -> eyre::Result<Self> {
 		let mut by_index = HashMap::with_capacity(entries.len());
@@ -65,15 +89,49 @@ impl AssetRegistry {
 					mint,
 					vault_token_account,
 					name: entry.name.clone(),
+					kind: None,
 				},
 			);
 		}
-		Ok(Self { by_index })
+		Ok(Self { by_index, native_coin_index: None })
+	}
+
+	/// Apply the result of the on-chain startup attestation. Native routing is
+	/// never inferred from a config name or mint address.
+	pub fn apply_attestation(
+		&mut self,
+		kinds: &HashMap<[u8; 32], u8>,
+		native_coin_index: [u8; 32],
+	) -> eyre::Result<()> {
+		for (index, entry) in &mut self.by_index {
+			let raw = kinds.get(index).ok_or_else(|| {
+				eyre::eyre!("missing on-chain kind attestation for asset 0x{}", hex::encode(index))
+			})?;
+			entry.kind = Some(AssetKind::try_from(*raw)?);
+		}
+		if self.by_index.values().any(|entry| entry.kind == Some(AssetKind::NativeCoin)) {
+			let local = self.by_index.get(&native_coin_index).ok_or_else(|| {
+				eyre::eyre!(
+					"native assets are configured but local native index 0x{} is missing",
+					hex::encode(native_coin_index)
+				)
+			})?;
+			if local.kind != Some(AssetKind::NativeCoin) {
+				eyre::bail!("vault native coin index is not attested as NativeCoin");
+			}
+		}
+		self.native_coin_index = Some(AssetIndex(native_coin_index));
+		Ok(())
 	}
 
 	/// Look up an asset entry by its 32-byte CCCP index.
 	pub fn get(&self, index: &[u8; 32]) -> Option<&AssetEntry> {
 		self.by_index.get(index)
+	}
+
+	pub fn native_coin_index(&self) -> eyre::Result<AssetIndex> {
+		self.native_coin_index
+			.ok_or_else(|| eyre::eyre!("native coin index has not been attested"))
 	}
 
 	pub fn len(&self) -> usize {
@@ -154,6 +212,22 @@ mod tests {
 		let entry = registry.get(&idx).expect("usdc entry exists");
 		assert_eq!(entry.name.as_deref(), Some("usdc"));
 		assert_eq!(entry.vault_token_account, derive_ata(&vault_pda, &entry.mint));
+	}
+
+	#[test]
+	fn native_kind_comes_from_attestation_and_requires_local_entry() {
+		let vault_pda = Pubkey::new_unique();
+		let entries = fake_entries();
+		let mut registry = AssetRegistry::from_entries(&entries, &vault_pda).unwrap();
+		let first = parse_asset_index_hex(&entries[0].index).unwrap();
+		let second = parse_asset_index_hex(&entries[1].index).unwrap();
+		let kinds = HashMap::from([(first, 1u8), (second, 2u8)]);
+		registry.apply_attestation(&kinds, first).unwrap();
+		assert_eq!(registry.get(&first).unwrap().kind, Some(AssetKind::NativeCoin));
+		assert_eq!(registry.native_coin_index().unwrap(), AssetIndex(first));
+
+		let mut missing_local = AssetRegistry::from_entries(&entries, &vault_pda).unwrap();
+		assert!(missing_local.apply_attestation(&kinds, [0xff; 32]).is_err());
 	}
 
 	#[test]

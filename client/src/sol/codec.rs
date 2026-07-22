@@ -151,6 +151,9 @@ pub const ROUND_UP_EVENT_DISCRIMINATOR: [u8; 8] = [0x2a, 0xee, 0x02, 0xc5, 0xa2,
 /// `sha256("global:poll")[..8]`
 pub const POLL_IX_DISCRIMINATOR: [u8; 8] = [0x4c, 0xaa, 0xbb, 0xb3, 0x76, 0xb3, 0xe4, 0x21];
 
+/// `sha256("global:poll_native")[..8]`
+pub const POLL_NATIVE_IX_DISCRIMINATOR: [u8; 8] = [0x30, 0xc6, 0xeb, 0x19, 0x22, 0x7c, 0xf2, 0x0f];
+
 /// `sha256("global:round_control_relay")[..8]`
 pub const ROUND_CONTROL_RELAY_IX_DISCRIMINATOR: [u8; 8] =
 	[0x78, 0x6e, 0x30, 0x2a, 0xe2, 0xa9, 0xda, 0x77];
@@ -162,6 +165,10 @@ pub const SUBMIT_SIGNATURES_IX_DISCRIMINATOR: [u8; 8] =
 /// `sha256("global:poll_buffered")[..8]`
 pub const POLL_BUFFERED_IX_DISCRIMINATOR: [u8; 8] =
 	[0xde, 0x5b, 0x9f, 0xaf, 0xc9, 0x56, 0x81, 0xeb];
+
+/// `sha256("global:poll_buffered_native")[..8]`
+pub const POLL_BUFFERED_NATIVE_IX_DISCRIMINATOR: [u8; 8] =
+	[0x37, 0x26, 0x2f, 0x55, 0xf9, 0xf4, 0x61, 0xc8];
 
 /// `sha256("global:close_poll_signatures")[..8]`
 pub const CLOSE_POLL_SIGNATURES_IX_DISCRIMINATOR: [u8; 8] =
@@ -225,6 +232,7 @@ mod tests {
 		assert_eq!(anchor_sighash("event", "SocketEvent"), SOCKET_EVENT_DISCRIMINATOR);
 		assert_eq!(anchor_sighash("event", "RoundUpEvent"), ROUND_UP_EVENT_DISCRIMINATOR);
 		assert_eq!(anchor_sighash("global", "poll"), POLL_IX_DISCRIMINATOR);
+		assert_eq!(anchor_sighash("global", "poll_native"), POLL_NATIVE_IX_DISCRIMINATOR);
 		assert_eq!(
 			anchor_sighash("global", "round_control_relay"),
 			ROUND_CONTROL_RELAY_IX_DISCRIMINATOR
@@ -234,6 +242,10 @@ mod tests {
 			SUBMIT_SIGNATURES_IX_DISCRIMINATOR
 		);
 		assert_eq!(anchor_sighash("global", "poll_buffered"), POLL_BUFFERED_IX_DISCRIMINATOR);
+		assert_eq!(
+			anchor_sighash("global", "poll_buffered_native"),
+			POLL_BUFFERED_NATIVE_IX_DISCRIMINATOR
+		);
 		assert_eq!(
 			anchor_sighash("global", "close_poll_signatures"),
 			CLOSE_POLL_SIGNATURES_IX_DISCRIMINATOR
