@@ -108,7 +108,7 @@ sol_provider:
   id: 1397705728
   provider: "https://api.devnet.solana.com"
   ws_provider: "<Optional>"
-  call_interval: 2000
+  # call_interval: 2000 # Optional; defaults to 2000ms.
   is_relay_target: true
   # Required only when is_relay_target is true; omitted for watch-only.
   fee_payer_keypair_path: "<PATH_TO_FEE_PAYER_KEYPAIR_JSON>"

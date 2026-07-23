@@ -130,7 +130,7 @@ sol_provider:
   id: 1397705730
   provider: "<YOUR_SOLANA_MAINNET_RPC_ENDPOINT>"
   ws_provider: "<Optional>"
-  call_interval: 2000
+  # call_interval: 2000 # Optional; defaults to 2000ms.
   is_relay_target: false
   get_signatures_batch_size: 100
   assets: []

@@ -3,6 +3,8 @@ use secrecy::SecretString;
 use serde::Deserialize;
 use std::borrow::Cow;
 
+use crate::constants::cli::DEFAULT_SOL_CALL_INTERVAL_MS;
+
 pub type Result<T> = std::result::Result<T, Error>;
 
 /// Error type for the CLI.
@@ -150,6 +152,7 @@ pub struct SolProvider {
 	/// polling `getSlot` over the HTTP RPC if absent.
 	pub ws_provider: Option<String>,
 	/// Slot polling interval in milliseconds.
+	#[serde(default = "default_sol_call_interval_ms")]
 	pub call_interval: u64,
 	/// Whether the relayer should send outbound `poll(...)` IXs to this
 	/// cluster. Mirror of `EVMProvider.is_relay_target`. Defaults to false
@@ -197,6 +200,10 @@ pub struct SolAssetEntry {
 	/// Expected SPL mint decimals. Production entries should set this so
 	/// bridge amount units are attested at boot rather than trusted manually.
 	pub decimals: Option<u8>,
+}
+
+fn default_sol_call_interval_ms() -> u64 {
+	DEFAULT_SOL_CALL_INTERVAL_MS
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -297,18 +304,18 @@ mod tests {
 	}
 
 	#[test]
-	fn sol_provider_defaults_to_watch_only_without_fee_payer() {
+	fn sol_provider_defaults_to_watch_only_and_two_second_polling() {
 		let provider: SolProvider = serde_yaml::from_str(
 			r#"
 id: 1397705728
 provider: https://api.devnet.solana.com
-call_interval: 1000
 "#,
 		)
 		.unwrap();
 
 		assert!(!provider.is_relay_target);
 		assert!(provider.fee_payer_keypair_path.is_none());
+		assert_eq!(provider.call_interval, DEFAULT_SOL_CALL_INTERVAL_MS);
 	}
 
 	#[test]
