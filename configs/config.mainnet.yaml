@@ -123,6 +123,18 @@ handler_configs:
   - handler_type: Roundup
     watch_list: [ 3068 ]
 
+# Required single-cluster Solana wiring. SOL_MAIN is deliberately
+# fail-closed until its compiled deployment identity is populated.
+sol_provider:
+  # SOL_MAIN = b"SOL\2" = 0x534f4c02; paired with Bifrost mainnet.
+  id: 1397705730
+  provider: "<YOUR_SOLANA_MAINNET_RPC_ENDPOINT>"
+  ws_provider: "<Optional>"
+  call_interval: 2000
+  is_relay_target: false
+  get_signatures_batch_size: 100
+  assets: []
+
 ###  The items below are optional. ###
 
 bootstrap_config:

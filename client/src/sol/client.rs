@@ -14,13 +14,48 @@ use std::{collections::HashMap, sync::Arc};
 
 use sha2::{Digest, Sha256};
 use solana_client::nonblocking::rpc_client::RpcClient;
-use solana_commitment_config::{CommitmentConfig, CommitmentLevel};
+use solana_commitment_config::CommitmentConfig;
 use solana_sdk::pubkey::Pubkey;
 use std::str::FromStr;
 
-use br_primitives::{cli::SolProvider, sol::is_sol_chain_index};
+use br_primitives::{
+	cli::SolProvider,
+	constants::config::NATIVE_BLOCK_TIME,
+	sol::{is_sol_chain_index, sol_environment},
+};
 
 use crate::sol::pda;
+
+/// Number of recent finalized Solana slots used to estimate wall-clock
+/// slot time for round-based bootstrap replay.
+const SOL_BOOTSTRAP_SLOT_SAMPLE: u64 = 100;
+
+fn bootstrap_slots_from_timing(
+	round_offset: u64,
+	round_length: u64,
+	slot_diff: u64,
+	timestamp_diff: u64,
+) -> eyre::Result<u64> {
+	if round_offset == 0 || round_length == 0 {
+		eyre::bail!("bootstrap round offset and round length must be non-zero");
+	}
+	if slot_diff == 0 || timestamp_diff == 0 {
+		eyre::bail!("Solana bootstrap slot-time sample must span non-zero slots and time");
+	}
+
+	// Same time window as EthClient::get_bootstrap_offset_height_based_on_block_time:
+	// round_offset × BFC round_length × native BFC block time. Convert that
+	// wall-clock duration into Solana slots using the sampled slot cadence.
+	let replay_seconds = round_offset
+		.checked_mul(round_length)
+		.and_then(|blocks| blocks.checked_mul(NATIVE_BLOCK_TIME))
+		.ok_or_else(|| eyre::eyre!("Solana bootstrap replay duration overflow"))?;
+	let scaled_slots = replay_seconds
+		.checked_mul(slot_diff)
+		.ok_or_else(|| eyre::eyre!("Solana bootstrap slot calculation overflow"))?;
+
+	Ok(scaled_slots.div_ceil(timestamp_diff).max(1))
+}
 
 /// Byte offset of the `latest_round_id: u64` field inside the Anchor-
 /// serialized `SocketConfig` account.
@@ -116,7 +151,7 @@ pub struct SolHealthReport {
 
 #[derive(Clone)]
 pub struct SolClient {
-	/// Free-form cluster name (e.g. `solana-devnet`). Used in logs and
+	/// ChainId-derived cluster name (e.g. `solana-devnet`). Used in logs and
 	/// metrics labels.
 	pub name: String,
 	/// CCCP `ChainId` for this cluster.
@@ -131,36 +166,38 @@ pub struct SolClient {
 	pub is_relay_target: bool,
 	/// `getSignaturesForAddress` page size.
 	pub get_signatures_batch_size: u64,
-	expected_upgrade_authority: Option<Pubkey>,
-	expected_program_data_sha256: Option<[u8; 32]>,
+	upgrade_authority: Pubkey,
 	asset_attestations: Vec<AssetAttestation>,
-	/// Underlying nonblocking RPC client. Pre-configured with the
-	/// `commitment` level from the provider config.
+	/// Underlying nonblocking RPC client. Bridge ingestion is always
+	/// finalized so callers cannot weaken finality through configuration.
 	rpc: Arc<RpcClient>,
 }
 
 impl SolClient {
-	/// Build a new client from a config entry. Panics if the program ID
-	/// or URL is invalid — those are operator misconfigurations and
-	/// should fail loudly at boot, not silently at runtime.
-	pub fn new(provider: &SolProvider) -> Self {
-		let program_id = Pubkey::from_str(&provider.program_id)
-			.expect("invalid SolProvider.program_id (not a base58 pubkey)");
+	/// Build a client from a config entry plus the immutable deployment
+	/// profile selected by its ChainId.
+	///
+	/// Environments without a pinned deployment fail closed instead of
+	/// accepting a placeholder program identity from operator config.
+	pub fn new(provider: &SolProvider) -> eyre::Result<Self> {
+		let environment = sol_environment(provider.id)
+			.ok_or_else(|| eyre::eyre!("unsupported Solana ChainId {}", provider.id))?;
+		let deployment = environment.deployment.ok_or_else(|| {
+			eyre::eyre!(
+				"cccp-solana deployment identity is not configured for ChainId {} ({})",
+				provider.id,
+				environment.name
+			)
+		})?;
+		let program_id = Pubkey::from_str(deployment.program_id)
+			.map_err(|err| eyre::eyre!("invalid compiled cccp-solana program ID: {err}"))?;
 
-		let commitment = parse_commitment(provider.commitment.as_deref());
-		let rpc = Arc::new(RpcClient::new_with_commitment(provider.provider.clone(), commitment));
-		let expected_upgrade_authority =
-			provider.expected_upgrade_authority.as_deref().map(|value| {
-				Pubkey::from_str(value).expect("invalid SolProvider.expected_upgrade_authority")
-			});
-		let expected_program_data_sha256 =
-			provider.expected_program_data_sha256.as_deref().map(|value| {
-				let value = value.strip_prefix("0x").unwrap_or(value);
-				let mut out = [0u8; 32];
-				hex::decode_to_slice(value, &mut out)
-					.expect("invalid SolProvider.expected_program_data_sha256");
-				out
-			});
+		let rpc = Arc::new(RpcClient::new_with_commitment(
+			provider.provider.clone(),
+			CommitmentConfig::finalized(),
+		));
+		let upgrade_authority = Pubkey::from_str(deployment.upgrade_authority)
+			.map_err(|err| eyre::eyre!("invalid compiled cccp-solana upgrade authority: {err}"))?;
 		let asset_attestations = provider
 			.assets
 			.iter()
@@ -177,19 +214,18 @@ impl SolClient {
 			})
 			.collect();
 
-		Self {
-			name: provider.name.clone(),
+		Ok(Self {
+			name: environment.name.to_owned(),
 			chain_id: provider.id,
 			url: provider.provider.clone(),
 			ws_url: provider.ws_provider.clone(),
 			program_id,
 			is_relay_target: provider.is_relay_target,
 			get_signatures_batch_size: provider.get_signatures_batch_size.unwrap_or(100),
-			expected_upgrade_authority,
-			expected_program_data_sha256,
+			upgrade_authority,
 			asset_attestations,
 			rpc,
-		}
+		})
 	}
 
 	/// Borrow the underlying `RpcClient`. Handlers use this directly for
@@ -203,8 +239,70 @@ impl SolClient {
 		self.name.clone()
 	}
 
+	/// Convert the global BFC bootstrap round horizon into a Solana slot
+	/// horizon using recent finalized block times.
+	///
+	/// This mirrors `EthClient::get_bootstrap_offset_height_based_on_block_time`
+	/// but samples Solana's slot cadence. `getBlocks` filters out skipped
+	/// slots; using the first/last slot-number difference still includes
+	/// those gaps in the wall-clock conversion.
+	pub async fn get_bootstrap_replay_slots_based_on_block_time(
+		&self,
+		round_offset: u64,
+		round_length: u64,
+	) -> eyre::Result<u64> {
+		let tip = self
+			.rpc
+			.get_slot()
+			.await
+			.map_err(|e| eyre::eyre!("get_slot for Solana bootstrap timing: {e}"))?;
+		let sample_start = tip.saturating_sub(SOL_BOOTSTRAP_SLOT_SAMPLE);
+		let blocks = self
+			.rpc
+			.get_blocks_with_commitment(sample_start, Some(tip), CommitmentConfig::finalized())
+			.await
+			.map_err(|e| eyre::eyre!("get_blocks for Solana bootstrap timing: {e}"))?;
+		let first_slot = *blocks
+			.first()
+			.ok_or_else(|| eyre::eyre!("Solana bootstrap timing sample returned no blocks"))?;
+		let last_slot = *blocks
+			.last()
+			.ok_or_else(|| eyre::eyre!("Solana bootstrap timing sample returned no blocks"))?;
+		if first_slot == last_slot {
+			eyre::bail!("Solana bootstrap timing sample requires at least two finalized blocks");
+		}
+
+		let (first_timestamp, last_timestamp) = tokio::try_join!(
+			self.rpc.get_block_time(first_slot),
+			self.rpc.get_block_time(last_slot),
+		)
+		.map_err(|e| eyre::eyre!("get_block_time for Solana bootstrap timing: {e}"))?;
+		let timestamp_diff = last_timestamp.checked_sub(first_timestamp).ok_or_else(|| {
+			eyre::eyre!(
+				"non-monotonic Solana block times: slot {first_slot}={first_timestamp}, \
+				 slot {last_slot}={last_timestamp}"
+			)
+		})?;
+		let timestamp_diff = u64::try_from(timestamp_diff)
+			.map_err(|_| eyre::eyre!("negative Solana bootstrap timestamp difference"))?;
+		let slot_diff = last_slot - first_slot;
+		let replay_slots =
+			bootstrap_slots_from_timing(round_offset, round_length, slot_diff, timestamp_diff)?;
+
+		log::info!(
+			target: &self.name,
+			"[sol-bootstrap] round_offset={} round_length={} sampled_slots={} sampled_seconds={} replay_slots={}",
+			round_offset,
+			round_length,
+			slot_diff,
+			timestamp_diff,
+			replay_slots,
+		);
+		Ok(replay_slots)
+	}
+
 	/// Boot-time deployment attestation. Verifies the executable loader and
-	/// ProgramData linkage, optional upgrade-authority/binary hash pins,
+	/// ProgramData linkage and the compiled upgrade-authority pin,
 	/// singleton account ownership/layout, and every configured asset mint's
 	/// address, decimals, initialization state, and mint authority.
 	///
@@ -251,35 +349,23 @@ impl SolClient {
 		{
 			eyre::bail!("ProgramData {program_data_key} has invalid loader state");
 		}
-		let (upgrade_authority, code_offset) = match program_data.data[12] {
-			0 => (None, 13usize),
+		let upgrade_authority = match program_data.data[12] {
+			0 => None,
 			1 if program_data.data.len() >= 45 => {
 				let mut authority = [0u8; 32];
 				authority.copy_from_slice(&program_data.data[13..45]);
-				(Some(Pubkey::new_from_array(authority)), 45usize)
+				Some(Pubkey::new_from_array(authority))
 			},
 			other => {
 				eyre::bail!("ProgramData {program_data_key} has invalid authority tag {other}")
 			},
 		};
-		if let Some(expected) = self.expected_upgrade_authority
-			&& upgrade_authority != Some(expected)
-		{
+		if upgrade_authority != Some(self.upgrade_authority) {
 			eyre::bail!(
-				"ProgramData upgrade authority mismatch on {}: expected {expected}, got {:?}",
+				"ProgramData upgrade authority mismatch on {}: expected {}, got {:?}",
 				self.name,
+				self.upgrade_authority,
 				upgrade_authority,
-			);
-		}
-		let binary_hash: [u8; 32] = Sha256::digest(&program_data.data[code_offset..]).into();
-		if let Some(expected) = self.expected_program_data_sha256
-			&& binary_hash != expected
-		{
-			eyre::bail!(
-				"ProgramData bytecode hash mismatch on {}: expected {}, got {}",
-				self.name,
-				hex::encode(expected),
-				hex::encode(binary_hash),
 			);
 		}
 
@@ -387,10 +473,9 @@ impl SolClient {
 
 		log::info!(
 			target: &self.name,
-			"cccp-solana attested: program={} program_data={} sha256={} upgrade_authority={:?} assets={}",
+			"cccp-solana attested: program={} program_data={} upgrade_authority={:?} assets={}",
 			self.program_id,
 			program_data_key,
-			hex::encode(binary_hash),
 			upgrade_authority,
 			self.asset_attestations.len(),
 		);
@@ -520,16 +605,6 @@ fn attest_anchor_account(
 	Ok(())
 }
 
-fn parse_commitment(s: Option<&str>) -> CommitmentConfig {
-	let level = match s.unwrap_or("finalized") {
-		"processed" => CommitmentLevel::Processed,
-		"confirmed" => CommitmentLevel::Confirmed,
-		// default + canonical: finalized
-		_ => CommitmentLevel::Finalized,
-	};
-	CommitmentConfig { commitment: level }
-}
-
 #[cfg(test)]
 mod tests {
 	use super::*;
@@ -613,5 +688,25 @@ mod tests {
 		blob[ROUND_INFO_RELAYERS_LEN_OFFSET..ROUND_INFO_RELAYERS_LEN_OFFSET + 4]
 			.copy_from_slice(&7u32.to_le_bytes());
 		assert_eq!(decode_round_info_payer(&blob), None);
+	}
+
+	#[test]
+	fn bootstrap_slots_use_bfc_round_window_and_sampled_slot_time() {
+		// 3 rounds × 100 BFC blocks × 3s = 900s. A 40s / 100-slot
+		// Solana sample is 400ms per slot, so replay 2,250 slots.
+		assert_eq!(bootstrap_slots_from_timing(3, 100, 100, 40).unwrap(), 2_250);
+	}
+
+	#[test]
+	fn bootstrap_slots_round_up_partial_slot() {
+		assert_eq!(bootstrap_slots_from_timing(1, 1, 2, 5).unwrap(), 2);
+	}
+
+	#[test]
+	fn bootstrap_slots_reject_invalid_timing() {
+		assert!(bootstrap_slots_from_timing(0, 100, 100, 40).is_err());
+		assert!(bootstrap_slots_from_timing(3, 0, 100, 40).is_err());
+		assert!(bootstrap_slots_from_timing(3, 100, 0, 40).is_err());
+		assert!(bootstrap_slots_from_timing(3, 100, 100, 0).is_err());
 	}
 }

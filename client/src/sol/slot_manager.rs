@@ -4,7 +4,7 @@
 //
 // On every tick (`call_interval` ms) the worker:
 //   1. Fetches the latest slot from the configured Solana cluster.
-//   2. Walks "newly confirmed" signatures touching the cccp-solana
+//   2. Walks newly finalized signatures touching the cccp-solana
 //      program ID via `getSignaturesForAddress` (with `until` set to the
 //      most recently processed signature so we never re-emit duplicates).
 //   3. For each signature, fetches the full transaction (`getTransaction`)
@@ -14,18 +14,14 @@
 //      and broadcasts them on the slot channel for the handler workers
 //      to consume.
 //
-// `confirmation_depth` is informational at the moment — Solana's RPC
-// already filters by `commitment` (= `finalized` by default for cccp), so
-// any tx returned by `getSignaturesForAddress` is already finalized when
-// the commitment level is `finalized`.
+// Solana RPC commitment is fixed to `finalized`, so every transaction
+// returned by `getSignaturesForAddress` is already past finality.
 
-use std::path::PathBuf;
 use std::sync::{
 	Arc, Mutex,
 	atomic::{AtomicUsize, Ordering},
 };
 
-use serde::{Deserialize, Serialize};
 use solana_client::nonblocking::rpc_client::RpcClient;
 use solana_client::rpc_client::GetConfirmedSignaturesForAddress2Config;
 use solana_client::rpc_config::RpcTransactionConfig;
@@ -51,27 +47,24 @@ const SUB_LOG_TARGET: &str = "slot-manager";
 const WS_RECONNECT_INTERVAL: std::time::Duration = std::time::Duration::from_secs(30);
 /// Maximum gap allowed between WS `slotSubscribe` notifications before
 /// the watchdog declares the stream stalled and forces an HTTP fallback.
-/// Solana mainnet produces a slot every ~400ms; confirmed-commitment
-/// updates typically arrive within a few seconds, so a 10-second window
+/// Solana mainnet produces a slot every ~400ms; slot notifications
+/// typically arrive within a few seconds, so a 10-second window
 /// is long enough to avoid false positives on a slow cluster but tight
 /// enough to recover from a silently-dead WS pipe within one cycle.
 const WS_NOTIFICATION_WATCHDOG: std::time::Duration = std::time::Duration::from_secs(10);
 
-#[derive(Debug, Serialize, Deserialize)]
-struct SlotCursorCheckpoint {
-	program_id: String,
-	last_seen_signature: Option<String>,
-	last_processed_slot: u64,
-	/// Decoded but not yet acknowledged by every registered consumer.
-	/// Persisting this outbox alongside the source cursor closes the crash
-	/// window between queueing an event and the handlers consuming it.
-	#[serde(default)]
-	pending_messages: Vec<EventMessage>,
+fn reached_stateless_floor(
+	has_signature_cursor: bool,
+	oldest_page_slot: Option<u64>,
+	floor_slot: u64,
+) -> bool {
+	!has_signature_cursor && oldest_page_slot.map(|slot| slot <= floor_slot).unwrap_or(true)
 }
 
-/// One at-least-once delivery from `SlotManager` to a consumer. Dropping a
-/// delivery without calling `acknowledge` keeps the durable outbox intact,
-/// so the same message is replayed after the next tick or process restart.
+/// One delivery from `SlotManager` to a consumer. Dropping a delivery
+/// without calling `acknowledge` keeps the in-memory batch pending for the
+/// next tick. A process restart replays the configured finalized bootstrap
+/// window and relies on on-chain idempotency instead of local persistence.
 pub struct EventDelivery {
 	pub message: EventMessage,
 	ack: Option<oneshot::Sender<()>>,
@@ -94,17 +87,12 @@ pub struct SlotManager {
 	/// backlog instead of causing `broadcast::Lagged` and silently losing
 	/// an irrevocable bridge event.
 	subscribers: Mutex<Vec<UnboundedSender<EventDelivery>>>,
-	/// Number of consumers registered for this manager. Cursor advancement
-	/// requires an ACK from every one; a closed queue therefore stalls
-	/// ingestion safely instead of silently dropping one side of the bridge.
+	/// Number of consumers registered for this manager. In-memory cursor
+	/// advancement requires an ACK from every one; a closed queue therefore
+	/// stalls ingestion instead of silently dropping one side of the bridge.
 	required_subscribers: AtomicUsize,
 	/// Slot polling interval in milliseconds.
 	call_interval: u64,
-	/// Slot confirmation depth — informational. With `commitment=finalized`
-	/// every transaction returned by `getSignaturesForAddress` is already
-	/// past finality, so we use this only for log/heartbeat throttling.
-	#[allow(dead_code)]
-	confirmation_depth: u64,
 	/// Most recent signature we've already streamed events for. Passed
 	/// as `until` on the next `getSignaturesForAddress` call so we only
 	/// fetch the delta.
@@ -112,11 +100,8 @@ pub struct SlotManager {
 	/// Most recent slot we've already streamed events for. Used as a
 	/// monotonic checkpoint for `NewSlot` heartbeats.
 	last_processed_slot: u64,
-	/// Durable at-least-once outbox restored from the cursor file.
+	/// Current decoded batch, retained in memory until every consumer ACKs.
 	pending_messages: Vec<EventMessage>,
-	/// Durable source cursor. Written atomically only after every fetched
-	/// transaction has been decoded and queued for all consumers.
-	cursor_path: Option<PathBuf>,
 	/// Optional WebSocket URL for `slotSubscribe`. When set, the manager
 	/// uses real-time WS notifications to trigger ticks instead of polling
 	/// `getSlot` over HTTP. Falls back to HTTP on WS failure.
@@ -124,29 +109,19 @@ pub struct SlotManager {
 }
 
 impl SlotManager {
-	pub fn new(
-		client: SolClient,
-		call_interval: u64,
-		confirmation_depth: u64,
-		ws_url: Option<String>,
-		cursor_path: Option<PathBuf>,
-	) -> eyre::Result<Self> {
+	pub fn new(client: SolClient, call_interval: u64, ws_url: Option<String>) -> Self {
 		let rpc = client.rpc();
-		let (last_seen_signature, last_processed_slot, pending_messages) =
-			load_cursor(cursor_path.as_ref(), &client.program_id)?;
-		Ok(Self {
+		Self {
 			client,
 			rpc,
 			subscribers: Mutex::new(Vec::new()),
 			required_subscribers: AtomicUsize::new(0),
 			call_interval,
-			confirmation_depth,
-			last_seen_signature,
-			last_processed_slot,
-			pending_messages,
-			cursor_path,
+			last_seen_signature: None,
+			last_processed_slot: 0,
+			pending_messages: Vec::new(),
 			ws_url,
-		})
+		}
 	}
 
 	/// Subscribe to the slot event channel. Multiple consumers (inbound
@@ -199,33 +174,9 @@ impl SlotManager {
 		Ok(())
 	}
 
-	async fn persist_cursor(
-		&self,
-		last_seen_signature: Option<Signature>,
-		last_processed_slot: u64,
-		pending_messages: &[EventMessage],
-	) -> eyre::Result<()> {
-		let Some(path) = &self.cursor_path else { return Ok(()) };
-		let checkpoint = SlotCursorCheckpoint {
-			program_id: self.client.program_id.to_string(),
-			last_seen_signature: last_seen_signature.map(|sig| sig.to_string()),
-			last_processed_slot,
-			pending_messages: pending_messages.to_vec(),
-		};
-		let encoded = serde_json::to_vec_pretty(&checkpoint)
-			.map_err(|e| eyre::eyre!("serialize Solana cursor: {e}"))?;
-		let temp_path = path.with_extension("tmp");
-		tokio::fs::write(&temp_path, encoded)
-			.await
-			.map_err(|e| eyre::eyre!("write cursor {}: {e}", temp_path.display()))?;
-		tokio::fs::rename(&temp_path, path)
-			.await
-			.map_err(|e| eyre::eyre!("commit cursor {}: {e}", path.display()))
-	}
-
-	/// Deliver the restored/current outbox and clear it only after every
-	/// registered consumer ACKs every message. If the process exits at any
-	/// point before the second atomic cursor write, restart replays the batch.
+	/// Deliver the current in-memory batch and clear it only after every
+	/// registered consumer ACKs every message. On process restart the
+	/// bootstrap window reconstructs the batch from finalized chain history.
 	async fn replay_pending(&mut self) -> eyre::Result<()> {
 		if self.pending_messages.is_empty() {
 			return Ok(());
@@ -234,8 +185,6 @@ impl SlotManager {
 		for message in self.pending_messages.clone() {
 			self.publish(message).await?;
 		}
-		self.persist_cursor(self.last_seen_signature, self.last_processed_slot, &[])
-			.await?;
 		self.pending_messages.clear();
 		Ok(())
 	}
@@ -416,18 +365,19 @@ impl SlotManager {
 	/// Process a specific slot: fetch new signatures, decode each
 	/// transaction's logs, broadcast the resulting events.
 	pub async fn tick_at_slot(&mut self, latest_slot: u64) -> eyre::Result<()> {
-		// A prior process may have advanced the source cursor only after
-		// atomically recording an unacknowledged outbox. Redeliver that batch
-		// before fetching anything newer.
+		// Redeliver an in-memory batch whose consumer ACK failed before
+		// fetching anything newer.
 		self.replay_pending().await?;
 
 		// Fetch every signature touching the program since `last_seen`.
 		// `getSignaturesForAddress` is page-limited, so walk `before` until
-		// the prior cursor is reached. On the first process start we keep the
-		// original one-page-at-tip behavior; historical replay is controlled
-		// explicitly through `bootstrap_catchup`.
+		// the prior in-memory cursor is reached. If no signature cursor exists
+		// (for example, bootstrap found no traffic), paginate until the
+		// previously processed slot boundary instead of fetching one page and
+		// potentially skipping a busy interval.
 		let batch = (self.client.get_signatures_batch_size as usize).clamp(1, 1_000);
 		let until = self.last_seen_signature;
+		let floor_slot = self.last_processed_slot;
 		let mut before = None;
 		let mut sigs = Vec::new();
 		loop {
@@ -446,14 +396,22 @@ impl SlotManager {
 			if page_len == 0 {
 				break;
 			}
+			let reached_floor = reached_stateless_floor(
+				until.is_some(),
+				page.last().map(|entry| entry.slot),
+				floor_slot,
+			);
 			before = Some(
 				Signature::from_str(&page.last().expect("non-empty page").signature)
 					.map_err(|e| eyre::eyre!("RPC returned invalid signature: {e}"))?,
 			);
 			sigs.extend(page);
-			if until.is_none() || page_len < batch {
+			if reached_floor || page_len < batch {
 				break;
 			}
+		}
+		if until.is_none() {
+			sigs.retain(|entry| entry.slot > floor_slot);
 		}
 
 		// Publish slot as a `block_height` gauge so the existing EVM
@@ -467,7 +425,6 @@ impl SlotManager {
 			// tell apart "no events yet" from "RPC stalled".
 			self.publish(EventMessage::new_slot(latest_slot)).await?;
 			br_metrics::increase_sol_events(&self.client.name, "new_slot");
-			self.persist_cursor(self.last_seen_signature, latest_slot, &[]).await?;
 			self.last_processed_slot = latest_slot;
 			return Ok(());
 		}
@@ -512,10 +469,9 @@ impl SlotManager {
 		// chronologically-sorted list).
 		let latest = Signature::from_str(&new_signatures.last().expect("non-empty list").signature)
 			.map_err(|e| eyre::eyre!("invalid newest signature from RPC: {e}"))?;
-		// First atomic write: advance the source cursor and persist the full
-		// undelivered outbox together. A crash from this point onward replays
-		// the messages instead of silently skipping them.
-		self.persist_cursor(Some(latest), latest_slot, &pending_messages).await?;
+		// Advance only the in-memory cursor. A process restart reconstructs
+		// this interval through `bootstrap_catchup`; duplicate deliveries are
+		// filtered using BFC/Solana on-chain state.
 		self.last_seen_signature = Some(latest);
 		self.last_processed_slot = latest_slot;
 		self.pending_messages = pending_messages;
@@ -524,8 +480,8 @@ impl SlotManager {
 
 	/// Walk backwards from the current slot until we cross the requested
 	/// `offset_slots` boundary, processing every cccp-solana transaction
-	/// in between. Called once at boot when
-	/// `SolProvider.bootstrap_offset_slots` is set.
+	/// in between. The caller derives `offset_slots` from the global BFC
+	/// bootstrap round horizon and recent Solana slot timing.
 	///
 	/// The RPC returns signatures newest-first and we paginate via
 	/// `before`, so the walk is:
@@ -541,13 +497,13 @@ impl SlotManager {
 	/// subscribers see events in the same order `tick_at_slot` would
 	/// deliver them live, and update `last_seen_signature` to the
 	/// newest signature we saw (so the next live tick starts from that
-	/// cursor, not duplicate what we already replayed).
+	/// in-memory cursor, not duplicate what we already replayed).
 	pub async fn bootstrap_catchup(&mut self, offset_slots: u64) -> eyre::Result<()> {
 		self.replay_pending().await?;
 		if self.last_seen_signature.is_some() {
 			log::info!(
 				target: &self.client.get_chain_name(),
-				"[{}] durable cursor loaded at slot {}; skipping offset replay",
+				"[{}] bootstrap already completed in memory at slot {}; skipping duplicate replay",
 				SUB_LOG_TARGET,
 				self.last_processed_slot,
 			);
@@ -625,7 +581,6 @@ impl SlotManager {
 				"[{}] bootstrap catch-up: no cccp-solana traffic in the last {offset_slots} slots",
 				SUB_LOG_TARGET,
 			);
-			self.persist_cursor(self.last_seen_signature, tip, &[]).await?;
 			self.last_processed_slot = tip;
 			return Ok(());
 		}
@@ -677,7 +632,6 @@ impl SlotManager {
 		// left off — i.e. the newest signature we saw, and the tip slot.
 		let newest = Signature::from_str(&collected.last().expect("non-empty list").signature)
 			.map_err(|e| eyre::eyre!("invalid newest bootstrap signature: {e}"))?;
-		self.persist_cursor(Some(newest), tip, &pending_messages).await?;
 		self.last_seen_signature = Some(newest);
 		self.last_processed_slot = tip;
 		self.pending_messages = pending_messages;
@@ -776,81 +730,16 @@ impl SlotManager {
 	}
 }
 
-fn load_cursor(
-	path: Option<&PathBuf>,
-	program_id: &solana_sdk::pubkey::Pubkey,
-) -> eyre::Result<(Option<Signature>, u64, Vec<EventMessage>)> {
-	let Some(path) = path else { return Ok((None, 0, Vec::new())) };
-	if let Some(parent) = path.parent().filter(|p| !p.as_os_str().is_empty()) {
-		std::fs::create_dir_all(parent)
-			.map_err(|e| eyre::eyre!("create cursor directory {}: {e}", parent.display()))?;
-	}
-	if !path.exists() {
-		return Ok((None, 0, Vec::new()));
-	}
-	let bytes =
-		std::fs::read(path).map_err(|e| eyre::eyre!("read cursor {}: {e}", path.display()))?;
-	let checkpoint: SlotCursorCheckpoint = serde_json::from_slice(&bytes)
-		.map_err(|e| eyre::eyre!("decode cursor {}: {e}", path.display()))?;
-	if checkpoint.program_id != program_id.to_string() {
-		eyre::bail!(
-			"cursor {} belongs to program {}, configured program is {}",
-			path.display(),
-			checkpoint.program_id,
-			program_id,
-		);
-	}
-	let signature = checkpoint
-		.last_seen_signature
-		.map(|value| {
-			Signature::from_str(&value)
-				.map_err(|e| eyre::eyre!("invalid signature in cursor {}: {e}", path.display()))
-		})
-		.transpose()?;
-	Ok((signature, checkpoint.last_processed_slot, checkpoint.pending_messages))
-}
-
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use solana_sdk::pubkey::Pubkey;
 
 	#[test]
-	fn durable_cursor_restores_signature_and_rejects_other_program() {
-		let program_id = Pubkey::new_unique();
-		let signature = Signature::from([0x42; 64]);
-		let path = std::env::temp_dir().join(format!("cccp-solana-{program_id}.cursor-test.json"));
-		let checkpoint = SlotCursorCheckpoint {
-			program_id: program_id.to_string(),
-			last_seen_signature: Some(signature.to_string()),
-			last_processed_slot: 123,
-			pending_messages: vec![EventMessage::new_slot(123)],
-		};
-		std::fs::write(&path, serde_json::to_vec(&checkpoint).unwrap()).unwrap();
-
-		assert_eq!(
-			load_cursor(Some(&path), &program_id).unwrap(),
-			(Some(signature), 123, vec![EventMessage::new_slot(123)])
-		);
-		assert!(load_cursor(Some(&path), &Pubkey::new_unique()).is_err());
-
-		let _ = std::fs::remove_file(path);
-	}
-
-	#[test]
-	fn legacy_cursor_without_outbox_remains_readable() {
-		let program_id = Pubkey::new_unique();
-		let path =
-			std::env::temp_dir().join(format!("cccp-solana-{program_id}.legacy-cursor.json"));
-		let legacy = serde_json::json!({
-			"program_id": program_id.to_string(),
-			"last_seen_signature": null,
-			"last_processed_slot": 77
-		});
-		std::fs::write(&path, serde_json::to_vec(&legacy).unwrap()).unwrap();
-
-		assert_eq!(load_cursor(Some(&path), &program_id).unwrap(), (None, 77, Vec::new()));
-		let _ = std::fs::remove_file(path);
+	fn stateless_floor_paginates_until_processed_slot() {
+		assert!(!reached_stateless_floor(false, Some(101), 100));
+		assert!(reached_stateless_floor(false, Some(100), 100));
+		assert!(reached_stateless_floor(false, Some(99), 100));
+		assert!(!reached_stateless_floor(true, Some(99), 100));
 	}
 
 	#[tokio::test]

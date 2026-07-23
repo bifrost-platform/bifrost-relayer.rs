@@ -2,6 +2,7 @@ use alloy::primitives::ChainId;
 use secrecy::SecretString;
 use serde::Deserialize;
 use std::borrow::Cow;
+
 pub type Result<T> = std::result::Result<T, Error>;
 
 /// Error type for the CLI.
@@ -47,10 +48,8 @@ pub struct RelayerConfig {
 	pub evm_providers: Vec<EVMProvider>,
 	/// BTC configs
 	pub btc_provider: BTCProvider,
-	/// Solana configs (one entry per Solana cluster the relayer should
-	/// observe). Optional — if absent, no Solana wiring is spawned.
-	#[serde(default)]
-	pub sol_providers: Vec<SolProvider>,
+	/// SOL configs
+	pub sol_provider: SolProvider,
 	/// Handler configs
 	pub handler_configs: Vec<HandlerConfig>,
 	/// Bootstrapping configs
@@ -141,10 +140,9 @@ pub struct EVMProvider {
 /// runtime config.
 #[derive(Debug, Clone, Deserialize)]
 pub struct SolProvider {
-	/// Cluster name (free-form, used in logs).
-	pub name: String,
 	/// CCCP `ChainId` for this cluster — must match the `pallet-cccp-relay-queue`
-	/// registration on Bifrost.
+	/// registration on Bifrost. The logs/metrics name and immutable deployment
+	/// identity are derived from this ID.
 	pub id: ChainId,
 	/// JSON-RPC endpoint URL (`https://api.devnet.solana.com` etc.).
 	pub provider: String,
@@ -153,35 +151,18 @@ pub struct SolProvider {
 	pub ws_provider: Option<String>,
 	/// Slot polling interval in milliseconds.
 	pub call_interval: u64,
-	/// Number of confirmed slots required before a transaction is treated
-	/// as final. Defaults to 32 (Solana finalized commitment) if absent.
-	pub block_confirmations: Option<u64>,
-	/// Commitment level for `getSlot` / `getTransaction`
-	/// (`processed` | `confirmed` | `finalized`). Defaults to `finalized`.
-	pub commitment: Option<String>,
-	/// `cccp-solana` program id (base58).
-	pub program_id: String,
-	/// Optional expected upgrade authority for the deployed ProgramData.
-	/// Production onboarding should set this to the governance multisig so
-	/// an RPC endpoint cannot silently point the relayer at another build.
-	pub expected_upgrade_authority: Option<String>,
-	/// Optional SHA-256 of the deployed SBF bytecode (hex, with or without
-	/// `0x`). When set, the boot health check hashes ProgramData code bytes.
-	pub expected_program_data_sha256: Option<String>,
 	/// Whether the relayer should send outbound `poll(...)` IXs to this
-	/// cluster. Mirror of `EVMProvider.is_relay_target`.
+	/// cluster. Mirror of `EVMProvider.is_relay_target`. Defaults to false
+	/// so an omitted field is watch-only rather than transaction-capable.
+	#[serde(default)]
 	pub is_relay_target: bool,
 	/// Optional `getSignaturesForAddress` page size.
 	pub get_signatures_batch_size: Option<u64>,
-	/// Durable slot-manager cursor checkpoint. Relay targets must configure
-	/// this on persistent storage so restarts resume after the last fully
-	/// decoded signature instead of jumping to the current tip.
-	pub cursor_path: Option<String>,
 	/// Path to the local Solana keypair JSON used for fee payment + relayer
-	/// signature submissions. The relayer's CCCP signing key remains
-	/// secp256k1 — this is the Ed25519 wallet used to *pay fees* and to
-	/// authorize the relayer side of `poll(...)` IXs.
-	pub fee_payer_keypair_path: String,
+	/// signature submissions. Required only when `is_relay_target = true`;
+	/// watch-only providers do not load a Solana keypair. The relayer's CCCP
+	/// signing key remains secp256k1.
+	pub fee_payer_keypair_path: Option<String>,
 	/// Static asset registry: maps the on-chain CCCP `AssetIndex` (32-byte
 	/// hex, optionally `0x`-prefixed) to the SPL Mint address (base58)
 	/// the cccp-solana vault holds for that asset.
@@ -199,14 +180,6 @@ pub struct SolProvider {
 	pub confirmation_timeout_secs: Option<u64>,
 	/// Maximum number of send-with-escalation retries. Defaults to 3.
 	pub max_send_retries: Option<u32>,
-	/// Number of Solana slots to walk backwards from the current tip
-	/// during bootstrap so the relayer picks up events it missed while
-	/// offline. `None` (= 0) means "start from the current tip and
-	/// ignore any earlier history". A typical mainnet setting is 64–256
-	/// slots (≈ 30s–2min) to cover brief restarts; larger values cover
-	/// longer outages at the cost of more `getSignaturesForAddress`
-	/// pagination calls at boot.
-	pub bootstrap_offset_slots: Option<u64>,
 }
 
 /// One row of the per-cluster asset registry. The `index` field is the
@@ -312,4 +285,56 @@ pub struct KeystoreConfig {
 	pub password: Option<SecretString>,
 	/// AWS KMS key ID. (to use keystore encryption/decryption)
 	pub kms_key_id: Option<String>,
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	#[derive(Deserialize)]
+	struct SolProviderOnly {
+		sol_provider: SolProvider,
+	}
+
+	#[test]
+	fn sol_provider_defaults_to_watch_only_without_fee_payer() {
+		let provider: SolProvider = serde_yaml::from_str(
+			r#"
+id: 1397705728
+provider: https://api.devnet.solana.com
+call_interval: 1000
+"#,
+		)
+		.unwrap();
+
+		assert!(!provider.is_relay_target);
+		assert!(provider.fee_payer_keypair_path.is_none());
+	}
+
+	#[test]
+	fn sol_provider_config_accepts_one_mapping_not_a_sequence() {
+		let config: SolProviderOnly = serde_yaml::from_str(
+			r#"
+sol_provider:
+  id: 1397705728
+  provider: https://api.devnet.solana.com
+  call_interval: 1000
+"#,
+		)
+		.unwrap();
+		assert_eq!(config.sol_provider.id, 1_397_705_728);
+
+		assert!(serde_yaml::from_str::<SolProviderOnly>("{}").is_err());
+
+		let sequence = r#"
+sol_provider:
+  - id: 1397705728
+    provider: https://api.devnet.solana.com
+    call_interval: 1000
+"#;
+		assert!(serde_yaml::from_str::<SolProviderOnly>(sequence).is_err());
+
+		let legacy_sequence = sequence.replace("sol_provider:", "sol_providers:");
+		assert!(serde_yaml::from_str::<SolProviderOnly>(&legacy_sequence).is_err());
+	}
 }
