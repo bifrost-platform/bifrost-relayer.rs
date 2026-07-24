@@ -41,7 +41,7 @@ use br_primitives::{
 	bootstrap::BootstrapSharedData,
 	cli::{Configuration, HandlerType},
 	constants::{
-		cli::{DEFAULT_KEYSTORE_PATH, DEFAULT_PROMETHEUS_PORT},
+		cli::{DEFAULT_BOOTSTRAP_ROUND_OFFSET, DEFAULT_KEYSTORE_PATH, DEFAULT_PROMETHEUS_PORT},
 		errors::{
 			INVALID_BITCOIN_NETWORK, INVALID_PRIVATE_KEY, INVALID_PROVIDER_URL,
 			KMS_INITIALIZATION_ERROR,
@@ -204,28 +204,31 @@ pub async fn relay(config: Configuration) -> Result<TaskManager, ServiceError> {
 		&task_manager,
 		debug_mode,
 	);
-	// Build per-cluster Solana wiring BEFORE the handler deps so the
-	// SocketRelayHandler can be wired up with the per-cluster outbound
-	// senders. Empty if no `sol_providers` are configured. Failure to
-	// construct any cluster (e.g. invalid program ID, unreadable fee-payer
+	// Build the required single-cluster Solana wiring BEFORE the handler deps
+	// so the SocketRelayHandler can be wired up with its outbound sender.
+	// Failure to construct the cluster (e.g. invalid program ID, unreadable fee-payer
 	// keypair, unreachable RPC endpoint) is a configuration error and
-	// fails fast at boot via the per-cluster health probe.
+	// fails fast at boot via the health probe.
 	let sol_deps = crate::service_deps::build_sol_deps(
-		&config.relayer_config.sol_providers,
+		&config.relayer_config.sol_provider,
 		bfc_client.clone(),
 		substrate_deps.xt_request_sender.clone(),
 		substrate_deps.sub_client.clone(),
 		&substrate_deps.sub_rpc_url,
 		task_manager.spawn_handle(),
 		debug_mode,
+		config
+			.relayer_config
+			.bootstrap_config
+			.as_ref()
+			.and_then(|bootstrap| bootstrap.round_offset)
+			.unwrap_or(DEFAULT_BOOTSTRAP_ROUND_OFFSET),
 	)
 	.await
 	.map_err(|e| ServiceError::Other(format!("failed to build Solana deps: {e}")))?;
 
-	// Collect outbound senders by ChainId for the SocketRelayHandler
-	// dispatch table. Each Solana cluster gets exactly one entry; if no
-	// clusters are configured this map is empty and the handler treats
-	// the Solana branch as a no-op.
+	// Keep the existing ChainId dispatch table used by the handlers, but
+	// populate it with the single configured Solana provider.
 	let sol_outbound_senders: std::sync::Arc<
 		std::collections::BTreeMap<
 			alloy::primitives::ChainId,
@@ -233,9 +236,7 @@ pub async fn relay(config: Configuration) -> Result<TaskManager, ServiceError> {
 		>,
 	> = {
 		let mut map = std::collections::BTreeMap::new();
-		for entry in &sol_deps {
-			map.insert(entry.client.chain_id, entry.outbound_sender.clone());
-		}
+		map.insert(sol_deps.client.chain_id, sol_deps.outbound_sender.clone());
 		std::sync::Arc::new(map)
 	};
 
@@ -247,9 +248,7 @@ pub async fn relay(config: Configuration) -> Result<TaskManager, ServiceError> {
 		std::collections::BTreeMap<alloy::primitives::ChainId, br_client::sol::client::SolClient>,
 	> = {
 		let mut map = std::collections::BTreeMap::new();
-		for entry in &sol_deps {
-			map.insert(entry.client.chain_id, entry.client.clone());
-		}
+		map.insert(sol_deps.client.chain_id, sol_deps.client.clone());
 		std::sync::Arc::new(map)
 	};
 
@@ -720,17 +719,17 @@ where
 		},
 	);
 
-	// Three workers per `sol_providers` entry: slot-manager / outbound /
-	// queue-poller. (Inbound ingestion is the queue poller's job via
-	// `cccp-relay-queue`; there is no separate inbound handler.)
-	for SolDeps {
+	// Three workers for the required `sol_provider`: slot-manager / outbound /
+	// queue-poller. Inbound ingestion is the queue poller's job via
+	// `cccp-relay-queue`; there is no separate inbound handler.
+	let SolDeps {
 		client,
-		bootstrap_offset_slots,
+		bootstrap_replay_slots,
 		mut slot_manager,
 		mut outbound,
 		outbound_sender: _,
 		mut queue_poller,
-	} in sol_deps
+	} = sol_deps;
 	{
 		let cluster_name = client.get_chain_name();
 
@@ -740,23 +739,25 @@ where
 			slot_label,
 			Some("solana-slot-manager"),
 			async move {
-				// Run bootstrap catch-up once before entering the live
-				// loop. Failures are logged and ignored — the live loop
-				// still starts and will pick up new events from the tip,
-				// so a flaky history fetch doesn't block steady-state
-				// relaying. Retry-on-restart is handled by the outer
-				// supervisor loop since any panic here lands in the
-				// `loop { ... }` below.
-				if bootstrap_offset_slots > 0 {
-					if let Err(err) = slot_manager.bootstrap_catchup(bootstrap_offset_slots).await {
-						log::error!(
-							"solana slot manager bootstrap catch-up failed: {err:?}; \
-							 proceeding with live polling only",
-						);
-						sentry::capture_message(
-							&format!("solana bootstrap catch-up failed: {err:?}"),
-							sentry::Level::Warning,
-						);
+				// This relayer is stateless across process restarts, so the
+				// finalized bootstrap window is the recovery source of truth.
+				// Never enter live polling after a failed history fetch:
+				// doing so could permanently skip an event that falls behind
+				// the in-memory cursor.
+				loop {
+					match slot_manager.bootstrap_catchup(bootstrap_replay_slots).await {
+						Ok(()) => break,
+						Err(err) => {
+							log::error!(
+								"solana slot manager bootstrap catch-up failed: {err:?}; \
+								 retrying in 12 seconds before live polling",
+							);
+							sentry::capture_message(
+								&format!("solana bootstrap catch-up failed: {err:?}"),
+								sentry::Level::Error,
+							);
+							tokio::time::sleep(Duration::from_secs(12)).await;
+						},
 					}
 				}
 

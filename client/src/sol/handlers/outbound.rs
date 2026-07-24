@@ -14,7 +14,7 @@
 // `is_relay_target = false` (watch-only) disables (1) only; the commit
 // mirror in (2) stays active.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -104,6 +104,25 @@ fn build_commit_socket_message(ev: &Event) -> Socket_Message {
 			variants: Bytes::from(ev.variants.clone()),
 		},
 	}
+}
+
+fn poll_filter_contains(mask: U256, status: u8) -> bool {
+	(mask >> U256::from(status)) & U256::from(1u64) == U256::from(1u64)
+}
+
+fn load_fee_payer(
+	is_relay_target: bool,
+	fee_payer_keypair_path: Option<&Path>,
+) -> eyre::Result<Option<Keypair>> {
+	if !is_relay_target {
+		return Ok(None);
+	}
+	let path = fee_payer_keypair_path
+		.ok_or_else(|| eyre::eyre!("fee-payer keypair is required for a Solana relay target"))?;
+	let fee_payer = read_keypair_file(path).map_err(|err| {
+		eyre::eyre!("failed to load Solana fee-payer keypair from {}: {}", path.display(), err)
+	})?;
+	Ok(Some(fee_payer))
 }
 
 // ── Compute Budget Program ──────────────────────────────────────────
@@ -215,7 +234,8 @@ where
 	rpc: Arc<RpcClient>,
 	receiver: UnboundedReceiver<SolOutboundJob>,
 	/// Loaded fee-payer Ed25519 keypair (= `solana_sdk::Keypair`).
-	fee_payer: Keypair,
+	/// Absent for watch-only providers.
+	fee_payer: Option<Keypair>,
 	/// Asset registry — maps CCCP asset indexes to SPL mints and
 	/// pre-derived vault ATAs. Built from static config at boot.
 	pub registry: AssetRegistry,
@@ -260,7 +280,7 @@ where
 	#[allow(clippy::too_many_arguments)]
 	pub fn new(
 		client: SolClient,
-		fee_payer_keypair_path: PathBuf,
+		fee_payer_keypair_path: Option<PathBuf>,
 		registry: AssetRegistry,
 		base_priority_fee: Option<u64>,
 		max_priority_fee: Option<u64>,
@@ -271,13 +291,7 @@ where
 		debug_mode: bool,
 		event_receiver: UnboundedReceiver<EventDelivery>,
 	) -> eyre::Result<(Self, SolOutboundSender)> {
-		let fee_payer = read_keypair_file(&fee_payer_keypair_path).map_err(|err| {
-			eyre::eyre!(
-				"failed to load Solana fee-payer keypair from {}: {}",
-				fee_payer_keypair_path.display(),
-				err
-			)
-		})?;
+		let fee_payer = load_fee_payer(client.is_relay_target, fee_payer_keypair_path.as_deref())?;
 		let rpc = client.rpc();
 		let (sender, receiver) = mpsc::unbounded_channel();
 
@@ -367,9 +381,15 @@ where
 		}
 	}
 
+	fn fee_payer(&self) -> eyre::Result<&Keypair> {
+		self.fee_payer.as_ref().ok_or_else(|| {
+			eyre::eyre!("Solana fee-payer is unavailable because this provider is watch-only")
+		})
+	}
+
 	/// Borrow the fee-payer pubkey, useful for diagnostics.
-	pub fn fee_payer_pubkey(&self) -> Pubkey {
-		self.fee_payer.pubkey()
+	pub fn fee_payer_pubkey(&self) -> Option<Pubkey> {
+		self.fee_payer.as_ref().map(Signer::pubkey)
 	}
 
 	/// Run the worker loop. Pops jobs off the channel and submits them
@@ -382,7 +402,7 @@ where
 		let relay_target = self.client.is_relay_target;
 		log::info!(
 			target: &self.client.get_chain_name(),
-			"[{}] outbound handler started; fee_payer={} assets={} relay_target={}",
+			"[{}] outbound handler started; fee_payer={:?} assets={} relay_target={}",
 			SUB_LOG_TARGET,
 			self.fee_payer_pubkey(),
 			self.registry.len(),
@@ -405,8 +425,14 @@ where
 						match item {
 							None => return Ok(()),
 							Some(delivery) => {
-								self.handle_commit_event_message(&delivery.message).await;
-								delivery.acknowledge();
+								match self.handle_event_message(&delivery.message).await {
+									Ok(()) => delivery.acknowledge(),
+									Err(err) => log::warn!(
+										target: &self.client.get_chain_name(),
+										"[{}] event handling failed; retaining delivery for retry: {err:?}",
+										SUB_LOG_TARGET,
+									),
+								}
 							},
 						}
 					},
@@ -449,8 +475,14 @@ where
 							return Ok(());
 						}
 						Some(delivery) => {
-							self.handle_commit_event_message(&delivery.message).await;
-							delivery.acknowledge();
+							match self.handle_event_message(&delivery.message).await {
+								Ok(()) => delivery.acknowledge(),
+								Err(err) => log::warn!(
+									target: &self.client.get_chain_name(),
+									"[{}] event handling failed; retaining delivery for retry: {err:?}",
+									SUB_LOG_TARGET,
+								),
+							}
 						},
 					}
 				},
@@ -511,6 +543,7 @@ where
 	/// match and the active-window guard, so a stale local view here can
 	/// only ever cause a harmless rejected tx — never an erroneous close.
 	async fn sweep_expired_rounds(&self, cursor: &mut Option<u64>) -> eyre::Result<()> {
+		let fee_payer = self.fee_payer()?;
 		let (latest, active) = self.client.round_window().await?;
 
 		// Highest round that is strictly outside the active window, i.e.
@@ -540,7 +573,7 @@ where
 		let scan_hi = hi.min(lo + ROUND_SWEEP_MAX_PER_TICK - 1);
 		let round_ids: Vec<u64> = (lo..=scan_hi).collect();
 
-		let me = self.fee_payer.pubkey();
+		let me = fee_payer.pubkey();
 		let payers = self.client.round_info_payers(&round_ids).await?;
 
 		let mine: Vec<u64> = round_ids
@@ -589,6 +622,22 @@ where
 	// ---------------------------------------------------------------------
 	// Solana → BFC commit mirror
 	// ---------------------------------------------------------------------
+
+	async fn handle_event_message(&mut self, msg: &EventMessage) -> eyre::Result<()> {
+		if msg.event_type == EventType::AssetDirectoryUpdated {
+			let registry = self.client.load_asset_registry().await?;
+			log::info!(
+				target: &self.client.get_chain_name(),
+				"[{}] reloaded finalized on-chain asset directory: {} entries",
+				SUB_LOG_TARGET,
+				registry.len(),
+			);
+			self.registry = registry;
+			return Ok(());
+		}
+		self.handle_commit_event_message(msg).await;
+		Ok(())
+	}
 
 	async fn handle_commit_event_message(&self, msg: &EventMessage) {
 		if msg.event_type != EventType::Outbound {
@@ -641,6 +690,35 @@ where
 		}
 
 		let socket_msg = build_commit_socket_message(ev);
+		let relayer = self.bfc_client.address().await;
+		match self
+			.bfc_client
+			.protocol_contracts
+			.socket
+			.get_poll_filter(socket_msg.req_id.clone(), relayer)
+			.call()
+			.await
+		{
+			Ok(mask) if poll_filter_contains(mask, socket_msg.status) => {
+				log::debug!(
+					target: &self.client.get_chain_name(),
+					"-[{}] skipping replayed sol outbound-commit — pollFilter bit {} already set for relayer {} (seq={} sig={})",
+					sub_display_format(SUB_LOG_TARGET),
+					socket_msg.status,
+					relayer,
+					ev.sequence,
+					ev.signature,
+				);
+				return;
+			},
+			Ok(_) => {},
+			Err(err) => log::debug!(
+				target: &self.client.get_chain_name(),
+				"-[{}] outbound-commit pollFilter precheck failed for seq={}: {err:?}; proceeding",
+				sub_display_format(SUB_LOG_TARGET),
+				ev.sequence,
+			),
+		}
 		let tx_request = self.build_poll_request(socket_msg, EvmSignatures::default());
 
 		// src = BFC, dst = this Solana cluster; is_inbound = false.
@@ -673,6 +751,7 @@ where
 	}
 
 	async fn handle(&self, job: SolOutboundJob) -> eyre::Result<()> {
+		let fee_payer = self.fee_payer()?;
 		// Check if we need the buffered path (too many sigs for a single tx).
 		let needs_buffer = match &job {
 			SolOutboundJob::Poll { submit, .. } | SolOutboundJob::PollFromBfc { submit, .. } => {
@@ -694,7 +773,7 @@ where
 		let app_ixs = match &job {
 			SolOutboundJob::Poll { submit, asset_index, tokens } => vec![build_poll_ix(
 				&self.client.program_id,
-				&self.fee_payer.pubkey(),
+				&fee_payer.pubkey(),
 				submit,
 				asset_index,
 				tokens,
@@ -705,7 +784,7 @@ where
 			SolOutboundJob::RoundControlRelay { submit } => {
 				vec![build_round_control_relay_ix(
 					&self.client.program_id,
-					&self.fee_payer.pubkey(),
+					&fee_payer.pubkey(),
 					submit,
 				)]
 			},
@@ -730,7 +809,7 @@ where
 			// Pre-flight: compile the message and check serialized size.
 			// Solana's max tx packet size is 1232 bytes. We estimate the
 			// wire size as: compact(num_sigs) + num_sigs*64 + message bytes.
-			let message = Message::new(&ixs, Some(&self.fee_payer.pubkey()));
+			let message = Message::new(&ixs, Some(&fee_payer.pubkey()));
 			let message_data = message.serialize();
 			let num_signers = message.header.num_required_signatures as usize;
 			// compact-u16 encoding for 1 signer = 1 byte
@@ -748,7 +827,7 @@ where
 				SUB_LOG_TARGET,
 			);
 
-			let tx = Transaction::new(&[&self.fee_payer], message, recent_blockhash);
+			let tx = Transaction::new(&[fee_payer], message, recent_blockhash);
 
 			// Send without waiting for confirmation — we'll poll manually.
 			let signature = self
@@ -840,6 +919,7 @@ where
 	/// as a separate `submit_signatures` tx, then send the SPL or native
 	/// buffered poll instruction selected from the attested asset kind.
 	async fn handle_buffered(&self, job: SolOutboundJob) -> eyre::Result<()> {
+		let fee_payer_signer = self.fee_payer()?;
 		// For SPL, `Some(wallet)` builds a `create_associated_token_account` IX so
 		// the recipient ATA is materialized on first use (`PollFromBfc`
 		// path). `None` = the caller already produced the ATA in
@@ -855,7 +935,7 @@ where
 						hex::encode(asset_index.0)
 					)
 				})?;
-				match entry.kind.ok_or_else(|| eyre::eyre!("asset kind was not attested"))? {
+				match entry.kind {
 					AssetKind::NativeCoin => {
 						(submit, asset_index, None, Some(*recipient_wallet), true)
 					},
@@ -878,7 +958,7 @@ where
 
 		let req_id_pack = submit.msg.req_id.pack();
 		let total_sigs = submit.sigs.r.len();
-		let fee_payer = self.fee_payer.pubkey();
+		let fee_payer = fee_payer_signer.pubkey();
 
 		log::info!(
 			target: &self.client.get_chain_name(),
@@ -989,8 +1069,8 @@ where
 			.await
 			.map_err(|e| eyre::eyre!("get_latest_blockhash: {e}"))?;
 
-		let message = Message::new(&ixs, Some(&self.fee_payer.pubkey()));
-		let tx = Transaction::new(&[&self.fee_payer], message, recent_blockhash);
+		let message = Message::new(&ixs, Some(&fee_payer));
+		let tx = Transaction::new(&[fee_payer_signer], message, recent_blockhash);
 
 		let signature = self
 			.rpc
@@ -1012,6 +1092,7 @@ where
 	/// Buffered relayer-set rotation. This mirrors `handle_buffered` but
 	/// uses the dedicated roundup PDA and finalizer instructions.
 	async fn handle_roundup_buffered(&self, submit: &RoundUpSubmit) -> eyre::Result<()> {
+		let fee_payer_signer = self.fee_payer()?;
 		if submit.sigs.r.len() != submit.sigs.s.len() || submit.sigs.s.len() != submit.sigs.v.len()
 		{
 			return Err(eyre::eyre!("roundup signature component lengths differ"));
@@ -1025,7 +1106,7 @@ where
 		let mut round_bytes = [0u8; 8];
 		round_bytes.copy_from_slice(&submit.round[24..32]);
 		let round_id = u64::from_be_bytes(round_bytes);
-		let fee_payer = self.fee_payer.pubkey();
+		let fee_payer = fee_payer_signer.pubkey();
 		let (buffer_pda, _) =
 			pda::roundup_signatures(&self.client.program_id, round_id, &fee_payer);
 
@@ -1102,13 +1183,14 @@ where
 		ix: Instruction,
 		compute_unit_limit: u32,
 	) -> eyre::Result<()> {
+		let fee_payer = self.fee_payer()?;
 		let ixs = vec![
 			compute_budget_set_cu_limit(compute_unit_limit),
 			compute_budget_set_cu_price(self.base_priority_fee),
 			ix,
 		];
 
-		let message = Message::new(&ixs, Some(&self.fee_payer.pubkey()));
+		let message = Message::new(&ixs, Some(&fee_payer.pubkey()));
 		let message_data = message.serialize();
 		let tx_size = 1 + message.header.num_required_signatures as usize * 64 + message_data.len();
 		if tx_size > SOLANA_MAX_TX_SIZE {
@@ -1123,7 +1205,7 @@ where
 			.await
 			.map_err(|e| eyre::eyre!("get_latest_blockhash: {e}"))?;
 
-		let tx = Transaction::new(&[&self.fee_payer], message, recent_blockhash);
+		let tx = Transaction::new(&[fee_payer], message, recent_blockhash);
 
 		let signature = self
 			.rpc
@@ -1143,20 +1225,19 @@ where
 		asset_index: &AssetIndex,
 		recipient_wallet: &Pubkey,
 	) -> eyre::Result<Vec<Instruction>> {
+		let fee_payer = self.fee_payer()?.pubkey();
 		let entry = self.registry.get(&asset_index.0).ok_or_else(|| {
 			eyre::eyre!(
-				"no asset registry entry for index 0x{}; configure SolProvider.assets",
+				"no finalized on-chain asset directory entry for index 0x{}",
 				hex::encode(asset_index.0)
 			)
 		})?;
-		let kind = entry.kind.ok_or_else(|| {
-			eyre::eyre!("asset 0x{} kind was not attested", hex::encode(asset_index.0))
-		})?;
+		let kind = entry.kind;
 
 		if kind == AssetKind::NativeCoin {
 			return Ok(vec![build_poll_native_ix(
 				&self.client.program_id,
-				&self.fee_payer.pubkey(),
+				&fee_payer,
 				submit,
 				asset_index,
 				&self.registry.native_coin_index()?,
@@ -1172,16 +1253,9 @@ where
 			recipient_token_account: recipient_ata,
 		};
 
-		let create_ata =
-			build_create_ata_idempotent_ix(&self.fee_payer.pubkey(), recipient_wallet, &entry.mint);
+		let create_ata = build_create_ata_idempotent_ix(&fee_payer, recipient_wallet, &entry.mint);
 
-		let poll = build_poll_ix(
-			&self.client.program_id,
-			&self.fee_payer.pubkey(),
-			submit,
-			asset_index,
-			&tokens,
-		);
+		let poll = build_poll_ix(&self.client.program_id, &fee_payer, submit, asset_index, &tokens);
 
 		Ok(vec![create_ata, poll])
 	}
@@ -1190,7 +1264,7 @@ where
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use br_primitives::cli::SolAssetEntry;
+	use std::str::FromStr;
 
 	use crate::sol::{
 		codec::{
@@ -1206,14 +1280,25 @@ mod tests {
 
 	fn fake_registry(program_id: &Pubkey) -> AssetRegistry {
 		let (vault_pda, _) = pda::vault_config(program_id);
-		AssetRegistry::from_entries(
-			&[SolAssetEntry {
-				index: "0x0100010000000000000000000000000000000000000000000000000000000008".into(),
-				mint: "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA".into(),
-				name: Some("usdc".into()),
-				decimals: Some(6),
-			}],
-			&vault_pda,
+		let token_index = [
+			0x01, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+			0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+			0x00, 0x00, 0x00, 0x08,
+		];
+		let native_index = [0x42; 32];
+		AssetRegistry::new(
+			[
+				AssetRegistry::entry(
+					token_index,
+					Pubkey::from_str("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA").unwrap(),
+					6,
+					2,
+					&vault_pda,
+				)
+				.unwrap(),
+				AssetRegistry::entry(native_index, Pubkey::new_unique(), 9, 1, &vault_pda).unwrap(),
+			],
+			native_index,
 		)
 		.unwrap()
 	}
@@ -1367,6 +1452,20 @@ mod tests {
 
 		let msg = build_commit_socket_message(&event);
 		assert_eq!(<[u8; 32]>::from(msg.params.tokenIDX1), token_idx1);
+	}
+
+	#[test]
+	fn poll_filter_bit_detects_replayed_commit() {
+		let mask = U256::from(1u64) << U256::from(3u8);
+		assert!(poll_filter_contains(mask, 3));
+		assert!(!poll_filter_contains(mask, 2));
+	}
+
+	#[test]
+	fn watch_only_provider_does_not_load_fee_payer() {
+		let nonexistent = PathBuf::from("/definitely/not/a/solana-keypair.json");
+		assert!(load_fee_payer(false, Some(&nonexistent)).unwrap().is_none());
+		assert!(load_fee_payer(true, None).is_err());
 	}
 
 	/// Pure helper mirroring `SolOutboundHandler::schedule_retry`'s

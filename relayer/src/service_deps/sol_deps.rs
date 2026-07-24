@@ -1,17 +1,15 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 // Solana dependency container — mirrors `BtcDeps` for the cccp-solana
-// integration. One `SolDeps` is built per `SolProvider` entry in the
-// relayer config; if no providers are configured, no Solana wiring is
-// spawned at all.
+// integration. One `SolDeps` is built from the relayer's required single
+// `SolProvider`.
 //
 // `SolDeps` is generic in `<F, P, N>` so the outbound handler can hold the
 // same Bifrost `EthClient` shape every other relayer subsystem uses;
 // `SolOutboundHandler` owns both the BFC → Solana submission path and the
 // Solana → BFC commit mirror.
 
-use std::path::PathBuf;
-use std::sync::Arc;
+use std::{path::PathBuf, sync::Arc};
 
 use sc_service::SpawnTaskHandle;
 
@@ -28,7 +26,6 @@ use br_client::{
 			outbound::{SolOutboundHandler, SolOutboundSender},
 			queue_poller::SolSocketQueuePoller,
 		},
-		pda,
 		registry::AssetRegistry,
 		slot_manager::SlotManager,
 	},
@@ -40,8 +37,6 @@ use br_primitives::{
 };
 use subxt::{OnlineClient, rpcs::LegacyRpcMethods};
 
-const DEFAULT_SOL_CONFIRMATION_DEPTH: u64 = 32;
-
 /// Per-cluster Solana dependency bundle.
 pub struct SolDeps<F, P, N: AlloyNetwork>
 where
@@ -49,10 +44,9 @@ where
 	P: Provider<N> + 'static,
 {
 	pub client: SolClient,
-	/// Number of slots to walk backwards on boot, passed to
-	/// `SlotManager::bootstrap_catchup` before the live loop starts.
-	/// `0` / `None` disables catch-up.
-	pub bootstrap_offset_slots: u64,
+	/// Round-derived number of finalized slots to replay before the live
+	/// loop starts.
+	pub bootstrap_replay_slots: u64,
 	pub slot_manager: SlotManager,
 	/// Merged outbound worker: BFC → Solana IX submission + Solana → BFC
 	/// commit mirror in a single `tokio::select!` loop.
@@ -75,6 +69,9 @@ where
 {
 	pub fn new(
 		provider: &SolProvider,
+		client: SolClient,
+		registry: AssetRegistry,
+		bootstrap_replay_slots: u64,
 		bfc_client: Arc<EthClient<F, P, N>>,
 		xt_request_sender: Arc<XtRequestSender>,
 		sub_client: OnlineClient<CustomConfig>,
@@ -82,27 +79,9 @@ where
 		handle: SpawnTaskHandle,
 		debug_mode: bool,
 	) -> eyre::Result<Self> {
-		let client = SolClient::new(provider);
-
-		let confirmation_depth =
-			provider.block_confirmations.unwrap_or(DEFAULT_SOL_CONFIRMATION_DEPTH);
-
-		let slot_manager = SlotManager::new(
-			client.clone(),
-			provider.call_interval,
-			confirmation_depth,
-			provider.ws_provider.clone(),
-			provider.cursor_path.as_ref().map(PathBuf::from),
-		)?;
-		// Build the per-cluster asset registry from the static config.
-		// The vault PDA is derived from the cccp-solana program ID and is
-		// shared across every asset entry — we pre-derive each SPL vault ATA
-		// so the outbound hot path is allocation-free. NativeCoin entries
-		// switch to the native-vault PDA after on-chain kind attestation.
-		let (vault_pda, _vault_bump) = pda::vault_config(&client.program_id);
-		let registry = AssetRegistry::from_entries(&provider.assets, &vault_pda)?;
-
-		let fee_payer_path = PathBuf::from(&provider.fee_payer_keypair_path);
+		let slot_manager =
+			SlotManager::new(client.clone(), provider.call_interval, provider.ws_provider.clone());
+		let fee_payer_path = provider.fee_payer_keypair_path.as_ref().map(PathBuf::from);
 		// Give the commit mirror its own lossless consumer queue so it cannot
 		// be starved by the queue poller's BFC storage queries.
 		let (outbound, outbound_sender) = SolOutboundHandler::new(
@@ -130,11 +109,9 @@ where
 			slot_manager.subscribe(),
 		);
 
-		let bootstrap_offset_slots = provider.bootstrap_offset_slots.unwrap_or(0);
-
 		Ok(Self {
 			client,
-			bootstrap_offset_slots,
+			bootstrap_replay_slots,
 			slot_manager,
 			outbound,
 			outbound_sender,
@@ -143,32 +120,28 @@ where
 	}
 }
 
-/// Build a `SolDeps` bundle for every entry in `config.sol_providers`.
-/// Returns an empty vec if no providers are configured. Each entry shares
-/// the same Bifrost `EthClient` + `XtRequestSender` for inbound vote
-/// submission.
+/// Build the single required `SolDeps` bundle from `config.sol_provider`.
 ///
-/// **Boot-time health check**: every cluster is probed via
+/// **Boot-time health check**: the configured cluster is probed via
 /// `SolClient::health_check` before its `SolDeps` is returned. A
 /// misconfigured RPC endpoint, an unreachable program ID, or a
 /// `cccp-solana` deployment that hasn't landed yet causes the relayer
 /// to refuse to start — exactly the same fail-fast policy the EVM and
 /// BTC tracks use.
 pub async fn build_sol_deps<F, P, N: AlloyNetwork>(
-	providers: &[SolProvider],
+	provider: &SolProvider,
 	bfc_client: Arc<EthClient<F, P, N>>,
 	xt_request_sender: Arc<XtRequestSender>,
 	sub_client: OnlineClient<CustomConfig>,
 	sub_rpc_url: &str,
 	handle: SpawnTaskHandle,
 	debug_mode: bool,
-) -> eyre::Result<Vec<SolDeps<F, P, N>>>
+	bootstrap_round_offset: u64,
+) -> eyre::Result<SolDeps<F, P, N>>
 where
 	F: TxFiller<N> + WalletProvider<N> + 'static,
 	P: Provider<N> + 'static,
 {
-	// Build the legacy RPC client once; it's cheap to clone and every
-	// per-cluster queue poller needs it for storage best-block queries.
 	let sub_rpc = {
 		let rpc_client = create_rpc_client(sub_rpc_url)
 			.await
@@ -176,31 +149,43 @@ where
 		LegacyRpcMethods::<subxt::config::RpcConfigFor<CustomConfig>>::new(rpc_client)
 	};
 
-	let mut out = Vec::with_capacity(providers.len());
-	for p in providers {
-		let mut deps = SolDeps::new(
-			p,
-			bfc_client.clone(),
-			xt_request_sender.clone(),
-			sub_client.clone(),
-			sub_rpc.clone(),
-			handle.clone(),
-			debug_mode,
-		)?;
-		let report = deps.client.health_check().await?;
-		deps.outbound
-			.registry
-			.apply_attestation(&report.asset_kinds, report.native_coin_index)?;
-		let slot = report.slot;
-		log::info!(
-			target: &deps.client.get_chain_name(),
-			"[sol-bootstrap] cluster {} healthy at slot {} (program={})",
-			deps.client.name,
-			slot,
-			deps.client.program_id,
-		);
+	let bootstrap_round_length = bfc_client
+		.protocol_contracts
+		.authority
+		.round_info()
+		.call()
+		.await
+		.map_err(|e| eyre::eyre!("read BFC round info for Solana bootstrap: {e}"))?
+		.round_length
+		.saturating_to::<u64>();
 
-		out.push(deps);
-	}
-	Ok(out)
+	let client = SolClient::new(provider)?;
+	let report = client.health_check().await?;
+	let bootstrap_replay_slots = client
+		.get_bootstrap_replay_slots_based_on_block_time(
+			bootstrap_round_offset,
+			bootstrap_round_length,
+		)
+		.await?;
+	let deps = SolDeps::new(
+		provider,
+		client,
+		report.registry,
+		bootstrap_replay_slots,
+		bfc_client,
+		xt_request_sender,
+		sub_client,
+		sub_rpc,
+		handle,
+		debug_mode,
+	)?;
+	log::info!(
+		target: &deps.client.get_chain_name(),
+		"[sol-bootstrap] cluster {} healthy at slot {} (program={})",
+		deps.client.name,
+		report.slot,
+		deps.client.program_id,
+	);
+
+	Ok(deps)
 }

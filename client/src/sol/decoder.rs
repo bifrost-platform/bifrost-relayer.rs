@@ -23,6 +23,7 @@ use solana_sdk::pubkey::Pubkey;
 use std::str::FromStr;
 
 use crate::sol::codec::{
+	ASSET_DIRECTORY_UPDATED_EVENT_DISCRIMINATOR, AssetDirectoryUpdate,
 	ROUND_UP_EVENT_DISCRIMINATOR, RoundUpSubmit, SOCKET_EVENT_DISCRIMINATOR, SocketMessage,
 };
 
@@ -33,6 +34,7 @@ const PROGRAM_DATA_PREFIX: &str = "Program data: ";
 pub enum DecodedAnchorEvent {
 	Socket(SocketMessage),
 	RoundUp(RoundUpSubmit),
+	AssetDirectoryUpdated(AssetDirectoryUpdate),
 }
 
 /// Decode only a transaction that committed successfully. Solana retains
@@ -93,6 +95,10 @@ pub fn decode_anchor_events(
 			&& let Ok(submit) = RoundUpSubmit::try_from_slice(body)
 		{
 			out.push(DecodedAnchorEvent::RoundUp(submit));
+		} else if disc == ASSET_DIRECTORY_UPDATED_EVENT_DISCRIMINATOR
+			&& let Ok(update) = AssetDirectoryUpdate::try_from_slice(body)
+		{
+			out.push(DecodedAnchorEvent::AssetDirectoryUpdated(update));
 		}
 	}
 	out
@@ -124,6 +130,15 @@ mod tests {
 		let body = borsh::to_vec(msg).unwrap();
 		let mut payload = Vec::with_capacity(8 + body.len());
 		payload.extend_from_slice(&SOCKET_EVENT_DISCRIMINATOR);
+		payload.extend_from_slice(&body);
+		let encoded = base64::engine::general_purpose::STANDARD.encode(&payload);
+		format!("Program data: {encoded}")
+	}
+
+	fn synth_asset_directory_event_log_line(update: &AssetDirectoryUpdate) -> String {
+		let body = borsh::to_vec(update).unwrap();
+		let mut payload = Vec::with_capacity(8 + body.len());
+		payload.extend_from_slice(&ASSET_DIRECTORY_UPDATED_EVENT_DISCRIMINATOR);
 		payload.extend_from_slice(&body);
 		let encoded = base64::engine::general_purpose::STANDARD.encode(&payload);
 		format!("Program data: {encoded}")
@@ -170,6 +185,24 @@ mod tests {
 			DecodedAnchorEvent::Socket(d) => assert_eq!(d, &msg),
 			other => panic!("expected SocketEvent, got {other:?}"),
 		}
+	}
+
+	#[test]
+	fn decodes_asset_directory_update() {
+		let program_id = Pubkey::new_unique();
+		let update = AssetDirectoryUpdate {
+			asset_index: AssetIndex([0x42; 32]),
+			asset_config: Pubkey::new_unique().to_bytes(),
+		};
+		let logs = vec![
+			format!("Program {program_id} invoke [1]"),
+			synth_asset_directory_event_log_line(&update),
+			format!("Program {program_id} success"),
+		];
+		assert_eq!(
+			decode_anchor_events(&program_id, &logs),
+			vec![DecodedAnchorEvent::AssetDirectoryUpdated(update)]
+		);
 	}
 
 	#[test]

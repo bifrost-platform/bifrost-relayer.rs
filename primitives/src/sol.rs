@@ -29,6 +29,59 @@ pub const SOL_DEV_CHAIN_ID: u64 = u32::from_be_bytes(SOL_DEV) as u64;
 pub const SOL_TEST_CHAIN_ID: u64 = u32::from_be_bytes(SOL_TEST) as u64;
 pub const SOL_MAIN_CHAIN_ID: u64 = u32::from_be_bytes(SOL_MAIN) as u64;
 
+/// Immutable identity of one deployed `cccp-solana` program.
+///
+/// These values are deliberately compiled into the relayer rather than
+/// accepted from operator config. A Solana RPC endpoint can therefore never
+/// redirect the relayer to a different program or upgrade authority.
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub struct SolDeployment {
+	/// Upgradeable-loader program account.
+	pub program_id: &'static str,
+	/// Authority expected on the linked ProgramData account.
+	pub upgrade_authority: &'static str,
+}
+
+/// ChainId-derived Solana environment identity.
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub struct SolEnvironment {
+	/// Stable logs/metrics label. This is not operator-configurable.
+	pub name: &'static str,
+	/// `None` keeps an environment fail-closed until its deployment identity
+	/// has been pinned in a relayer release.
+	pub deployment: Option<SolDeployment>,
+}
+
+/// Bifrost testbed ↔ Solana devnet deployment.
+pub const SOL_DEV_ENVIRONMENT: SolEnvironment = SolEnvironment {
+	name: "solana-devnet",
+	deployment: Some(SolDeployment {
+		program_id: "HZ7XCyfXEdkfee2eJfAN6yKEf2S8dVJhmqAcvixKMW5z",
+		upgrade_authority: "G6ZrR6V5xMutxTC5z9wkGZqJNCmeA3vxemXWQHRNpxoZ",
+	}),
+};
+
+/// Bifrost testnet ↔ Solana devnet. Deployment identity will be pinned after
+/// this environment is deployed.
+pub const SOL_TEST_ENVIRONMENT: SolEnvironment =
+	SolEnvironment { name: "solana-devnet", deployment: None };
+
+/// Bifrost mainnet ↔ Solana mainnet-beta. Deployment identity will be pinned
+/// only after the production deployment is complete.
+pub const SOL_MAIN_ENVIRONMENT: SolEnvironment =
+	SolEnvironment { name: "solana", deployment: None };
+
+/// Resolve the immutable environment profile for one canonical Solana
+/// `ChainId`. Unknown IDs are not Solana environments.
+pub const fn sol_environment(chain_id: u64) -> Option<&'static SolEnvironment> {
+	match chain_id {
+		SOL_DEV_CHAIN_ID => Some(&SOL_DEV_ENVIRONMENT),
+		SOL_TEST_CHAIN_ID => Some(&SOL_TEST_ENVIRONMENT),
+		SOL_MAIN_CHAIN_ID => Some(&SOL_MAIN_ENVIRONMENT),
+		_ => None,
+	}
+}
+
 pub fn is_sol_chain_index(index: ChainIndex) -> bool {
 	index == SOL_DEV || index == SOL_TEST || index == SOL_MAIN
 }
@@ -49,6 +102,9 @@ pub enum EventType {
 	Inbound,
 	/// Relayer outbound flow emitted `Socket(Executed)` etc.
 	Outbound,
+	/// On-chain asset-directory membership changed. Consumers must reload
+	/// finalized PDA state; the event payload is not used as metadata.
+	AssetDirectoryUpdated,
 	/// New slot heartbeat (no events in this slot).
 	NewSlot,
 }
@@ -135,6 +191,10 @@ impl EventMessage {
 	pub fn new_slot(slot: u64) -> Self {
 		Self::new(slot, EventType::NewSlot, vec![])
 	}
+
+	pub fn asset_directory_updated(slot: u64) -> Self {
+		Self::new(slot, EventType::AssetDirectoryUpdated, vec![])
+	}
 }
 
 #[cfg(test)]
@@ -149,6 +209,16 @@ mod tests {
 		assert_eq!(SOL_DEV_CHAIN_ID, 1_397_705_728);
 		assert_eq!(SOL_TEST_CHAIN_ID, 1_397_705_729);
 		assert_eq!(SOL_MAIN_CHAIN_ID, 1_397_705_730);
+		assert_eq!(sol_environment(SOL_DEV_CHAIN_ID), Some(&SOL_DEV_ENVIRONMENT));
+		assert_eq!(sol_environment(SOL_TEST_CHAIN_ID), Some(&SOL_TEST_ENVIRONMENT));
+		assert_eq!(sol_environment(SOL_MAIN_CHAIN_ID), Some(&SOL_MAIN_ENVIRONMENT));
+		assert_eq!(SOL_DEV_ENVIRONMENT.name, "solana-devnet");
+		assert_eq!(SOL_TEST_ENVIRONMENT.name, "solana-devnet");
+		assert_eq!(SOL_MAIN_ENVIRONMENT.name, "solana");
+		assert!(SOL_DEV_ENVIRONMENT.deployment.is_some());
+		assert!(SOL_TEST_ENVIRONMENT.deployment.is_none());
+		assert!(SOL_MAIN_ENVIRONMENT.deployment.is_none());
+		assert!(sol_environment(u64::MAX).is_none());
 		assert!(is_sol_chain_index(SOL_DEV));
 		assert!(is_sol_chain_index(SOL_TEST));
 		assert!(is_sol_chain_index(SOL_MAIN));

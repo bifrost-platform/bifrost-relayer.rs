@@ -449,9 +449,9 @@ where
 		while let Some(delivery) = self.event_stream.next().await {
 			let msg = &delivery.message;
 
-			// Only socket events carry state transitions we care about;
-			// NewSlot heartbeats pass through without action.
-			if matches!(msg.event_type, EventType::NewSlot) {
+			// Only socket events carry queue transitions. NewSlot heartbeats
+			// and asset-directory invalidations are handled elsewhere.
+			if matches!(msg.event_type, EventType::NewSlot | EventType::AssetDirectoryUpdated) {
 				delivery.acknowledge();
 				continue;
 			}
