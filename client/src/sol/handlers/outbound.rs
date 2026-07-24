@@ -425,8 +425,14 @@ where
 						match item {
 							None => return Ok(()),
 							Some(delivery) => {
-								self.handle_commit_event_message(&delivery.message).await;
-								delivery.acknowledge();
+								match self.handle_event_message(&delivery.message).await {
+									Ok(()) => delivery.acknowledge(),
+									Err(err) => log::warn!(
+										target: &self.client.get_chain_name(),
+										"[{}] event handling failed; retaining delivery for retry: {err:?}",
+										SUB_LOG_TARGET,
+									),
+								}
 							},
 						}
 					},
@@ -469,8 +475,14 @@ where
 							return Ok(());
 						}
 						Some(delivery) => {
-							self.handle_commit_event_message(&delivery.message).await;
-							delivery.acknowledge();
+							match self.handle_event_message(&delivery.message).await {
+								Ok(()) => delivery.acknowledge(),
+								Err(err) => log::warn!(
+									target: &self.client.get_chain_name(),
+									"[{}] event handling failed; retaining delivery for retry: {err:?}",
+									SUB_LOG_TARGET,
+								),
+							}
 						},
 					}
 				},
@@ -610,6 +622,22 @@ where
 	// ---------------------------------------------------------------------
 	// Solana → BFC commit mirror
 	// ---------------------------------------------------------------------
+
+	async fn handle_event_message(&mut self, msg: &EventMessage) -> eyre::Result<()> {
+		if msg.event_type == EventType::AssetDirectoryUpdated {
+			let registry = self.client.load_asset_registry().await?;
+			log::info!(
+				target: &self.client.get_chain_name(),
+				"[{}] reloaded finalized on-chain asset directory: {} entries",
+				SUB_LOG_TARGET,
+				registry.len(),
+			);
+			self.registry = registry;
+			return Ok(());
+		}
+		self.handle_commit_event_message(msg).await;
+		Ok(())
+	}
 
 	async fn handle_commit_event_message(&self, msg: &EventMessage) {
 		if msg.event_type != EventType::Outbound {
@@ -907,7 +935,7 @@ where
 						hex::encode(asset_index.0)
 					)
 				})?;
-				match entry.kind.ok_or_else(|| eyre::eyre!("asset kind was not attested"))? {
+				match entry.kind {
 					AssetKind::NativeCoin => {
 						(submit, asset_index, None, Some(*recipient_wallet), true)
 					},
@@ -1200,13 +1228,11 @@ where
 		let fee_payer = self.fee_payer()?.pubkey();
 		let entry = self.registry.get(&asset_index.0).ok_or_else(|| {
 			eyre::eyre!(
-				"no asset registry entry for index 0x{}; configure SolProvider.assets",
+				"no finalized on-chain asset directory entry for index 0x{}",
 				hex::encode(asset_index.0)
 			)
 		})?;
-		let kind = entry.kind.ok_or_else(|| {
-			eyre::eyre!("asset 0x{} kind was not attested", hex::encode(asset_index.0))
-		})?;
+		let kind = entry.kind;
 
 		if kind == AssetKind::NativeCoin {
 			return Ok(vec![build_poll_native_ix(
@@ -1238,7 +1264,7 @@ where
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use br_primitives::cli::SolAssetEntry;
+	use std::str::FromStr;
 
 	use crate::sol::{
 		codec::{
@@ -1254,14 +1280,25 @@ mod tests {
 
 	fn fake_registry(program_id: &Pubkey) -> AssetRegistry {
 		let (vault_pda, _) = pda::vault_config(program_id);
-		AssetRegistry::from_entries(
-			&[SolAssetEntry {
-				index: "0x0100010000000000000000000000000000000000000000000000000000000008".into(),
-				mint: "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA".into(),
-				name: Some("usdc".into()),
-				decimals: Some(6),
-			}],
-			&vault_pda,
+		let token_index = [
+			0x01, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+			0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+			0x00, 0x00, 0x00, 0x08,
+		];
+		let native_index = [0x42; 32];
+		AssetRegistry::new(
+			[
+				AssetRegistry::entry(
+					token_index,
+					Pubkey::from_str("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA").unwrap(),
+					6,
+					2,
+					&vault_pda,
+				)
+				.unwrap(),
+				AssetRegistry::entry(native_index, Pubkey::new_unique(), 9, 1, &vault_pda).unwrap(),
+			],
+			native_index,
 		)
 		.unwrap()
 	}

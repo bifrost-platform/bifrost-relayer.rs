@@ -48,4 +48,5 @@ pub mod seeds {
 	pub const ROUNDUP_FILTER: &[u8] = b"rupf";
 	pub const ROUNDUP_SIGS: &[u8] = b"rupsigs";
 	pub const ASSET_CONFIG: &[u8] = b"asset";
+	pub const ASSET_DIRECTORY: &[u8] = b"asset_dir";
 }

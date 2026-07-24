@@ -112,8 +112,6 @@ sol_provider:
   is_relay_target: true
   # Required only when is_relay_target is true; omitted for watch-only.
   fee_payer_keypair_path: "<PATH_TO_FEE_PAYER_KEYPAIR_JSON>"
-  # Every production asset entry must also pin `decimals`.
-  assets: []
 
 ###  The items below are optional. ###
 

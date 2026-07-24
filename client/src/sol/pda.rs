@@ -130,6 +130,10 @@ pub fn asset_config(program_id: &Pubkey, asset_index: &AssetIndex) -> (Pubkey, u
 	find(&[seeds::ASSET_CONFIG, asset_index], program_id)
 }
 
+pub fn asset_directory_entry(program_id: &Pubkey, asset_index: &AssetIndex) -> (Pubkey, u8) {
+	find(&[seeds::ASSET_DIRECTORY, asset_index], program_id)
+}
+
 #[cfg(test)]
 mod tests {
 	use super::*;
@@ -219,5 +223,6 @@ mod tests {
 		assert_eq!(seeds::ROUNDUP_FILTER, b"rupf");
 		assert_eq!(seeds::ROUNDUP_SIGS, b"rupsigs");
 		assert_eq!(seeds::ASSET_CONFIG, b"asset");
+		assert_eq!(seeds::ASSET_DIRECTORY, b"asset_dir");
 	}
 }

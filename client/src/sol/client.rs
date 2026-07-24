@@ -10,12 +10,15 @@
 // work (slot polling, signature decoding, transaction submission) lives
 // in `slot_manager.rs` and `handlers/`.
 
-use std::{collections::HashMap, sync::Arc};
+use std::sync::Arc;
 
 use sha2::{Digest, Sha256};
+use solana_account_decoder_client_types::UiAccountEncoding;
 use solana_client::nonblocking::rpc_client::RpcClient;
+use solana_client::rpc_config::{RpcAccountInfoConfig, RpcProgramAccountsConfig};
+use solana_client::rpc_filter::{Memcmp, RpcFilterType};
 use solana_commitment_config::CommitmentConfig;
-use solana_sdk::pubkey::Pubkey;
+use solana_sdk::{account::Account, pubkey::Pubkey};
 use std::str::FromStr;
 
 use br_primitives::{
@@ -24,7 +27,11 @@ use br_primitives::{
 	sol::{is_sol_chain_index, sol_environment},
 };
 
-use crate::sol::pda;
+use crate::sol::{
+	codec::ASSET_DIRECTORY_ENTRY_ACCOUNT_DISCRIMINATOR,
+	pda,
+	registry::{AssetKind, AssetRegistry},
+};
 
 /// Number of recent finalized Solana slots used to estimate wall-clock
 /// slot time for round-based bootstrap replay.
@@ -135,18 +142,10 @@ fn decode_round_info_payer(data: &[u8]) -> Option<Pubkey> {
 	Some(Pubkey::new_from_array(payer))
 }
 
-#[derive(Clone)]
-struct AssetAttestation {
-	index: [u8; 32],
-	mint: Pubkey,
-	expected_decimals: Option<u8>,
-}
-
 #[derive(Debug, Clone)]
 pub struct SolHealthReport {
 	pub slot: u64,
-	pub native_coin_index: [u8; 32],
-	pub asset_kinds: HashMap<[u8; 32], u8>,
+	pub registry: AssetRegistry,
 }
 
 #[derive(Clone)]
@@ -167,7 +166,6 @@ pub struct SolClient {
 	/// `getSignaturesForAddress` page size.
 	pub get_signatures_batch_size: u64,
 	upgrade_authority: Pubkey,
-	asset_attestations: Vec<AssetAttestation>,
 	/// Underlying nonblocking RPC client. Bridge ingestion is always
 	/// finalized so callers cannot weaken finality through configuration.
 	rpc: Arc<RpcClient>,
@@ -198,22 +196,6 @@ impl SolClient {
 		));
 		let upgrade_authority = Pubkey::from_str(deployment.upgrade_authority)
 			.map_err(|err| eyre::eyre!("invalid compiled cccp-solana upgrade authority: {err}"))?;
-		let asset_attestations = provider
-			.assets
-			.iter()
-			.map(|entry| {
-				let index = entry.index.strip_prefix("0x").unwrap_or(&entry.index);
-				let mut index_bytes = [0u8; 32];
-				hex::decode_to_slice(index, &mut index_bytes)
-					.expect("invalid SolProvider.assets[].index");
-				AssetAttestation {
-					index: index_bytes,
-					mint: Pubkey::from_str(&entry.mint).expect("invalid SolProvider.assets[].mint"),
-					expected_decimals: entry.decimals,
-				}
-			})
-			.collect();
-
 		Ok(Self {
 			name: environment.name.to_owned(),
 			chain_id: provider.id,
@@ -223,7 +205,6 @@ impl SolClient {
 			is_relay_target: provider.is_relay_target,
 			get_signatures_batch_size: provider.get_signatures_batch_size.unwrap_or(100),
 			upgrade_authority,
-			asset_attestations,
 			rpc,
 		})
 	}
@@ -303,8 +284,9 @@ impl SolClient {
 
 	/// Boot-time deployment attestation. Verifies the executable loader and
 	/// ProgramData linkage and the compiled upgrade-authority pin,
-	/// singleton account ownership/layout, and every configured asset mint's
-	/// address, decimals, initialization state, and mint authority.
+	/// singleton account ownership/layout, and every directory-discovered
+	/// asset's PDA linkage, mint, decimals, initialization state, and mint
+	/// authority.
 	///
 	/// Returns the latest slot on success. Should be called once during
 	/// `service::relay()` setup so misconfigurations fail fast at boot
@@ -318,8 +300,6 @@ impl SolClient {
 
 		let upgradeable_loader = Pubkey::from_str("BPFLoaderUpgradeab1e11111111111111111111111")
 			.expect("canonical upgradeable loader id");
-		let token_program = Pubkey::from_str("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA")
-			.expect("canonical token program id");
 		let program = self.rpc.get_account(&self.program_id).await.map_err(|err| {
 			eyre::eyre!(
 				"cccp-solana program {} not found on {} (slot={slot}): {err}",
@@ -422,9 +402,118 @@ impl SolClient {
 			eyre::bail!("socket_config has an unsupported BFC ChainIndex on {}", self.name);
 		}
 
-		let mut asset_kinds = HashMap::with_capacity(self.asset_attestations.len());
-		for spec in &self.asset_attestations {
-			let (asset_key, _) = pda::asset_config(&self.program_id, &spec.index);
+		let registry = self.load_asset_registry_from_vault(&vault_key, &vault.data).await?;
+
+		log::info!(
+			target: &self.name,
+			"cccp-solana attested: program={} program_data={} upgrade_authority={:?} assets={}",
+			self.program_id,
+			program_data_key,
+			upgrade_authority,
+			registry.len(),
+		);
+		Ok(SolHealthReport { slot, registry })
+	}
+
+	/// Reload the complete finalized asset directory and referenced
+	/// AssetConfig/mint accounts. Called at boot and after every
+	/// `AssetDirectoryUpdated` invalidation event.
+	pub async fn load_asset_registry(&self) -> eyre::Result<AssetRegistry> {
+		let (vault_key, _) = pda::vault_config(&self.program_id);
+		let vault = self.rpc.get_account(&vault_key).await.map_err(|err| {
+			eyre::eyre!("vault_config {vault_key} missing on {}: {err}", self.name)
+		})?;
+		attest_anchor_account(
+			"VaultConfig",
+			&vault_key,
+			&vault.owner,
+			&vault.data,
+			&self.program_id,
+			141,
+		)?;
+		self.load_asset_registry_from_vault(&vault_key, &vault.data).await
+	}
+
+	async fn load_asset_registry_from_vault(
+		&self,
+		vault_key: &Pubkey,
+		vault_data: &[u8],
+	) -> eyre::Result<AssetRegistry> {
+		const ASSET_DIRECTORY_ENTRY_SIZE: usize = 8 + 32 + 32 + 1;
+		const ASSET_CONFIG_SIZE: usize = 187;
+
+		let filters = vec![
+			RpcFilterType::DataSize(ASSET_DIRECTORY_ENTRY_SIZE as u64),
+			RpcFilterType::Memcmp(Memcmp::new_raw_bytes(
+				0,
+				ASSET_DIRECTORY_ENTRY_ACCOUNT_DISCRIMINATOR.to_vec(),
+			)),
+		];
+		let directories = self
+			.rpc
+			.get_program_ui_accounts_with_config(
+				&self.program_id,
+				RpcProgramAccountsConfig {
+					filters: Some(filters),
+					account_config: RpcAccountInfoConfig {
+						encoding: Some(UiAccountEncoding::Base64),
+						commitment: Some(CommitmentConfig::finalized()),
+						..RpcAccountInfoConfig::default()
+					},
+					..RpcProgramAccountsConfig::default()
+				},
+			)
+			.await
+			.map_err(|err| eyre::eyre!("get AssetDirectoryEntry accounts on {}: {err}", self.name))?
+			.into_iter()
+			.map(|(key, account)| {
+				account
+					.decode::<Account>()
+					.map(|account| (key, account))
+					.ok_or_else(|| eyre::eyre!("decode AssetDirectoryEntry account {key}"))
+			})
+			.collect::<eyre::Result<Vec<_>>>()?;
+		if directories.is_empty() {
+			eyre::bail!(
+				"on-chain asset directory is empty on {}; migrate existing AssetConfig entries",
+				self.name
+			);
+		}
+
+		let token_program = Pubkey::from_str("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA")
+			.expect("canonical token program id");
+		let native_mint = Pubkey::new_from_array(vault_data[104..136].try_into().unwrap());
+		let mut entries = Vec::with_capacity(directories.len());
+
+		for (directory_key, directory) in directories {
+			attest_anchor_account(
+				"AssetDirectoryEntry",
+				&directory_key,
+				&directory.owner,
+				&directory.data,
+				&self.program_id,
+				ASSET_DIRECTORY_ENTRY_SIZE,
+			)?;
+
+			let mut asset_index = [0u8; 32];
+			asset_index.copy_from_slice(&directory.data[8..40]);
+			let (expected_directory, expected_directory_bump) =
+				pda::asset_directory_entry(&self.program_id, &asset_index);
+			if directory_key != expected_directory || directory.data[72] != expected_directory_bump
+			{
+				eyre::bail!(
+					"asset directory PDA/bump mismatch for index 0x{}",
+					hex::encode(asset_index)
+				);
+			}
+
+			let (asset_key, _) = pda::asset_config(&self.program_id, &asset_index);
+			if directory.data[40..72] != asset_key.to_bytes() {
+				eyre::bail!(
+					"asset directory {} points to a non-canonical AssetConfig",
+					directory_key
+				);
+			}
 			let asset = self.rpc.get_account(&asset_key).await.map_err(|err| {
 				eyre::eyre!("asset_config {asset_key} missing on {}: {err}", self.name)
 			})?;
@@ -434,54 +523,51 @@ impl SolClient {
 				&asset.owner,
 				&asset.data,
 				&self.program_id,
-				42,
+				ASSET_CONFIG_SIZE,
 			)?;
-			if asset.data[8..40] != spec.mint.to_bytes() {
-				eyre::bail!("asset {asset_key} mint does not match configured {}", spec.mint);
-			}
-			let mint = self.rpc.get_account(&spec.mint).await.map_err(|err| {
-				eyre::eyre!("configured mint {} missing on {}: {err}", spec.mint, self.name)
+
+			let mint_key = Pubkey::new_from_array(asset.data[8..40].try_into().unwrap());
+			let decimals = asset.data[40];
+			let asset_kind = asset.data[41];
+			let mint = self.rpc.get_account(&mint_key).await.map_err(|err| {
+				eyre::eyre!("asset mint {mint_key} missing on {}: {err}", self.name)
 			})?;
 			if mint.owner != token_program || mint.data.len() < 46 || mint.data[45] == 0 {
-				eyre::bail!("configured mint {} is not an initialized SPL Mint", spec.mint);
+				eyre::bail!("asset mint {mint_key} is not an initialized SPL Mint");
 			}
-			let decimals = mint.data[44];
-			if asset.data[40] != decimals || spec.expected_decimals.is_some_and(|d| d != decimals) {
+			if mint.data[44] != decimals {
 				eyre::bail!(
-					"mint decimals mismatch for {} on {}: mint={decimals}, asset={}, expected={:?}",
-					spec.mint,
+					"mint decimals mismatch for {mint_key} on {}: mint={}, asset={decimals}",
 					self.name,
-					asset.data[40],
-					spec.expected_decimals,
+					mint.data[44],
 				);
 			}
-			let asset_kind = asset.data[41];
-			if !matches!(asset_kind, 1..=3) {
-				eyre::bail!("asset {asset_key} has unsupported kind {asset_kind}");
+
+			let kind = AssetKind::try_from(asset_kind)?;
+			if kind == AssetKind::NativeCoin && mint_key != native_mint {
+				eyre::bail!(
+					"native asset {asset_key} mint does not match vault_config.native_mint"
+				);
 			}
-			asset_kinds.insert(spec.index, asset_kind);
-			if asset_kind == 1 && vault.data[104..136] != spec.mint.to_bytes() {
-				eyre::bail!("native asset mint does not match vault_config.native_mint");
-			}
-			if asset_kind == 3 {
+			if kind == AssetKind::SplTokenMintable {
 				let authority_tag = u32::from_le_bytes(mint.data[0..4].try_into().unwrap());
 				if authority_tag != 1 || mint.data[4..36] != vault_key.to_bytes() {
-					eyre::bail!("mintable asset {} is not controlled by the vault PDA", spec.mint);
+					eyre::bail!("mintable asset {mint_key} is not controlled by the vault PDA");
 				}
 			}
+
+			entries.push(AssetRegistry::entry(
+				asset_index,
+				mint_key,
+				decimals,
+				asset_kind,
+				vault_key,
+			)?);
 		}
 
-		log::info!(
-			target: &self.name,
-			"cccp-solana attested: program={} program_data={} upgrade_authority={:?} assets={}",
-			self.program_id,
-			program_data_key,
-			upgrade_authority,
-			self.asset_attestations.len(),
-		);
 		let mut native_coin_index = [0u8; 32];
-		native_coin_index.copy_from_slice(&vault.data[72..104]);
-		Ok(SolHealthReport { slot, native_coin_index, asset_kinds })
+		native_coin_index.copy_from_slice(&vault_data[72..104]);
+		AssetRegistry::new(entries, native_coin_index)
 	}
 
 	/// Read the on-chain `socket_config.latest_round_id`.

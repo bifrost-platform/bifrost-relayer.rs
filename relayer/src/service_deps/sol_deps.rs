@@ -26,7 +26,6 @@ use br_client::{
 			outbound::{SolOutboundHandler, SolOutboundSender},
 			queue_poller::SolSocketQueuePoller,
 		},
-		pda,
 		registry::AssetRegistry,
 		slot_manager::SlotManager,
 	},
@@ -71,6 +70,7 @@ where
 	pub fn new(
 		provider: &SolProvider,
 		client: SolClient,
+		registry: AssetRegistry,
 		bootstrap_replay_slots: u64,
 		bfc_client: Arc<EthClient<F, P, N>>,
 		xt_request_sender: Arc<XtRequestSender>,
@@ -81,14 +81,6 @@ where
 	) -> eyre::Result<Self> {
 		let slot_manager =
 			SlotManager::new(client.clone(), provider.call_interval, provider.ws_provider.clone());
-		// Build the per-cluster asset registry from the static config.
-		// The vault PDA is derived from the cccp-solana program ID and is
-		// shared across every asset entry — we pre-derive each SPL vault ATA
-		// so the outbound hot path is allocation-free. NativeCoin entries
-		// switch to the native-vault PDA after on-chain kind attestation.
-		let (vault_pda, _vault_bump) = pda::vault_config(&client.program_id);
-		let registry = AssetRegistry::from_entries(&provider.assets, &vault_pda)?;
-
 		let fee_payer_path = provider.fee_payer_keypair_path.as_ref().map(PathBuf::from);
 		// Own broadcast subscriber so the commit-mirror branch and the
 		// queue poller never starve each other.
@@ -169,15 +161,17 @@ where
 		.saturating_to::<u64>();
 
 	let client = SolClient::new(provider)?;
+	let report = client.health_check().await?;
 	let bootstrap_replay_slots = client
 		.get_bootstrap_replay_slots_based_on_block_time(
 			bootstrap_round_offset,
 			bootstrap_round_length,
 		)
 		.await?;
-	let mut deps = SolDeps::new(
+	let deps = SolDeps::new(
 		provider,
 		client,
+		report.registry,
 		bootstrap_replay_slots,
 		bfc_client,
 		xt_request_sender,
@@ -186,10 +180,6 @@ where
 		handle,
 		debug_mode,
 	)?;
-	let report = deps.client.health_check().await?;
-	deps.outbound
-		.registry
-		.apply_attestation(&report.asset_kinds, report.native_coin_index)?;
 	log::info!(
 		target: &deps.client.get_chain_name(),
 		"[sol-bootstrap] cluster {} healthy at slot {} (program={})",

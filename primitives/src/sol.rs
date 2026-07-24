@@ -102,6 +102,9 @@ pub enum EventType {
 	Inbound,
 	/// Relayer outbound flow emitted `Socket(Executed)` etc.
 	Outbound,
+	/// On-chain asset-directory membership changed. Consumers must reload
+	/// finalized PDA state; the event payload is not used as metadata.
+	AssetDirectoryUpdated,
 	/// New slot heartbeat (no events in this slot).
 	NewSlot,
 }
@@ -187,6 +190,10 @@ impl EventMessage {
 
 	pub fn new_slot(slot: u64) -> Self {
 		Self::new(slot, EventType::NewSlot, vec![])
+	}
+
+	pub fn asset_directory_updated(slot: u64) -> Self {
+		Self::new(slot, EventType::AssetDirectoryUpdated, vec![])
 	}
 }
 

@@ -133,7 +133,6 @@ sol_provider:
   # call_interval: 2000 # Optional; defaults to 2000ms.
   is_relay_target: false
   get_signatures_batch_size: 100
-  assets: []
 
 ###  The items below are optional. ###
 

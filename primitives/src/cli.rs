@@ -136,11 +136,10 @@ pub struct EVMProvider {
 /// the `cccp-solana` Anchor program: the relayer polls slots, decodes
 /// program logs into `SocketEvent`s, and submits matching Bifrost
 /// extrinsics. The `id` field is the same `ChainId` (u64) the rest of the
-/// relayer uses to route messages — it does NOT have to equal the 4-byte
-/// `bytes4 ChainIndex` baked into the on-chain socket message; the latter
-/// is encoded into the `cccp-solana` constants module and shared via
-/// runtime config.
+/// relayer uses to route messages. It is the big-endian numeric form of the
+/// 4-byte `ChainIndex` stored in the on-chain `SocketConfig`.
 #[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct SolProvider {
 	/// CCCP `ChainId` for this cluster — must match the `pallet-cccp-relay-queue`
 	/// registration on Bifrost. The logs/metrics name and immutable deployment
@@ -166,11 +165,6 @@ pub struct SolProvider {
 	/// watch-only providers do not load a Solana keypair. The relayer's CCCP
 	/// signing key remains secp256k1.
 	pub fee_payer_keypair_path: Option<String>,
-	/// Static asset registry: maps the on-chain CCCP `AssetIndex` (32-byte
-	/// hex, optionally `0x`-prefixed) to the SPL Mint address (base58)
-	/// the cccp-solana vault holds for that asset.
-	#[serde(default)]
-	pub assets: Vec<SolAssetEntry>,
 	/// Base priority fee in micro-lamports per compute unit.
 	/// The outbound handler starts at this value and escalates on
 	/// confirmation timeouts. Defaults to 1 000.
@@ -183,23 +177,6 @@ pub struct SolProvider {
 	pub confirmation_timeout_secs: Option<u64>,
 	/// Maximum number of send-with-escalation retries. Defaults to 3.
 	pub max_send_retries: Option<u32>,
-}
-
-/// One row of the per-cluster asset registry. The `index` field is the
-/// 32-byte CCCP `AssetIndex` (= EVM `bytes32 tokenIDX0`) as a hex string.
-#[derive(Debug, Clone, Deserialize)]
-pub struct SolAssetEntry {
-	/// 32-byte hex (with or without `0x` prefix) — same value the EVM
-	/// `Task_Params.tokenIDX0` field carries on the wire.
-	pub index: String,
-	/// SPL Mint pubkey (base58).
-	pub mint: String,
-	/// Optional human-readable name (e.g. `usdc`). Used in logs only.
-	#[serde(default)]
-	pub name: Option<String>,
-	/// Expected SPL mint decimals. Production entries should set this so
-	/// bridge amount units are attested at boot rather than trusted manually.
-	pub decimals: Option<u8>,
 }
 
 fn default_sol_call_interval_ms() -> u64 {
@@ -343,5 +320,18 @@ sol_provider:
 
 		let legacy_sequence = sequence.replace("sol_provider:", "sol_providers:");
 		assert!(serde_yaml::from_str::<SolProviderOnly>(&legacy_sequence).is_err());
+	}
+
+	#[test]
+	fn sol_provider_rejects_removed_static_assets_field() {
+		let stale = r#"
+id: 1397705728
+provider: https://api.devnet.solana.com
+assets:
+  - index: "0x00"
+    mint: So11111111111111111111111111111111111111112
+"#;
+		let err = serde_yaml::from_str::<SolProvider>(stale).unwrap_err().to_string();
+		assert!(err.contains("unknown field `assets`"), "{err}");
 	}
 }

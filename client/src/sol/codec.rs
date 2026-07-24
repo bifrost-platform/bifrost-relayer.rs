@@ -133,6 +133,16 @@ pub struct RoundUpSubmit {
 	pub sigs: Signatures,
 }
 
+/// Payload emitted by the on-chain `AssetDirectoryUpdated` event.
+///
+/// It is used only as an invalidation signal; finalized PDA state remains
+/// the source of truth for asset metadata.
+#[derive(BorshSerialize, BorshDeserialize, Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct AssetDirectoryUpdate {
+	pub asset_index: AssetIndex,
+	pub asset_config: [u8; 32],
+}
+
 // ---------------------------------------------------------------------------
 // Anchor discriminator helpers — sha256(<namespace>:<name>)[..8].
 // We hard-code the four discriminators we need rather than computing them
@@ -147,6 +157,14 @@ pub const SOCKET_EVENT_DISCRIMINATOR: [u8; 8] = [0xaa, 0x63, 0xaa, 0xa9, 0xc2, 0
 
 /// `sha256("event:RoundUpEvent")[..8]`
 pub const ROUND_UP_EVENT_DISCRIMINATOR: [u8; 8] = [0x2a, 0xee, 0x02, 0xc5, 0xa2, 0x51, 0xeb, 0xd8];
+
+/// `sha256("event:AssetDirectoryUpdated")[..8]`
+pub const ASSET_DIRECTORY_UPDATED_EVENT_DISCRIMINATOR: [u8; 8] =
+	[0x56, 0xf7, 0x42, 0x0b, 0x8e, 0x85, 0x0b, 0xc1];
+
+/// `sha256("account:AssetDirectoryEntry")[..8]`
+pub const ASSET_DIRECTORY_ENTRY_ACCOUNT_DISCRIMINATOR: [u8; 8] =
+	[0x6f, 0xa8, 0x44, 0x10, 0x34, 0x29, 0x11, 0x77];
 
 /// `sha256("global:poll")[..8]`
 pub const POLL_IX_DISCRIMINATOR: [u8; 8] = [0x4c, 0xaa, 0xbb, 0xb3, 0x76, 0xb3, 0xe4, 0x21];
@@ -231,6 +249,14 @@ mod tests {
 	fn anchor_discriminator_constants_match() {
 		assert_eq!(anchor_sighash("event", "SocketEvent"), SOCKET_EVENT_DISCRIMINATOR);
 		assert_eq!(anchor_sighash("event", "RoundUpEvent"), ROUND_UP_EVENT_DISCRIMINATOR);
+		assert_eq!(
+			anchor_sighash("event", "AssetDirectoryUpdated"),
+			ASSET_DIRECTORY_UPDATED_EVENT_DISCRIMINATOR
+		);
+		assert_eq!(
+			anchor_sighash("account", "AssetDirectoryEntry"),
+			ASSET_DIRECTORY_ENTRY_ACCOUNT_DISCRIMINATOR
+		);
 		assert_eq!(anchor_sighash("global", "poll"), POLL_IX_DISCRIMINATOR);
 		assert_eq!(anchor_sighash("global", "poll_native"), POLL_NATIVE_IX_DISCRIMINATOR);
 		assert_eq!(

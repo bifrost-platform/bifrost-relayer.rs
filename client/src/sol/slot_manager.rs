@@ -661,12 +661,17 @@ impl SlotManager {
 
 		let mut inbound_events: Vec<Event> = Vec::new();
 		let mut outbound_events: Vec<Event> = Vec::new();
+		let mut asset_directory_updated = false;
 
 		for ev in &decoded {
-			let DecodedAnchorEvent::Socket(msg) = ev else {
-				// RoundUp events are routed by a different worker. Skip
-				// them here so the inbound/outbound channel stays clean.
-				continue;
+			let msg = match ev {
+				DecodedAnchorEvent::Socket(msg) => msg,
+				DecodedAnchorEvent::AssetDirectoryUpdated(_) => {
+					asset_directory_updated = true;
+					continue;
+				},
+				// RoundUp events are routed by a different worker.
+				DecodedAnchorEvent::RoundUp(_) => continue,
 			};
 
 			let evt = Event {
@@ -711,7 +716,11 @@ impl SlotManager {
 			}
 		}
 
-		let mut messages = Vec::with_capacity(2);
+		let mut messages = Vec::with_capacity(3);
+		if asset_directory_updated {
+			messages.push(EventMessage::asset_directory_updated(slot));
+			br_metrics::increase_sol_events(&self.client.name, "asset_directory_updated");
+		}
 		if !inbound_events.is_empty() {
 			let count = inbound_events.len() as u64;
 			messages.push(EventMessage::new(slot, EventType::Inbound, inbound_events));

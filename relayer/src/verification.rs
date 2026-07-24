@@ -122,11 +122,6 @@ fn assert_sol_provider_validity(p: &SolProvider) {
 		deployment.upgrade_authority,
 	);
 	if p.is_relay_target {
-		assert!(
-			!p.assets.is_empty(),
-			"sol_provider.assets must not be empty for relay target {}",
-			name,
-		);
 		let fee_payer_path = p.fee_payer_keypair_path.as_deref().unwrap_or_else(|| {
 			panic!("sol_provider.fee_payer_keypair_path is required for relay target {name}")
 		});
@@ -142,15 +137,6 @@ fn assert_sol_provider_validity(p: &SolProvider) {
 			fee_payer_path
 		);
 	}
-	for asset in &p.assets {
-		assert!(
-			asset.decimals.is_some(),
-			"sol_provider asset {} on {} must pin decimals",
-			asset.index,
-			name,
-		);
-	}
-
 	// 5) priority fee sanity: base ≤ max
 	if let (Some(base), Some(max)) = (p.base_priority_fee, p.max_priority_fee) {
 		assert!(
@@ -165,28 +151,6 @@ fn assert_sol_provider_validity(p: &SolProvider) {
 			timeout > 0 && timeout <= 300,
 			"sol_provider.confirmation_timeout_secs must be 1…300, got {timeout} for {}",
 			name
-		);
-	}
-
-	// 6) every asset entry must parse cleanly. We delegate the actual
-	// parsing to `AssetRegistry::from_entries` at runtime; here we just
-	// check that hex / base58 length is sane so misconfigurations don't
-	// silently disable a token.
-	for asset in &p.assets {
-		let stripped = asset.index.strip_prefix("0x").unwrap_or(&asset.index);
-		assert!(
-			stripped.len() == 64,
-			"sol_provider.assets entry for {} has wrong index length \
-			 (expected 64 hex chars, got {}): {}",
-			name,
-			stripped.len(),
-			asset.index
-		);
-		assert!(
-			solana_sdk::pubkey::Pubkey::from_str(&asset.mint).is_ok(),
-			"sol_provider.assets entry for {} has invalid SPL mint pubkey: {}",
-			name,
-			asset.mint
 		);
 	}
 }
