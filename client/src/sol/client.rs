@@ -639,6 +639,34 @@ impl SolClient {
 		Ok((u64::from_le_bytes(latest), u64::from_le_bytes(active)))
 	}
 
+	/// Read the number of relayers registered on one `RoundInfo` PDA.
+	///
+	/// Used to compute the on-chain majority (`len / 2 + 1`) before spending
+	/// any transaction on a roundup: `roundup_relay` rejects a submit whose
+	/// recovered signer count falls short with `RelayCount` (6030), but the
+	/// buffered path has already paid for the buffer-fill transactions by the
+	/// time the finalizer reverts. Checking first keeps a not-yet-quorate
+	/// round free.
+	///
+	/// `None` means the round account does not exist.
+	pub async fn round_relayer_count(&self, round_id: u64) -> eyre::Result<Option<usize>> {
+		let (pda, _) = pda::round_info(&self.program_id, round_id);
+		let account = self
+			.rpc
+			.get_account_with_commitment(&pda, CommitmentConfig::finalized())
+			.await
+			.map_err(|e| eyre::eyre!("get_account(round_info {round_id}) on {}: {e}", self.name))?;
+		let Some(account) = account.value else { return Ok(None) };
+		if account.data.len() < ROUND_INFO_RELAYERS_LEN_OFFSET + 4 {
+			eyre::bail!("RoundInfo {pda} is too small to hold a relayer vector");
+		}
+		let mut len_bytes = [0u8; 4];
+		len_bytes.copy_from_slice(
+			&account.data[ROUND_INFO_RELAYERS_LEN_OFFSET..ROUND_INFO_RELAYERS_LEN_OFFSET + 4],
+		);
+		Ok(Some(u32::from_le_bytes(len_bytes) as usize))
+	}
+
 	/// Batch-fetch the `payer` of each `RoundInfo` PDA for the given round
 	/// ids. Returns one entry per input id, in order: `Some(pubkey)` if the
 	/// round account exists and carries a recorded payer, `None` if the

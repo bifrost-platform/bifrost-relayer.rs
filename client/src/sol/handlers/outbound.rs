@@ -110,6 +110,16 @@ fn poll_filter_contains(mask: U256, status: u8) -> bool {
 	(mask >> U256::from(status)) & U256::from(1u64) == U256::from(1u64)
 }
 
+/// Signature threshold the on-chain program enforces for a round.
+///
+/// Byte-for-byte mirror of `cccp-solana::authority::round_manager::majority`
+/// (`relayers.len() / 2 + 1`). Drift here would make the relayer's pre-check
+/// disagree with the program and either waste transactions on a submit that
+/// reverts or withhold one that would have succeeded.
+fn majority_of(relayer_count: usize) -> usize {
+	relayer_count / 2 + 1
+}
+
 fn load_fee_payer(
 	is_relay_target: bool,
 	fee_payer_keypair_path: Option<&Path>,
@@ -1106,6 +1116,45 @@ where
 		let mut round_bytes = [0u8; 8];
 		round_bytes.copy_from_slice(&submit.round[24..32]);
 		let round_id = u64::from_be_bytes(round_bytes);
+
+		// Bail out before spending anything if the quorum cannot be met.
+		//
+		// The buffered path fills a signature buffer over several confirmed
+		// transactions and only then calls the finalizer. When the signature
+		// set is short of the on-chain majority the finalizer reverts with
+		// `RelayCount` (6030) — but the buffer-fill transactions have already
+		// landed and paid fees. On a retry loop that burns the fee-payer's SOL
+		// once per attempt while never making progress, so refuse up front.
+		//
+		// The majority is measured against the *current* round's relayer set
+		// (`roundup_relay` verifies signers against `latest_round_id`), which
+		// is `round_id - 1`.
+		let quorum_round = round_id.saturating_sub(1);
+		match self.client.round_relayer_count(quorum_round).await {
+			Ok(Some(relayer_count)) => {
+				let majority = majority_of(relayer_count);
+				if submit.sigs.v.len() < majority {
+					return Err(eyre::eyre!(
+						"roundup {round_id} has {} signature(s) but round {quorum_round} needs a \
+						 majority of {majority} (relayers={relayer_count}); not submitting",
+						submit.sigs.v.len(),
+					));
+				}
+			},
+			// Round missing or unreadable: fall through and let the on-chain
+			// program be the authority rather than blocking on a probe.
+			Ok(None) => log::warn!(
+				target: &self.client.get_chain_name(),
+				"[{}] round {quorum_round} not found while pre-checking roundup {round_id} quorum",
+				SUB_LOG_TARGET,
+			),
+			Err(err) => log::warn!(
+				target: &self.client.get_chain_name(),
+				"[{}] roundup {round_id} quorum pre-check failed: {err}",
+				SUB_LOG_TARGET,
+			),
+		}
+
 		let fee_payer = fee_payer_signer.pubkey();
 		let (buffer_pda, _) =
 			pda::roundup_signatures(&self.client.program_id, round_id, &fee_payer);
