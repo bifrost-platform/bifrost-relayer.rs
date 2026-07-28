@@ -297,6 +297,27 @@ where
 		signers.into_iter().find(|s| prev_relayers.contains(s)).unwrap_or_default()
 	}
 
+	/// Re-read a pending Solana roundup's signatures from BFC.
+	///
+	/// `pending_sol_relays` stores the submit captured at first broadcast. If
+	/// the BFC-side quorum had not formed yet, that snapshot carries a partial
+	/// signature set which `roundup_relay` rejects with `RelayCount` (6030) —
+	/// and because the stored copy is replayed verbatim on every retry tick,
+	/// the round would stay wedged even after the quorum completes. Rebuilding
+	/// from the live `get_round_signatures` view is what makes the retry lane
+	/// self-healing.
+	///
+	/// `new_relayers` is kept from the stored submit: it is the payload the
+	/// relayers actually signed over, so re-deriving it from the current
+	/// relayer set could produce a digest nobody signed.
+	async fn refresh_sol_submit(&self, stored: &SolRoundUpSubmit) -> Result<SolRoundUpSubmit> {
+		let round = U256::from_be_bytes(stored.round);
+		let new_relayers: Vec<Address> =
+			stored.new_relayers.iter().map(|r| Address::from(*r)).collect();
+		let sigs = self.get_sorted_signatures(round, &new_relayers).await?;
+		build_sol_round_up_submit(&Round_Up_Submit { round, new_relayers, sigs })
+	}
+
 	/// Build `round_control_relay` method call param.
 	async fn build_roundup_submit(
 		&self,
@@ -445,11 +466,10 @@ where
 			// transient send failure. Dedupe by borsh-encoded `round`.
 			if !is_bootstrap {
 				let mut pending = self.pending_sol_relays.lock().unwrap();
-				let relays = pending.entry(*dst_chain_id).or_default();
-				if !relays.iter().any(|r| r.round == sol_submit.round) {
-					let pos = relays.partition_point(|r| r.round < sol_submit.round);
-					relays.insert(pos, sol_submit.clone());
-				}
+				upsert_pending_sol_submit(
+					pending.entry(*dst_chain_id).or_default(),
+					sol_submit.clone(),
+				);
 			}
 
 			// Probe the cluster's current round to avoid a guaranteed-to-revert
@@ -696,10 +716,30 @@ where
 			let Some(submit) = next_submit else { continue };
 			let submit_round = u64_from_round_be(&submit.round);
 
+			// Re-read the signatures from BFC instead of replaying the snapshot
+			// captured when the round was first broadcast. A round whose quorum
+			// had not formed yet was stored with a partial signature set, and
+			// the on-chain `roundup_relay` rejects it with `RelayCount` (6030)
+			// forever — the stored copy never grows, so this lane could never
+			// recover on its own. Refreshing here lets a round that has since
+			// reached quorum go through on the next tick.
+			let submit = match self.refresh_sol_submit(&submit).await {
+				Ok(refreshed) => refreshed,
+				Err(err) => {
+					log::warn!(
+						target: &self.client.get_chain_name(),
+						"-[{}] 🔄 (sol-roundup retry) signature refresh failed for round {submit_round}: {err}; keeping pending",
+						sub_display_format(SUB_LOG_TARGET),
+					);
+					continue;
+				},
+			};
+
 			log::info!(
 				target: &self.client.get_chain_name(),
-				"-[{}] 🔄 Retrying Solana RoundUp relay to cluster {dst_chain_id} for round {submit_round}",
+				"-[{}] 🔄 Retrying Solana RoundUp relay to cluster {dst_chain_id} for round {submit_round} ({} sigs)",
 				sub_display_format(SUB_LOG_TARGET),
+				submit.sigs.v.len(),
 			);
 
 			let job = SolOutboundJob::RoundControlRelay { submit };
@@ -1067,6 +1107,28 @@ where
 /// set is a programming error. This panics in debug if the upper 24
 /// bytes are non-zero; in release it silently truncates (matches the
 /// existing `round_id_from_submit` in the IX builder).
+/// Insert `submit` into a cluster's pending list, keeping it sorted ascending
+/// by round and keeping at most one entry per round.
+///
+/// When an entry for the round already exists, the copy carrying **more
+/// signatures** wins. The first broadcast of a round can be captured before
+/// the BFC quorum has formed; that partial set is rejected on chain with
+/// `RelayCount` (6030), and keeping it would pin the round to a snapshot that
+/// can never succeed.
+fn upsert_pending_sol_submit(relays: &mut Vec<SolRoundUpSubmit>, submit: SolRoundUpSubmit) {
+	match relays.iter_mut().find(|r| r.round == submit.round) {
+		Some(existing) => {
+			if submit.sigs.v.len() > existing.sigs.v.len() {
+				*existing = submit;
+			}
+		},
+		None => {
+			let pos = relays.partition_point(|r| r.round < submit.round);
+			relays.insert(pos, submit);
+		},
+	}
+}
+
 fn u64_from_round_be(round: &[u8; 32]) -> u64 {
 	debug_assert!(
 		round[0..24].iter().all(|&b| b == 0),
@@ -1083,4 +1145,59 @@ fn u64_from_round_be(round: &[u8; 32]) -> u64 {
 /// truncation and matches `u64_from_round_be` after a borsh encode.
 fn u64_from_u256_low(value: U256) -> u64 {
 	value.as_limbs()[0]
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+	use crate::sol::codec::Signatures as SolSignatures;
+
+	fn submit(round: u64, sig_count: usize) -> SolRoundUpSubmit {
+		let mut round_bytes = [0u8; 32];
+		round_bytes[24..32].copy_from_slice(&round.to_be_bytes());
+		SolRoundUpSubmit {
+			round: round_bytes,
+			new_relayers: vec![[0x11; 20]],
+			sigs: SolSignatures {
+				r: vec![[0x22; 32]; sig_count],
+				s: vec![[0x33; 32]; sig_count],
+				v: vec![27u8; sig_count],
+			},
+		}
+	}
+
+	#[test]
+	fn upsert_keeps_pending_sorted_and_unique_per_round() {
+		let mut relays = Vec::new();
+		upsert_pending_sol_submit(&mut relays, submit(12, 1));
+		upsert_pending_sol_submit(&mut relays, submit(10, 1));
+		upsert_pending_sol_submit(&mut relays, submit(11, 1));
+
+		let rounds: Vec<u64> = relays.iter().map(|r| u64_from_round_be(&r.round)).collect();
+		assert_eq!(rounds, vec![10, 11, 12], "pending list must stay ascending by round");
+	}
+
+	/// The wedge this fixes: a round first captured before the BFC quorum
+	/// formed carries a partial signature set that `roundup_relay` rejects
+	/// with `RelayCount`. A later broadcast holding the full quorum must
+	/// replace it, otherwise the retry lane replays the doomed copy forever.
+	#[test]
+	fn upsert_replaces_a_partial_submit_with_a_fuller_one() {
+		let mut relays = Vec::new();
+		upsert_pending_sol_submit(&mut relays, submit(33241, 1));
+		upsert_pending_sol_submit(&mut relays, submit(33241, 2));
+
+		assert_eq!(relays.len(), 1, "same round must not duplicate");
+		assert_eq!(relays[0].sigs.v.len(), 2, "the fuller signature set must win");
+	}
+
+	#[test]
+	fn upsert_does_not_regress_to_a_thinner_submit() {
+		let mut relays = Vec::new();
+		upsert_pending_sol_submit(&mut relays, submit(33241, 3));
+		upsert_pending_sol_submit(&mut relays, submit(33241, 1));
+
+		assert_eq!(relays.len(), 1);
+		assert_eq!(relays[0].sigs.v.len(), 3, "a thinner set must never overwrite a fuller one");
+	}
 }
