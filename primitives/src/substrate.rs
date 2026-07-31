@@ -39,18 +39,12 @@ pub use runtime_types::{
 	pallet_cccp_relay_queue::{FinalizePollSubmission, OnFlightPollSubmission},
 };
 
-#[allow(ambiguous_glob_reexports)]
-pub use bifrost_runtime::{
-	blaze::calls::types::*, btc_registration_pool::calls::types::*,
-	btc_socket_queue::calls::types::*, cccp_relay_queue::calls::types::*,
-};
-
 use super::constants::errors::INVALID_PROVIDER_URL;
 use jsonrpsee::ws_client::WsClientBuilder;
 use subxt::{
 	OnlineClient,
-	backend::rpc::RpcClient,
-	config::{Config, DefaultExtrinsicParams, SubstrateConfig},
+	config::{Config, DefaultTransactionExtensions, SubstrateConfig},
+	rpcs::RpcClient,
 };
 use url::Url;
 
@@ -58,8 +52,8 @@ use url::Url;
 /// The default jsonrpsee limit is 10 MB, which can be exceeded by large Substrate blocks.
 const MAX_WS_RESPONSE_BODY_SIZE: u32 = 128 * 1024 * 1024;
 
-#[derive(Debug, Clone)]
-pub enum CustomConfig {}
+#[derive(Debug, Clone, Default)]
+pub struct CustomConfig;
 
 impl Config for CustomConfig {
 	type AccountId = <SubstrateConfig as Config>::AccountId;
@@ -67,7 +61,7 @@ impl Config for CustomConfig {
 	type Signature = EthereumSignature;
 	type Hasher = <SubstrateConfig as Config>::Hasher;
 	type Header = <SubstrateConfig as Config>::Header;
-	type ExtrinsicParams = DefaultExtrinsicParams<CustomConfig>;
+	type TransactionExtensions = DefaultTransactionExtensions<CustomConfig>;
 	type AssetId = u32;
 }
 

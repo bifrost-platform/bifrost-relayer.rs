@@ -13,7 +13,7 @@ use br_primitives::{
 	substrate::{
 		CustomConfig, MigrationSequence,
 		bifrost_runtime::{
-			self, btc_registration_pool::storage::types::service_state::ServiceState,
+			self, btc_registration_pool::storage::service_state::Output as ServiceState,
 		},
 		initialize_sub_client,
 	},
@@ -74,13 +74,26 @@ where
 	/// Get the current round number.
 	async fn get_current_round(&self) -> u32 {
 		loop {
-			match self.sub_client.as_ref().unwrap().storage().at_latest().await {
-				Ok(storage) => {
+			match self.sub_client.as_ref().unwrap().at_current_block().await {
+				Ok(at) => {
+					let storage = at.storage();
 					match storage
-						.fetch(&bifrost_runtime::storage().btc_registration_pool().current_round())
+						.try_fetch(
+							bifrost_runtime::storage().btc_registration_pool().current_round(),
+							(),
+						)
 						.await
 					{
-						Ok(Some(round)) => return round,
+						Ok(Some(round)) => match round.decode() {
+							Ok(round) => return round,
+							Err(_) => {
+								tokio::time::sleep(Duration::from_millis(
+									DEFAULT_CALL_RETRY_INTERVAL_MS,
+								))
+								.await;
+								continue;
+							},
+						},
 						Ok(None) => {
 							unreachable!("The current round number should always be available.")
 						},
@@ -104,13 +117,26 @@ where
 	/// Fetch the latest service state from the storage.
 	async fn get_service_state(&self) -> ServiceState {
 		loop {
-			match self.sub_client.as_ref().unwrap().storage().at_latest().await {
-				Ok(storage) => {
+			match self.sub_client.as_ref().unwrap().at_current_block().await {
+				Ok(at) => {
+					let storage = at.storage();
 					match storage
-						.fetch(&bifrost_runtime::storage().btc_registration_pool().service_state())
+						.try_fetch(
+							bifrost_runtime::storage().btc_registration_pool().service_state(),
+							(),
+						)
 						.await
 					{
-						Ok(Some(state)) => return state,
+						Ok(Some(state)) => match state.decode() {
+							Ok(state) => return state,
+							Err(_) => {
+								tokio::time::sleep(Duration::from_millis(
+									DEFAULT_CALL_RETRY_INTERVAL_MS,
+								))
+								.await;
+								continue;
+							},
+						},
 						Ok(None) => {
 							unreachable!("The service state should always be available.")
 						},

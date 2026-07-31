@@ -15,7 +15,7 @@ use br_primitives::{
 	substrate::{
 		EthereumSignature, MigrationSequence, Public, VaultKeySubmission,
 		bifrost_runtime::{
-			self, btc_registration_pool::storage::types::service_state::ServiceState,
+			self, btc_registration_pool::storage::service_state::Output as ServiceState,
 		},
 	},
 	tx::{SubmitVaultKeyMetadata, XtRequest, XtRequestMessage, XtRequestMetadata, XtRequestSender},
@@ -24,7 +24,7 @@ use br_primitives::{
 use cron::Schedule;
 use eyre::Result;
 use std::{str::FromStr, sync::Arc, time::Duration};
-use subxt::ext::subxt_core::utils::AccountId20;
+use subxt::utils::eth::AccountId20;
 use tokio::{sync::RwLock, time::sleep};
 
 use crate::traits::PeriodicWorker;
@@ -186,7 +186,7 @@ where
 		let metadata = SubmitVaultKeyMetadata::new(who, pub_key);
 		if self.is_system_vault(who) {
 			Ok((
-				Arc::new(
+				XtRequest::SubmitSystemVaultKey(
 					bifrost_runtime::tx()
 						.btc_registration_pool()
 						.submit_system_vault_key(msg, signature),
@@ -195,7 +195,7 @@ where
 			))
 		} else {
 			Ok((
-				Arc::new(
+				XtRequest::SubmitVaultKey(
 					bifrost_runtime::tx().btc_registration_pool().submit_vault_key(msg, signature),
 				),
 				metadata,

@@ -56,6 +56,55 @@ pub trait Handler {
 }
 
 #[async_trait::async_trait]
+/// Provides a reusable check for whether a `SocketMessage`'s encoded byte size exceeds
+/// `BtcSocketQueue::MaxSocketMessageBytes`.
+pub trait SocketMessageSizeGuard {
+	/// The substrate client used to query the configured byte size limit.
+	fn sub_client(&self) -> &OnlineClient<CustomConfig>;
+
+	/// The chain name to attribute the skip-log to.
+	fn chain_name(&self) -> String;
+
+	/// Fetches the configured maximum allowed byte size of a single socket message from
+	/// `BtcSocketQueue::MaxSocketMessageBytes`.
+	async fn fetch_max_socket_message_bytes(&self) -> Result<u32> {
+		Ok(self
+			.sub_client()
+			.at_current_block()
+			.await?
+			.storage()
+			.fetch(bifrost_runtime::storage().btc_socket_queue().max_socket_message_bytes(), ())
+			.await?
+			.decode()?)
+	}
+
+	/// Checks whether the encoded `SocketMessage` byte size exceeds the configured limit,
+	/// logging a warning under `sub_log_target` when it does.
+	async fn exceeds_max_socket_message_bytes(
+		&self,
+		msg: &Socket_Message,
+		sub_log_target: &str,
+	) -> Result<bool> {
+		let encoded_len = Vec::<u8>::from(msg.clone()).len();
+		let max_bytes = self.fetch_max_socket_message_bytes().await? as usize;
+
+		if encoded_len > max_bytes {
+			br_primitives::log_and_capture!(
+				warn,
+				&self.chain_name(),
+				sub_log_target,
+				"⚠️ Skipping oversized SocketMessage: seq={}, size={} bytes (limit={} bytes)",
+				msg.req_id.sequence,
+				encoded_len,
+				max_bytes,
+			);
+			return Ok(true);
+		}
+		Ok(false)
+	}
+}
+
+#[async_trait::async_trait]
 /// The client to interact with the `Socket` contract instance.
 pub trait SocketRelayBuilder<F, P, N: Network>
 where
@@ -235,19 +284,19 @@ where
 
 	/// Checks if the given token index is hookable.
 	async fn is_hookable(&self, asset_index_hash: B256) -> Result<bool> {
-		match self
-			.get_sub_client()
-			.storage()
-			.at_latest()
-			.await?
-			.fetch(
-				&bifrost_runtime::storage()
-					.cccp_relay_queue()
-					.asset_indexes_hook_state(SubH256(asset_index_hash.0)),
+		let at = self.get_sub_client().at_current_block().await?;
+		let storage = at.storage();
+		match storage
+			.try_fetch(
+				bifrost_runtime::storage().cccp_relay_queue().asset_indexes_hook_state(),
+				(SubH256(asset_index_hash.0),),
 			)
 			.await
 		{
-			Ok(Some(is_hookable)) => Ok(is_hookable),
+			Ok(Some(sv)) => match sv.decode() {
+				Ok(is_hookable) => Ok(is_hookable),
+				Err(e) => Err(e.into()),
+			},
 			Ok(None) => Ok(false),
 			Err(e) => Err(e.into()),
 		}
@@ -255,13 +304,13 @@ where
 
 	/// Fetches an oracle ID from `OracleRegistry.Oracles` using the typed subxt storage API.
 	async fn fetch_oracle_oid(&self, oracle_key: OracleKey) -> Result<Option<B256>> {
-		let result = self
-			.get_sub_client()
-			.storage()
-			.at_latest()
+		let at = self.get_sub_client().at_current_block().await?;
+		let storage = at.storage();
+		let result = storage
+			.try_fetch(bifrost_runtime::storage().oracle_registry().oracles(), (oracle_key,))
 			.await?
-			.fetch(&bifrost_runtime::storage().oracle_registry().oracles(oracle_key))
-			.await?;
+			.map(|sv| sv.decode())
+			.transpose()?;
 		Ok(result.map(|oid| B256::from_slice(&oid.0)))
 	}
 
@@ -274,17 +323,16 @@ where
 		&self,
 		asset_index_hash: B256,
 	) -> Result<Option<Address>> {
-		let result = self
-			.get_sub_client()
-			.storage()
-			.at_latest()
-			.await?
-			.fetch(
-				&bifrost_runtime::storage()
-					.cccp_relay_queue()
-					.asset_indexes(SubH256(asset_index_hash.0)),
+		let at = self.get_sub_client().at_current_block().await?;
+		let storage = at.storage();
+		let result = storage
+			.try_fetch(
+				bifrost_runtime::storage().cccp_relay_queue().asset_indexes(),
+				(SubH256(asset_index_hash.0),),
 			)
-			.await?;
+			.await?
+			.map(|sv| sv.decode())
+			.transpose()?;
 		Ok(result.map(|h160| Address::from_slice(&h160.0)))
 	}
 
@@ -293,13 +341,16 @@ where
 	///
 	/// Returns `(aggregator_address, decimal)` if found, or `None` if no aggregator is registered.
 	async fn fetch_aggregator_info(&self, asset_id: Address) -> Result<Option<(Address, u8)>> {
-		let result = self
-			.get_sub_client()
-			.storage()
-			.at_latest()
+		let at = self.get_sub_client().at_current_block().await?;
+		let storage = at.storage();
+		let result = storage
+			.try_fetch(
+				bifrost_runtime::storage().oracle_registry().aggregators(),
+				(SubH160(asset_id.0.0),),
+			)
 			.await?
-			.fetch(&bifrost_runtime::storage().oracle_registry().aggregators(SubH160(asset_id.0.0)))
-			.await?;
+			.map(|sv| sv.decode())
+			.transpose()?;
 		Ok(result.map(|info| (Address::from_slice(&info.address.0), info.decimal)))
 	}
 

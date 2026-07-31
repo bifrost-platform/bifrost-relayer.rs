@@ -21,6 +21,10 @@ pub struct BootstrapSharedData {
 	/// Cached RoundUp bootstrap logs (Bifrost chain only), populated by RoundupEmitter
 	/// and consumed by RoundupRelayHandler to avoid a duplicate eth_getLogs call.
 	pub bootstrap_roundup_logs: Arc<RwLock<Option<Vec<Log>>>>,
+	/// Whether the CCCPRelayQueue pallet is present in the connected runtime.
+	/// When false, SocketRelayHandler processes Requested events directly (legacy mode)
+	/// and SocketQueuePoller/SocketOnflightHandler are not spawned.
+	pub cccp_relay_queue_enabled: bool,
 }
 
 impl BootstrapSharedData {
@@ -73,6 +77,7 @@ impl BootstrapSharedData {
 			bootstrap_config: bootstrap_config.clone(),
 			bootstrap_socket_logs,
 			bootstrap_roundup_logs,
+			cccp_relay_queue_enabled: true, // overridden by HandlerDeps after runtime metadata check
 		}
 	}
 }

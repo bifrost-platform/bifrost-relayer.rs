@@ -125,12 +125,10 @@ pub async fn relay(config: Configuration) -> Result<TaskManager, ServiceError> {
 			.http(url.clone())
 			.with_poll_interval(Duration::from_millis(evm_provider.call_interval));
 		let provider = Arc::new(
-			ProviderBuilder::new()
-				.disable_recommended_fillers()
+			ProviderBuilder::<_, _, AnyNetwork>::default()
 				.with_cached_nonce_management()
-				.filler(GasFiller)
+				.filler(GasFiller::default())
 				.filler(ChainIdFiller::new(evm_provider.id.into()))
-				.network::<AnyNetwork>()
 				.wallet(wallet.clone())
 				.connect_client(retry_client.clone()),
 		);

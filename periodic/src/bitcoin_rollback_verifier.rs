@@ -26,7 +26,7 @@ use cron::Schedule;
 use eyre::Result;
 use serde::Deserialize;
 use serde_json::Value;
-use subxt::{ext::subxt_core::utils::AccountId20, utils::H256};
+use subxt::{utils::H256, utils::eth::AccountId20};
 use tokio::time::sleep;
 
 use crate::traits::PeriodicWorker;
@@ -290,7 +290,9 @@ where
 		let metadata = SubmitRollbackPollMetadata::new(txid, is_approved);
 
 		Ok((
-			Arc::new(bifrost_runtime::tx().btc_socket_queue().submit_rollback_poll(msg, signature)),
+			XtRequest::SubmitRollbackPoll(
+				bifrost_runtime::tx().btc_socket_queue().submit_rollback_poll(msg, signature),
+			),
 			metadata,
 		))
 	}

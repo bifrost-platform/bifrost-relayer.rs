@@ -11,7 +11,7 @@ use alloy::{
 use array_bytes::Hexify;
 use eyre::Result;
 use sc_service::SpawnTaskHandle;
-use subxt::{OnlineClient, ext::subxt_core::utils::AccountId20};
+use subxt::{OnlineClient, utils::eth::AccountId20};
 use tokio::sync::{broadcast::Receiver, mpsc::UnboundedSender};
 use tokio_stream::{StreamExt, wrappers::BroadcastStream};
 
@@ -27,7 +27,7 @@ use br_primitives::{
 	},
 	eth::{BootstrapState, BuiltRelayTransaction, RelayDirection, SocketEventStatus},
 	substrate::{CustomConfig, SocketMessagesSubmission, bifrost_runtime},
-	tx::{SocketRelayMetadata, XtRequestMessage, XtRequestMetadata, XtRequestSender},
+	tx::{SocketRelayMetadata, XtRequest, XtRequestMessage, XtRequestMetadata, XtRequestSender},
 	utils::sub_display_format,
 };
 
@@ -36,9 +36,11 @@ use crate::{
 	eth::{
 		ClientMap, EthClient,
 		events::EventMessage,
-		handlers::SocketOnflightReceiver,
+		handlers::{SocketOnflightMessage, SocketOnflightReceiver},
 		send_transaction,
-		traits::{BootstrapHandler, Handler, HookExecutor, SocketRelayBuilder},
+		traits::{
+			BootstrapHandler, Handler, HookExecutor, SocketMessageSizeGuard, SocketRelayBuilder,
+		},
 	},
 	sol::convert::{build_sol_poll_submit, decode_solana_wallet_from_variants},
 };
@@ -71,7 +73,8 @@ where
 	/// The receiver that consumes new events from the block channel.
 	event_stream: BroadcastStream<EventMessage>,
 	/// The receiver for TransferPolled messages from SocketOnflightHandler.
-	onflight_receiver: SocketOnflightReceiver,
+	/// None when CCCPRelayQueue pallet is absent (legacy mode).
+	onflight_receiver: Option<SocketOnflightReceiver>,
 	/// The entire clients instantiated in the system. <chain_id, Arc<EthClient>>
 	system_clients: Arc<ClientMap<F, P, N>>,
 	/// The bifrost client.
@@ -185,9 +188,15 @@ where
 						},
 					}
 				},
-				// Handle TransferPolled messages from SocketOnflightHandler
-				// These don't need confirmation - already validated through Substrate consensus
-				onflight_msg = self.onflight_receiver.recv() => {
+				// Handle TransferPolled messages from SocketOnflightHandler.
+				// Uses std::future::pending() when the receiver is None (legacy mode) so this
+				// arm never resolves and the select loop doesn't spin.
+				onflight_msg = async {
+					match self.onflight_receiver.as_mut() {
+						Some(rx) => rx.recv().await,
+						None => std::future::pending::<Option<SocketOnflightMessage>>().await,
+					}
+				} => {
 					if let Some(msg) = onflight_msg {
 						if let Err(e) = self.process_onflight_message(msg.socket_message).await {
 							br_primitives::log_and_capture!(
@@ -230,11 +239,19 @@ where
 				let msg = decoded_socket.msg.clone();
 				let status = SocketEventStatus::from(msg.status);
 
-				// Skip Requested status - now handled by TransferPolled from Substrate
-				if status == SocketEventStatus::Requested {
+				if self.exceeds_max_socket_message_bytes(&msg, SUB_LOG_TARGET).await? {
+					return Ok(());
+				}
+
+				// In relay-queue mode (CCCP-v2) the Requested status is handled by
+				// SocketOnflightHandler via the CCCPRelayQueue pallet. In legacy mode the
+				// handler processes it directly, so we only skip when the pallet is present.
+				if status == SocketEventStatus::Requested
+					&& self.bootstrap_shared_data.cccp_relay_queue_enabled
+				{
 					log::debug!(
 						target: &self.client.get_chain_name(),
-						"-[{}] Skipping Requested status (handled by TransferPolled): seq={}",
+						"-[{}] Skipping Requested status (handled by SocketOnflightHandler): seq={}",
 						sub_display_format(SUB_LOG_TARGET),
 						msg.req_id.sequence,
 					);
@@ -257,38 +274,40 @@ where
 					// do nothing if not selected
 					return Ok(());
 				}
-				// Check if we should execute the hook (Executed status with valid requirements)
-				if let Some(variants) = self.should_execute_hook(&msg).await? {
-					match self.execute_hook(&msg, variants, is_inbound).await {
-						Ok(()) => (),
-						Err(error) => {
-							// we don't propagate the error to prevent hook execution errors fail the entire relay process
-							br_primitives::log_and_capture!(
-								error,
-								&self.client.get_chain_name(),
-								SUB_LOG_TARGET,
-								self.client.address().await,
-								"❗️ Failed to execute hook: {:?}",
-								error
-							);
-						},
+				if self.bootstrap_shared_data.cccp_relay_queue_enabled {
+					// Check if we should execute the hook (Executed status with valid requirements)
+					if let Some(variants) = self.should_execute_hook(&msg).await? {
+						match self.execute_hook(&msg, variants, is_inbound).await {
+							Ok(()) => (),
+							Err(error) => {
+								// we don't propagate the error to prevent hook execution errors fail the entire relay process
+								br_primitives::log_and_capture!(
+									error,
+									&self.client.get_chain_name(),
+									SUB_LOG_TARGET,
+									self.client.address().await,
+									"❗️ Failed to execute hook: {:?}",
+									error
+								);
+							},
+						}
 					}
-				}
-				// Check if we should rollback the hook (Rollbacked status with valid requirements)
-				if let Some(variants) = self.should_rollback_hook(&msg).await? {
-					match self.rollback_hook(&msg, variants).await {
-						Ok(()) => (),
-						Err(error) => {
-							// we don't propagate the error to prevent hook rollback errors fail the entire relay process
-							br_primitives::log_and_capture!(
-								error,
-								&self.client.get_chain_name(),
-								SUB_LOG_TARGET,
-								self.client.address().await,
-								"❗️ Failed to rollback hook: {:?}",
-								error
-							);
-						},
+					// Check if we should rollback the hook (Rollbacked status with valid requirements)
+					if let Some(variants) = self.should_rollback_hook(&msg).await? {
+						match self.rollback_hook(&msg, variants).await {
+							Ok(()) => (),
+							Err(error) => {
+								// we don't propagate the error to prevent hook rollback errors fail the entire relay process
+								br_primitives::log_and_capture!(
+									error,
+									&self.client.get_chain_name(),
+									SUB_LOG_TARGET,
+									self.client.address().await,
+									"❗️ Failed to rollback hook: {:?}",
+									error
+								);
+							},
+						}
 					}
 				}
 
@@ -435,7 +454,7 @@ where
 	pub fn new(
 		id: ChainId,
 		event_receiver: Receiver<EventMessage>,
-		onflight_receiver: SocketOnflightReceiver,
+		onflight_receiver: Option<SocketOnflightReceiver>,
 		system_clients: Arc<ClientMap<F, P, N>>,
 		bifrost_client: Arc<EthClient<F, P, N>>,
 		xt_request_sender: Arc<XtRequestSender>,
@@ -1097,13 +1116,15 @@ where
 			let encoded_msg: Vec<u8> = msg.into();
 			let signature =
 				self.client.sign_message(encoded_msg.hexify_prefixed().as_bytes()).await?.into();
-			let call = Arc::new(bifrost_runtime::tx().blaze().submit_outbound_requests(
-				SocketMessagesSubmission {
-					authority_id: AccountId20(self.client.address().await.0.0),
-					messages: vec![encoded_msg],
-				},
-				signature,
-			));
+			let call = XtRequest::SubmitOutboundRequests(
+				bifrost_runtime::tx().blaze().submit_outbound_requests(
+					SocketMessagesSubmission {
+						authority_id: AccountId20(self.client.address().await.0.0),
+						messages: vec![encoded_msg],
+					},
+					signature,
+				),
+			);
 			match self.xt_request_sender.send(XtRequestMessage::new(
 				call,
 				XtRequestMetadata::SubmitOutboundRequests(metadata.clone()),
@@ -1283,6 +1304,20 @@ where
 
 	fn get_sub_client(&self) -> OnlineClient<CustomConfig> {
 		self.sub_client.clone()
+	}
+}
+
+impl<F, P, N: Network> SocketMessageSizeGuard for SocketRelayHandler<F, P, N>
+where
+	F: TxFiller<N> + WalletProvider<N>,
+	P: Provider<N>,
+{
+	fn sub_client(&self) -> &OnlineClient<CustomConfig> {
+		&self.sub_client
+	}
+
+	fn chain_name(&self) -> String {
+		self.client.get_chain_name()
 	}
 }
 

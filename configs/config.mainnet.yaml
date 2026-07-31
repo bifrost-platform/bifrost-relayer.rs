@@ -96,16 +96,6 @@ evm_providers:
     socket_address: "0xac1552e30857A814a225BAa81145bcB071B46DDd"
     authority_address: "0xA069a57426Cd4c53925c1847Bec01aAB832A5118"
     vault_address: "0xf549E4B5B4Cb7fd4e83b8AA047C742C06D527429"
-  - name: "core"
-    id: 1116
-    provider: "<YOUR_CORE_RPC_ENDPOINT>"
-    call_interval: 3000
-    block_confirmations: 3
-    is_relay_target: false
-    eip1559: false
-    socket_address: "0x4C7a44F3FB37A53F33D3fe3cCdE97A444F105239"
-    authority_address: "0xA069a57426Cd4c53925c1847Bec01aAB832A5118"
-    vault_address: "0x872b347cd764d46c127ffefbcaB605FFF3f3a48C"
   - name: "oasys"
     id: 248
     provider: "<YOUR_OASYS_RPC_ENDPOINT>"
@@ -119,7 +109,7 @@ evm_providers:
 
 handler_configs:
   - handler_type: Socket
-    watch_list: [ 3068, 1, 56, 137, 8453, 42161, 1116, 248 ]
+    watch_list: [ 3068, 1, 56, 137, 8453, 42161, 248 ]
   - handler_type: Roundup
     watch_list: [ 3068 ]
 
