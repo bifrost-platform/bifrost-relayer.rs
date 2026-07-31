@@ -35,7 +35,7 @@ use br_primitives::{
 	substrate::{CustomConfig, create_rpc_client},
 	tx::XtRequestSender,
 };
-use subxt::{OnlineClient, backend::legacy::LegacyRpcMethods};
+use subxt::{OnlineClient, rpcs::LegacyRpcMethods};
 
 /// Per-cluster Solana dependency bundle.
 pub struct SolDeps<F, P, N: AlloyNetwork>
@@ -75,7 +75,7 @@ where
 		bfc_client: Arc<EthClient<F, P, N>>,
 		xt_request_sender: Arc<XtRequestSender>,
 		sub_client: OnlineClient<CustomConfig>,
-		sub_rpc: LegacyRpcMethods<CustomConfig>,
+		sub_rpc: LegacyRpcMethods<subxt::config::RpcConfigFor<CustomConfig>>,
 		handle: SpawnTaskHandle,
 		debug_mode: bool,
 	) -> eyre::Result<Self> {
@@ -147,7 +147,7 @@ where
 		let rpc_client = create_rpc_client(sub_rpc_url)
 			.await
 			.map_err(|e| eyre::eyre!("create substrate RPC client for queue poller: {e}"))?;
-		LegacyRpcMethods::<CustomConfig>::new(rpc_client)
+		LegacyRpcMethods::<subxt::config::RpcConfigFor<CustomConfig>>::new(rpc_client)
 	};
 
 	let bootstrap_round_length = bfc_client
