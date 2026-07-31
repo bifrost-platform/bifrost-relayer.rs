@@ -34,11 +34,11 @@ url = { workspace = true }
 solana-sdk = { workspace = true }
 
 # Bifrost Relayer
-br-cli = { path = "../client/cli", default-features = false }
-br-client = { path = "../client", default-features = false }
-br-periodic = { path = "../periodic", default-features = false }
-br-primitives = { path = "../primitives", default-features = false }
-br-metrics = { path = "../metrics", default-features = false }
+br-cli = { workspace = true }
+br-client = { workspace = true }
+br-periodic = { workspace = true }
+br-primitives = { workspace = true }
+br-metrics = { workspace = true }
 
 # Substrate
 sc-cli = { workspace = true }

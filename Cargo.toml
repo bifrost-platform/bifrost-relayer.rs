@@ -20,6 +20,13 @@ license = "Apache-2.0"
 repository = "https://github.com/bifrost-platform/bifrost-relayer.rs"
 
 [workspace.dependencies]
+# Bifrost Relayer
+br-primitives = { path = "primitives", default-features = false }
+br-client = { path = "client", default-features = false }
+br-cli = { path = "client/cli", default-features = false }
+br-periodic = { path = "periodic", default-features = false }
+br-metrics = { path = "metrics", default-features = false }
+
 # General
 log = "0.4.29"
 env_logger = "0.11.9"

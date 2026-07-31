@@ -30,5 +30,5 @@ futures = { workspace = true }
 sc-service = { workspace = true }
 
 # Bifrost Relayer
-br-client = { path = "../client", default-features = false }
-br-primitives = { path = "../primitives", default-features = false }
+br-client = { workspace = true }
+br-primitives = { workspace = true }

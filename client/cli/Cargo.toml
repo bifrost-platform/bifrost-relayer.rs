@@ -20,8 +20,8 @@ tokio = { workspace = true, features = [
 ] }
 
 # Bifrost Relayer
-br-primitives = { path = "../../primitives", default-features = false }
-br-metrics = { path = "../../metrics", default-features = false }
+br-primitives = { workspace = true }
+br-metrics = { workspace = true }
 
 # Substrate
 sc-service = { workspace = true }
