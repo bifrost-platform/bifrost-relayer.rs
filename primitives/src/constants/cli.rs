@@ -22,6 +22,9 @@ pub const DEFAULT_ESCALATE_INTERVAL_SEC: u64 = 12;
 /// The maximum call interval allowed in milliseconds. (=60s)
 pub const MAX_CALL_INTERVAL_MS: u64 = 60_000;
 
+/// The default Solana slot polling interval in milliseconds. (=2s)
+pub const DEFAULT_SOL_CALL_INTERVAL_MS: u64 = 2_000;
+
 /// The maximum block confirmations allowed. (=100 blocks)
 pub const MAX_BLOCK_CONFIRMATIONS: u64 = 100;
 

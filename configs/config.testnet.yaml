@@ -96,6 +96,21 @@ handler_configs:
   - handler_type: Roundup
     watch_list: [49088]
 
+# Required single-cluster Solana wiring. It spawns a SlotManager, outbound
+# handler, and queue poller. Its `id` must also be registered
+# on Bifrost via `pallet-cccp-relay-queue` so the unsigned-extrinsic
+# submission path accepts it.
+sol_provider:
+  # SOL_DEV = b"SOL\0" = 0x534f4c00; paired with the Bifrost testbed.
+  # Cluster name and deployed program identity are derived from this ID.
+  id: 1397705728
+  provider: "https://api.devnet.solana.com"
+  ws_provider: "<Optional>"
+  # call_interval: 2000 # Optional; defaults to 2000ms.
+  is_relay_target: true
+  # Required only when is_relay_target is true; omitted for watch-only.
+  fee_payer_keypair_path: "<PATH_TO_FEE_PAYER_KEYPAIR_JSON>"
+
 ###  The items below are optional. ###
 
 bootstrap_config:

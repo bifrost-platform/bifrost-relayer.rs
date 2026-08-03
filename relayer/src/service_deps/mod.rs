@@ -3,6 +3,7 @@ mod full_deps;
 mod handler_deps;
 mod manager_deps;
 mod periodic_deps;
+mod sol_deps;
 mod substrate_deps;
 
 pub use btc_deps::BtcDeps;
@@ -10,6 +11,7 @@ pub use full_deps::FullDeps;
 pub use handler_deps::HandlerDeps;
 pub use manager_deps::ManagerDeps;
 pub use periodic_deps::PeriodicDeps;
+pub use sol_deps::{SolDeps, build_sol_deps};
 pub use substrate_deps::SubstrateDeps;
 
 use alloy::{

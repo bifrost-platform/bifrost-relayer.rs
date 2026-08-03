@@ -83,31 +83,36 @@ where
 	}
 
 	/// Verifies whether the given socket message has been executed.
+	///
+	/// The src and dst checks are independent so that messages whose source
+	/// chain isn't in `system_clients` (e.g., a Solana source, served via the
+	/// separate `sol_clients` map elsewhere) can still be marked executed on
+	/// the strength of the dst-side terminal status alone. Otherwise
+	/// Solana-sourced relays would forever fail the `(Some, Some)` match,
+	/// stay in the rollback queue, and trip `try_rollback` after the timeout
+	/// — sending a spurious `Rollback(Inbound-Failed-*)` for a transfer that
+	/// already completed successfully on the dst chain.
 	async fn is_request_executed(&self, socket_msg: &Socket_Message) -> Result<bool> {
-		let src_request = self
-			.get_socket_request(
-				&socket_msg.req_id,
-				Into::<u32>::into(socket_msg.req_id.ChainIndex) as ChainId,
-			)
-			.await?;
-		let dst_request = self
-			.get_socket_request(
-				&socket_msg.req_id,
-				Into::<u32>::into(socket_msg.ins_code.ChainIndex) as ChainId,
-			)
-			.await?;
+		let src_chain_id = Into::<u32>::into(socket_msg.req_id.ChainIndex) as ChainId;
+		let dst_chain_id = Into::<u32>::into(socket_msg.ins_code.ChainIndex) as ChainId;
+		let src_request = self.get_socket_request(&socket_msg.req_id, src_chain_id).await?;
+		let dst_request = self.get_socket_request(&socket_msg.req_id, dst_chain_id).await?;
 
-		if let (Some(src_request), Some(dst_request)) = (src_request, dst_request) {
+		// src-side terminal: Committed/Rollbacked closes the round trip
+		// unambiguously. Skipped when src isn't queryable here.
+		if let Some(src_request) = src_request {
 			let src_status = SocketEventStatus::from(&src_request.field[0]);
-			let dst_status = SocketEventStatus::from(&dst_request.field[0]);
-
 			match src_status {
 				SocketEventStatus::Committed | SocketEventStatus::Rollbacked => return Ok(true),
 				_ => (),
 			}
-			if self
-				.is_inbound_sequence(Into::<u32>::into(socket_msg.ins_code.ChainIndex) as ChainId)
-			{
+		}
+
+		// dst-side terminal: Inbound has 4 terminal statuses (the relayer
+		// stops voting at any of them), Outbound has 2.
+		if let Some(dst_request) = dst_request {
+			let dst_status = SocketEventStatus::from(&dst_request.field[0]);
+			if self.is_inbound_sequence(dst_chain_id) {
 				match dst_status {
 					SocketEventStatus::Executed
 					| SocketEventStatus::Reverted

@@ -18,4 +18,4 @@ alloy = { workspace = true }
 # Substrate
 prometheus-endpoint = { workspace = true }
 
-br-primitives = { path = "../primitives", default-features = false }
+br-primitives = { workspace = true }

@@ -11,4 +11,6 @@ where
 	pub handler_deps: HandlerDeps<F, P, N>,
 	pub substrate_deps: SubstrateDeps<F, P, N>,
 	pub btc_deps: BtcDeps<F, P, N>,
+	/// Single required Solana wiring bundle.
+	pub sol_deps: SolDeps<F, P, N>,
 }

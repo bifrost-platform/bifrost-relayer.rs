@@ -24,7 +24,9 @@ use tokio::sync::RwLock;
 
 use crate::{
 	cli::{LOG_TARGET, SUB_LOG_TARGET},
-	service_deps::{BtcDeps, FullDeps, HandlerDeps, ManagerDeps, PeriodicDeps, SubstrateDeps},
+	service_deps::{
+		BtcDeps, FullDeps, HandlerDeps, ManagerDeps, PeriodicDeps, SolDeps, SubstrateDeps,
+	},
 	verification::assert_configuration_validity,
 };
 use br_client::{
@@ -39,7 +41,7 @@ use br_primitives::{
 	bootstrap::BootstrapSharedData,
 	cli::{Configuration, HandlerType},
 	constants::{
-		cli::{DEFAULT_KEYSTORE_PATH, DEFAULT_PROMETHEUS_PORT},
+		cli::{DEFAULT_BOOTSTRAP_ROUND_OFFSET, DEFAULT_KEYSTORE_PATH, DEFAULT_PROMETHEUS_PORT},
 		errors::{
 			INVALID_BITCOIN_NETWORK, INVALID_PRIVATE_KEY, INVALID_PROVIDER_URL,
 			KMS_INITIALIZATION_ERROR,
@@ -202,6 +204,54 @@ pub async fn relay(config: Configuration) -> Result<TaskManager, ServiceError> {
 		&task_manager,
 		debug_mode,
 	);
+	// Build the required single-cluster Solana wiring BEFORE the handler deps
+	// so the SocketRelayHandler can be wired up with its outbound sender.
+	// Failure to construct the cluster (e.g. invalid program ID, unreadable fee-payer
+	// keypair, unreachable RPC endpoint) is a configuration error and
+	// fails fast at boot via the health probe.
+	let sol_deps = crate::service_deps::build_sol_deps(
+		&config.relayer_config.sol_provider,
+		bfc_client.clone(),
+		substrate_deps.xt_request_sender.clone(),
+		substrate_deps.sub_client.clone(),
+		&substrate_deps.sub_rpc_url,
+		task_manager.spawn_handle(),
+		debug_mode,
+		config
+			.relayer_config
+			.bootstrap_config
+			.as_ref()
+			.and_then(|bootstrap| bootstrap.round_offset)
+			.unwrap_or(DEFAULT_BOOTSTRAP_ROUND_OFFSET),
+	)
+	.await
+	.map_err(|e| ServiceError::Other(format!("failed to build Solana deps: {e}")))?;
+
+	// Keep the existing ChainId dispatch table used by the handlers, but
+	// populate it with the single configured Solana provider.
+	let sol_outbound_senders: std::sync::Arc<
+		std::collections::BTreeMap<
+			alloy::primitives::ChainId,
+			br_client::sol::handlers::outbound::SolOutboundSender,
+		>,
+	> = {
+		let mut map = std::collections::BTreeMap::new();
+		map.insert(sol_deps.client.chain_id, sol_deps.outbound_sender.clone());
+		std::sync::Arc::new(map)
+	};
+
+	// Parallel map of `SolClient`s keyed by the same `ChainId`. The
+	// RoundupRelayHandler uses these to probe `socket_config.latest_round_id`
+	// in the Solana dispatch + retry paths. Shares the same `Arc<RpcClient>`
+	// the outbound workers use, so no extra connection is opened.
+	let sol_clients: std::sync::Arc<
+		std::collections::BTreeMap<alloy::primitives::ChainId, br_client::sol::client::SolClient>,
+	> = {
+		let mut map = std::collections::BTreeMap::new();
+		map.insert(sol_deps.client.chain_id, sol_deps.client.clone());
+		std::sync::Arc::new(map)
+	};
+
 	let handler_deps = HandlerDeps::new(
 		&config,
 		&manager_deps,
@@ -209,6 +259,8 @@ pub async fn relay(config: Configuration) -> Result<TaskManager, ServiceError> {
 		bootstrap_shared_data.clone(),
 		bfc_client.clone(),
 		periodic_deps.rollback_senders.clone(),
+		sol_clients,
+		sol_outbound_senders,
 		&task_manager,
 		debug_mode,
 	)
@@ -228,7 +280,7 @@ pub async fn relay(config: Configuration) -> Result<TaskManager, ServiceError> {
 
 	Ok(spawn_relayer_tasks(
 		task_manager,
-		FullDeps { manager_deps, periodic_deps, handler_deps, substrate_deps, btc_deps },
+		FullDeps { manager_deps, periodic_deps, handler_deps, substrate_deps, btc_deps, sol_deps },
 		&config,
 	))
 }
@@ -245,7 +297,8 @@ where
 {
 	let prometheus_config = &config.relayer_config.prometheus_config;
 
-	let FullDeps { manager_deps, periodic_deps, handler_deps, substrate_deps, btc_deps } = deps;
+	let FullDeps { manager_deps, periodic_deps, handler_deps, substrate_deps, btc_deps, sol_deps } =
+		deps;
 
 	let ManagerDeps { event_managers, .. } = manager_deps;
 	let PeriodicDeps {
@@ -665,6 +718,97 @@ where
 			}
 		},
 	);
+
+	// Three workers for the required `sol_provider`: slot-manager / outbound /
+	// queue-poller. Inbound ingestion is the queue poller's job via
+	// `cccp-relay-queue`; there is no separate inbound handler.
+	let SolDeps {
+		client,
+		bootstrap_replay_slots,
+		mut slot_manager,
+		mut outbound,
+		outbound_sender: _,
+		mut queue_poller,
+	} = sol_deps;
+	{
+		let cluster_name = client.get_chain_name();
+
+		let slot_label = format!("solana-slot-manager-{}", cluster_name);
+		let slot_label: &'static str = Box::leak(slot_label.into_boxed_str());
+		task_manager.spawn_essential_handle().spawn(
+			slot_label,
+			Some("solana-slot-manager"),
+			async move {
+				// This relayer is stateless across process restarts, so the
+				// finalized bootstrap window is the recovery source of truth.
+				// Never enter live polling after a failed history fetch:
+				// doing so could permanently skip an event that falls behind
+				// the in-memory cursor.
+				loop {
+					match slot_manager.bootstrap_catchup(bootstrap_replay_slots).await {
+						Ok(()) => break,
+						Err(err) => {
+							log::error!(
+								"solana slot manager bootstrap catch-up failed: {err:?}; \
+								 retrying in 12 seconds before live polling",
+							);
+							sentry::capture_message(
+								&format!("solana bootstrap catch-up failed: {err:?}"),
+								sentry::Level::Error,
+							);
+							tokio::time::sleep(Duration::from_secs(12)).await;
+						},
+					}
+				}
+
+				loop {
+					let report = slot_manager.run().await;
+					let log_msg = format!(
+						"solana slot manager stopped: {report:?}\nRestarting in 12 seconds...",
+					);
+					log::error!("{log_msg}");
+					sentry::capture_message(&log_msg, sentry::Level::Error);
+					tokio::time::sleep(Duration::from_secs(12)).await;
+				}
+			},
+		);
+
+		let outbound_label = format!("solana-outbound-handler-{}", cluster_name);
+		let outbound_label: &'static str = Box::leak(outbound_label.into_boxed_str());
+		task_manager.spawn_essential_handle().spawn(
+			outbound_label,
+			Some("solana-outbound"),
+			async move {
+				loop {
+					let report = outbound.run().await;
+					let log_msg = format!(
+						"solana outbound handler stopped: {report:?}\nRestarting in 12 seconds...",
+					);
+					log::error!("{log_msg}");
+					sentry::capture_message(&log_msg, sentry::Level::Error);
+					tokio::time::sleep(Duration::from_secs(12)).await;
+				}
+			},
+		);
+
+		let queue_poller_label = format!("solana-queue-poller-{}", cluster_name);
+		let queue_poller_label: &'static str = Box::leak(queue_poller_label.into_boxed_str());
+		task_manager.spawn_essential_handle().spawn(
+			queue_poller_label,
+			Some("solana-queue-poller"),
+			async move {
+				loop {
+					let report = queue_poller.run().await;
+					let log_msg = format!(
+						"solana queue poller stopped: {report:?}\nRestarting in 12 seconds...",
+					);
+					log::error!("{log_msg}");
+					sentry::capture_message(&log_msg, sentry::Level::Error);
+					tokio::time::sleep(Duration::from_secs(12)).await;
+				}
+			},
+		);
+	}
 
 	// spawn prometheus endpoint
 	if let Some(prometheus_config) = prometheus_config {
