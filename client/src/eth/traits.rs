@@ -536,26 +536,20 @@ where
 	/// # Returns
 	/// * `Ok(())` - If gas estimation and fee calculation succeed.
 	/// * `Err(_)` - If any step fails (e.g., oracle failure, fee exceeds limit).
-	async fn estimate_hook_gas(
+	/// Estimates the gas required for a `Hooks.execute()` transaction request, on the
+	/// destination chain.
+	///
+	/// # Returns
+	/// * `Ok(Some(gas))` - If gas estimation succeeded.
+	/// * `Ok(None)` - If the estimation reverted, indicating the hook execution should be skipped.
+	/// * `Err(_)` - If an RPC error unrelated to a revert occurs.
+	async fn estimate_hook_gas_or_skip(
 		&self,
-		msg: &Socket_Message,
-		max_tx_fee: U256,
 		tx_request: &N::TransactionRequest,
-		is_inbound: bool,
-	) -> Result<(U256, u64)> {
-		// Validate: maxTxFee must not exceed the bridged amount
-		if max_tx_fee > msg.params.amount {
-			return Err(eyre::eyre!(
-				"max_tx_fee ({}) exceeds bridged amount ({})",
-				max_tx_fee,
-				msg.params.amount
-			));
-		}
-
-		// Estimate gas and fee on destination chain
+	) -> Result<Option<u64>> {
 		avoid_race_condition().await;
-		let gas = match self.get_client().estimate_gas(tx_request.clone()).await {
-			Ok(gas) => gas,
+		match self.get_client().estimate_gas(tx_request.clone()).await {
+			Ok(gas) => Ok(Some(gas)),
 			Err(e) => {
 				// Check if error is a revert, either directly or wrapped in retry error
 				let error_string = e.to_string();
@@ -574,10 +568,33 @@ where
 						"⚠️  Hook.execute() estimated gas reverted: {}",
 						error_string
 					);
-					return Ok((U256::ZERO, 0));
+					return Ok(None);
 				}
-				return Err(e.into());
+				Err(e.into())
 			},
+		}
+	}
+
+	async fn estimate_hook_gas(
+		&self,
+		msg: &Socket_Message,
+		max_tx_fee: U256,
+		tx_request: &N::TransactionRequest,
+		is_inbound: bool,
+	) -> Result<(U256, u64)> {
+		// Validate: maxTxFee must not exceed the bridged amount
+		if max_tx_fee > msg.params.amount {
+			return Err(eyre::eyre!(
+				"max_tx_fee ({}) exceeds bridged amount ({})",
+				max_tx_fee,
+				msg.params.amount
+			));
+		}
+
+		// Estimate gas and fee on destination chain
+		let gas = match self.estimate_hook_gas_or_skip(tx_request).await? {
+			Some(gas) => gas,
+			None => return Ok((U256::ZERO, 0)),
 		};
 		let gas_price = self.get_client().get_gas_price().await?;
 		// DNC: Destination Chain's Native Currency
@@ -1021,26 +1038,37 @@ where
 	) -> Result<()> {
 		match &self.get_client().protocol_contracts.hooks {
 			Some(hooks) => {
+				let is_feeless =
+					self.get_client().metadata.feeless_hook_contracts.contains(&variants.receiver);
+				let init_fee = if is_feeless { U256::ZERO } else { variants.max_tx_fee };
+
 				log::info!(
 					target: &self.get_client().get_chain_name(),
-					"-[{}] 🪝 Calling Hooks.execute() on chain {} with txFee: {} for sequence: {}",
+					"-[{}] 🪝 Calling Hooks.execute() on chain {} with txFee: {} for sequence: {}{}",
 					sub_display_format(SUB_LOG_TARGET),
 					self.get_client().metadata.id,
 					variants.max_tx_fee,
-					msg.req_id.sequence
+					msg.req_id.sequence,
+					if is_feeless { " (feeless: whitelisted receiver)" } else { "" }
 				);
 
 				// Build the Hooks.execute() call for initial gas estimation
 				let init_tx_request = hooks
-					.execute_0(variants.max_tx_fee, msg.clone().into())
+					.execute_0(init_fee, msg.clone().into())
 					.into_transaction_request()
 					.with_from(self.get_client().address().await);
 
-				let (fee_in_bridged_asset, gas) = self
-					.estimate_hook_gas(&msg, variants.max_tx_fee, &init_tx_request, is_inbound)
-					.await?;
+				let (fee_in_bridged_asset, gas) = if is_feeless {
+					match self.estimate_hook_gas_or_skip(&init_tx_request).await? {
+						Some(gas) => (U256::ZERO, gas),
+						None => return Ok(()), // reverted, skip execution
+					}
+				} else {
+					self.estimate_hook_gas(&msg, variants.max_tx_fee, &init_tx_request, is_inbound)
+						.await?
+				};
 
-				if fee_in_bridged_asset.is_zero() || gas == 0 {
+				if (!is_feeless && fee_in_bridged_asset.is_zero()) || gas == 0 {
 					// Skip execution, don't submit transaction
 					return Ok(());
 				}

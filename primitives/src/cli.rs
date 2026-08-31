@@ -96,6 +96,11 @@ pub struct EVMProvider {
 	/// execution is skipped to prevent draining the relayer's native balance.
 	/// Only relevant for chains that have `hooks_address` configured.
 	pub max_hook_fee: Option<u128>,
+	/// Addresses of hook target contracts (i.e. `Variants.receiver`) that are whitelisted for
+	/// feeless hook execution. When the hook's receiver matches one of these addresses,
+	/// `Hooks.execute()` is called with a fee of zero instead of the estimated fee.
+	/// Only relevant for chains that have `hooks_address` configured.
+	pub feeless_hook_contracts: Option<Vec<String>>,
 	/// Socket contract address
 	pub socket_address: String,
 	/// Authority contract address

@@ -1,6 +1,9 @@
 use alloy::{
 	network::Network,
-	primitives::{Address, ChainId, U256, map::AddressHashMap},
+	primitives::{
+		Address, ChainId, U256,
+		map::{AddressHashMap, AddressHashSet},
+	},
 	providers::{
 		Provider, WalletProvider,
 		fillers::{FillProvider, TxFiller},
@@ -111,6 +114,9 @@ pub struct ProviderMetadata {
 	/// Maximum fee in native currency wei the relayer will pay for a single `Hooks.execute()`.
 	/// Hook execution is skipped if the estimated gas cost exceeds this value.
 	pub max_hook_fee: Option<U256>,
+	/// Hook target contract addresses (`Variants.receiver`) whitelisted for feeless hook
+	/// execution. `Hooks.execute()` is called with a zero fee when the receiver is a member.
+	pub feeless_hook_contracts: AddressHashSet,
 }
 
 impl ProviderMetadata {
@@ -140,6 +146,12 @@ impl ProviderMetadata {
 			},
 			is_relay_target: evm_provider.is_relay_target,
 			max_hook_fee: evm_provider.max_hook_fee.map(U256::from),
+			feeless_hook_contracts: evm_provider
+				.feeless_hook_contracts
+				.unwrap_or_default()
+				.iter()
+				.map(|address| Address::from_str(address).expect(INVALID_CONTRACT_ADDRESS))
+				.collect(),
 		}
 	}
 }
