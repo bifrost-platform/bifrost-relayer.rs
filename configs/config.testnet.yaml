@@ -33,6 +33,10 @@ evm_providers:
     authority_address: "0x0000000000000000000000000000000000000400"
     vault_address: "0x90381bB369D4F8069fdA9246b23637a78c5d1c83"
     hooks_address: "0xc945016bf1a4Dea71D0F6AbfD1E9Dc7075Bc3874"
+    # Optional: hook target contracts (Variants.receiver) that are exempted from hook fees.
+    # Hooks.execute() is called with a fee of 0 when the receiver matches one of these addresses.
+    # feeless_hook_contracts:
+    #   - "0x0000000000000000000000000000000000000000"
     relayer_manager_address: "0x0000000000000000000000000000000000002000"
     bitcoin_socket_address: "0xc292D9d5c31D5246cfAC67ba91202bbCF0AA8108"
     socket_queue_address: "0x0000000000000000000000000000000000000101"
