@@ -1,8 +1,11 @@
 Dockerfile
 Cargo.lock
-.editorconfig
-.gitignore
-target
 media
+target
+LICENSE
+rustfmt.toml
 .idea
+.editorconfig
+.git
 .github
+.gitignore

@@ -85,17 +85,6 @@ evm_providers:
     vault_address: "0x4F7aB59b5AC112970F5dD66D8a7ac505c8E5e08B"
     chainlink_wbtc_usd_address: "0xCCADC697c55bbB68dc5bCdf8d3CBe83CdD4E071E"
     chainlink_cbbtc_usd_address: "0x07DA0E54543a844a80ABE69c8A12F22B3aA59f9D"
-  - name: "arbitrum"
-    id: 42161
-    provider: "<YOUR_ARBITRUM_ONE_RPC_ENDPOINT>"
-    call_interval: 2000
-    block_confirmations: 5
-    get_logs_batch_size: 8
-    is_relay_target: false
-    eip1559: true
-    socket_address: "0xac1552e30857A814a225BAa81145bcB071B46DDd"
-    authority_address: "0xA069a57426Cd4c53925c1847Bec01aAB832A5118"
-    vault_address: "0xf549E4B5B4Cb7fd4e83b8AA047C742C06D527429"
   - name: "oasys"
     id: 248
     provider: "<YOUR_OASYS_RPC_ENDPOINT>"
@@ -109,7 +98,7 @@ evm_providers:
 
 handler_configs:
   - handler_type: Socket
-    watch_list: [ 3068, 1, 56, 137, 8453, 42161, 248 ]
+    watch_list: [ 3068, 1, 56, 137, 8453, 248 ]
   - handler_type: Roundup
     watch_list: [ 3068 ]
 

@@ -84,19 +84,17 @@ where
 
 				let new_relayers = self.fetch_validator_list(latest_round).await?;
 
-				if !self.is_selected_relayer(latest_round - U256::from(1)).await? {
-					continue;
+				if self.is_selected_relayer(latest_round - U256::from(1)).await? {
+					self.request_send_transaction(
+						self.build_transaction(
+							latest_round,
+							new_relayers.clone(),
+							self.client.address().await,
+						)
+						.await?,
+						VSPPhase1Metadata::new(latest_round, new_relayers.clone()),
+					);
 				}
-
-				self.request_send_transaction(
-					self.build_transaction(
-						latest_round,
-						new_relayers.clone(),
-						self.client.address().await,
-					)
-					.await?,
-					VSPPhase1Metadata::new(latest_round, new_relayers.clone()),
-				);
 
 				self.current_round = latest_round;
 				self.client.update_default_address(Some(&new_relayers)).await;

@@ -21,8 +21,7 @@ tokio = { workspace = true, features = [
 	"macros",
 ] }
 miniscript = { workspace = true }
-subxt = { workspace = true }
-jsonrpsee = { workspace = true }
+subxt = { workspace = true, features = ["reconnecting-rpc-client"] }
 bitcoincore-rpc = { workspace = true }
 url = { workspace = true }
 sha3 = { workspace = true }
