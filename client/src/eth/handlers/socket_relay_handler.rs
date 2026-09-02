@@ -46,6 +46,12 @@ use crate::{
 
 const SUB_LOG_TARGET: &str = "socket-handler";
 
+/// Consecutive on-chain verification attempts that fail to find a pending event
+/// before it is dropped as reorged-out. After a reorg the event's transaction
+/// goes back to the mempool and is usually re-included within a block or two, so
+/// this must comfortably exceed that latency (≈ `MAX_ABSENT_CHECKS` × `call_interval`).
+const MAX_ABSENT_CHECKS: u32 = 5;
+
 /// A pending event waiting for block confirmations.
 #[derive(Clone, Debug)]
 struct PendingEvent {
@@ -53,6 +59,10 @@ struct PendingEvent {
 	log: Log,
 	/// The block number when this event was received.
 	block_number: u64,
+	/// Consecutive verification attempts that did not find the event on-chain.
+	/// Reset whenever the event is seen again; the event is dropped once this
+	/// reaches `MAX_ABSENT_CHECKS`.
+	absent_checks: u32,
 }
 
 /// The essential task that handles `socket relay` related events.
@@ -137,6 +147,7 @@ where
 											self.pending_events.write().await.push(PendingEvent {
 												log,
 												block_number: msg.block_number,
+												absent_checks: 0,
 											});
 											new_pending_count += 1;
 										}
@@ -497,6 +508,8 @@ where
 		// Track indices to remove and updates to apply
 		let mut indices_to_remove: Vec<usize> = Vec::new();
 		let mut block_updates: Vec<(usize, u64)> = Vec::new();
+		// Events not found on-chain this round (transient after a reorg, or gone).
+		let mut absent_bumps: Vec<usize> = Vec::new();
 
 		// Get events to check
 		let events_to_check: Vec<(usize, PendingEvent)> = {
@@ -543,14 +556,32 @@ where
 					block_updates.push((idx, current_block));
 				},
 				Ok(None) => {
-					// Event no longer exists (reorged out completely)
-					log::warn!(
-						target: &self.client.get_chain_name(),
-						"-[{}] ⚠️ Event from block #{} no longer exists on-chain (reorged out), skipping",
-						sub_display_format(SUB_LOG_TARGET),
-						event.block_number,
-					);
-					indices_to_remove.push(idx);
+					// Not found on-chain. Right after a reorg the emitting transaction
+					// sits in the mempool and is re-included a block or two later, so
+					// this is often transient. EventManager will not re-deliver an
+					// event that is re-mined at the same height, so retry a few times
+					// here before giving up.
+					let next_absent_checks = event.absent_checks.saturating_add(1);
+					if next_absent_checks >= MAX_ABSENT_CHECKS {
+						log::warn!(
+							target: &self.client.get_chain_name(),
+							"-[{}] ⚠️ Event from block #{} not found on-chain after {} checks, dropping (reorged out)",
+							sub_display_format(SUB_LOG_TARGET),
+							event.block_number,
+							next_absent_checks,
+						);
+						indices_to_remove.push(idx);
+					} else {
+						log::warn!(
+							target: &self.client.get_chain_name(),
+							"-[{}] ⚠️ Event from block #{} not found on-chain (check {}/{}), retrying",
+							sub_display_format(SUB_LOG_TARGET),
+							event.block_number,
+							next_absent_checks,
+							MAX_ABSENT_CHECKS,
+						);
+						absent_bumps.push(idx);
+					}
 				},
 				Err(e) => {
 					log::warn!(
@@ -564,12 +595,24 @@ where
 			}
 		}
 
-		// Apply block number updates
+		// Apply block number updates (event re-mined at a new height — seen again,
+		// so reset the absent counter)
 		if !block_updates.is_empty() {
 			let mut pending = self.pending_events.write().await;
 			for (idx, new_block) in block_updates {
-				if idx < pending.len() {
-					pending[idx].block_number = new_block;
+				if let Some(entry) = pending.get_mut(idx) {
+					entry.block_number = new_block;
+					entry.absent_checks = 0;
+				}
+			}
+		}
+
+		// Bump the absent counter for events not found on-chain this round
+		if !absent_bumps.is_empty() {
+			let mut pending = self.pending_events.write().await;
+			for idx in absent_bumps {
+				if let Some(entry) = pending.get_mut(idx) {
+					entry.absent_checks = entry.absent_checks.saturating_add(1);
 				}
 			}
 		}
@@ -590,7 +633,9 @@ where
 	}
 
 	/// Verify that an event still exists on-chain and find its current block.
-	/// Returns Ok(Some(block_number)) if found, Ok(None) if reorged out completely.
+	/// Returns Ok(Some(block_number)) if the emitting transaction is mined and still
+	/// carries a log from the socket contract, Ok(None) otherwise (transaction
+	/// missing, still in the mempool, or re-mined without the log).
 	async fn verify_event_on_chain(&self, event: &PendingEvent) -> Result<Option<u64>> {
 		let log = &event.log;
 		let tx_hash = log.transaction_hash;
@@ -601,19 +646,19 @@ where
 
 			if let Some(tx) = self.client.get_transaction_by_hash(tx_hash).await? {
 				if let Some(current_block) = tx.block_number() {
-					// Transaction exists, verify the log is still in it
+					// Transaction is mined. Confirm it still emits a log from the
+					// socket contract. We deliberately do not match on `log_index`:
+					// a reorg that re-mines the transaction into a differently
+					// composed block changes the block-level log index even though
+					// it is the same event.
 					let filter = Filter::new()
 						.address(log.address())
 						.from_block(current_block)
 						.to_block(current_block);
 
 					let logs = self.client.get_logs(&filter).await?;
-					let log_index = log.log_index;
 
-					if logs
-						.iter()
-						.any(|l| l.transaction_hash == Some(tx_hash) && l.log_index == log_index)
-					{
+					if logs.iter().any(|l| l.transaction_hash == Some(tx_hash)) {
 						return Ok(Some(current_block));
 					}
 				}
