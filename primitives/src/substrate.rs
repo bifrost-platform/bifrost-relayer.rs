@@ -40,11 +40,13 @@ pub use runtime_types::{
 };
 
 use super::constants::errors::INVALID_PROVIDER_URL;
-use jsonrpsee::ws_client::WsClientBuilder;
 use subxt::{
 	OnlineClient,
 	config::{Config, DefaultTransactionExtensions, SubstrateConfig},
-	rpcs::RpcClient,
+	rpcs::{
+		RpcClient,
+		client::{ReconnectingRpcClient, reconnecting_rpc_client::RpcError},
+	},
 };
 use url::Url;
 
@@ -79,12 +81,17 @@ pub async fn initialize_sub_client(mut url: Url) -> OnlineClient<CustomConfig> {
 }
 
 /// Create an `RpcClient` with an increased max WebSocket response body size.
-pub async fn create_rpc_client(url: &str) -> Result<RpcClient, jsonrpsee::core::ClientError> {
-	let ws_client = WsClientBuilder::default()
+///
+/// The underlying transport is a self-reconnecting WebSocket client: if the connection to the
+/// node provider drops, it automatically re-establishes the connection (with exponential
+/// backoff) in the background instead of leaving every subsequent call failing with
+/// "restart required".
+pub async fn create_rpc_client(url: &str) -> Result<RpcClient, RpcError> {
+	let reconnecting_client = ReconnectingRpcClient::builder()
 		.max_response_size(MAX_WS_RESPONSE_BODY_SIZE)
 		.build(url)
 		.await?;
-	Ok(RpcClient::new(ws_client))
+	Ok(RpcClient::new(reconnecting_client))
 }
 
 pub fn get_sub_rpc_url(mut url: Url) -> String {
