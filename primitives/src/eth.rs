@@ -18,6 +18,7 @@ use crate::{
 	cli::EVMProvider,
 	constants::{
 		cli::DEFAULT_GET_LOGS_BATCH_SIZE,
+		config::DEFAULT_HOOK_GAS_MULTIPLIER,
 		errors::{INVALID_CONTRACT_ADDRESS, MISSING_CONTRACT_ADDRESS},
 	},
 	contracts::{
@@ -117,6 +118,9 @@ pub struct ProviderMetadata {
 	/// Hook target contract addresses (`Variants.receiver`) whitelisted for feeless hook
 	/// execution. `Hooks.execute()` is called with a zero fee when the receiver is a member.
 	pub feeless_hook_contracts: AddressHashSet,
+	/// The coefficient multiplied to the estimated gas of a `Hooks.execute()`/`Hooks.rollback()`
+	/// transaction before it's set as the transaction's gas limit.
+	pub hook_gas_multiplier: f64,
 }
 
 impl ProviderMetadata {
@@ -152,6 +156,9 @@ impl ProviderMetadata {
 				.iter()
 				.map(|address| Address::from_str(address).expect(INVALID_CONTRACT_ADDRESS))
 				.collect(),
+			hook_gas_multiplier: evm_provider
+				.hook_gas_multiplier
+				.unwrap_or(DEFAULT_HOOK_GAS_MULTIPLIER),
 		}
 	}
 }

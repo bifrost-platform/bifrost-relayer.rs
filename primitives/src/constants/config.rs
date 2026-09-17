@@ -28,3 +28,7 @@ pub const PRICE_FETCHER_REQUEST_TIMEOUT: u64 = 30;
 /// 200 bps = 2%. If the market price deviates from the on-chain oracle price
 /// by more than this threshold, an immediate price feed will be triggered.
 pub const DEFAULT_PRICE_DEVIATION_THRESHOLD_BPS: u64 = 200;
+
+/// The default coefficient multiplied to the estimated gas of a `Hooks.execute()`/
+/// `Hooks.rollback()` transaction when no `hook_gas_multiplier` is configured (i.e. no buffer).
+pub const DEFAULT_HOOK_GAS_MULTIPLIER: f64 = 1.0;

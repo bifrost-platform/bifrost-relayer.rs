@@ -101,6 +101,11 @@ pub struct EVMProvider {
 	/// `Hooks.execute()` is called with a fee of zero instead of the estimated fee.
 	/// Only relevant for chains that have `hooks_address` configured.
 	pub feeless_hook_contracts: Option<Vec<String>>,
+	/// The coefficient multiplied to the estimated gas of a `Hooks.execute()`/`Hooks.rollback()`
+	/// transaction before it's set as the transaction's gas limit (e.g. `1.2` adds a 20% buffer).
+	/// Defaults to `1.0` (no buffer) when unset. Only relevant for chains that have
+	/// `hooks_address` configured.
+	pub hook_gas_multiplier: Option<f64>,
 	/// Socket contract address
 	pub socket_address: String,
 	/// Authority contract address

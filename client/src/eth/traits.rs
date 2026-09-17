@@ -537,10 +537,11 @@ where
 	/// * `Ok(())` - If gas estimation and fee calculation succeed.
 	/// * `Err(_)` - If any step fails (e.g., oracle failure, fee exceeds limit).
 	/// Estimates the gas required for a `Hooks.execute()` transaction request, on the
-	/// destination chain.
+	/// destination chain. The raw estimate is scaled by `metadata.hook_gas_multiplier` to
+	/// add a safety buffer before it's used as the transaction's gas limit.
 	///
 	/// # Returns
-	/// * `Ok(Some(gas))` - If gas estimation succeeded.
+	/// * `Ok(Some(gas))` - If gas estimation succeeded, scaled by `hook_gas_multiplier`.
 	/// * `Ok(None)` - If the estimation reverted, indicating the hook execution should be skipped.
 	/// * `Err(_)` - If an RPC error unrelated to a revert occurs.
 	async fn estimate_hook_gas_or_skip(
@@ -549,7 +550,11 @@ where
 	) -> Result<Option<u64>> {
 		avoid_race_condition().await;
 		match self.get_client().estimate_gas(tx_request.clone()).await {
-			Ok(gas) => Ok(Some(gas)),
+			Ok(gas) => {
+				let multiplier = self.get_client().metadata.hook_gas_multiplier;
+				let buffered_gas = (gas as f64 * multiplier).ceil() as u64;
+				Ok(Some(buffered_gas))
+			},
 			Err(e) => {
 				// Check if error is a revert, either directly or wrapped in retry error
 				let error_string = e.to_string();
