@@ -29,3 +29,7 @@ pub const DEFAULT_PRICE_DEVIATION_THRESHOLD_BPS: u64 = 200;
 /// The price deviation threshold in basis points (bps) for stablecoins.
 /// 25 bps = 0.25%, matching Chainlink's deviation threshold for stablecoin/USD feeds.
 pub const STABLECOIN_PRICE_DEVIATION_THRESHOLD_BPS: u64 = 25;
+
+/// The default coefficient multiplied to the estimated gas of a `Hooks.execute()`/
+/// `Hooks.rollback()` transaction when no `hook_gas_multiplier` is configured (i.e. no buffer).
+pub const DEFAULT_HOOK_GAS_MULTIPLIER: f64 = 1.0;
