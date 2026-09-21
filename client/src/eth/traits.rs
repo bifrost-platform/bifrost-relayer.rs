@@ -565,6 +565,11 @@ where
 				};
 
 				if is_revert {
+					// Some revert reasons are expected and not worth logging/tracking
+					if error_string.contains("Already processed") {
+						return Ok(None);
+					}
+
 					br_primitives::log_and_capture!(
 						warn,
 						&self.get_client().get_chain_name(),
