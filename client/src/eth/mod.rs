@@ -663,15 +663,19 @@ pub fn send_transaction<F, P, N: Network>(
 				);
 				log::error!(target: &requester, "{msg}");
 
-				const SENTRY_IGNORE_PATTERNS: [&str; 4] = [
+				const SENTRY_IGNORE_PATTERNS: [&str; 6] = [
 					// roundup already executed on external chain through round_control_relay()
 					"latest round",
 					// outbound aggregated relay already executed
 					"_outbound_exec_relay status",
+					// outbound aggregated relay already reverted
+					"_outbound_revert_relay status",
 					// inbound aggregated relay already executed
 					"phase3",
 					// bridge request already committed
 					"revert poll filtered",
+					// Hook execution already executed
+					"Already processed",
 				];
 				if !SENTRY_IGNORE_PATTERNS.iter().any(|pattern| err_string.contains(pattern)) {
 					sentry::capture_message(&msg, sentry::Level::Error);
