@@ -20,4 +20,8 @@ pub const MAX_FEE_COEFFICIENT: u64 = 2;
 pub const MAX_PRIORITY_FEE_COEFFICIENT: u64 = 2;
 
 /// The interval in milliseconds before retrying a failed roundup relay to an external chain.
-pub const ROUNDUP_RELAY_RETRY_INTERVAL_MS: u64 = 600_000; // 10 minutes
+pub const ROUNDUP_RELAY_RETRY_INTERVAL_MS: u64 = 180_000; // 3 minutes
+
+/// The interval in milliseconds before retrying a socket relay that was parked because the
+/// destination chain hadn't yet synced to the message's `req_id.round_id` via roundup phase2.
+pub const SOCKET_RELAY_RETRY_INTERVAL_MS: u64 = 180_000; // 3 minutes
