@@ -25,7 +25,7 @@ use br_primitives::{
 		CustomConfig,
 		bifrost_runtime::{self, runtime_types::bp_oracle::OracleKey},
 	},
-	tx::HookMetadata,
+	tx::{HookMetadata, SocketRelayMetadata},
 	utils::{recover_message, sub_display_format},
 };
 use eyre::Result;
@@ -243,6 +243,18 @@ pub trait BootstrapHandler {
 	}
 }
 
+/// Formats the identifying fields of a socket message for hook-related logs.
+pub fn hook_msg_info(msg: &Socket_Message) -> String {
+	format!(
+		"Socket({:?}-{}, {} -> {}, round: {})",
+		SocketEventStatus::from(msg.status),
+		msg.req_id.sequence,
+		Into::<u32>::into(msg.req_id.ChainIndex),
+		Into::<u32>::into(msg.ins_code.ChainIndex),
+		msg.req_id.round_id,
+	)
+}
+
 #[async_trait::async_trait]
 pub trait HookExecutor<F, P, N: Network>
 where
@@ -408,8 +420,9 @@ where
 					&self.get_client().get_chain_name(),
 					SUB_LOG_TARGET,
 					self.get_client().address().await,
-					"⚠️  Source chain client not found for chain id: {}. Skipping hook processing.",
-					src_chain_id
+					"⚠️  Source chain client not found for chain id: {}. Skipping hook processing. ({})",
+					src_chain_id,
+					hook_msg_info(msg)
 				);
 				return Ok(None);
 			},
@@ -420,8 +433,9 @@ where
 			None => {
 				log::warn!(
 					target: &self.get_client().get_chain_name(),
-					"-[{}] ⏭️  Skipping hook processing: source chain has no hooks contract",
-					sub_display_format(SUB_LOG_TARGET)
+					"-[{}] ⏭️  Skipping hook processing: source chain has no hooks contract ({})",
+					sub_display_format(SUB_LOG_TARGET),
+					hook_msg_info(msg)
 				);
 				return Ok(None);
 			},
@@ -431,10 +445,11 @@ where
 		if msg.params.refund != *hooks_address {
 			log::warn!(
 				target: &self.get_client().get_chain_name(),
-				"-[{}] ⏭️  Skipping hook processing: refund address {:?} != hooks address {:?}",
+				"-[{}] ⏭️  Skipping hook processing: refund address {:?} != hooks address {:?} ({})",
 				sub_display_format(SUB_LOG_TARGET),
 				msg.params.refund,
-				hooks_address
+				hooks_address,
+				hook_msg_info(msg)
 			);
 			return Ok(None);
 		}
@@ -462,22 +477,24 @@ where
 			Ok(variants) => {
 				log::info!(
 					target: &self.get_client().get_chain_name(),
-					"-[{}] ✅ Decoded variants: sender={:?}, receiver={:?}, refund={:?}, max_tx_fee={}, message_len={}",
+					"-[{}] ✅ Decoded variants: sender={:?}, receiver={:?}, refund={:?}, max_tx_fee={}, message_len={} ({})",
 					sub_display_format(SUB_LOG_TARGET),
 					variants.sender,
 					variants.receiver,
 					variants.refund,
 					variants.max_tx_fee,
-					variants.message.len()
+					variants.message.len(),
+					hook_msg_info(msg)
 				);
 				return Ok(Some(variants));
 			},
 			Err(e) => {
 				log::warn!(
 					target: &self.get_client().get_chain_name(),
-					"-[{}] ⚠️  Failed to decode variants, skipping hook processing: {}",
+					"-[{}] ⚠️  Failed to decode variants, skipping hook processing: {} ({})",
 					sub_display_format(SUB_LOG_TARGET),
-					e
+					e,
+					hook_msg_info(msg)
 				);
 				return Ok(None);
 			},
@@ -548,6 +565,7 @@ where
 	/// * `Err(_)` - If an RPC error unrelated to a revert occurs.
 	async fn estimate_hook_gas_or_skip(
 		&self,
+		msg: &Socket_Message,
 		tx_request: &N::TransactionRequest,
 	) -> Result<Option<u64>> {
 		avoid_race_condition().await;
@@ -567,19 +585,26 @@ where
 				};
 
 				if is_revert {
-					// Some revert reasons are expected and not worth logging/tracking
+					// "Already processed" reverts are expected and not worth tracking
 					if error_string.contains("Already processed") {
-						return Ok(None);
+						log::warn!(
+							target: &self.get_client().get_chain_name(),
+							"-[{}] ⚠️  Hook.execute() estimated gas reverted: {} ({})",
+							sub_display_format(SUB_LOG_TARGET),
+							error_string,
+							hook_msg_info(msg)
+						);
+					} else {
+						br_primitives::log_and_capture!(
+							warn,
+							&self.get_client().get_chain_name(),
+							SUB_LOG_TARGET,
+							self.get_client().address().await,
+							"⚠️  Hook.execute() estimated gas reverted: {} ({})",
+							error_string,
+							hook_msg_info(msg)
+						);
 					}
-
-					br_primitives::log_and_capture!(
-						warn,
-						&self.get_client().get_chain_name(),
-						SUB_LOG_TARGET,
-						self.get_client().address().await,
-						"⚠️  Hook.execute() estimated gas reverted: {}",
-						error_string
-					);
 					return Ok(None);
 				}
 				Err(e.into())
@@ -604,7 +629,7 @@ where
 		}
 
 		// Estimate gas and fee on destination chain
-		let gas = match self.estimate_hook_gas_or_skip(tx_request).await? {
+		let gas = match self.estimate_hook_gas_or_skip(msg, tx_request).await? {
 			Some(gas) => gas,
 			None => return Ok((U256::ZERO, 0)),
 		};
@@ -622,9 +647,10 @@ where
 					&self.get_client().get_chain_name(),
 					SUB_LOG_TARGET,
 					self.get_client().address().await,
-					"⚠️  Estimated hook fee ({} wei) exceeds max_hook_fee limit ({} wei). Skipping hook execution.",
+					"⚠️  Estimated hook fee ({} wei) exceeds max_hook_fee limit ({} wei). Skipping hook execution. ({})",
 					estimated_fee_in_dnc,
-					max_hook_fee
+					max_hook_fee,
+					hook_msg_info(msg)
 				);
 				return Ok((U256::ZERO, 0));
 			}
@@ -643,8 +669,9 @@ where
 					&self.get_client().get_chain_name(),
 					SUB_LOG_TARGET,
 					self.get_client().address().await,
-					"⚠️  DNC oracle ID not found for chain {}. Skipping hook execution.",
-					dst_chain_id
+					"⚠️  DNC oracle ID not found for chain {}. Skipping hook execution. ({})",
+					dst_chain_id,
+					hook_msg_info(msg)
 				);
 				return Ok((U256::ZERO, 0));
 			},
@@ -652,21 +679,24 @@ where
 
 		// Resolve the unified asset address for the bridged token from the relay queue pallet.
 		// AssetIndexes maps tokenIDX0 → AssetId (H160) registered in the oracle registry.
-		let bridged_asset_id =
-			match self.fetch_asset_id_from_relay_queue(msg.params.tokenIDX0).await? {
-				Some(id) => id,
-				None => {
-					br_primitives::log_and_capture!(
-						warn,
-						&self.get_client().get_chain_name(),
-						SUB_LOG_TARGET,
-						self.get_client().address().await,
-						"⚠️  Bridged asset not found in relay queue for tokenIDX0 {:?}. Skipping hook execution.",
-						msg.params.tokenIDX0
-					);
-					return Ok((U256::ZERO, 0));
-				},
-			};
+		let bridged_asset_id = match self
+			.fetch_asset_id_from_relay_queue(msg.params.tokenIDX0)
+			.await?
+		{
+			Some(id) => id,
+			None => {
+				br_primitives::log_and_capture!(
+					warn,
+					&self.get_client().get_chain_name(),
+					SUB_LOG_TARGET,
+					self.get_client().address().await,
+					"⚠️  Bridged asset not found in relay queue for tokenIDX0 {:?}. Skipping hook execution. ({})",
+					msg.params.tokenIDX0,
+					hook_msg_info(msg)
+				);
+				return Ok((U256::ZERO, 0));
+			},
+		};
 
 		// Fetch bridged asset decimals from the destination chain
 		let bridged_asset = self
@@ -688,8 +718,9 @@ where
 					&self.get_client().get_chain_name(),
 					SUB_LOG_TARGET,
 					self.get_client().address().await,
-					"⚠️  Bridged asset oracle ID not found for {:?}. Skipping hook execution.",
-					bridged_asset_id
+					"⚠️  Bridged asset oracle ID not found for {:?}. Skipping hook execution. ({})",
+					bridged_asset_id,
+					hook_msg_info(msg)
 				);
 				return Ok((U256::ZERO, 0));
 			},
@@ -710,9 +741,10 @@ where
 						&self.get_client().get_chain_name(),
 						SUB_LOG_TARGET,
 						self.get_client().address().await,
-						"⚠️  DNC oracle price is stale (last updated {}s ago, threshold: {}s). Skipping hook execution.",
+						"⚠️  DNC oracle price is stale (last updated {}s ago, threshold: {}s). Skipping hook execution. ({})",
 						staleness,
-						CHAINLINK_STALENESS_THRESHOLD_VOLATILE
+						CHAINLINK_STALENESS_THRESHOLD_VOLATILE,
+						hook_msg_info(msg)
 					);
 					return Ok((U256::ZERO, 0));
 				}
@@ -723,7 +755,8 @@ where
 						&self.get_client().get_chain_name(),
 						SUB_LOG_TARGET,
 						self.get_client().address().await,
-						"⚠️  DNC oracle returned zero price. Skipping hook execution."
+						"⚠️  DNC oracle returned zero price. Skipping hook execution. ({})",
+						hook_msg_info(msg)
 					);
 					return Ok((U256::ZERO, 0));
 				}
@@ -735,9 +768,10 @@ where
 					&self.get_client().get_chain_name(),
 					SUB_LOG_TARGET,
 					self.get_client().address().await,
-					"⚠️  DNC oracle price fetch failed (chain: {}). Skipping hook execution. Error: {}",
+					"⚠️  DNC oracle price fetch failed (chain: {}). Skipping hook execution. Error: {} ({})",
 					dst_chain_id,
-					e.to_string()
+					e.to_string(),
+					hook_msg_info(msg)
 				);
 				return Ok((U256::ZERO, 0));
 			},
@@ -756,8 +790,9 @@ where
 							&self.get_client().get_chain_name(),
 							SUB_LOG_TARGET,
 							self.get_client().address().await,
-							"⚠️  Oracle aggregator not found for asset {:?}. Skipping hook execution.",
-							bridged_asset_id
+							"⚠️  Oracle aggregator not found for asset {:?}. Skipping hook execution. ({})",
+							bridged_asset_id,
+							hook_msg_info(msg)
 						);
 						return Ok((U256::ZERO, 0));
 					},
@@ -775,10 +810,11 @@ where
 							&self.get_client().get_chain_name(),
 							SUB_LOG_TARGET,
 							self.get_client().address().await,
-							"⚠️  Oracle aggregator price is stale (last updated {}s ago, threshold: {}s) for {:?}. Skipping hook execution.",
+							"⚠️  Oracle aggregator price is stale (last updated {}s ago, threshold: {}s) for {:?}. Skipping hook execution. ({})",
 							staleness,
 							CHAINLINK_STALENESS_THRESHOLD_VOLATILE,
-							bridged_asset_id
+							bridged_asset_id,
+							hook_msg_info(msg)
 						);
 						return Ok((U256::ZERO, 0));
 					}
@@ -790,8 +826,9 @@ where
 							&self.get_client().get_chain_name(),
 							SUB_LOG_TARGET,
 							self.get_client().address().await,
-							"⚠️  Oracle aggregator returned non-positive price for {:?}. Skipping hook execution.",
-							bridged_asset_id
+							"⚠️  Oracle aggregator returned non-positive price for {:?}. Skipping hook execution. ({})",
+							bridged_asset_id,
+							hook_msg_info(msg)
 						);
 						return Ok((U256::ZERO, 0));
 					}
@@ -816,8 +853,9 @@ where
 							&self.get_client().get_chain_name(),
 							SUB_LOG_TARGET,
 							self.get_client().address().await,
-							"⚠️  Oracle aggregator normalized price is zero for {:?}. Skipping hook execution.",
-							bridged_asset_id
+							"⚠️  Oracle aggregator normalized price is zero for {:?}. Skipping hook execution. ({})",
+							bridged_asset_id,
+							hook_msg_info(msg)
 						);
 						return Ok((U256::ZERO, 0));
 					}
@@ -829,9 +867,10 @@ where
 						&self.get_client().get_chain_name(),
 						SUB_LOG_TARGET,
 						self.get_client().address().await,
-						"⚠️  Oracle aggregator price fetch failed (token: {:?}). Skipping hook execution. Error: {}",
+						"⚠️  Oracle aggregator price fetch failed (token: {:?}). Skipping hook execution. Error: {} ({})",
 						bridged_asset_id,
-						e.to_string()
+						e.to_string(),
+						hook_msg_info(msg)
 					);
 					return Ok((U256::ZERO, 0));
 				},
@@ -847,9 +886,10 @@ where
 							&self.get_client().get_chain_name(),
 							SUB_LOG_TARGET,
 							self.get_client().address().await,
-							"⚠️  Bridged asset oracle price is stale (last updated {}s ago, threshold: {}s). Skipping hook execution.",
+							"⚠️  Bridged asset oracle price is stale (last updated {}s ago, threshold: {}s). Skipping hook execution. ({})",
 							staleness,
-							CHAINLINK_STALENESS_THRESHOLD_VOLATILE
+							CHAINLINK_STALENESS_THRESHOLD_VOLATILE,
+							hook_msg_info(msg)
 						);
 						return Ok((U256::ZERO, 0));
 					}
@@ -860,7 +900,8 @@ where
 							&self.get_client().get_chain_name(),
 							SUB_LOG_TARGET,
 							self.get_client().address().await,
-							"⚠️  Bridged asset oracle returned zero price. Skipping hook execution."
+							"⚠️  Bridged asset oracle returned zero price. Skipping hook execution. ({})",
+							hook_msg_info(msg)
 						);
 						return Ok((U256::ZERO, 0));
 					}
@@ -872,9 +913,10 @@ where
 						&self.get_client().get_chain_name(),
 						SUB_LOG_TARGET,
 						self.get_client().address().await,
-						"⚠️  Bridged asset oracle price fetch failed (token: {:?}). Skipping hook execution. Error: {}",
+						"⚠️  Bridged asset oracle price fetch failed (token: {:?}). Skipping hook execution. Error: {} ({})",
 						bridged_asset,
-						e.to_string()
+						e.to_string(),
+						hook_msg_info(msg)
 					);
 					return Ok((U256::ZERO, 0));
 				},
@@ -910,12 +952,13 @@ where
 
 		log::info!(
 			target: &self.get_client().get_chain_name(),
-			"-[{}] 💰 Hook fee estimate: {} (bridged asset wei) <= max_tx_fee: {}. dnc_price: {}, bridged_price: {}",
+			"-[{}] 💰 Hook fee estimate: {} (bridged asset wei) <= max_tx_fee: {}. dnc_price: {}, bridged_price: {} ({})",
 			sub_display_format(SUB_LOG_TARGET),
 			fee_in_bridged_asset,
 			max_tx_fee,
 			dnc_price,
 			bridged_price,
+			hook_msg_info(msg),
 		);
 
 		Ok((fee_in_bridged_asset, gas))
@@ -966,19 +1009,25 @@ where
 	/// # Arguments
 	/// * `msg` - The socket message containing details of the failed cross-chain transfer.
 	/// * `variants` - The decoded variants containing execution parameters (sender, receiver, max_tx_fee, message).
+	/// * `relay` - The socket relay metadata attached to the transaction for logging.
 	///
 	/// # Returns
 	/// * `Ok(())` - If the transaction is successfully submitted or correctly skipped.
 	/// * `Err(_)` - If an error occurs during transaction building.
-	async fn rollback_hook(&self, msg: &Socket_Message, variants: Variants) -> Result<()> {
+	async fn rollback_hook(
+		&self,
+		msg: &Socket_Message,
+		variants: Variants,
+		relay: &SocketRelayMetadata,
+	) -> Result<()> {
 		match &self.get_client().protocol_contracts.hooks {
 			Some(hooks) => {
 				log::info!(
 					target: &self.get_client().get_chain_name(),
-					"-[{}] 🔄 Calling Hooks.rollback() on chain {} for sequence: {}",
+					"-[{}] 🔄 Calling Hooks.rollback() on chain {} ({})",
 					sub_display_format(SUB_LOG_TARGET),
 					self.get_client().metadata.id,
-					msg.req_id.sequence
+					hook_msg_info(msg)
 				);
 
 				avoid_race_condition().await;
@@ -990,6 +1039,7 @@ where
 					.with_from(self.get_client().address().await);
 
 				let metadata = HookMetadata::new(
+					relay.clone(),
 					variants.sender,
 					variants.receiver,
 					variants.max_tx_fee,
@@ -1008,16 +1058,17 @@ where
 
 				log::info!(
 					target: &self.get_client().get_chain_name(),
-					"-[{}] ✅ Hooks.rollback() transaction submitted for sequence: {}",
+					"-[{}] ✅ Hooks.rollback() transaction submitted ({})",
 					sub_display_format(SUB_LOG_TARGET),
-					msg.req_id.sequence
+					hook_msg_info(msg)
 				);
 			},
 			None => {
 				log::debug!(
 					target: &self.get_client().get_chain_name(),
-					"-[{}] ⏭️  Skipping Hooks.rollback(): no hooks contract configured",
-					sub_display_format(SUB_LOG_TARGET)
+					"-[{}] ⏭️  Skipping Hooks.rollback(): no hooks contract configured ({})",
+					sub_display_format(SUB_LOG_TARGET),
+					hook_msg_info(msg)
 				);
 			},
 		}
@@ -1038,6 +1089,7 @@ where
 	/// # Arguments
 	/// * `msg` - The socket message containing details of the cross-chain transfer.
 	/// * `variants` - The decoded variants containing execution parameters (sender, receiver, max_tx_fee, message).
+	/// * `relay` - The socket relay metadata attached to the transaction for logging.
 	///
 	/// # Returns
 	/// * `Ok(())` - If the transaction is successfully submitted or correctly skipped.
@@ -1046,7 +1098,7 @@ where
 		&self,
 		msg: &Socket_Message,
 		variants: Variants,
-		is_inbound: bool,
+		relay: &SocketRelayMetadata,
 	) -> Result<()> {
 		match &self.get_client().protocol_contracts.hooks {
 			Some(hooks) => {
@@ -1056,12 +1108,12 @@ where
 
 				log::info!(
 					target: &self.get_client().get_chain_name(),
-					"-[{}] 🪝 Calling Hooks.execute() on chain {} with txFee: {} for sequence: {}{}",
+					"-[{}] 🪝 Calling Hooks.execute() on chain {} with txFee: {}{} ({})",
 					sub_display_format(SUB_LOG_TARGET),
 					self.get_client().metadata.id,
 					variants.max_tx_fee,
-					msg.req_id.sequence,
-					if is_feeless { " (feeless: whitelisted receiver)" } else { "" }
+					if is_feeless { " (feeless: whitelisted receiver)" } else { "" },
+					hook_msg_info(msg)
 				);
 
 				// Build the Hooks.execute() call for initial gas estimation
@@ -1071,13 +1123,18 @@ where
 					.with_from(self.get_client().address().await);
 
 				let (fee_in_bridged_asset, gas) = if is_feeless {
-					match self.estimate_hook_gas_or_skip(&init_tx_request).await? {
+					match self.estimate_hook_gas_or_skip(msg, &init_tx_request).await? {
 						Some(gas) => (U256::ZERO, gas),
 						None => return Ok(()), // reverted, skip execution
 					}
 				} else {
-					self.estimate_hook_gas(&msg, variants.max_tx_fee, &init_tx_request, is_inbound)
-						.await?
+					self.estimate_hook_gas(
+						&msg,
+						variants.max_tx_fee,
+						&init_tx_request,
+						relay.is_inbound,
+					)
+					.await?
 				};
 
 				if (!is_feeless && fee_in_bridged_asset.is_zero()) || gas == 0 {
@@ -1093,6 +1150,7 @@ where
 					.with_gas_limit(gas);
 
 				let metadata = HookMetadata::new(
+					relay.clone(),
 					variants.sender,
 					variants.receiver,
 					variants.max_tx_fee,
@@ -1111,9 +1169,9 @@ where
 
 				log::info!(
 					target: &self.get_client().get_chain_name(),
-					"-[{}] ✅ Hooks.execute() transaction submitted for sequence: {}",
+					"-[{}] ✅ Hooks.execute() transaction submitted ({})",
 					sub_display_format(SUB_LOG_TARGET),
-					msg.req_id.sequence
+					hook_msg_info(msg)
 				);
 			},
 			None => return Ok(()),
