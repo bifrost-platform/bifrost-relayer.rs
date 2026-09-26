@@ -43,6 +43,7 @@ use crate::{
 		send_transaction,
 		traits::{
 			BootstrapHandler, Handler, HookExecutor, SocketMessageSizeGuard, SocketRelayBuilder,
+			hook_msg_info,
 		},
 	},
 	sol::convert::{build_sol_poll_submit, decode_solana_wallet_from_variants},
@@ -327,7 +328,7 @@ where
 				if self.bootstrap_shared_data.cccp_relay_queue_enabled {
 					// Check if we should execute the hook (Executed status with valid requirements)
 					if let Some(variants) = self.should_execute_hook(&msg).await? {
-						match self.execute_hook(&msg, variants, is_inbound).await {
+						match self.execute_hook(&msg, variants, &metadata).await {
 							Ok(()) => (),
 							Err(error) => {
 								// we don't propagate the error to prevent hook execution errors fail the entire relay process
@@ -336,15 +337,16 @@ where
 									&self.client.get_chain_name(),
 									SUB_LOG_TARGET,
 									self.client.address().await,
-									"❗️ Failed to execute hook: {:?}",
-									error
+									"❗️ Failed to execute hook: {:?} ({})",
+									error,
+									hook_msg_info(&msg)
 								);
 							},
 						}
 					}
 					// Check if we should rollback the hook (Rollbacked status with valid requirements)
 					if let Some(variants) = self.should_rollback_hook(&msg).await? {
-						match self.rollback_hook(&msg, variants).await {
+						match self.rollback_hook(&msg, variants, &metadata).await {
 							Ok(()) => (),
 							Err(error) => {
 								// we don't propagate the error to prevent hook rollback errors fail the entire relay process
@@ -353,8 +355,9 @@ where
 									&self.client.get_chain_name(),
 									SUB_LOG_TARGET,
 									self.client.address().await,
-									"❗️ Failed to rollback hook: {:?}",
-									error
+									"❗️ Failed to rollback hook: {:?} ({})",
+									error,
+									hook_msg_info(&msg)
 								);
 							},
 						}
@@ -939,7 +942,11 @@ where
 				// drop the remaining `ready` relays, which were already spliced out of
 				// `pending_socket_relays` above. Re-park on failure instead of propagating.
 				if let Err(e) = self
-					.send_socket_message(relay.socket_msg.clone(), relay.metadata.clone(), relay.is_inbound)
+					.send_socket_message(
+						relay.socket_msg.clone(),
+						relay.metadata.clone(),
+						relay.is_inbound,
+					)
 					.await
 				{
 					br_primitives::log_and_capture!(
@@ -951,9 +958,12 @@ where
 						dst_chain_id,
 						e
 					);
-					self.pending_socket_relays.lock().unwrap().entry(dst_chain_id).or_default().push(
-						relay,
-					);
+					self.pending_socket_relays
+						.lock()
+						.unwrap()
+						.entry(dst_chain_id)
+						.or_default()
+						.push(relay);
 				}
 			}
 		}
