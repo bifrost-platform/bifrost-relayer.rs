@@ -78,21 +78,10 @@ evm_providers:
     authority_address: "0x15EDC0c65004548fa787Bc01e533366674946C5F"
     vault_address: "0x9070e3a291B96D156f361A850410d656880540D2"
     hooks_address: "0x42E65F9B77DD0BC081c51e95b14117eF22EC91e2"
-  - name: "arbitrum-sepolia"
-    id: 421614
-    provider: "<YOUR_ARBITRUM_SEPOLIA_RPC_ENDPOINT>"
-    call_interval: 2000
-    block_confirmations: 5
-    get_logs_batch_size: 8
-    is_relay_target: false
-    eip1559: true
-    socket_address: "0xd1E060FD930B75DA9A709c91E6Ad03B330Fb2950"
-    authority_address: "0x4dA97eCD85d4EE00E26C5f3aF21e6Da7bc3F71e2"
-    vault_address: "0x6EeE91b7c69e3576C13cE7a9C7C0E305dF6996F9"
 
 handler_configs:
   - handler_type: Socket
-    watch_list: [49088, 11155111, 97, 84532, 421614]
+    watch_list: [49088, 11155111, 97, 84532]
   - handler_type: Roundup
     watch_list: [49088]
 
