@@ -81,14 +81,17 @@ where
 			}
 			sleep(Duration::from_millis(DEFAULT_CALL_RETRY_INTERVAL_MS)).await;
 		}
-		panic!(
+		// Do not panic here: this manager runs as an essential task, so a panic would shut
+		// down the whole service for a single unreachable Bitcoin node. Return the error and
+		// let the caller retry.
+		Err(bitcoincore_rpc::Error::ReturnedError(format!(
 			"[{}]-[{}] {} [cmd: {}]: {}",
 			LOG_TARGET,
 			crate::btc::SUB_LOG_TARGET,
 			PROVIDER_INTERNAL_ERROR,
 			cmd,
 			error_msg
-		);
+		)))
 	}
 }
 
@@ -136,17 +139,18 @@ where
 	}
 
 	/// Bootstrap phase 0-1.
-	pub async fn bootstrap_0(&mut self) {
-		self.initialize().await;
+	pub async fn bootstrap_0(&mut self) -> Result<()> {
+		self.initialize().await?;
 		let should_bootstrap = self.is_before_bootstrap_state(BootstrapState::NormalStart).await;
 		if should_bootstrap {
-			self.wait_provider_sync().await.unwrap();
+			self.wait_provider_sync().await?;
 		}
+		Ok(())
 	}
 
 	/// Initialize the block manager.
-	pub async fn initialize(&mut self) {
-		let latest_block = self.get_block_count().await.unwrap();
+	pub async fn initialize(&mut self) -> Result<()> {
+		let latest_block = self.get_block_count().await?;
 		self.waiting_block = latest_block.saturating_add(1);
 
 		log::info!(
@@ -155,13 +159,14 @@ where
 			sub_display_format(SUB_LOG_TARGET),
 			latest_block
 		);
+		Ok(())
 	}
 
 	/// Wait for the provider to be synced.
 	pub async fn wait_provider_sync(&self) -> Result<()> {
 		let mut is_first_check = true;
 		loop {
-			let info = self.get_blockchain_info().await.unwrap();
+			let info = self.get_blockchain_info().await?;
 			match info.initial_block_download {
 				true => {
 					if is_first_check {
@@ -232,7 +237,8 @@ where
 	pub async fn run(&mut self) -> Result<()> {
 		let should_bootstrap = self.is_before_bootstrap_state(BootstrapState::NormalStart).await;
 		if should_bootstrap {
-			self.bootstrap().await?;
+			// Bootstrap failures are fatal (see `bootstrap_0`); only the live loop below retries.
+			self.bootstrap().await.expect("bitcoin block manager bootstrap failed");
 		}
 		self.wait_for_all_chains_bootstrapped().await?;
 
@@ -246,7 +252,7 @@ where
 					&vault_set,
 					&refund_set,
 				)
-				.await;
+				.await?;
 			}
 		}
 		Ok(())
@@ -330,15 +336,15 @@ where
 		to_block: u64,
 		vault_set: &BTreeSet<Address<NetworkUnchecked>>,
 		refund_set: &BTreeSet<Address<NetworkUnchecked>>,
-	) {
+	) -> Result<()> {
 		let from_block = self.waiting_block;
 
 		for num in from_block..=to_block {
 			let (mut inbound, mut outbound) =
 				(EventMessage::inbound(num), EventMessage::outbound(num));
 
-			let block_hash = self.get_block_hash(num).await.unwrap();
-			let txs = self.get_block_info_with_txs(&block_hash).await.unwrap().tx;
+			let block_hash = self.get_block_hash(num).await?;
+			let txs = self.get_block_info_with_txs(&block_hash).await?.tx;
 			for tx in txs {
 				self.filter(
 					tx.txid,
@@ -360,12 +366,16 @@ where
 				outbound.events.len()
 			);
 
-			self.sender.send(EventMessage::new_block(num)).unwrap();
-			self.sender.send(inbound).unwrap();
-			self.sender.send(outbound).unwrap();
+			self.sender.send(EventMessage::new_block(num))?;
+			self.sender.send(inbound)?;
+			self.sender.send(outbound)?;
+
+			// Advance per block so a failure on a later block doesn't re-emit the ones already
+			// sent when the caller retries.
+			self.increment_waiting_block(num);
 		}
 
-		self.increment_waiting_block(to_block);
+		Ok(())
 	}
 
 	/// Filter the transaction whether it contains Inbound or Outbound events.

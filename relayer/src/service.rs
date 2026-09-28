@@ -705,16 +705,25 @@ where
 		"bitcoin-block-manager",
 		Some("block-manager"),
 		async move {
-			block_manager.bootstrap_0().await;
+			// Bootstrap failures are fatal: exiting is preferable to idling while every chain
+			// waits on this one at the bootstrap barrier.
+			block_manager
+				.bootstrap_0()
+				.await
+				.expect("bitcoin block manager bootstrap failed");
+			// After bootstrap, a Bitcoin node outage must not take down the other chains, so
+			// `run()` errors are retried in place.
 			loop {
 				let report = block_manager.run().await;
 				let log_msg = format!(
-					"bitcoin block manager({}) stopped: {:?}\nRestarting immediately...",
+					"bitcoin block manager({}) stopped: {:?}\nRestarting in 12 seconds...",
 					block_manager.bfc_client.address().await,
 					report
 				);
 				log::error!("{log_msg}");
 				sentry::capture_message(&log_msg, sentry::Level::Error);
+
+				tokio::time::sleep(Duration::from_secs(12)).await;
 			}
 		},
 	);
