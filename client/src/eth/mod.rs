@@ -398,9 +398,10 @@ where
 				},
 			}
 
-			match self
-				.send_transaction(tx_request.clone())
-				.await?
+			let pending = self.send_transaction(tx_request.clone()).await?;
+			let submitted_tx_hash = *pending.tx_hash();
+
+			match pending
 				.with_timeout(Some(Duration::from_millis(DEFAULT_TX_TIMEOUT_MS)))
 				.watch()
 				.await
@@ -414,14 +415,23 @@ where
 					);
 				},
 				Err(err) => {
-					br_primitives::log_and_capture_simple!(
-						error,
-						" ❗️ Failed to send transaction ({} address:{}): Flush, Error: {}",
-						self.get_chain_name(),
-						address,
-						err
-					);
-					transactions.push_front(tx_request);
+					if self.is_already_confirmed(submitted_tx_hash).await {
+						log::info!(
+							target: &self.get_chain_name(),
+							" 🔖 Transaction confirmed ({} tx:{}): Flush (watch() timed out, confirmed via receipt check)",
+							self.get_chain_name(),
+							submitted_tx_hash,
+						);
+					} else {
+						br_primitives::log_and_capture_simple!(
+							error,
+							" ❗️ Failed to send transaction ({} address:{}): Flush, Error: {}",
+							self.get_chain_name(),
+							address,
+							err
+						);
+						transactions.push_front(tx_request);
+					}
 				},
 			}
 		}
@@ -429,6 +439,17 @@ where
 		log::info!(target: &self.get_chain_name(), "-[{}] Flushing stalled transactions completed", sub_display_format(SUB_LOG_TARGET));
 
 		Ok(())
+	}
+
+	/// Checks whether a submitted transaction is already confirmed on-chain via
+	/// `eth_getTransactionReceipt`.
+	///
+	/// Used as a fallback right after a `watch()` timeout: some RPC endpoints (e.g. a
+	/// load-balancing proxy in front of multiple backend nodes without sticky sessions) can route
+	/// receipt-polling requests to a node lagging behind the one that processed the submitted
+	/// transaction, causing a spurious timeout even though the transaction has already confirmed.
+	async fn is_already_confirmed(&self, tx_hash: FixedBytes<32>) -> bool {
+		matches!(self.get_transaction_receipt(tx_hash).await, Ok(Some(_)))
 	}
 
 	/// Fill the gas-related fields for the given transaction.
@@ -515,6 +536,8 @@ where
 				eyre::bail!(err)
 			},
 		};
+		let submitted_tx_hash = *pending.tx_hash();
+
 		match pending
 			.with_timeout(Some(Duration::from_millis(DEFAULT_TX_TIMEOUT_MS)))
 			.watch()
@@ -531,6 +554,16 @@ where
 				Ok(())
 			},
 			Err(_) => {
+				if self.is_already_confirmed(submitted_tx_hash).await {
+					log::info!(
+						target: &requester,
+						" ✅ Transaction confirmed ({} tx:{}): {} (watch() timed out, confirmed via receipt check)",
+						self.get_chain_name(),
+						submitted_tx_hash,
+						metadata
+					);
+					return Ok(());
+				}
 				self.flush_stalled_transactions().await?;
 				Ok(())
 			},
@@ -689,6 +722,7 @@ pub fn send_transaction<F, P, N: Network>(
 					pending.tx_hash(),
 					metadata
 				);
+				let submitted_tx_hash = *pending.tx_hash();
 
 				match pending
 					.with_timeout(Some(Duration::from_millis(DEFAULT_TX_TIMEOUT_MS)))
@@ -705,16 +739,26 @@ pub fn send_transaction<F, P, N: Network>(
 						);
 					},
 					Err(err) => {
-						br_primitives::log_and_capture_simple!(
-							error,
-							" ❗️ Transaction failed to register ({} address:{}): {}, Error: {}",
-							client.get_chain_name(),
-							client.address().await,
-							metadata,
-							err
-						);
+						if client.is_already_confirmed(submitted_tx_hash).await {
+							log::info!(
+								target: &requester,
+								" ✅ Transaction confirmed ({} tx:{}): {} (watch() timed out, confirmed via receipt check)",
+								client.get_chain_name(),
+								submitted_tx_hash,
+								metadata
+							);
+						} else {
+							br_primitives::log_and_capture_simple!(
+								error,
+								" ❗️ Transaction failed to register ({} address:{}): {}, Error: {}",
+								client.get_chain_name(),
+								client.address().await,
+								metadata,
+								err
+							);
 
-						client.flush_stalled_transactions().await.unwrap();
+							client.flush_stalled_transactions().await.unwrap();
+						}
 					},
 				}
 			},

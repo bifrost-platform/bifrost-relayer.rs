@@ -21,6 +21,9 @@ pub const INVALID_BIFROST_NATIVENESS: &str =
 pub const INVALID_PERIODIC_SCHEDULE: &str =
 	"Invalid periodic schedule format provided. Please check your schedule format.";
 
+pub const INVALID_PACKAGE_VERSION: &str =
+	"Invalid package version. Expected `major.minor.patch` where minor and patch are below 1000.";
+
 pub const INVALID_CONFIG_FILE_PATH: &str =
 	"Invalid config.yaml file path provided. Please check your file path.";
 

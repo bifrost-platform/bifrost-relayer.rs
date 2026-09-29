@@ -39,8 +39,19 @@ where
 		debug_mode: bool,
 	) -> Self {
 		// initialize the heartbeat sender
-		let heartbeat_sender =
-			HeartbeatSender::new(bfc_client.clone(), task_manager.spawn_handle(), debug_mode);
+		// `SUBSTRATE_CLI_COMMIT_HASH` is `unknown` when the build has no access to git (e.g.
+		// docker), which is reported as zero bytes.
+		let impl_version = br_primitives::version::encode_impl_version(env!("CARGO_PKG_VERSION"))
+			.expect(br_primitives::constants::errors::INVALID_PACKAGE_VERSION);
+		let spec_version =
+			br_primitives::version::encode_spec_version(env!("SUBSTRATE_CLI_COMMIT_HASH"));
+		let heartbeat_sender = HeartbeatSender::new(
+			bfc_client.clone(),
+			task_manager.spawn_handle(),
+			debug_mode,
+			impl_version,
+			spec_version,
+		);
 
 		// initialize the oracle price feeder
 		let oracle_price_feeder = OraclePriceFeeder::new(

@@ -13,3 +13,4 @@ pub mod periodic;
 pub mod substrate;
 pub mod tx;
 pub mod utils;
+pub mod version;
