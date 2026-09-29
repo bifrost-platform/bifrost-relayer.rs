@@ -133,11 +133,20 @@ pub struct HeartbeatMetadata {
 	pub current_round_index: U256,
 	/// The current session index.
 	pub current_session_index: U256,
+	/// The relayer implementation version reported by the heartbeat.
+	pub impl_version: U256,
+	/// The relayer spec version (commit hash) reported by the heartbeat.
+	pub spec_version: B256,
 }
 
 impl HeartbeatMetadata {
-	pub fn new(current_round_index: U256, current_session_index: U256) -> Self {
-		Self { current_round_index, current_session_index }
+	pub fn new(
+		current_round_index: U256,
+		current_session_index: U256,
+		impl_version: U256,
+		spec_version: B256,
+	) -> Self {
+		Self { current_round_index, current_session_index, impl_version, spec_version }
 	}
 }
 
@@ -145,8 +154,11 @@ impl Display for HeartbeatMetadata {
 	fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
 		write!(
 			f,
-			"Heartbeat(Round: {:?}, Session: {:?})",
-			self.current_round_index, self.current_session_index
+			"Heartbeat(Round: {:?}, Session: {:?}, Impl: {:?}, Spec: {:?})",
+			self.current_round_index,
+			self.current_session_index,
+			self.impl_version,
+			self.spec_version
 		)
 	}
 }

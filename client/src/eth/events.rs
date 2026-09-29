@@ -1,11 +1,14 @@
 use alloy::{
 	network::Network,
-	primitives::{BlockNumber, ChainId},
+	primitives::{B256, BlockNumber, ChainId},
 	providers::{Provider, WalletProvider, fillers::TxFiller},
 	rpc::types::{Filter, Log, SyncStatus},
 };
 use eyre::Result;
-use std::sync::Arc;
+use std::{
+	collections::{BTreeMap, HashMap},
+	sync::Arc,
+};
 use tokio::{
 	sync::broadcast::{self, Receiver, Sender},
 	time::{Duration, interval, sleep},
@@ -61,6 +64,17 @@ where
 	pub sender: Sender<EventMessage>,
 	/// The block waiting for enough confirmations.
 	waiting_block: u64,
+	/// The block waiting to be (re-)scanned by the confirmed-log backstop loop. Trails
+	/// `waiting_block` by `block_confirmations` blocks. See `process_confirmed_block`.
+	confirmed_waiting_block: u64,
+	/// Count of target logs already broadcast by `process_new_block`, per tx hash, bucketed
+	/// by block number so entries can be evicted once `process_confirmed_block` will never
+	/// revisit that block again. Keyed on tx hash rather than `(tx_hash, log_index)` because
+	/// a reorg can re-mine a transaction into a differently composed block, changing its
+	/// block-level log index without it being a new event (see `verify_event_on_chain`).
+	/// Counting rather than just tracking presence means a transaction that emits more than
+	/// one target log is still fully backfilled if only some of its logs were seen live.
+	broadcast_log_counts: BTreeMap<u64, HashMap<B256, usize>>,
 	/// The bootstrap shared data.
 	bootstrap_shared_data: Arc<BootstrapSharedData>,
 	/// The flag whether the relayer has enabled self balance synchronization. This field will be
@@ -80,7 +94,15 @@ where
 		is_balance_sync_enabled: bool,
 	) -> Self {
 		let (sender, _receiver) = broadcast::channel(512);
-		Self { client, sender, waiting_block: 0u64, bootstrap_shared_data, is_balance_sync_enabled }
+		Self {
+			client,
+			sender,
+			waiting_block: 0u64,
+			confirmed_waiting_block: 0u64,
+			broadcast_log_counts: BTreeMap::new(),
+			bootstrap_shared_data,
+			is_balance_sync_enabled,
+		}
 	}
 
 	/// Initialize event manager.
@@ -90,6 +112,9 @@ where
 		// initialize waiting block to the latest block + 1
 		let latest_block = self.client.get_block_number().await?;
 		self.waiting_block = latest_block.saturating_add(1u64);
+		// the confirmed-log backstop loop starts from the same point and will naturally
+		// trail `waiting_block` once it starts gating on `block_confirmations`.
+		self.confirmed_waiting_block = self.waiting_block;
 		log::info!(
 			target: &self.client.get_chain_name(),
 			"-[{}] 💤 Idle, best: #{:?}",
@@ -121,14 +146,36 @@ where
 					self.client.sync_balance().await?;
 				}
 			}
+			while self.is_confirmed_batch_ready(latest_block) {
+				self.process_confirmed_block().await?;
+			}
 		}
 
 		Ok(())
 	}
 
+	/// Builds the `eth_getLogs` address filter shared by the live and confirmed-log scans.
+	fn build_log_filter(&self, from: u64, to: u64) -> Filter {
+		let contracts = &self.client.protocol_contracts;
+		let mut addresses = vec![*contracts.socket.address()];
+		if let Some(ls) = &contracts.legacy_socket {
+			addresses.push(*ls.address());
+		}
+		if let Some(bs) = &contracts.bitcoin_socket {
+			addresses.push(*bs.address());
+		}
+		Filter::new()
+			.from_block(BlockNumber::from(from))
+			.to_block(BlockNumber::from(to))
+			.address(addresses)
+	}
+
 	/// Process the new block and verifies if any events emitted from the target contracts.
 	/// Note: Events are broadcast immediately without waiting for block confirmations.
-	/// Handlers that need confirmation (e.g., SocketRelayHandler) should implement their own waiting logic.
+	/// Handlers that need confirmation (e.g., SocketRelayHandler) should implement their own
+	/// waiting logic. `process_confirmed_block` is the backstop for events this immediate scan
+	/// misses (e.g. a shallow reorg at the tip, or an RPC endpoint that hasn't indexed the block
+	/// on every backend yet).
 	async fn process_new_block(&mut self) -> Result<()> {
 		let from = self.waiting_block;
 		let to = from.saturating_add(self.client.metadata.get_logs_batch_size.saturating_sub(1u64));
@@ -150,25 +197,79 @@ where
 			);
 		}
 
-		let contracts = &self.client.protocol_contracts;
-		let mut addresses = vec![*contracts.socket.address()];
-		if let Some(ls) = &contracts.legacy_socket {
-			addresses.push(*ls.address());
-		}
-		if let Some(bs) = &contracts.bitcoin_socket {
-			addresses.push(*bs.address());
-		}
-		let filter = Filter::new()
-			.from_block(BlockNumber::from(from))
-			.to_block(BlockNumber::from(to))
-			.address(addresses);
+		let filter = self.build_log_filter(from, to);
 
 		let target_logs = self.client.get_logs(&filter).await?;
 		if !target_logs.is_empty() {
+			for log in &target_logs {
+				*self
+					.broadcast_log_counts
+					.entry(log.block_number.unwrap_or(from))
+					.or_default()
+					.entry(log.transaction_hash.unwrap_or_default())
+					.or_insert(0) += 1;
+			}
 			self.sender.send(EventMessage::new(self.waiting_block, target_logs)).unwrap();
 		}
 
 		self.increment_waiting_block(to);
+
+		Ok(())
+	}
+
+	/// Re-scans a block range that has already accumulated `block_confirmations`
+	/// confirmations, as a backstop against events `process_new_block` missed on its
+	/// unconfirmed, immediate `get_logs` call. Logs are grouped by `(block_number, tx_hash)`
+	/// and compared against the count `process_new_block` already broadcast for that
+	/// transaction; if this scan finds more than that, the transaction's logs (all of them,
+	/// including any already broadcast) are (re-)sent through the same channel — downstream
+	/// handlers cannot tell a backfilled log apart from one seen live, and re-sending an
+	/// already-processed log is a harmless no-op there (poll-filter / on-flight checks are
+	/// idempotent against on-chain state).
+	async fn process_confirmed_block(&mut self) -> Result<()> {
+		let from = self.confirmed_waiting_block;
+		let to = from.saturating_add(self.client.metadata.get_logs_batch_size.saturating_sub(1u64));
+
+		let filter = self.build_log_filter(from, to);
+		let target_logs = self.client.get_logs(&filter).await?;
+
+		let mut grouped: BTreeMap<(u64, B256), Vec<Log>> = BTreeMap::new();
+		for log in target_logs {
+			let block = log.block_number.unwrap_or(from);
+			let tx_hash = log.transaction_hash.unwrap_or_default();
+			grouped.entry((block, tx_hash)).or_default().push(log);
+		}
+
+		let mut missed_logs = Vec::new();
+		for ((block, tx_hash), logs) in grouped {
+			let already_seen = self
+				.broadcast_log_counts
+				.get(&block)
+				.and_then(|txs| txs.get(&tx_hash))
+				.copied()
+				.unwrap_or(0);
+			if logs.len() > already_seen {
+				missed_logs.extend(logs);
+			}
+		}
+
+		if !missed_logs.is_empty() {
+			log::warn!(
+				target: &self.client.get_chain_name(),
+				"-[{}] 🩹 Recovered {} event(s) missed by the live scan in block range #({:?} … {:?}), backfilling",
+				sub_display_format(SUB_LOG_TARGET),
+				missed_logs.len(),
+				from,
+				to,
+			);
+			self.sender.send(EventMessage::new(from, missed_logs)).unwrap();
+		}
+
+		// These blocks will never be revisited by this loop again; the counts recorded for
+		// them are no longer needed for dedup.
+		self.broadcast_log_counts.retain(|&block, _| block > to);
+
+		self.confirmed_waiting_block = to.saturating_add(1u64);
 
 		Ok(())
 	}
@@ -203,6 +304,20 @@ where
 			.waiting_block
 			.saturating_add(self.client.metadata.get_logs_batch_size.saturating_sub(1u64));
 		latest_block >= to
+	}
+
+	/// Verifies if the next batch of blocks has accumulated `block_confirmations`
+	/// confirmations and is ready for `process_confirmed_block` to (re-)scan.
+	#[inline]
+	fn is_confirmed_batch_ready(&self, latest_block: u64) -> bool {
+		let safe_latest = latest_block.saturating_sub(self.client.metadata.block_confirmations);
+		if self.confirmed_waiting_block > safe_latest {
+			return false;
+		}
+		let to = self
+			.confirmed_waiting_block
+			.saturating_add(self.client.metadata.get_logs_batch_size.saturating_sub(1u64));
+		safe_latest >= to
 	}
 
 	/// Bootstrap phase 0-1.
