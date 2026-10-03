@@ -32,7 +32,7 @@ use br_client::{
 		handlers::Handler as _,
 		storage::keypair::{KeypairStorage, KmsKeypairStorage, PasswordKeypairStorage},
 	},
-	eth::{EthClient, retry::RetryBackoffLayer, traits::Handler as _},
+	eth::{EthClient, nonce::RelayerNonceManager, retry::RetryBackoffLayer, traits::Handler as _},
 };
 use br_periodic::traits::PeriodicWorker;
 use br_primitives::{
@@ -122,9 +122,10 @@ pub async fn relay(config: Configuration) -> Result<TaskManager, ServiceError> {
 			))
 			.http(url.clone())
 			.with_poll_interval(Duration::from_millis(evm_provider.call_interval));
+		let nonce_manager = RelayerNonceManager::default();
 		let provider = Arc::new(
 			ProviderBuilder::<_, _, AnyNetwork>::default()
-				.with_cached_nonce_management()
+				.with_nonce_management(nonce_manager.clone())
 				.filler(GasFiller::default())
 				.filler(ChainIdFiller::new(evm_provider.id.into()))
 				.wallet(wallet.clone())
@@ -146,6 +147,7 @@ pub async fn relay(config: Configuration) -> Result<TaskManager, ServiceError> {
 				evm_provider.chainlink_cbbtc_usd_address.clone(),
 				evm_provider.chainlink_jpy_usd_address.clone(),
 			),
+			nonce_manager,
 		));
 
 		// initialize default address to selected account
