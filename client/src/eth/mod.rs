@@ -49,8 +49,11 @@ use tokio::{
 };
 use url::Url;
 
+use nonce::RelayerNonceManager;
+
 pub mod events;
 pub mod handlers;
+pub mod nonce;
 pub mod traits;
 
 pub type ClientMap<F, P, N> = BTreeMap<ChainId, Arc<EthClient<F, P, N>>>;
@@ -79,6 +82,8 @@ where
 	pub contract_cache: Arc<ContractCache<F, P, N>>,
 	/// flushing not allowed to work concurrently.
 	pub martial_law: Arc<Mutex<()>>,
+	/// The nonce manager shared with the provider's nonce filler.
+	nonce_manager: RelayerNonceManager,
 }
 
 impl<F, P, N: Network> EthClient<F, P, N>
@@ -94,6 +99,7 @@ where
 		metadata: ProviderMetadata,
 		protocol_contracts: ProtocolContracts<F, P, N>,
 		aggregator_contracts: AggregatorContracts<F, P, N>,
+		nonce_manager: RelayerNonceManager,
 	) -> Self {
 		Self {
 			inner,
@@ -104,6 +110,7 @@ where
 			aggregator_contracts,
 			contract_cache: Arc::new(ContractCache::new()),
 			martial_law: Arc::new(Mutex::new(())),
+			nonce_manager,
 		}
 	}
 
@@ -294,11 +301,27 @@ where
 		Ok(logs)
 	}
 
-	/// Flush stalled transactions from the txpool.
+	/// Flush stalled transactions from the txpool, then re-sync the cached nonce with the chain.
+	///
+	/// Flushing runs when a transaction stalls or hits `nonce too low`, both of which mean the
+	/// cached nonce may have drifted from the chain. Renumbering the txpool entries alone would
+	/// leave the cache pointing past them, opening a new gap for the next send.
 	pub async fn flush_stalled_transactions(&self) -> Result<()> {
 		let _lock = self.martial_law.lock().await;
 
+		let result = self.flush_txpool().await;
+		self.nonce_manager.reset().await;
+		result
+	}
+
+	async fn flush_txpool(&self) -> Result<()> {
 		log::info!(target: &self.get_chain_name(), "-[{}] Flushing stalled transactions", sub_display_format(SUB_LOG_TARGET));
+
+		// possibility of txpool being flushed automatically. wait for 2 blocks.
+		// also paces callers that resend right after a flush on `nonce too low`, including on
+		// chains without the txpool namespace: the nonce is refetched from the chain after every
+		// flush, so a lagging node would otherwise turn that resend into a tight loop.
+		sleep(Duration::from_millis(self.metadata.call_interval * 2)).await;
 
 		// if txpool namespace is not enabled on the chain, do nothing
 		if self.txpool_status().await.is_err() {
@@ -309,9 +332,6 @@ where
 			);
 			return Ok(());
 		}
-
-		// possibility of txpool being flushed automatically. wait for 2 blocks.
-		sleep(Duration::from_millis(self.metadata.call_interval * 2)).await;
 
 		let address = self.address().await;
 		let content = match self.txpool_content_from(address).await {
@@ -356,8 +376,15 @@ where
 			.collect::<VecDeque<_>>();
 		transactions.make_contiguous().sort_by_key(|a| a.nonce().unwrap());
 
-		// if the nonce of the first transaction is not equal to the current nonce, update the nonce
+		// the txpool snapshot may still contain transactions that are already mined (e.g. served by
+		// a lagging node behind a load balancer). drop them instead of re-sending their calldata.
 		let mut count = self.get_transaction_count(address).await?;
+		transactions.retain(|tx| tx.nonce().unwrap() >= count);
+		if transactions.is_empty() {
+			return Ok(());
+		}
+
+		// if the nonce of the first transaction is not equal to the current nonce, update the nonce
 		if transactions.front().unwrap().nonce().unwrap() != count {
 			for tx in transactions.iter_mut() {
 				tx.set_nonce(count);
@@ -366,6 +393,20 @@ where
 		}
 
 		while let Some(mut tx_request) = transactions.pop_front() {
+			// the original (or a previously replaced) transaction may have been mined while we were
+			// waiting on an earlier one. its nonce is consumed, so there is nothing left to replace.
+			let current_nonce = self.get_transaction_count(address).await?;
+			if tx_request.nonce().unwrap() < current_nonce {
+				log::info!(
+					target: &self.get_chain_name(),
+					"-[{}] Skipping flush of nonce {} (already mined, current nonce {})",
+					sub_display_format(SUB_LOG_TARGET),
+					tx_request.nonce().unwrap(),
+					current_nonce,
+				);
+				continue;
+			}
+
 			// RBF
 			match TxType::try_from(tx_request.output_tx_type().into())? {
 				TxType::Legacy => {
@@ -398,7 +439,21 @@ where
 				},
 			}
 
-			let pending = self.send_transaction(tx_request.clone()).await?;
+			let pending = match self.send_transaction(tx_request.clone()).await {
+				Ok(pending) => pending,
+				// mined between the nonce check above and the submission
+				Err(err) if is_nonce_too_low(&err) => {
+					log::info!(
+						target: &self.get_chain_name(),
+						"-[{}] Skipping flush of nonce {} (already mined): {}",
+						sub_display_format(SUB_LOG_TARGET),
+						tx_request.nonce().unwrap(),
+						err,
+					);
+					continue;
+				},
+				Err(err) => return Err(err.into()),
+			};
 			let submitted_tx_hash = *pending.tx_hash();
 
 			match pending
@@ -655,6 +710,11 @@ where
 	}
 }
 
+/// Whether the error is a `nonce too low` rejection, i.e. the nonce is already consumed on-chain.
+pub fn is_nonce_too_low(err: &impl std::fmt::Display) -> bool {
+	err.to_string().to_lowercase().contains("nonce too low")
+}
+
 pub async fn avoid_race_condition() {
 	// to avoid duplicate(will revert) external networks transactions
 	let duration = Duration::from_millis(rand::rng().random_range(0..=12000));
@@ -761,7 +821,14 @@ pub fn send_transaction<F, P, N: Network>(
 								err
 							);
 
-							client.flush_stalled_transactions().await.unwrap();
+							if let Err(err) = client.flush_stalled_transactions().await {
+								br_primitives::log_and_capture_simple!(
+									error,
+									" ❗️ Failed to flush stalled transactions ({}): {}",
+									client.get_chain_name(),
+									err
+								);
+							}
 						}
 					},
 				}
@@ -776,8 +843,15 @@ pub fn send_transaction<F, P, N: Network>(
 					err
 				);
 
-				if err.to_string().to_lowercase().contains("nonce too low") {
-					client.flush_stalled_transactions().await.unwrap();
+				if is_nonce_too_low(&err) {
+					if let Err(err) = client.flush_stalled_transactions().await {
+						br_primitives::log_and_capture_simple!(
+							error,
+							" ❗️ Failed to flush stalled transactions ({}): {}",
+							client.get_chain_name(),
+							err
+						);
+					}
 					send_transaction(client, request, requester, metadata, debug_mode, handle);
 				}
 			},
@@ -829,9 +903,10 @@ pub mod retry {
 	pub struct RetryPolicy;
 
 	impl RetryPolicyT for RetryPolicy {
-		fn should_retry(&self, _error: &TransportError) -> bool {
-			// TODO: Filter out errors that are not retryable. now we retry all errors.
-			true
+		fn should_retry(&self, error: &TransportError) -> bool {
+			// a consumed nonce never becomes valid again, so retrying only delays the caller's
+			// recovery. TODO: Filter out other errors that are not retryable.
+			!super::is_nonce_too_low(error)
 		}
 
 		/// Provides a backoff hint if the error response contains it
