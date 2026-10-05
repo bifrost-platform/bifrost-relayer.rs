@@ -120,7 +120,7 @@ where
 	}
 }
 
-/// Build the single required `SolDeps` bundle from `config.sol_provider`.
+/// Build the `SolDeps` bundle from `config.sol_provider`.
 ///
 /// **Boot-time health check**: the configured cluster is probed via
 /// `SolClient::health_check` before its `SolDeps` is returned. A

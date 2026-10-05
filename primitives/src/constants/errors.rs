@@ -4,6 +4,8 @@ pub const INVALID_CONTRACT_ABI: &str =
 pub const INVALID_CONTRACT_ADDRESS: &str =
 	"Invalid contract address provided. Please check your contract's address.";
 
+pub const MISSING_BTC_PROVIDER: &str = "The runtime has the Bitcoin pallets but `btc_provider` is missing. Please check your configuration.";
+
 pub const MISSING_CONTRACT_ADDRESS: &str = "Some protocol contracts are missing for Bifrost. Please check your `evm_providers` configuration.";
 
 pub const INVALID_PRIVATE_KEY: &str =

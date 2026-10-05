@@ -35,7 +35,9 @@ pub(super) fn assert_configuration_validity(config: &Configuration) {
 	}
 
 	// assert `sol_provider`
-	assert_sol_provider_validity(sol_provider);
+	if let Some(sol_provider) = sol_provider {
+		assert_sol_provider_validity(sol_provider);
+	}
 
 	// assert `evm_providers`
 	evm_providers.iter().for_each(|evm_provider| {

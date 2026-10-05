@@ -48,10 +48,11 @@ pub struct RelayerConfig {
 	pub keystore_config: Option<KeystoreConfig>,
 	/// EVM configs
 	pub evm_providers: Vec<EVMProvider>,
-	/// BTC configs
-	pub btc_provider: BTCProvider,
-	/// SOL configs
-	pub sol_provider: SolProvider,
+	/// BTC configs. Required when the connected runtime has the `BtcSocketQueue` and
+	/// `BtcRegistrationPool` pallets, ignored otherwise.
+	pub btc_provider: Option<BTCProvider>,
+	/// SOL configs. Omit to run without Solana support.
+	pub sol_provider: Option<SolProvider>,
 	/// Handler configs
 	pub handler_configs: Vec<HandlerConfig>,
 	/// Bootstrapping configs

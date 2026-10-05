@@ -281,8 +281,11 @@ where
 	F: TxFiller<N> + WalletProvider<N>,
 	P: Provider<N>,
 {
+	/// Instantiates the protocol contracts. The Bitcoin contracts are only bound on Bifrost
+	/// when `btc_enabled` is set.
 	pub fn new(
 		is_native: bool,
+		btc_enabled: bool,
 		provider: Arc<FillProvider<F, P, N>>,
 		evm_provider: EVMProvider,
 	) -> Self {
@@ -320,6 +323,8 @@ where
 				.expect(INVALID_CONTRACT_ADDRESS),
 				provider.clone(),
 			));
+		}
+		if is_native && btc_enabled {
 			contracts.bitcoin_socket = Some(BitcoinSocketContract::new(
 				Address::from_str(
 					&evm_provider.bitcoin_socket_address.expect(MISSING_CONTRACT_ADDRESS),
