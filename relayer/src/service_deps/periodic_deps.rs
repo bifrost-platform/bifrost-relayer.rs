@@ -17,10 +17,10 @@ where
 	pub rollback_emitters: Vec<SocketRollbackEmitter<F, P, N>>,
 	/// The `RollbackSender`'s for each specified chain.
 	pub rollback_senders: Arc<BTreeMap<ChainId, Arc<UnboundedSender<Socket_Message>>>>,
-	/// The `KeypairMigrator` used for detecting migration sequences.
-	pub keypair_migrator: KeypairMigrator<F, P, N>,
-	/// The `PubKeyPreSubmitter` used for presubmitting public keys.
-	pub presubmitter: PubKeyPreSubmitter<F, P, N>,
+	/// The `KeypairMigrator` used for detecting migration sequences. (Bitcoin only)
+	pub keypair_migrator: Option<KeypairMigrator<F, P, N>>,
+	/// The `PubKeyPreSubmitter` used for presubmitting public keys. (Bitcoin only)
+	pub presubmitter: Option<PubKeyPreSubmitter<F, P, N>>,
 }
 
 impl<F, P, N: AlloyNetwork> PeriodicDeps<F, P, N>
@@ -31,7 +31,7 @@ where
 	pub fn new(
 		bootstrap_shared_data: BootstrapSharedData,
 		migration_sequence: Arc<RwLock<MigrationSequence>>,
-		keypair_storage: KeypairStorage,
+		keypair_storage: Option<KeypairStorage>,
 		substrate_deps: &SubstrateDeps<F, P, N>,
 		clients: Arc<ClientMap<F, P, N>>,
 		bfc_client: Arc<EthClient<F, P, N>>,
@@ -90,18 +90,22 @@ where
 			rollback_senders.insert(*chain_id, rollback_sender);
 		});
 
-		// initialize migration detector
-		let keypair_migrator = KeypairMigrator::new(
-			bfc_client.clone(),
-			migration_sequence.clone(),
-			keypair_storage.clone(),
-		);
-		let presubmitter = PubKeyPreSubmitter::new(
-			bfc_client.clone(),
-			substrate_deps.xt_request_sender.clone(),
-			keypair_storage.clone(),
-			migration_sequence.clone(),
-		);
+		// initialize migration detector and presubmitter (Bitcoin only)
+		let keypair_migrator = keypair_storage.as_ref().map(|keypair_storage| {
+			KeypairMigrator::new(
+				bfc_client.clone(),
+				migration_sequence.clone(),
+				keypair_storage.clone(),
+			)
+		});
+		let presubmitter = keypair_storage.as_ref().map(|keypair_storage| {
+			PubKeyPreSubmitter::new(
+				bfc_client.clone(),
+				substrate_deps.xt_request_sender.clone(),
+				keypair_storage.clone(),
+				migration_sequence.clone(),
+			)
+		});
 
 		Self {
 			heartbeat_sender,

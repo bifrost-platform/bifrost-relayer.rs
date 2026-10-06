@@ -915,7 +915,11 @@ where
 				// drop the remaining `ready` relays, which were already spliced out of
 				// `pending_socket_relays` above. Re-park on failure instead of propagating.
 				if let Err(e) = self
-					.send_socket_message(relay.socket_msg.clone(), relay.metadata.clone(), relay.is_inbound)
+					.send_socket_message(
+						relay.socket_msg.clone(),
+						relay.metadata.clone(),
+						relay.is_inbound,
+					)
 					.await
 				{
 					br_primitives::log_and_capture!(
@@ -927,9 +931,12 @@ where
 						dst_chain_id,
 						e
 					);
-					self.pending_socket_relays.lock().unwrap().entry(dst_chain_id).or_default().push(
-						relay,
-					);
+					self.pending_socket_relays
+						.lock()
+						.unwrap()
+						.entry(dst_chain_id)
+						.or_default()
+						.push(relay);
 				}
 			}
 		}

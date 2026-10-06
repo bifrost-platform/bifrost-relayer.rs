@@ -10,5 +10,6 @@ where
 	pub periodic_deps: PeriodicDeps<F, P, N>,
 	pub handler_deps: HandlerDeps<F, P, N>,
 	pub substrate_deps: SubstrateDeps<F, P, N>,
-	pub btc_deps: BtcDeps<F, P, N>,
+	/// Bitcoin wiring. `None` when the runtime has no Bitcoin pallets.
+	pub btc_deps: Option<BtcDeps<F, P, N>>,
 }

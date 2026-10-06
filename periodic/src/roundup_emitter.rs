@@ -2,7 +2,7 @@ use alloy::{
 	network::Network,
 	primitives::{Address, U256},
 	providers::{Provider, WalletProvider, fillers::TxFiller},
-	rpc::types::{Filter, Log},
+	rpc::types::Log,
 	sol_types::SolEvent as _,
 };
 use cron::Schedule;
@@ -216,7 +216,7 @@ where
 				let shared_data = self.bootstrap_shared_data();
 				let bootstrap_states = shared_data.bootstrap_states.read().await;
 				bootstrap_states.iter().all(|(chain_id, state)| {
-					if *chain_id != self.client.get_bitcoin_chain_id().unwrap() {
+					if Some(*chain_id) != self.client.get_bitcoin_chain_id() {
 						*state == BootstrapState::BootstrapRoundUpPhase1
 					} else {
 						true
@@ -231,6 +231,17 @@ where
 
 		let get_next_poll_round = || async move {
 			let logs = self.get_bootstrap_events().await.unwrap();
+			if logs.is_empty() {
+				// No RoundUp within the bootstrap window (e.g. rounds that only rotate on
+				// authority set changes), so there is nothing to replay.
+				log::warn!(
+					target: &self.client.get_chain_name(),
+					"-[{}] ⚙️  [Bootstrap mode] No RoundUp found within the bootstrap window. Skipping RoundUp replay at Round({})",
+					sub_display_format(SUB_LOG_TARGET),
+					self.current_round,
+				);
+				return self.current_round + U256::from(1);
+			}
 
 			let round_up_events: Vec<RoundUp> =
 				logs.iter().map(|log| log.log_decode::<RoundUp>().unwrap().inner.data).collect();
@@ -298,7 +309,7 @@ where
 			let bootstrap_states = self.bootstrap_shared_data.bootstrap_states.read().await;
 			bootstrap_states
 				.keys()
-				.filter(|chain_id| **chain_id != self.client.get_bitcoin_chain_id().unwrap())
+				.filter(|chain_id| Some(**chain_id) != self.client.get_bitcoin_chain_id())
 				.cloned()
 				.collect()
 		};
@@ -321,45 +332,15 @@ where
 		let mut round_up_events = vec![];
 
 		if let Some(bootstrap_config) = &self.bootstrap_shared_data.bootstrap_config {
-			let round_info = self.client.protocol_contracts.authority.round_info().call().await?;
-			let bootstrap_offset_height = self
+			round_up_events = self
 				.client
-				.get_bootstrap_offset_height_based_on_block_time(
+				.get_historical_logs(
 					bootstrap_config.round_offset.unwrap_or(DEFAULT_BOOTSTRAP_ROUND_OFFSET),
-					round_info,
+					vec![*self.client.protocol_contracts.socket.address()],
+					RoundUp::SIGNATURE_HASH,
+					BOOTSTRAP_BLOCK_CHUNK_SIZE,
 				)
 				.await?;
-
-			let latest_block_number = self.client.get_block_number().await?;
-			let mut from_block = latest_block_number.saturating_sub(bootstrap_offset_height);
-			let to_block = latest_block_number;
-
-			// Split from_block into smaller chunks
-			while from_block <= to_block {
-				let chunk_to_block =
-					std::cmp::min(from_block + BOOTSTRAP_BLOCK_CHUNK_SIZE - 1, to_block);
-
-				let filter = Filter::new()
-					.address(*self.client.protocol_contracts.socket.address())
-					.event_signature(RoundUp::SIGNATURE_HASH)
-					.from_block(from_block)
-					.to_block(chunk_to_block);
-
-				let chunk_logs = self.client.get_logs(&filter).await?;
-				round_up_events.extend(chunk_logs);
-
-				from_block = chunk_to_block + 1;
-			}
-
-			if round_up_events.is_empty() {
-				panic!(
-					"[{}]-[{}]-[{}] ❗️ Failed to find the latest RoundUp event. Please use a higher bootstrap offset. Current offset: {:?}",
-					self.client.get_chain_name(),
-					SUB_LOG_TARGET,
-					self.client.address().await,
-					bootstrap_config.round_offset.unwrap_or(DEFAULT_BOOTSTRAP_ROUND_OFFSET)
-				);
-			}
 
 			// Always overwrite the cache so RoundupRelayHandler receives the most
 			// recent snapshot (this method may be called multiple times while waiting

@@ -66,12 +66,14 @@ pub trait SocketMessageSizeGuard {
 	fn chain_name(&self) -> String;
 
 	/// Fetches the configured maximum allowed byte size of a single socket message from
-	/// `BtcSocketQueue::MaxSocketMessageBytes`.
+	/// `BtcSocketQueue::MaxSocketMessageBytes`. Runtimes without that pallet fall back to
+	/// `DEFAULT_MAX_SOCKET_MESSAGE_BYTES`.
 	async fn fetch_max_socket_message_bytes(&self) -> Result<u32> {
-		Ok(self
-			.sub_client()
-			.at_current_block()
-			.await?
+		let at = self.sub_client().at_current_block().await?;
+		if at.metadata_ref().pallet_by_name("BtcSocketQueue").is_none() {
+			return Ok(cccp::DEFAULT_MAX_SOCKET_MESSAGE_BYTES);
+		}
+		Ok(at
 			.storage()
 			.fetch(bifrost_runtime::storage().btc_socket_queue().max_socket_message_bytes(), ())
 			.await?

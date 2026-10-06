@@ -45,8 +45,9 @@ pub struct RelayerConfig {
 	pub keystore_config: Option<KeystoreConfig>,
 	/// EVM configs
 	pub evm_providers: Vec<EVMProvider>,
-	/// BTC configs
-	pub btc_provider: BTCProvider,
+	/// BTC configs. Required when the connected runtime has the `BtcSocketQueue` and
+	/// `BtcRegistrationPool` pallets, ignored otherwise.
+	pub btc_provider: Option<BTCProvider>,
 	/// Handler configs
 	pub handler_configs: Vec<HandlerConfig>,
 	/// Bootstrapping configs

@@ -1,8 +1,11 @@
 use br_client::btc::handlers::FeeRateFeeder;
 use br_periodic::PsbtBroadcaster;
-use br_primitives::constants::btc::{
-	MEMPOOL_SPACE_BLOCK_HEIGHT_ENDPOINT, MEMPOOL_SPACE_FEE_RATE_ENDPOINT,
-	MEMPOOL_SPACE_TESTNET_BLOCK_HEIGHT_ENDPOINT, MEMPOOL_SPACE_TESTNET_FEE_RATE_ENDPOINT,
+use br_primitives::{
+	cli::BTCProvider,
+	constants::btc::{
+		MEMPOOL_SPACE_BLOCK_HEIGHT_ENDPOINT, MEMPOOL_SPACE_FEE_RATE_ENDPOINT,
+		MEMPOOL_SPACE_TESTNET_BLOCK_HEIGHT_ENDPOINT, MEMPOOL_SPACE_TESTNET_FEE_RATE_ENDPOINT,
+	},
 };
 
 use super::*;
@@ -36,7 +39,7 @@ where
 	P: Provider<N>,
 {
 	pub fn new(
-		config: &Configuration,
+		btc_provider: &BTCProvider,
 		keypair_storage: KeypairStorage,
 		bootstrap_shared_data: BootstrapSharedData,
 		substrate_deps: &SubstrateDeps<F, P, N>,
@@ -45,7 +48,6 @@ where
 		task_manager: &TaskManager,
 		debug_mode: bool,
 	) -> Self {
-		let btc_provider = &config.relayer_config.btc_provider;
 		let bootstrap_shared_data = Arc::new(bootstrap_shared_data.clone());
 		let network = Network::from_core_arg(&btc_provider.chain).expect(INVALID_BITCOIN_NETWORK);
 

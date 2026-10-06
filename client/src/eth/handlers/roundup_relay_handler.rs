@@ -496,7 +496,7 @@ where
 			let bootstrap_states = self.bootstrap_shared_data.bootstrap_states.read().await;
 			bootstrap_states
 				.keys()
-				.filter(|chain_id| **chain_id != self.client.get_bitcoin_chain_id().unwrap())
+				.filter(|chain_id| Some(**chain_id) != self.client.get_bitcoin_chain_id())
 				.cloned()
 				.collect()
 		};
