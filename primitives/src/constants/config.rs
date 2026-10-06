@@ -25,3 +25,7 @@ pub const PRICE_FETCHER_REQUEST_TIMEOUT: u64 = 30;
 /// 200 bps = 2%. If the market price deviates from the on-chain oracle price
 /// by more than this threshold, an immediate price feed will be triggered.
 pub const DEFAULT_PRICE_DEVIATION_THRESHOLD_BPS: u64 = 200;
+
+/// The price deviation threshold in basis points (bps) for stablecoins.
+/// 25 bps = 0.25%, matching Chainlink's deviation threshold for stablecoin/USD feeds.
+pub const STABLECOIN_PRICE_DEVIATION_THRESHOLD_BPS: u64 = 25;
