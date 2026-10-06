@@ -54,7 +54,7 @@ const PENDING_EVENT_MAX_AGE: Duration = Duration::from_secs(30 * 60);
 struct PendingRoundUpEvent {
 	/// The RoundUp event log.
 	log: Log,
-	/// Block number reported by the `EventManager` when the event was received.
+	/// Block the event was emitted in. Confirmations are counted from this block.
 	block_number: u64,
 	/// When the event was first queued, used as a wall-clock safety cap.
 	first_seen: Instant,
@@ -131,8 +131,10 @@ where
 							for log in msg.event_logs {
 								if self.is_target_contract(&log) && self.is_target_event(log.topic0()) {
 									self.pending_events.lock().unwrap().push(PendingRoundUpEvent {
+										// `msg.block_number` is the first block of the batch, so prefer the
+										// log's own block to avoid counting too many confirmations.
+										block_number: log.block_number.unwrap_or(msg.block_number),
 										log,
-										block_number: msg.block_number,
 										first_seen: Instant::now(),
 									});
 									queued += 1;
@@ -439,7 +441,9 @@ where
 	///
 	/// - Bootstrap path (`is_bootstrap=true`): errors propagate immediately; no pending storage.
 	/// - Normal path (`is_bootstrap=false`): fire-and-forget send; per-chain RPC failures are
-	///   logged and the chain stays in `pending_relays` for later retry.
+	///   logged and the chain stays in `pending_relays` for later retry. This path never
+	///   returns an error, so a failed `process_confirmed_log` retry never re-sends relays
+	///   that were already submitted.
 	async fn broadcast_roundup(
 		&self,
 		roundup_submit: Round_Up_Submit,
@@ -463,7 +467,20 @@ where
 			}
 
 			let latest_round =
-				target_client.protocol_contracts.authority.latest_round().call().await?;
+				match target_client.protocol_contracts.authority.latest_round().call().await {
+					Ok(latest_round) => latest_round,
+					Err(e) if !is_bootstrap => {
+						log::warn!(
+							target: &self.client.get_chain_name(),
+							"-[{}] ⚠️ Failed to fetch latest round of chain {}, left to the retry interval: {:?}",
+							sub_display_format(SUB_LOG_TARGET),
+							dst_chain_id,
+							e,
+						);
+						continue;
+					},
+					Err(e) => return Err(e.into()),
+				};
 			if roundup_submit.round > latest_round {
 				let transaction_request = self.build_transaction_request(
 					&target_client.protocol_contracts.socket,
@@ -529,7 +546,19 @@ where
 			};
 
 			let chain_latest_round =
-				target_client.protocol_contracts.authority.latest_round().call().await?;
+				match target_client.protocol_contracts.authority.latest_round().call().await {
+					Ok(chain_latest_round) => chain_latest_round,
+					Err(e) => {
+						log::warn!(
+							target: &self.client.get_chain_name(),
+							"-[{}] ⚠️ Failed to fetch latest round of chain {}, retrying next interval: {:?}",
+							sub_display_format(SUB_LOG_TARGET),
+							dst_chain_id,
+							e,
+						);
+						continue;
+					},
+				};
 
 			// Drop all pending entries for this chain if it is already synced.
 			if chain_latest_round == bifrost_latest_round {
