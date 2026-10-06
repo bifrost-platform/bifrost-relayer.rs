@@ -13,7 +13,7 @@ pub mod socket_queue;
 pub mod vault;
 
 use alloy::{
-	primitives::{B256, Bytes, FixedBytes, Signature, b256},
+	primitives::{B256, Bytes, Signature, b256},
 	providers::fillers::FillProvider,
 	sol,
 };

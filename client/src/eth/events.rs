@@ -156,19 +156,18 @@ where
 
 	/// Builds the `eth_getLogs` address filter shared by the live and confirmed-log scans.
 	fn build_log_filter(&self, from: u64, to: u64) -> Filter {
-		match &self.client.protocol_contracts.bitcoin_socket {
-			Some(bitcoin_socket) => Filter::new()
-				.from_block(BlockNumber::from(from))
-				.to_block(BlockNumber::from(to))
-				.address(vec![
-					*self.client.protocol_contracts.socket.address(),
-					*bitcoin_socket.address(),
-				]),
-			_ => Filter::new()
-				.from_block(BlockNumber::from(from))
-				.to_block(BlockNumber::from(to))
-				.address(*self.client.protocol_contracts.socket.address()),
+		let contracts = &self.client.protocol_contracts;
+		let mut addresses = vec![*contracts.socket.address()];
+		if let Some(ls) = &contracts.legacy_socket {
+			addresses.push(*ls.address());
 		}
+		if let Some(bs) = &contracts.bitcoin_socket {
+			addresses.push(*bs.address());
+		}
+		Filter::new()
+			.from_block(BlockNumber::from(from))
+			.to_block(BlockNumber::from(to))
+			.address(addresses)
 	}
 
 	/// Process the new block and verifies if any events emitted from the target contracts.

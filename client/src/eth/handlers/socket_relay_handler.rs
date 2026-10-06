@@ -25,7 +25,7 @@ use br_primitives::{
 		errors::INVALID_CHAIN_ID, tx::SOCKET_RELAY_RETRY_INTERVAL_MS,
 	},
 	contracts::socket::{
-		Socket_Struct::{Instruction, RequestID, Signatures, Socket_Message},
+		Socket_Struct::{Signatures, Socket_Message},
 		SocketContract::Socket,
 	},
 	eth::{BootstrapState, BuiltRelayTransaction, RelayDirection, SocketEventStatus},
@@ -301,6 +301,20 @@ where
 
 				let is_inbound =
 					self.is_inbound_sequence(Into::<u32>::into(msg.ins_code.ChainIndex) as ChainId);
+
+				if self.client.is_asset_migrated_to_n_rail(&msg, log.address(), is_inbound).await? {
+					br_primitives::log_and_capture!(
+						warn,
+						&self.client.get_chain_name(),
+						SUB_LOG_TARGET,
+						self.client.address().await,
+						"⚠️  Ignoring L-Socket event: asset migrated to N-Vault (asset={}, seq={}, tx={:?})",
+						msg.params.tokenIDX0,
+						msg.req_id.sequence,
+						log.transaction_hash,
+					);
+					return Ok(());
+				}
 				let metadata = SocketRelayMetadata::new(
 					is_inbound,
 					status,
@@ -352,7 +366,7 @@ where
 					}
 				}
 
-				if self.is_sequence_ended(&msg.req_id, &msg.ins_code, metadata.status).await? {
+				if self.is_sequence_ended(&msg, metadata.status).await? {
 					// do nothing if protocol sequence ended
 					return Ok(());
 				}
@@ -376,13 +390,11 @@ where
 
 	#[inline]
 	fn is_target_contract(&self, log: &Log) -> bool {
-		match self.client.protocol_contracts.bitcoin_socket.as_ref() {
-			Some(bitcoin_socket) => {
-				log.address() == *self.client.protocol_contracts.socket.address()
-					|| log.address() == *bitcoin_socket.address()
-			},
-			_ => log.address() == *self.client.protocol_contracts.socket.address(),
-		}
+		let addr = log.address();
+		let contracts = &self.client.protocol_contracts;
+		addr == *contracts.socket.address()
+			|| contracts.legacy_socket.as_ref().is_some_and(|ls| addr == *ls.address())
+			|| contracts.bitcoin_socket.as_ref().is_some_and(|bs| addr == *bs.address())
 	}
 
 	#[inline]
@@ -738,7 +750,7 @@ where
 		}
 
 		// Check if sequence already ended
-		if self.is_sequence_ended(&msg.req_id, &msg.ins_code, metadata.status).await? {
+		if self.is_sequence_ended(&msg, metadata.status).await? {
 			log::debug!(
 				target: &self.client.get_chain_name(),
 				"-[{}] Sequence already ended, skipping",
@@ -989,14 +1001,17 @@ where
 
 	/// Compare the request status recorded in source chain with event status to determine if the
 	/// event has already been committed or rollbacked.
+	///
+	/// The source chain's owning contract (L-Socket or N-Socket) is resolved via the asset's
+	/// migration state (`tokenIDX0`), which is correct regardless of which chain's event is
+	/// currently being processed — unlike relying on the observed log's address.
 	async fn is_sequence_ended(
 		&self,
-		req_id: &RequestID,
-		ins_code: &Instruction,
+		socket_msg: &Socket_Message,
 		status: SocketEventStatus,
 	) -> Result<bool> {
-		let src = Into::<u32>::into(req_id.ChainIndex) as ChainId;
-		let dst = Into::<u32>::into(ins_code.ChainIndex) as ChainId;
+		let src = Into::<u32>::into(socket_msg.req_id.ChainIndex) as ChainId;
+		let dst = Into::<u32>::into(socket_msg.ins_code.ChainIndex) as ChainId;
 
 		// if inbound::accepted and relaying to bitcoin we consider as ended
 		if let Some(bitcoin_chain_id) = self.client.get_bitcoin_chain_id() {
@@ -1006,9 +1021,29 @@ where
 		}
 
 		if let Some(src_client) = &self.system_clients.get(&src) {
-			let request =
-				src_client.protocol_contracts.socket.get_request(req_id.clone()).call().await?;
+			let src_socket_address =
+				src_client.resolve_socket_address(socket_msg.params.tokenIDX0, true).await?;
 
+			let request = if let Some(legacy_socket) = &src_client.protocol_contracts.legacy_socket
+			{
+				if src_socket_address == *legacy_socket.address() {
+					legacy_socket.get_request(socket_msg.req_id.clone()).call().await?
+				} else {
+					src_client
+						.protocol_contracts
+						.socket
+						.get_request(socket_msg.req_id.clone())
+						.call()
+						.await?
+				}
+			} else {
+				src_client
+					.protocol_contracts
+					.socket
+					.get_request(socket_msg.req_id.clone())
+					.call()
+					.await?
+			};
 			return Ok(matches!(
 				SocketEventStatus::from(&request.field[0]),
 				SocketEventStatus::Committed | SocketEventStatus::Rollbacked
@@ -1276,21 +1311,19 @@ where
 				let chunk_to_block =
 					std::cmp::min(from_block + BOOTSTRAP_BLOCK_CHUNK_SIZE - 1, to_block);
 
-				let filter = match &self.client.protocol_contracts.bitcoin_socket {
-					Some(bitcoin_socket) => Filter::new()
-						.address(vec![
-							*self.client.protocol_contracts.socket.address(),
-							*bitcoin_socket.address(),
-						])
-						.event_signature(Socket::SIGNATURE_HASH)
-						.from_block(from_block)
-						.to_block(chunk_to_block),
-					_ => Filter::new()
-						.address(*self.client.protocol_contracts.socket.address())
-						.event_signature(Socket::SIGNATURE_HASH)
-						.from_block(from_block)
-						.to_block(chunk_to_block),
-				};
+				let contracts = &self.client.protocol_contracts;
+				let mut addresses = vec![*contracts.socket.address()];
+				if let Some(ls) = &contracts.legacy_socket {
+					addresses.push(*ls.address());
+				}
+				if let Some(bs) = &contracts.bitcoin_socket {
+					addresses.push(*bs.address());
+				}
+				let filter = Filter::new()
+					.address(addresses)
+					.event_signature(Socket::SIGNATURE_HASH)
+					.from_block(from_block)
+					.to_block(chunk_to_block);
 				let target_logs_chunk = self.client.get_logs(&filter).await?;
 				logs.extend(target_logs_chunk);
 
@@ -1404,7 +1437,9 @@ mod tests {
 
 	#[test]
 	fn test_socket_event_decode() {
-		let data = bytes!("");
+		let data = bytes!(
+			"00000000000000000000000000000000000000000000000000000000000000200000bfc000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000266100000000000000000000000000000000000000000000000000000000000009f2000000000000000000000000000000000000000000000000000000000000000100014a3400000000000000000000000000000000000000000000000000000000030203010000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000e000000004000000030000bfc0adcbd5ec26a0bfb347d14f449adca193005f97be000000000000000000000000000000000000000000000000000000000000000000000000000000000000000055b57a7a0f41d668c584b2246d373b639084eaed00000000000000000000000055b57a7a0f41d668c584b2246d373b639084eaed0000000000000000000000000000000000000000000000000007c1c5cf6a93af00000000000000000000000000000000000000000000000000000000000000c00000000000000000000000000000000000000000000000000000000000000000"
+		);
 
 		match Socket::abi_decode_data(&data) {
 			Ok(socket) => {
