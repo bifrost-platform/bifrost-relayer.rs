@@ -14,7 +14,10 @@ use sc_service::SpawnTaskHandle;
 use br_client::eth::{ClientMap, EthClient, send_transaction};
 use br_primitives::{
 	constants::{
-		config::{DEFAULT_PRICE_DEVIATION_THRESHOLD_BPS, PRICE_FETCHER_REQUEST_TIMEOUT},
+		config::{
+			DEFAULT_PRICE_DEVIATION_THRESHOLD_BPS, PRICE_FETCHER_REQUEST_TIMEOUT,
+			STABLECOIN_PRICE_DEVIATION_THRESHOLD_BPS,
+		},
 		errors::INVALID_PERIODIC_SCHEDULE,
 		schedule::PRICE_DEVIATION_CHECK_SCHEDULE,
 	},
@@ -35,10 +38,11 @@ use crate::{
 const SUB_LOG_TARGET: &str = "deviation-checker";
 
 /// Returns the deviation threshold in basis points for a given symbol.
-/// Default is `DEFAULT_PRICE_DEVIATION_THRESHOLD_BPS` (2%).
-/// Override per symbol as needed.
+/// Stablecoins use `STABLECOIN_PRICE_DEVIATION_THRESHOLD_BPS` (0.25%), everything else
+/// `DEFAULT_PRICE_DEVIATION_THRESHOLD_BPS` (2%).
 fn get_deviation_threshold_bps(symbol: &str) -> u64 {
 	match symbol {
+		"USDC" | "USDT" | "DAI" | "JPYC" => STABLECOIN_PRICE_DEVIATION_THRESHOLD_BPS,
 		_ => DEFAULT_PRICE_DEVIATION_THRESHOLD_BPS,
 	}
 }
