@@ -1,7 +1,7 @@
 use alloy::{
 	consensus::BlockHeader as _,
 	network::{BlockResponse, Network},
-	primitives::{ChainId, U256},
+	primitives::{Address, ChainId, FixedBytes, U256},
 	providers::{Provider, WalletProvider, fillers::TxFiller},
 };
 use cron::Schedule;
@@ -44,7 +44,10 @@ where
 	/// The receiver connected to the socket rollback channel.
 	rollback_receiver: UnboundedReceiver<Socket_Message>,
 	/// The local storage saving emitted `Socket` event messages.
-	rollback_msgs: BTreeMap<RawRequestID, RollbackableMessage>,
+	/// Keyed by `(sequence, tokenIDX0)` so that requests with the same sequence number but
+	/// different assets (which may live on different contracts, L-Socket vs N-Socket) are
+	/// stored as distinct entries.
+	rollback_msgs: BTreeMap<(RawRequestID, FixedBytes<32>), RollbackableMessage>,
 	/// The time schedule that represents when to check heartbeat pulsed.
 	schedule: Schedule,
 	/// The handle to spawn tasks.
@@ -95,8 +98,28 @@ where
 	async fn is_request_executed(&self, socket_msg: &Socket_Message) -> Result<bool> {
 		let src_chain_id = Into::<u32>::into(socket_msg.req_id.ChainIndex) as ChainId;
 		let dst_chain_id = Into::<u32>::into(socket_msg.ins_code.ChainIndex) as ChainId;
-		let src_request = self.get_socket_request(&socket_msg.req_id, src_chain_id).await?;
-		let dst_request = self.get_socket_request(&socket_msg.req_id, dst_chain_id).await?;
+
+		// Resolve which contract (L-Socket or N-Socket) owns this asset on each chain.
+		// `src` is treated as the local perspective (tokenIDX0 is that chain's own asset index),
+		// `dst` as the remote perspective (tokenIDX0 needs `remote_asset_pair` mapping there).
+		// Chains without a legacy socket (e.g. Bifrost) always resolve to the single N-Socket.
+		let Some(src_client) = self.system_clients.get(&src_chain_id) else {
+			return Ok(false);
+		};
+		let Some(dst_client) = self.system_clients.get(&dst_chain_id) else {
+			return Ok(false);
+		};
+		let src_socket_address =
+			src_client.resolve_socket_address(socket_msg.params.tokenIDX0, true).await?;
+		let dst_socket_address =
+			dst_client.resolve_socket_address(socket_msg.params.tokenIDX0, false).await?;
+
+		let src_request = self
+			.get_socket_request(&socket_msg.req_id, src_chain_id, src_socket_address)
+			.await?;
+		let dst_request = self
+			.get_socket_request(&socket_msg.req_id, dst_chain_id, dst_socket_address)
+			.await?;
 
 		// src-side terminal: Committed/Rollbacked closes the round trip
 		// unambiguously. Skipped when src isn't queryable here.
@@ -146,16 +169,25 @@ where
 		false
 	}
 
-	/// Get the current state of the socket request on the target chain.
+	/// Get the current state of the socket request on the target chain, querying whichever
+	/// contract (L-Socket or N-Socket) matches the already-resolved `socket_address`.
 	async fn get_socket_request(
 		&self,
 		req_id: &RequestID,
 		chain_id: ChainId,
+		socket_address: Address,
 	) -> Result<Option<RequestInfo>> {
 		if let Some(client) = self.system_clients.get(&chain_id) {
-			return Ok(Some(
-				client.protocol_contracts.socket.get_request(req_id.clone()).call().await?,
-			));
+			let request = if let Some(legacy_socket) = &client.protocol_contracts.legacy_socket {
+				if socket_address == *legacy_socket.address() {
+					legacy_socket.get_request(req_id.clone()).call().await?
+				} else {
+					client.protocol_contracts.socket.get_request(req_id.clone()).call().await?
+				}
+			} else {
+				client.protocol_contracts.socket.get_request(req_id.clone()).call().await?
+			};
+			return Ok(Some(request));
 		}
 		Ok(None)
 	}
@@ -237,19 +269,20 @@ where
 				}
 			}
 
-			let req_id = msg.req_id.sequence;
+			let sequence = msg.req_id.sequence;
+			let key = (sequence, msg.params.tokenIDX0);
+
 			// ignore if the request already exists.
-			if self.rollback_msgs.contains_key(&req_id) {
+			if self.rollback_msgs.contains_key(&key) {
 				continue;
 			}
-			self.rollback_msgs
-				.insert(req_id, RollbackableMessage::new(current_timestamp, msg));
+			self.rollback_msgs.insert(key, RollbackableMessage::new(current_timestamp, msg));
 
 			log::info!(
 				target: &self.client.get_chain_name(),
 				"-[{}] 🔃 Received Rollbackable Socket message: {}",
 				sub_display_format(SUB_LOG_TARGET),
-				req_id,
+				sequence,
 			);
 		}
 	}
@@ -303,8 +336,8 @@ where
 		loop {
 			self.wait_until_next_time().await;
 
-			// executed or rollback handled request ID's.
-			let mut handled_req_ids = vec![];
+			// executed or rollback handled keys (sequence, tokenIDX0).
+			let mut handled_keys: Vec<(RawRequestID, FixedBytes<32>)> = vec![];
 
 			if let Some(latest_block) = self
 				.client
@@ -314,11 +347,11 @@ where
 			{
 				self.receive(latest_block.header().timestamp());
 
-				for (req_id, rollback_msg) in self.rollback_msgs.clone() {
+				for (key, rollback_msg) in self.rollback_msgs.clone() {
 					// ignore if the request has already been processed.
 					// it should be removed from the local storage.
 					if self.is_request_executed(&rollback_msg.socket_msg).await? {
-						handled_req_ids.push(req_id);
+						handled_keys.push(key);
 						continue;
 					}
 					// ignore if the required interval didn't pass.
@@ -330,11 +363,11 @@ where
 					}
 					// the pending request has not been processed in the waiting period. rollback should be handled.
 					self.try_rollback(&rollback_msg.socket_msg).await?;
-					handled_req_ids.push(req_id);
+					handled_keys.push(key);
 				}
 			}
-			for req_id in handled_req_ids {
-				self.rollback_msgs.remove(&req_id);
+			for key in handled_keys {
+				self.rollback_msgs.remove(&key);
 			}
 
 			log::info!(

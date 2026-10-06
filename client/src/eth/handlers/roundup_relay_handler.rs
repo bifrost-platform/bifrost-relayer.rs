@@ -1,7 +1,7 @@
 use std::{
 	collections::{BTreeMap, HashMap},
 	sync::{Arc, Mutex},
-	time::Duration,
+	time::{Duration, Instant},
 };
 
 use alloy::{
@@ -56,6 +56,22 @@ const SUB_LOG_TARGET: &str = "roundup-handler";
 /// an external EVM's Authority round-space is disjoint from this BFC node's
 /// (e.g. a private testbed BFC pointed at public sepolia contracts).
 const EXTERNAL_ROUNDUP_WAIT_TIMEOUT_SECS: u64 = 120;
+/// How long a queued RoundUp event is retried before it is dropped as unprocessable.
+/// Guards against an unbounded `pending_events` queue when a transaction receipt never
+/// becomes available (e.g. the emitting transaction was reorged out). Chosen well above
+/// any realistic RPC outage so a transient failure never drops a pending relay.
+const PENDING_EVENT_MAX_AGE: Duration = Duration::from_secs(30 * 60);
+
+/// A RoundUp event log waiting for enough block confirmations on the bifrost chain
+/// before it is processed.
+struct PendingRoundUpEvent {
+	/// The RoundUp event log.
+	log: Log,
+	/// Block the event was emitted in. Confirmations are counted from this block.
+	block_number: u64,
+	/// When the event was first queued, used as a wall-clock safety cap.
+	first_seen: Instant,
+}
 
 /// The essential task that handles `roundup relay` related events.
 pub struct RoundupRelayHandler<F, P, N: Network>
@@ -95,6 +111,10 @@ where
 	/// the EVM shape. Entries are dropped once the cluster's on-chain
 	/// `latest_round_id` catches up to Bifrost's.
 	pending_sol_relays: Mutex<HashMap<ChainId, Vec<SolRoundUpSubmit>>>,
+	/// RoundUp event logs waiting for enough block confirmations on the bifrost chain
+	/// before they are processed. Guarded by a plain `Mutex`; the lock is always released
+	/// before any `.await`.
+	pending_events: Mutex<Vec<PendingRoundUpEvent>>,
 }
 
 #[async_trait]
@@ -117,6 +137,11 @@ where
 		// Skip the immediate first tick so we don't retry before any failure has occurred.
 		retry_interval.tick().await;
 
+		// Timer that drains `pending_events` once the emitting blocks have enough confirmations.
+		let mut confirm_interval = tokio::time::interval(tokio::time::Duration::from_millis(
+			self.client.metadata.call_interval,
+		));
+
 		loop {
 			tokio::select! {
 				msg = self.event_stream.next() => {
@@ -130,74 +155,128 @@ where
 								msg.event_logs.len(),
 							);
 
+							let mut queued = 0u32;
 							for log in msg.event_logs {
 								if self.is_target_contract(&log) && self.is_target_event(log.topic0()) {
-									self.process_confirmed_log(&log, false).await?;
+									self.pending_events.lock().unwrap().push(PendingRoundUpEvent {
+										// `msg.block_number` is the first block of the batch, so prefer the
+										// log's own block to avoid counting too many confirmations.
+										block_number: log.block_number.unwrap_or(msg.block_number),
+										log,
+										first_seen: Instant::now(),
+									});
+									queued += 1;
 								}
 							}
+							if queued > 0 {
+								log::info!(
+									target: &self.client.get_chain_name(),
+									"-[{}] 📦 Queued {} RoundUp event(s) from #{:?} for confirmation",
+									sub_display_format(SUB_LOG_TARGET),
+									queued,
+									msg.block_number,
+								);
+							}
 						},
-						_ => {},
+						Some(Err(e)) => {
+							log::warn!(
+								target: &self.client.get_chain_name(),
+								"-[{}] ⚠️ RoundUp event stream lagged, some blocks skipped: {:?}",
+								sub_display_format(SUB_LOG_TARGET),
+								e,
+							);
+						},
+						None => break,
+					}
+				},
+				_ = confirm_interval.tick() => {
+					if let Err(e) = self.process_confirmed_pending_events().await {
+						br_primitives::log_and_capture!(
+							error,
+							&self.client.get_chain_name(),
+							SUB_LOG_TARGET,
+							"❗️ Error processing confirmed RoundUp events: {:?}",
+							e
+						);
 					}
 				},
 				_ = retry_interval.tick() => {
-					if !self.pending_relays.lock().unwrap().is_empty() {
-						self.retry_pending_relays().await?;
+					if let Err(e) = self.retry_pending_relays().await {
+						br_primitives::log_and_capture!(
+							error,
+							&self.client.get_chain_name(),
+							SUB_LOG_TARGET,
+							"❗️ Error retrying pending roundup relays: {:?}",
+							e
+						);
 					}
 				},
 			}
 		}
+
+		Ok(())
 	}
 
 	async fn process_confirmed_log(&self, log: &Log, is_bootstrap: bool) -> Result<()> {
-		if let Some(receipt) =
-			self.client.get_transaction_receipt(log.transaction_hash.unwrap()).await?
-		{
-			if !receipt.status() {
-				return Ok(());
-			}
-			match self.decode_log(log.clone()).await {
-				Ok(serialized_log) => {
-					let prev_round = serialized_log.roundup.round - U256::from(1);
-					let relay_as = self.relay_as(prev_round).await;
-					if !self.is_selected_relayer(prev_round, relay_as).await? {
-						// do nothing if not selected
-						return Ok(());
-					}
+		let tx_hash = log.transaction_hash.unwrap();
+		let receipt = match self.client.get_transaction_receipt(tx_hash).await? {
+			Some(receipt) => receipt,
+			None => {
+				// The block is already confirmed but the receipt is not yet queryable
+				// (e.g. Frontier tx-hash mapping lag) or the transaction was reorged out.
+				// Return an error so the caller keeps the event queued and retries it.
+				return Err(eyre::eyre!(
+					"transaction receipt not found for RoundUp event ({:?})",
+					tx_hash
+				));
+			},
+		};
 
-					if !is_bootstrap {
-						log::info!(
-							target: &self.client.get_chain_name(),
-							"-[{}] 👤 RoundUp event detected. ({:?}-{:?})",
-							sub_display_format(SUB_LOG_TARGET),
-							serialized_log.status,
-							log.transaction_hash,
-						);
-					}
+		if !receipt.status() {
+			return Ok(());
+		}
+		match self.decode_log(log.clone()).await {
+			Ok(serialized_log) => {
+				let prev_round = serialized_log.roundup.round - U256::from(1);
+				let relay_as = self.relay_as(prev_round).await;
+				if !self.is_selected_relayer(prev_round, relay_as).await? {
+					// do nothing if not selected
+					return Ok(());
+				}
 
-					match RoundUpEventStatus::from_u8(serialized_log.status) {
-						RoundUpEventStatus::NextAuthorityCommitted => {
-							let roundup_submit = self
-								.build_roundup_submit(
-									serialized_log.roundup.round,
-									serialized_log.roundup.new_relayers,
-								)
-								.await?;
-							self.broadcast_roundup(roundup_submit, relay_as, is_bootstrap).await?;
-						},
-						RoundUpEventStatus::NextAuthorityRelayed => return Ok(()),
-					}
-				},
-				Err(e) => {
-					br_primitives::log_and_capture!(
-						error,
-						&self.client.get_chain_name(),
-						SUB_LOG_TARGET,
-						"Error on decoding RoundUp event ({:?}):{}",
+				if !is_bootstrap {
+					log::info!(
+						target: &self.client.get_chain_name(),
+						"-[{}] 👤 RoundUp event detected. ({:?}-{:?})",
+						sub_display_format(SUB_LOG_TARGET),
+						serialized_log.status,
 						log.transaction_hash,
-						e
 					);
-				},
-			}
+				}
+
+				match RoundUpEventStatus::from_u8(serialized_log.status) {
+					RoundUpEventStatus::NextAuthorityCommitted => {
+						let roundup_submit = self
+							.build_roundup_submit(
+								serialized_log.roundup.round,
+								serialized_log.roundup.new_relayers,
+							)
+							.await?;
+						self.broadcast_roundup(roundup_submit, relay_as, is_bootstrap).await?;
+					},
+					RoundUpEventStatus::NextAuthorityRelayed => return Ok(()),
+				}
+			},
+			Err(e) => {
+				br_primitives::log_and_capture!(
+					error,
+					&self.client.get_chain_name(),
+					SUB_LOG_TARGET,
+					"Error on decoding RoundUp event ({:?}):{}",
+					log.transaction_hash,
+					e
+				);
+			},
 		}
 		Ok(())
 	}
@@ -250,12 +329,78 @@ where
 			sol_clients,
 			sol_outbound_senders,
 			pending_sol_relays: Mutex::new(HashMap::new()),
+			pending_events: Mutex::new(Vec::new()),
 		}
 	}
 
 	/// Decode & Serialize log to `RoundUp` struct.
 	async fn decode_log(&self, log: Log) -> Result<RoundUp> {
 		Ok(log.log_decode::<RoundUp>()?.inner.data)
+	}
+
+	/// Processes queued RoundUp events whose emitting block has reached
+	/// `block_confirmations` on the bifrost chain.
+	///
+	/// Events that process successfully are removed from the queue. Events that fail
+	/// (e.g. a transaction receipt that is not yet queryable) are kept and retried on
+	/// the next tick, until they succeed or [`PENDING_EVENT_MAX_AGE`] elapses.
+	async fn process_confirmed_pending_events(&self) -> Result<()> {
+		let latest_block = self.client.get_block_number().await?;
+		let block_confirmations = self.client.metadata.block_confirmations;
+
+		// Snapshot the confirmed events (oldest first) without holding the lock across `.await`.
+		let confirmed: Vec<(usize, Log, Duration)> = {
+			let pending = self.pending_events.lock().unwrap();
+			pending
+				.iter()
+				.enumerate()
+				.filter(|(_, e)| latest_block.saturating_sub(e.block_number) >= block_confirmations)
+				.map(|(idx, e)| (idx, e.log.clone(), e.first_seen.elapsed()))
+				.collect()
+		};
+		if confirmed.is_empty() {
+			return Ok(());
+		}
+
+		// Indices to drop from the queue: successfully processed, or aged out.
+		let mut done: Vec<usize> = Vec::new();
+		for (idx, log, age) in confirmed {
+			match self.process_confirmed_log(&log, false).await {
+				Ok(()) => done.push(idx),
+				Err(e) if age >= PENDING_EVENT_MAX_AGE => {
+					done.push(idx);
+					br_primitives::log_and_capture!(
+						error,
+						&self.client.get_chain_name(),
+						SUB_LOG_TARGET,
+						"❗️ Dropping RoundUp event ({:?}) still unprocessable after {:?}: {:?}",
+						log.transaction_hash,
+						age,
+						e
+					);
+				},
+				Err(e) => {
+					log::warn!(
+						target: &self.client.get_chain_name(),
+						"-[{}] ⚠️ Failed to process RoundUp event ({:?}), will retry: {:?}",
+						sub_display_format(SUB_LOG_TARGET),
+						log.transaction_hash,
+						e,
+					);
+				},
+			}
+		}
+
+		if !done.is_empty() {
+			let mut pending = self.pending_events.lock().unwrap();
+			done.sort_unstable_by(|a, b| b.cmp(a));
+			for idx in done {
+				if idx < pending.len() {
+					pending.remove(idx);
+				}
+			}
+		}
+		Ok(())
 	}
 
 	/// Get the submitted signatures of the updated round.
@@ -350,23 +495,70 @@ where
 	///
 	/// - Bootstrap path (`is_bootstrap=true`): errors propagate immediately; no pending storage.
 	/// - Normal path (`is_bootstrap=false`): fire-and-forget send; per-chain RPC failures are
-	///   logged and the chain stays in `pending_relays` for later retry.
+	///   logged and the chain stays in `pending_relays` for later retry. This path never
+	///   returns an error, so a failed `process_confirmed_log` retry never re-sends relays
+	///   that were already submitted.
 	async fn broadcast_roundup(
 		&self,
 		roundup_submit: Round_Up_Submit,
 		from: Address,
 		is_bootstrap: bool,
 	) -> Result<()> {
-		if !self.external_clients.is_empty() {
-			for (dst_chain_id, target_client) in self.external_clients.iter() {
-				// For the normal path, always record this relay before attempting to send so that
-				// the retry interval can pick it up if the chain is out-of-sync.
-				if !is_bootstrap {
-					let mut pending = self.pending_relays.lock().unwrap();
-					let relays = pending.entry(*dst_chain_id).or_default();
-					if !relays.iter().any(|r| r.round == roundup_submit.round) {
-						let pos = relays.partition_point(|r| r.round < roundup_submit.round);
-						relays.insert(pos, roundup_submit.clone());
+		if self.external_clients.is_empty() {
+			return Ok(());
+		}
+
+		for (dst_chain_id, target_client) in self.external_clients.iter() {
+			// For the normal path, always record this relay before attempting to send so that
+			// the retry interval can pick it up if the chain is out-of-sync.
+			if !is_bootstrap {
+				let mut pending = self.pending_relays.lock().unwrap();
+				let relays = pending.entry(*dst_chain_id).or_default();
+				if !relays.iter().any(|r| r.round == roundup_submit.round) {
+					let pos = relays.partition_point(|r| r.round < roundup_submit.round);
+					relays.insert(pos, roundup_submit.clone());
+				}
+			}
+
+			let latest_round =
+				match target_client.protocol_contracts.authority.latest_round().call().await {
+					Ok(latest_round) => latest_round,
+					Err(e) if !is_bootstrap => {
+						log::warn!(
+							target: &self.client.get_chain_name(),
+							"-[{}] ⚠️ Failed to fetch latest round of chain {}, left to the retry interval: {:?}",
+							sub_display_format(SUB_LOG_TARGET),
+							dst_chain_id,
+							e,
+						);
+						continue;
+					},
+					Err(e) => return Err(e.into()),
+				};
+			if roundup_submit.round > latest_round {
+				let transaction_request = self.build_transaction_request(
+					&target_client.protocol_contracts.socket,
+					&roundup_submit,
+					from,
+				);
+				let metadata =
+					Arc::new(VSPPhase2Metadata::new(roundup_submit.round, *dst_chain_id));
+
+				if is_bootstrap {
+					while let Err(e) = target_client
+						.sync_send_transaction(
+							transaction_request.clone(),
+							SUB_LOG_TARGET.to_string(),
+							metadata.clone(),
+						)
+						.await
+					{
+						if e.to_string().to_lowercase().contains("nonce too low") {
+							target_client.flush_stalled_transactions().await?;
+							continue;
+						} else {
+							eyre::bail!(e);
+						}
 					}
 				}
 
@@ -550,10 +742,13 @@ where
 	/// the EVM lane and uses the same tick source. Its failure modes are
 	/// strictly per-cluster and never abort the EVM lane.
 	async fn retry_pending_relays(&self) -> Result<()> {
+		let chain_ids: Vec<ChainId> = self.pending_relays.lock().unwrap().keys().cloned().collect();
+		if chain_ids.is_empty() {
+			return Ok(());
+		}
+
 		let bifrost_latest_round =
 			self.client.protocol_contracts.authority.latest_round().call().await?;
-
-		let chain_ids: Vec<ChainId> = self.pending_relays.lock().unwrap().keys().cloned().collect();
 
 		for dst_chain_id in chain_ids {
 			let target_client = match self.external_clients.get(&dst_chain_id) {
@@ -565,7 +760,19 @@ where
 			};
 
 			let chain_latest_round =
-				target_client.protocol_contracts.authority.latest_round().call().await?;
+				match target_client.protocol_contracts.authority.latest_round().call().await {
+					Ok(chain_latest_round) => chain_latest_round,
+					Err(e) => {
+						log::warn!(
+							target: &self.client.get_chain_name(),
+							"-[{}] ⚠️ Failed to fetch latest round of chain {}, retrying next interval: {:?}",
+							sub_display_format(SUB_LOG_TARGET),
+							dst_chain_id,
+							e,
+						);
+						continue;
+					},
+				};
 
 			// Drop all pending entries for this chain if it is already synced.
 			if chain_latest_round == bifrost_latest_round {

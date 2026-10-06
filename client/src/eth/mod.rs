@@ -642,6 +642,8 @@ where
 	}
 
 	/// Get asset address from Vault contract.
+	/// Queries N-Vault first; if the asset is unregistered (remote_asset_index is zero),
+	/// falls back to L-Vault (present during the Stage 1/2 migration period).
 	pub async fn get_asset_address_by_index(
 		&self,
 		asset_index_hash: FixedBytes<32>,
@@ -649,23 +651,83 @@ where
 	) -> Result<Address> {
 		let remote_asset_index =
 			self.protocol_contracts.vault.remote_asset_pair(asset_index_hash).call().await?;
-		if is_inbound {
-			Ok(self
-				.protocol_contracts
-				.vault
-				.assets_config(remote_asset_index)
-				.call()
-				.await?
-				.unified)
+
+		let config = if remote_asset_index.is_zero() {
+			if let Some(legacy_vault) = &self.protocol_contracts.legacy_vault {
+				let legacy_asset_index =
+					legacy_vault.remote_asset_pair(asset_index_hash).call().await?;
+				legacy_vault.assets_config(legacy_asset_index).call().await?
+			} else {
+				self.protocol_contracts.vault.assets_config(remote_asset_index).call().await?
+			}
 		} else {
-			Ok(self
+			self.protocol_contracts.vault.assets_config(remote_asset_index).call().await?
+		};
+
+		if is_inbound { Ok(config.unified) } else { Ok(config.target) }
+	}
+
+	/// Returns true if a Socket event emitted by L-Socket should be ignored because the asset
+	/// has already migrated to the N rail on this chain.
+	///
+	/// - Outbound: `N-Vault.remote_asset_pair(tokenIDX0) != zero`
+	/// - Inbound:  `N-Vault.assets_config(tokenIDX0).unified != zero && .target != zero`
+	pub async fn is_asset_migrated_to_n_rail(
+		&self,
+		msg: &br_primitives::contracts::socket::Socket_Struct::Socket_Message,
+		log_address: Address,
+		is_inbound: bool,
+	) -> Result<bool> {
+		let Some(legacy_socket) = &self.protocol_contracts.legacy_socket else {
+			return Ok(false);
+		};
+		if log_address != *legacy_socket.address() {
+			return Ok(false);
+		}
+		if is_inbound {
+			let config =
+				self.protocol_contracts.vault.assets_config(msg.params.tokenIDX0).call().await?;
+			Ok(!config.target.is_zero())
+		} else {
+			let local_asset = self
 				.protocol_contracts
 				.vault
-				.assets_config(remote_asset_index)
+				.remote_asset_pair(msg.params.tokenIDX0)
 				.call()
-				.await?
-				.target)
+				.await?;
+			Ok(!local_asset.is_zero())
 		}
+	}
+
+	/// Determines which socket contract (Legacy or New) currently owns requests for the given
+	/// asset on this chain. If this chain has no legacy socket, the single N-Socket address is
+	/// always returned.
+	///
+	/// `treat_as_local` should be `true` when `token_idx0` is this chain's own local asset index
+	/// (i.e. this chain is the source of an inbound sequence), and `false` when `token_idx0` is a
+	/// remote index that needs mapping via `remote_asset_pair` (i.e. this chain is the destination
+	/// of an outbound sequence).
+	pub async fn resolve_socket_address(
+		&self,
+		token_idx0: FixedBytes<32>,
+		treat_as_local: bool,
+	) -> Result<Address> {
+		let Some(legacy_socket) = &self.protocol_contracts.legacy_socket else {
+			return Ok(*self.protocol_contracts.socket.address());
+		};
+		let migrated_to_n = if treat_as_local {
+			let config = self.protocol_contracts.vault.assets_config(token_idx0).call().await?;
+			!config.target.is_zero()
+		} else {
+			let remote_asset =
+				self.protocol_contracts.vault.remote_asset_pair(token_idx0).call().await?;
+			!remote_asset.is_zero()
+		};
+		Ok(if migrated_to_n {
+			*self.protocol_contracts.socket.address()
+		} else {
+			*legacy_socket.address()
+		})
 	}
 
 	/// Get ERC20 token decimals from cache or fetch and cache if not present.
@@ -748,11 +810,12 @@ pub fn send_transaction<F, P, N: Network>(
 				}
 
 				let msg = format!(
-					" ❗️ Failed to estimate gas ({} address:{}): {}, Error: {}",
+					" ❗️ Failed to estimate gas ({} address:{}): {}, Error: {}, Request: {:?}",
 					client.get_chain_name(),
 					client.address().await,
 					metadata,
-					err
+					err,
+					request
 				);
 				log::error!(target: &requester, "{msg}");
 
@@ -814,11 +877,12 @@ pub fn send_transaction<F, P, N: Network>(
 						} else {
 							br_primitives::log_and_capture_simple!(
 								error,
-								" ❗️ Transaction failed to register ({} address:{}): {}, Error: {}",
+								" ❗️ Transaction failed to register ({} address:{}): {}, Error: {}, Request: {:?}",
 								client.get_chain_name(),
 								client.address().await,
 								metadata,
-								err
+								err,
+								request
 							);
 
 							if let Err(err) = client.flush_stalled_transactions().await {
@@ -836,11 +900,12 @@ pub fn send_transaction<F, P, N: Network>(
 			Err(err) => {
 				br_primitives::log_and_capture_simple!(
 					error,
-					" ❗️ Failed to send transaction ({} address:{}): {}, Error: {}",
+					" ❗️ Failed to send transaction ({} address:{}): {}, Error: {}, Request: {:?}",
 					client.get_chain_name(),
 					client.address().await,
 					metadata,
-					err
+					err,
+					request
 				);
 
 				if is_nonce_too_low(&err) {

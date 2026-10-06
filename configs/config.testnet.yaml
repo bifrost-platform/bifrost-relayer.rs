@@ -78,9 +78,11 @@ evm_providers:
     block_confirmations: 7
     is_relay_target: false
     eip1559: true
-    socket_address: "0xdAcc4aeea580F782bB991eA862e1a57827Ea9D68"
-    authority_address: "0x15EDC0c65004548fa787Bc01e533366674946C5F"
-    vault_address: "0x9070e3a291B96D156f361A850410d656880540D2"
+    socket_address: "0x24d0fff5601E50647f791607B1c2b6C1e0360326"
+    legacy_socket_address: "0xdAcc4aeea580F782bB991eA862e1a57827Ea9D68"
+    authority_address: "0x1471127C2986dD5d0c40c055Fe76108e0719ADbA"
+    vault_address: "0x878dC08FC22F0b639D8aA7D263E7F4DeaDB55854"
+    legacy_vault_address: "0x9070e3a291B96D156f361A850410d656880540D2"
     hooks_address: "0x42E65F9B77DD0BC081c51e95b14117eF22EC91e2"
 
 handler_configs:
