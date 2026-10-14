@@ -2,5 +2,6 @@
 
 pub mod btc;
 pub mod eth;
+pub mod failover;
 pub mod sol;
 pub mod substrate;

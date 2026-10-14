@@ -15,7 +15,7 @@ use alloy::{
 	},
 	rpc::client::RpcClient,
 	signers::{Signer, aws::AwsSigner, local::PrivateKeySigner},
-	transports::http::reqwest::Url,
+	transports::{http::reqwest::Url, utils::guess_local_url},
 };
 use futures::FutureExt;
 use miniscript::bitcoin::Network;
@@ -34,7 +34,12 @@ use br_client::{
 		handlers::Handler as _,
 		storage::keypair::{KeypairStorage, KmsKeypairStorage, PasswordKeypairStorage},
 	},
-	eth::{EthClient, nonce::RelayerNonceManager, retry::RetryBackoffLayer, traits::Handler as _},
+	eth::{
+		EthClient,
+		failover::{FailoverService, HttpEndpoint},
+		nonce::RelayerNonceManager,
+		traits::Handler as _,
+	},
 };
 use br_periodic::traits::PeriodicWorker;
 use br_primitives::{
@@ -46,7 +51,7 @@ use br_primitives::{
 			INVALID_BIFROST_NATIVENESS, INVALID_BITCOIN_NETWORK, INVALID_PRIVATE_KEY,
 			INVALID_PROVIDER_URL, KMS_INITIALIZATION_ERROR, MISSING_BTC_PROVIDER,
 		},
-		tx::DEFAULT_CALL_RETRIES,
+		tx::{DEFAULT_CALL_RETRIES, DEFAULT_CALL_TIMEOUT_MS, PROVIDER_PROBE_PRIMARY_INTERVAL_MS},
 	},
 	eth::{AggregatorContracts, ProtocolContracts, ProviderMetadata, Signers},
 	substrate::{MigrationSequence, initialize_sub_client},
@@ -147,13 +152,26 @@ pub async fn relay(config: Configuration) -> Result<TaskManager, ServiceError> {
 			is_native,
 		);
 
-		let retry_client = RpcClient::builder()
-			.layer(RetryBackoffLayer::new(
-				DEFAULT_CALL_RETRIES,
-				evm_provider.call_interval,
-				evm_provider.name.clone(),
-			))
-			.http(url.clone())
+		let endpoints = evm_provider
+			.endpoints()
+			.map(|url| {
+				let url: Url = url.parse().expect(INVALID_PROVIDER_URL);
+				(url.to_string(), HttpEndpoint::new(url))
+			})
+			.collect::<Vec<_>>();
+		let is_local = guess_local_url(&evm_provider.provider);
+		let failover = FailoverService::new(
+			evm_provider.name.clone(),
+			endpoints,
+			DEFAULT_CALL_RETRIES,
+			Duration::from_millis(evm_provider.call_interval),
+			Duration::from_millis(DEFAULT_CALL_TIMEOUT_MS),
+			Duration::from_millis(PROVIDER_PROBE_PRIMARY_INTERVAL_MS),
+		);
+		failover.verify_fallbacks(evm_provider.id).await;
+		let failover_handle = failover.handle();
+		let rpc_client = RpcClient::builder()
+			.transport(failover, is_local)
 			.with_poll_interval(Duration::from_millis(evm_provider.call_interval));
 		let nonce_manager = RelayerNonceManager::default();
 		let provider = Arc::new(
@@ -162,7 +180,7 @@ pub async fn relay(config: Configuration) -> Result<TaskManager, ServiceError> {
 				.filler(GasFiller::default())
 				.filler(ChainIdFiller::new(evm_provider.id.into()))
 				.wallet(wallet.clone())
-				.connect_client(retry_client.clone()),
+				.connect_client(rpc_client),
 		);
 		let client = Arc::new(EthClient::new(
 			provider.clone(),
@@ -186,6 +204,7 @@ pub async fn relay(config: Configuration) -> Result<TaskManager, ServiceError> {
 				evm_provider.chainlink_jpy_usd_address.clone(),
 			),
 			nonce_manager,
+			failover_handle,
 		));
 
 		// initialize default address to selected account
