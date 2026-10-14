@@ -16,10 +16,12 @@ use tokio::{
 use tokio_stream::{StreamExt, wrappers::IntervalStream};
 
 use br_primitives::{
-	bootstrap::BootstrapSharedData, eth::BootstrapState, utils::sub_display_format,
+	bootstrap::BootstrapSharedData, constants::tx::PROVIDER_STALE_HEAD_TIMEOUT_MS,
+	eth::BootstrapState, utils::sub_display_format,
 };
 
 use super::{EthClient, traits::BootstrapHandler};
+use crate::failover::HeadMonitor;
 
 #[derive(Clone, Debug)]
 /// The message format passed through the block channel.
@@ -52,6 +54,10 @@ impl EventReceiver {
 
 const SUB_LOG_TARGET: &str = "event-manager";
 
+/// How far (in blocks) a provider's head may trail the last scanned block, at least, before the
+/// provider is considered behind. Absorbs load-balanced backends that are a few blocks apart.
+const MIN_HEAD_LAG_TOLERANCE: u64 = 5;
+
 /// The essential task that listens and handle new events.
 pub struct EventManager<F, P, N: Network>
 where
@@ -75,6 +81,8 @@ where
 	/// Counting rather than just tracking presence means a transaction that emits more than
 	/// one target log is still fully backfilled if only some of its logs were seen live.
 	broadcast_log_counts: BTreeMap<u64, HashMap<B256, usize>>,
+	/// Rotates away from a provider whose head is behind or stuck.
+	head_monitor: HeadMonitor,
 	/// The bootstrap shared data.
 	bootstrap_shared_data: Arc<BootstrapSharedData>,
 	/// The flag whether the relayer has enabled self balance synchronization. This field will be
@@ -94,12 +102,17 @@ where
 		is_balance_sync_enabled: bool,
 	) -> Self {
 		let (sender, _receiver) = broadcast::channel(512);
+		let head_monitor = HeadMonitor::new(
+			Duration::from_millis(PROVIDER_STALE_HEAD_TIMEOUT_MS),
+			client.metadata.block_confirmations.max(MIN_HEAD_LAG_TOLERANCE),
+		);
 		Self {
 			client,
 			sender,
 			waiting_block: 0u64,
 			confirmed_waiting_block: 0u64,
 			broadcast_log_counts: BTreeMap::new(),
+			head_monitor,
 			bootstrap_shared_data,
 			is_balance_sync_enabled,
 		}
@@ -139,6 +152,11 @@ where
 
 		while (stream.next().await).is_some() {
 			let latest_block = self.client.get_block_number().await?;
+			self.head_monitor.check(
+				self.client.failover(),
+				latest_block,
+				self.waiting_block.saturating_sub(1u64),
+			);
 			while self.is_batch_ready(latest_block) {
 				self.process_new_block().await?;
 

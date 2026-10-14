@@ -7,9 +7,7 @@ use alloy::{
 use br_primitives::{
 	bootstrap::BootstrapSharedData,
 	constants::{
-		cli::DEFAULT_BITCOIN_BOOTSTRAP_BLOCK_OFFSET,
-		errors::PROVIDER_INTERNAL_ERROR,
-		tx::{DEFAULT_CALL_RETRIES, DEFAULT_CALL_RETRY_INTERVAL_MS},
+		cli::DEFAULT_BITCOIN_BOOTSTRAP_BLOCK_OFFSET, tx::PROVIDER_STALE_BTC_HEAD_TIMEOUT_MS,
 	},
 	eth::BootstrapState,
 	utils::sub_display_format,
@@ -17,10 +15,9 @@ use br_primitives::{
 use eyre::Result;
 
 use super::handlers::BootstrapHandler;
+use crate::{btc::failover::FailoverClient as BtcClient, failover::HeadMonitor};
 use alloy::network::Network;
-use bitcoincore_rpc::{
-	Client as BtcClient, RpcApi, bitcoincore_rpc_json::GetRawTransactionResultVout,
-};
+use bitcoincore_rpc::{RpcApi, bitcoincore_rpc_json::GetRawTransactionResultVout};
 use br_primitives::btc::{Event, EventMessage};
 use miniscript::bitcoin::{Address, Txid, address::NetworkUnchecked};
 use serde::Deserialize;
@@ -33,6 +30,11 @@ use tokio::{
 use tokio_stream::{StreamExt, wrappers::IntervalStream};
 
 const SUB_LOG_TARGET: &str = "block-manager";
+
+/// How far (in blocks) a provider's head may trail the last processed block before the provider
+/// is considered behind. Right after start the processed block is the head itself, so this
+/// absorbs load-balanced backends a block or two apart.
+const BTC_HEAD_LAG_TOLERANCE: u64 = 2;
 
 /// A module that reads every new Bitcoin block and filters `Inbound`, `Outbound` events.
 pub struct BlockManager<F, P, N: Network>
@@ -58,6 +60,8 @@ where
 	bootstrap_offset: u32,
 	/// The API endpoint for fetching Bitcoin block height.
 	block_height_api: &'static str,
+	/// Rotates away from a provider whose head is behind or stuck.
+	head_monitor: HeadMonitor,
 }
 
 #[async_trait::async_trait]
@@ -71,27 +75,8 @@ where
 		cmd: &str,
 		args: &[Value],
 	) -> bitcoincore_rpc::Result<T> {
-		let mut error_msg = String::default();
-		for _ in 0..DEFAULT_CALL_RETRIES {
-			match self.btc_client.call(cmd, args).await {
-				Ok(ret) => return Ok(ret),
-				Err(e) => {
-					error_msg = e.to_string();
-				},
-			}
-			sleep(Duration::from_millis(DEFAULT_CALL_RETRY_INTERVAL_MS)).await;
-		}
-		// Do not panic here: this manager runs as an essential task, so a panic would shut
-		// down the whole service for a single unreachable Bitcoin node. Return the error and
-		// let the caller retry.
-		Err(bitcoincore_rpc::Error::ReturnedError(format!(
-			"[{}]-[{}] {} [cmd: {}]: {}",
-			LOG_TARGET,
-			crate::btc::SUB_LOG_TARGET,
-			PROVIDER_INTERNAL_ERROR,
-			cmd,
-			error_msg
-		)))
+		// retried and failed over by the client
+		self.btc_client.call(cmd, args).await
 	}
 }
 
@@ -130,6 +115,10 @@ where
 			bootstrap_shared_data,
 			bootstrap_offset,
 			block_height_api,
+			head_monitor: HeadMonitor::new(
+				Duration::from_millis(PROVIDER_STALE_BTC_HEAD_TIMEOUT_MS),
+				BTC_HEAD_LAG_TOLERANCE,
+			),
 		}
 	}
 
@@ -150,6 +139,7 @@ where
 
 	/// Initialize the block manager.
 	pub async fn initialize(&mut self) -> Result<()> {
+		self.btc_client.verify_fallbacks().await?;
 		let latest_block = self.get_block_count().await?;
 		self.waiting_block = latest_block.saturating_add(1);
 
@@ -245,6 +235,11 @@ where
 		let mut stream = IntervalStream::new(interval(Duration::from_millis(self.call_interval)));
 		while (stream.next().await).is_some() {
 			let latest_block_num = self.get_block_count().await?;
+			self.head_monitor.check(
+				self.btc_client.failover(),
+				latest_block_num,
+				self.waiting_block.saturating_sub(1),
+			);
 			if self.is_block_confirmed(latest_block_num) {
 				let (vault_set, refund_set) = self.fetch_registration_sets().await?;
 				self.process_confirmed_block(
