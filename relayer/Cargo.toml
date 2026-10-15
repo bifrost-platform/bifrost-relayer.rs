@@ -29,6 +29,7 @@ sentry = { workspace = true }
 aws-sdk-kms = { workspace = true }
 aws-config = { workspace = true }
 sp-core = { workspace = true }
+url = { workspace = true }
 
 # Bifrost Relayer
 br-cli = { path = "../client/cli", default-features = false }

@@ -31,6 +31,7 @@ use alloy::{
 		ext::TxPoolApi as _,
 		fillers::{FillProvider, TxFiller},
 	},
+	rpc::types::{Filter, Log},
 	signers::Signature,
 	transports::TransportResult,
 };
@@ -39,8 +40,8 @@ use rand::RngExt;
 use sc_service::SpawnTaskHandle;
 use std::{
 	cmp::max,
-	collections::{BTreeMap, VecDeque},
-	sync::Arc,
+	collections::{BTreeMap, HashSet, VecDeque},
+	sync::{Arc, Mutex as StdMutex},
 	time::Duration,
 };
 use tokio::{
@@ -49,9 +50,11 @@ use tokio::{
 };
 use url::Url;
 
+use crate::failover::FailoverHandle;
 use nonce::RelayerNonceManager;
 
 pub mod events;
+pub mod failover;
 pub mod handlers;
 pub mod nonce;
 pub mod traits;
@@ -84,6 +87,10 @@ where
 	pub martial_law: Arc<Mutex<()>>,
 	/// The nonce manager shared with the provider's nonce filler.
 	nonce_manager: RelayerNonceManager,
+	/// The provider failover state of the transport.
+	failover: FailoverHandle,
+	/// The providers already reported for ignoring `eth_getLogs` filters.
+	ignored_filters_reported: Arc<StdMutex<HashSet<String>>>,
 }
 
 impl<F, P, N: Network> EthClient<F, P, N>
@@ -100,6 +107,7 @@ where
 		protocol_contracts: ProtocolContracts<F, P, N>,
 		aggregator_contracts: AggregatorContracts<F, P, N>,
 		nonce_manager: RelayerNonceManager,
+		failover: FailoverHandle,
 	) -> Self {
 		Self {
 			inner,
@@ -111,12 +119,19 @@ where
 			contract_cache: Arc::new(ContractCache::new()),
 			martial_law: Arc::new(Mutex::new(())),
 			nonce_manager,
+			failover,
+			ignored_filters_reported: Default::default(),
 		}
 	}
 
 	/// Get the inner provider.
 	pub fn provider(&self) -> Arc<FillProvider<F, P, N>> {
 		self.inner.clone()
+	}
+
+	/// Get the provider failover state.
+	pub fn failover(&self) -> &FailoverHandle {
+		&self.failover
 	}
 
 	/// Verifies whether the configured chain id and the provider's chain id match.
@@ -588,7 +603,7 @@ where
 					err
 				);
 
-				eyre::bail!(err)
+				return Err(err.into());
 			},
 		};
 		let submitted_tx_hash = *pending.tx_hash();
@@ -770,6 +785,36 @@ where
 	) -> TransportResult<PendingTransactionBuilder<N>> {
 		self.inner.send_transaction_internal(tx).await
 	}
+
+	/// Keeps only the logs that match `filter`, which callers trust: some providers do not apply
+	/// it (QuickNode answers a single-block range with every log of the block).
+	async fn get_logs(&self, filter: &Filter) -> TransportResult<Vec<Log>> {
+		let (logs, dropped) = retain_matching(filter, self.inner.get_logs(filter).await?);
+		if dropped > 0 {
+			let provider = self.failover.current_url().to_string();
+			if self.ignored_filters_reported.lock().unwrap().insert(provider.clone()) {
+				br_primitives::log_and_capture_simple!(
+					warn,
+					"-[{}] ⚠️  [{}] Provider {} ignores eth_getLogs filters: dropped {} log(s) out of the filter",
+					sub_display_format(SUB_LOG_TARGET),
+					self.get_chain_name(),
+					provider,
+					dropped,
+				);
+			}
+		}
+		Ok(logs)
+	}
+}
+
+/// The logs that match `filter` (address, topics, block range, not removed), and how many did
+/// not.
+fn retain_matching(filter: &Filter, logs: Vec<Log>) -> (Vec<Log>, usize) {
+	let total = logs.len();
+	let logs: Vec<Log> =
+		logs.into_iter().filter(|log| !log.removed && filter.rpc_matches(log)).collect();
+	let dropped = total - logs.len();
+	(logs, dropped)
 }
 
 /// Whether the error is a `nonce too low` rejection, i.e. the nonce is already consumed on-chain.
@@ -819,15 +864,19 @@ pub fn send_transaction<F, P, N: Network>(
 				);
 				log::error!(target: &requester, "{msg}");
 
-				const SENTRY_IGNORE_PATTERNS: [&str; 4] = [
+				const SENTRY_IGNORE_PATTERNS: [&str; 6] = [
 					// roundup already executed on external chain through round_control_relay()
 					"latest round",
 					// outbound aggregated relay already executed
 					"_outbound_exec_relay status",
+					// outbound aggregated relay already reverted
+					"_outbound_revert_relay status",
 					// inbound aggregated relay already executed
 					"phase3",
 					// bridge request already committed
 					"revert poll filtered",
+					// Hook execution already executed
+					"Already processed",
 				];
 				if !SENTRY_IGNORE_PATTERNS.iter().any(|pattern| err_string.contains(pattern)) {
 					sentry::capture_message(&msg, sentry::Level::Error);
@@ -920,181 +969,44 @@ pub fn send_transaction<F, P, N: Network>(
 	});
 }
 
-pub mod retry {
-	use alloy::{
-		rpc::json_rpc::{RequestPacket, ResponsePacket},
-		transports::{
-			RpcError, TransportError, TransportErrorKind, TransportFut,
-			layers::RetryPolicy as RetryPolicyT,
-		},
-	};
-	use std::{
-		sync::{
-			Arc,
-			atomic::{AtomicU32, Ordering},
-		},
-		task::{Context, Poll},
-		time::Duration,
-	};
-	use tokio::time::sleep;
-	use tower::{Layer, Service};
+#[cfg(test)]
+mod tests {
+	use super::*;
+	use alloy::primitives::address;
 
-	/// A Transport Layer that is responsible for retrying requests based on the
-	/// error type. See [`TransportError`].
-	#[derive(Debug, Clone)]
-	pub struct RetryBackoffLayer {
-		/// The maximum number of retries for errors
-		max_retries: u32,
-		/// The initial backoff in milliseconds
-		initial_backoff: u64,
-		/// Chain name
-		chain_name: String,
+	fn log(address: &str, block: u64, removed: bool) -> Log {
+		serde_json::from_value(serde_json::json!({
+			"address": address,
+			"topics": ["0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"],
+			"data": "0x",
+			"blockNumber": format!("{block:#x}"),
+			"blockHash": "0x0000000000000000000000000000000000000000000000000000000000000001",
+			"transactionHash": "0x0000000000000000000000000000000000000000000000000000000000000002",
+			"transactionIndex": "0x0",
+			"logIndex": "0x0",
+			"removed": removed,
+		}))
+		.unwrap()
 	}
 
-	impl RetryBackoffLayer {
-		/// Creates a new retry layer with the given parameters.
-		pub const fn new(max_retries: u32, initial_backoff: u64, chain_name: String) -> Self {
-			Self { max_retries, initial_backoff, chain_name }
-		}
-	}
-
-	/// [RetryPolicy] implements [RetryPolicyT] to determine whether to retry depending on err.
-	#[derive(Debug, Copy, Clone, Default)]
-	#[non_exhaustive]
-	pub struct RetryPolicy;
-
-	impl RetryPolicyT for RetryPolicy {
-		fn should_retry(&self, error: &TransportError) -> bool {
-			// a consumed nonce never becomes valid again, so retrying only delays the caller's
-			// recovery. TODO: Filter out other errors that are not retryable.
-			!super::is_nonce_too_low(error)
-		}
-
-		/// Provides a backoff hint if the error response contains it
-		fn backoff_hint(&self, error: &TransportError) -> Option<Duration> {
-			if let RpcError::ErrorResp(resp) = error {
-				let data = resp.try_data_as::<serde_json::Value>();
-				if let Some(Ok(data)) = data {
-					// if daily rate limit exceeded, infura returns the requested backoff in the error
-					// response
-					let backoff_seconds = &data["rate"]["backoff_seconds"];
-					// infura rate limit error
-					if let Some(seconds) = backoff_seconds.as_u64() {
-						return Some(Duration::from_secs(seconds));
-					}
-					if let Some(seconds) = backoff_seconds.as_f64() {
-						return Some(Duration::from_secs(seconds as u64 + 1));
-					}
-				}
-			}
-
-			None
-		}
-	}
-
-	impl<S> Layer<S> for RetryBackoffLayer {
-		type Service = RetryBackoffService<S>;
-
-		fn layer(&self, inner: S) -> Self::Service {
-			RetryBackoffService {
-				inner,
-				policy: RetryPolicy,
-				max_retries: self.max_retries,
-				initial_backoff: self.initial_backoff,
-				requests_enqueued: Arc::new(AtomicU32::new(0)),
-				chain_name: self.chain_name.clone(),
-			}
-		}
-	}
-
-	/// A Tower Service used by the [RetryBackoffLayer] that is responsible for retrying all requests on error.
-	/// See [TransportError] and [RetryPolicy].
-	#[derive(Debug, Clone)]
-	pub struct RetryBackoffService<S> {
-		/// The inner service
-		inner: S,
-		/// The retry policy
-		policy: RetryPolicy,
-		/// The maximum number of retries for errors
-		max_retries: u32,
-		/// The initial backoff in milliseconds
-		initial_backoff: u64,
-		/// The number of requests currently enqueued
-		requests_enqueued: Arc<AtomicU32>,
-		/// Chain name
-		chain_name: String,
-	}
-
-	impl<S> RetryBackoffService<S> {
-		const fn initial_backoff(&self) -> Duration {
-			Duration::from_millis(self.initial_backoff)
-		}
-	}
-
-	impl<S> Service<RequestPacket> for RetryBackoffService<S>
-	where
-		S: Service<RequestPacket, Response = ResponsePacket, Error = TransportError>
-			+ Send
-			+ 'static
-			+ Clone,
-		S::Future: Send + 'static,
-	{
-		type Response = ResponsePacket;
-		type Error = TransportError;
-		type Future = TransportFut<'static>;
-
-		fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-			self.inner.poll_ready(cx)
-		}
-
-		fn call(&mut self, request: RequestPacket) -> Self::Future {
-			let inner = self.inner.clone();
-			let this = self.clone();
-			let mut inner = std::mem::replace(&mut self.inner, inner);
-			Box::pin(async move {
-				let _ = this.requests_enqueued.fetch_add(1, Ordering::SeqCst) as u64;
-				let mut retry_count: u32 = 0;
-				loop {
-					let err;
-					let res = inner.call(request.clone()).await;
-					br_metrics::increase_rpc_calls(&this.chain_name);
-
-					match res {
-						Ok(res) => {
-							if let Some(e) = res.as_error() {
-								err = TransportError::ErrorResp(e.clone())
-							} else {
-								this.requests_enqueued.fetch_sub(1, Ordering::SeqCst);
-								return Ok(res);
-							}
-						},
-						Err(e) => err = e,
-					}
-
-					let should_retry = this.policy.should_retry(&err);
-					if should_retry {
-						retry_count += 1;
-						if retry_count > this.max_retries {
-							return Err(TransportErrorKind::custom_str(&format!(
-								"Max retries exceeded {}",
-								err
-							)));
-						}
-
-						let _ = this.requests_enqueued.load(Ordering::SeqCst) as u64;
-
-						// try to extract the requested backoff from the error or compute the next
-						// backoff based on retry count
-						let backoff_hint = this.policy.backoff_hint(&err);
-						let next_backoff = backoff_hint.unwrap_or_else(|| this.initial_backoff());
-
-						sleep(next_backoff).await;
-					} else {
-						this.requests_enqueued.fetch_sub(1, Ordering::SeqCst);
-						return Err(err);
-					}
-				}
-			})
-		}
+	#[test]
+	fn logs_out_of_the_filter_are_dropped() {
+		let socket = "0x24d0fff5601e50647f791607b1c2b6c1e0360326";
+		let filter = Filter::new()
+			.address(address!("0x24d0fff5601e50647f791607b1c2b6c1e0360326"))
+			.from_block(100u64)
+			.to_block(100u64);
+		let logs = vec![
+			log(socket, 100, false),
+			// another contract's log, as a provider ignoring the filter returns it
+			log("0x4200000000000000000000000000000000000006", 100, false),
+			// out of the range
+			log(socket, 101, false),
+			log(socket, 100, true),
+		];
+		let (kept, dropped) = retain_matching(&filter, logs);
+		assert_eq!(kept.len(), 1);
+		assert_eq!(dropped, 3);
+		assert_eq!(kept[0].address(), address!("0x24d0fff5601e50647f791607b1c2b6c1e0360326"));
 	}
 }

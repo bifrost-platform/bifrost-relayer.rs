@@ -1,4 +1,4 @@
-use std::{collections::BTreeMap, str::FromStr, sync::Arc, time::Duration};
+use std::{collections::BTreeMap, str::FromStr, sync::Arc};
 
 use alloy::{
 	network::Network,
@@ -6,17 +6,16 @@ use alloy::{
 	providers::{Provider, WalletProvider, fillers::TxFiller},
 };
 use bitcoincore_rpc::{
-	Client as BtcClient, Error, RpcApi,
+	RpcApi,
 	bitcoin::{Address, Amount, Psbt, Txid, hashes::sha256d::Hash},
 	bitcoincore_rpc_json::GetRawTransactionResult,
 };
-use br_client::{btc::handlers::XtRequester, eth::EthClient};
+use br_client::{
+	btc::{failover::FailoverClient as BtcClient, handlers::XtRequester},
+	eth::EthClient,
+};
 use br_primitives::{
-	constants::{
-		errors::{INVALID_PERIODIC_SCHEDULE, PROVIDER_INTERNAL_ERROR},
-		schedule::BITCOIN_ROLLBACK_CHECK_SCHEDULE,
-		tx::{DEFAULT_CALL_RETRIES, DEFAULT_CALL_RETRY_INTERVAL_MS},
-	},
+	constants::{errors::INVALID_PERIODIC_SCHEDULE, schedule::BITCOIN_ROLLBACK_CHECK_SCHEDULE},
 	contracts::socket_queue::{SocketQueueContract::rollback_requestReturn, SocketQueueInstance},
 	substrate::{EthereumSignature, RollbackPollMessage, bifrost_runtime},
 	tx::{SubmitRollbackPollMetadata, XtRequest, XtRequestMetadata, XtRequestSender},
@@ -27,7 +26,6 @@ use eyre::Result;
 use serde::Deserialize;
 use serde_json::Value;
 use subxt::{utils::H256, utils::eth::AccountId20};
-use tokio::time::sleep;
 
 use crate::traits::PeriodicWorker;
 
@@ -102,17 +100,8 @@ where
 		cmd: &str,
 		args: &[Value],
 	) -> bitcoincore_rpc::Result<T> {
-		let mut latest_error = Error::ReturnedError(PROVIDER_INTERNAL_ERROR.to_string());
-		for _ in 0..DEFAULT_CALL_RETRIES {
-			match self.btc_client.call(cmd, args).await {
-				Ok(ret) => return Ok(ret),
-				Err(e) => {
-					latest_error = e;
-				},
-			}
-			sleep(Duration::from_millis(DEFAULT_CALL_RETRY_INTERVAL_MS)).await;
-		}
-		Err(latest_error)
+		// retried and failed over by the client
+		self.btc_client.call(cmd, args).await
 	}
 }
 
