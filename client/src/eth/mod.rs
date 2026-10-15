@@ -603,7 +603,7 @@ where
 					err
 				);
 
-				eyre::bail!(err)
+				return Err(err.into());
 			},
 		};
 		let submitted_tx_hash = *pending.tx_hash();
