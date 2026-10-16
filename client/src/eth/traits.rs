@@ -255,6 +255,39 @@ pub fn hook_msg_info(msg: &Socket_Message) -> String {
 	)
 }
 
+/// Converts a hook's gas cost on the destination chain into the bridged asset (its smallest
+/// unit), rounding **up**.
+///
+/// ```text
+/// fee_bridged = ceil( estimated_fee_in_dnc × dnc_price × 10^bridged_decimals
+///                     ─────────────────────────────────────────────────────── )
+///                              bridged_price × 10^18
+/// ```
+///
+/// Both prices come from the same OracleManager (unified 18-decimal scale), so no
+/// oracle-decimal adjustment is required. Rounding up keeps a non-zero gas cost from
+/// truncating to a zero fee on chains whose gas price is a few wei (e.g. Sepolia at
+/// ~20 wei: ~1M gas × 20 wei ≈ 0.00005 USD, which floors to 0 USDC units).
+pub fn hook_fee_in_bridged_asset(
+	estimated_fee_in_dnc: U256,
+	dnc_price: U256,
+	bridged_price: U256,
+	bridged_asset_decimals: u8,
+) -> Result<U256> {
+	let numerator = estimated_fee_in_dnc
+		.checked_mul(dnc_price)
+		.ok_or(eyre::eyre!("Fee × DNC price overflow"))?
+		.checked_mul(U256::from(10u64).pow(U256::from(bridged_asset_decimals)))
+		.ok_or(eyre::eyre!("Bridged asset decimal adjustment overflow"))?;
+	let denominator = bridged_price
+		.checked_mul(U256::from(10u64).pow(U256::from(18u8)))
+		.ok_or(eyre::eyre!("Bridged price normalization overflow"))?;
+	if denominator.is_zero() {
+		return Err(eyre::eyre!("Division by bridged price failed (zero)"));
+	}
+	Ok(numerator.div_ceil(denominator))
+}
+
 #[async_trait::async_trait]
 pub trait HookExecutor<F, P, N: Network>
 where
@@ -618,7 +651,7 @@ where
 		max_tx_fee: U256,
 		tx_request: &N::TransactionRequest,
 		is_inbound: bool,
-	) -> Result<(U256, u64)> {
+	) -> Result<Option<(U256, u64)>> {
 		// Validate: maxTxFee must not exceed the bridged amount
 		if max_tx_fee > msg.params.amount {
 			return Err(eyre::eyre!(
@@ -631,7 +664,7 @@ where
 		// Estimate gas and fee on destination chain
 		let gas = match self.estimate_hook_gas_or_skip(msg, tx_request).await? {
 			Some(gas) => gas,
-			None => return Ok((U256::ZERO, 0)),
+			None => return Ok(None),
 		};
 		let gas_price = self.get_client().get_gas_price().await?;
 		// DNC: Destination Chain's Native Currency
@@ -652,7 +685,7 @@ where
 					max_hook_fee,
 					hook_msg_info(msg)
 				);
-				return Ok((U256::ZERO, 0));
+				return Ok(None);
 			}
 		}
 
@@ -673,7 +706,7 @@ where
 					dst_chain_id,
 					hook_msg_info(msg)
 				);
-				return Ok((U256::ZERO, 0));
+				return Ok(None);
 			},
 		};
 
@@ -694,7 +727,7 @@ where
 					msg.params.tokenIDX0,
 					hook_msg_info(msg)
 				);
-				return Ok((U256::ZERO, 0));
+				return Ok(None);
 			},
 		};
 
@@ -722,7 +755,7 @@ where
 					bridged_asset_id,
 					hook_msg_info(msg)
 				);
-				return Ok((U256::ZERO, 0));
+				return Ok(None);
 			},
 		};
 
@@ -746,7 +779,7 @@ where
 						HOOK_STALENESS_THRESHOLD,
 						hook_msg_info(msg)
 					);
-					return Ok((U256::ZERO, 0));
+					return Ok(None);
 				}
 				let price = U256::from_be_bytes(info._1.data.into());
 				if price.is_zero() {
@@ -758,7 +791,7 @@ where
 						"⚠️  DNC oracle returned zero price. Skipping hook execution. ({})",
 						hook_msg_info(msg)
 					);
-					return Ok((U256::ZERO, 0));
+					return Ok(None);
 				}
 				price
 			},
@@ -773,7 +806,7 @@ where
 					e.to_string(),
 					hook_msg_info(msg)
 				);
-				return Ok((U256::ZERO, 0));
+				return Ok(None);
 			},
 		};
 
@@ -794,7 +827,7 @@ where
 							bridged_asset_id,
 							hook_msg_info(msg)
 						);
-						return Ok((U256::ZERO, 0));
+						return Ok(None);
 					},
 				};
 
@@ -816,7 +849,7 @@ where
 							bridged_asset_id,
 							hook_msg_info(msg)
 						);
-						return Ok((U256::ZERO, 0));
+						return Ok(None);
 					}
 
 					let answer = round_data.answer;
@@ -830,7 +863,7 @@ where
 							bridged_asset_id,
 							hook_msg_info(msg)
 						);
-						return Ok((U256::ZERO, 0));
+						return Ok(None);
 					}
 					// Normalize to 18-decimal scale to match the oracle manager's price format.
 					let price_raw = answer.into_raw();
@@ -857,7 +890,7 @@ where
 							bridged_asset_id,
 							hook_msg_info(msg)
 						);
-						return Ok((U256::ZERO, 0));
+						return Ok(None);
 					}
 					normalized
 				},
@@ -872,7 +905,7 @@ where
 						e.to_string(),
 						hook_msg_info(msg)
 					);
-					return Ok((U256::ZERO, 0));
+					return Ok(None);
 				},
 			}
 		} else {
@@ -891,7 +924,7 @@ where
 							HOOK_STALENESS_THRESHOLD,
 							hook_msg_info(msg)
 						);
-						return Ok((U256::ZERO, 0));
+						return Ok(None);
 					}
 					let price = U256::from_be_bytes(info._1.data.into());
 					if price.is_zero() {
@@ -903,7 +936,7 @@ where
 							"⚠️  Bridged asset oracle returned zero price. Skipping hook execution. ({})",
 							hook_msg_info(msg)
 						);
-						return Ok((U256::ZERO, 0));
+						return Ok(None);
 					}
 					price
 				},
@@ -918,28 +951,17 @@ where
 						e.to_string(),
 						hook_msg_info(msg)
 					);
-					return Ok((U256::ZERO, 0));
+					return Ok(None);
 				},
 			}
 		};
 
-		// Fee conversion: same-scale oracle prices, no decimal correction needed.
-		//
-		// fee_bridged = estimated_fee_in_dnc × dnc_price × 10^bridged_decimals
-		//               ─────────────────────────────────────────────────────────
-		//                            bridged_price × 10^18
-		//
-		// Both prices come from the same OracleManager (unified scale), so no
-		// oracle-decimal adjustment is required.
-		let fee_in_bridged_asset = estimated_fee_in_dnc
-			.checked_mul(dnc_price)
-			.ok_or(eyre::eyre!("Fee × DNC price overflow"))?
-			.checked_mul(U256::from(10u64).pow(U256::from(bridged_asset_decimals)))
-			.ok_or(eyre::eyre!("Bridged asset decimal adjustment overflow"))?
-			.checked_div(bridged_price)
-			.ok_or(eyre::eyre!("Division by bridged price failed (zero?)"))?
-			.checked_div(U256::from(10u64).pow(U256::from(18u8)))
-			.ok_or(eyre::eyre!("DNC decimal normalization failed"))?;
+		let fee_in_bridged_asset = hook_fee_in_bridged_asset(
+			estimated_fee_in_dnc,
+			dnc_price,
+			bridged_price,
+			bridged_asset_decimals,
+		)?;
 
 		// Validate: fee_in_bridged_asset <= maxTxFee
 		if fee_in_bridged_asset > max_tx_fee {
@@ -961,7 +983,7 @@ where
 			hook_msg_info(msg),
 		);
 
-		Ok((fee_in_bridged_asset, gas))
+		Ok(Some((fee_in_bridged_asset, gas)))
 	}
 
 	/// Validates if hooks rollback should be called for this socket message.
@@ -1122,11 +1144,13 @@ where
 					.into_transaction_request()
 					.with_from(self.get_client().address().await);
 
-				let (fee_in_bridged_asset, gas) = if is_feeless {
-					match self.estimate_hook_gas_or_skip(msg, &init_tx_request).await? {
-						Some(gas) => (U256::ZERO, gas),
-						None => return Ok(()), // reverted, skip execution
-					}
+				// `None` = skip (estimation reverted, fee over a limit, missing or stale oracle);
+				// the callee already logged why. A computed fee of zero is not a skip: on a chain
+				// whose gas is almost free the fee rounds to (at least) one unit and is executed.
+				let estimate = if is_feeless {
+					self.estimate_hook_gas_or_skip(msg, &init_tx_request)
+						.await?
+						.map(|gas| (U256::ZERO, gas))
 				} else {
 					self.estimate_hook_gas(
 						&msg,
@@ -1136,11 +1160,9 @@ where
 					)
 					.await?
 				};
-
-				if (!is_feeless && fee_in_bridged_asset.is_zero()) || gas == 0 {
-					// Skip execution, don't submit transaction
+				let Some((fee_in_bridged_asset, gas)) = estimate else {
 					return Ok(());
-				}
+				};
 
 				// Build the Hooks.execute() call for actual transaction submission
 				let tx_request = hooks
@@ -1177,5 +1199,66 @@ where
 			None => return Ok(()),
 		}
 		Ok(())
+	}
+}
+
+#[cfg(test)]
+mod hook_fee_tests {
+	use super::*;
+
+	const E18: u128 = 1_000_000_000_000_000_000;
+
+	fn fee(gas: u64, gas_price: u128, dnc_usd: u128, bridged_usd: u128, decimals: u8) -> U256 {
+		hook_fee_in_bridged_asset(
+			U256::from(gas) * U256::from(gas_price),
+			U256::from(dnc_usd) * U256::from(E18),
+			U256::from(bridged_usd) * U256::from(E18),
+			decimals,
+		)
+		.unwrap()
+	}
+
+	#[test]
+	fn tiny_gas_price_rounds_up_to_one_unit() {
+		// Sepolia 2026-10-16: ~1.05M gas at 23 wei, ETH $2700, USDC (6 decimals) — the floor was 0
+		assert_eq!(fee(1_048_925, 23, 2700, 1, 6), U256::from(1));
+	}
+
+	#[test]
+	fn exact_values_are_not_bumped() {
+		// 1e6 gas × 1e9 wei = 1e15 wei = 0.001 ETH = $2.7 = 2_700_000 USDC units exactly
+		assert_eq!(fee(1_000_000, 1_000_000_000, 2700, 1, 6), U256::from(2_700_000u64));
+		// one wei more rounds up by one unit
+		let f = hook_fee_in_bridged_asset(
+			U256::from(1_000_000_000_000_001u128),
+			U256::from(2700u128 * E18),
+			U256::from(E18),
+			6,
+		)
+		.unwrap();
+		assert_eq!(f, U256::from(2_700_001u64));
+	}
+
+	#[test]
+	fn matches_previous_floor_plus_at_most_one() {
+		// the old two-step floor division, for comparison
+		let old = |fee_dnc: U256, dnc: U256, br: U256, dec: u8| {
+			fee_dnc * dnc * U256::from(10u64).pow(U256::from(dec)) / br / U256::from(E18)
+		};
+		for (gas, price) in [(950_993u64, 81_625_018u128), (434_011, 1_500_000_000), (21_000, 7)] {
+			let fee_dnc = U256::from(gas) * U256::from(price);
+			let dnc = U256::from(2700u128 * E18);
+			let br = U256::from(E18);
+			let new = hook_fee_in_bridged_asset(fee_dnc, dnc, br, 6).unwrap();
+			let prev = old(fee_dnc, dnc, br, 6);
+			assert!(new == prev || new == prev + U256::from(1), "{gas} {price}: {new} vs {prev}");
+			assert!(!new.is_zero());
+		}
+	}
+
+	#[test]
+	fn zero_gas_cost_is_zero_fee_and_zero_price_is_an_error() {
+		assert_eq!(fee(0, 23, 2700, 1, 6), U256::ZERO);
+		assert!(hook_fee_in_bridged_asset(U256::from(1), U256::from(E18), U256::ZERO, 6).is_err());
 	}
 }
