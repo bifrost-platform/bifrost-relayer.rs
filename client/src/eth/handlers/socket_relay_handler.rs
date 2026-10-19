@@ -1,4 +1,7 @@
-use std::{collections::BTreeMap, sync::Arc};
+use std::{
+	collections::{BTreeMap, HashMap},
+	sync::{Arc, Mutex},
+};
 use tokio::sync::RwLock;
 
 use alloy::{
@@ -19,10 +22,10 @@ use br_primitives::{
 	bootstrap::BootstrapSharedData,
 	constants::{
 		cli::DEFAULT_BOOTSTRAP_ROUND_OFFSET, config::BOOTSTRAP_BLOCK_CHUNK_SIZE,
-		errors::INVALID_CHAIN_ID,
+		errors::INVALID_CHAIN_ID, tx::SOCKET_RELAY_RETRY_INTERVAL_MS,
 	},
 	contracts::socket::{
-		Socket_Struct::{Instruction, RequestID, Signatures, Socket_Message},
+		Socket_Struct::{Signatures, Socket_Message},
 		SocketContract::Socket,
 	},
 	eth::{BootstrapState, BuiltRelayTransaction, RelayDirection, SocketEventStatus},
@@ -40,6 +43,7 @@ use crate::{
 		send_transaction,
 		traits::{
 			BootstrapHandler, Handler, HookExecutor, SocketMessageSizeGuard, SocketRelayBuilder,
+			hook_msg_info,
 		},
 	},
 };
@@ -63,6 +67,15 @@ struct PendingEvent {
 	/// Reset whenever the event is seen again; the event is dropped once this
 	/// reaches `MAX_ABSENT_CHECKS`.
 	absent_checks: u32,
+}
+
+/// A socket relay parked because the destination chain hasn't synced to
+/// `req_id.round_id` yet (roundup phase2 still pending for that chain). Retried by
+/// `retry_pending_socket_relays` once `authority.latest_round()` catches up.
+struct PendingSocketRelay {
+	socket_msg: Socket_Message,
+	metadata: SocketRelayMetadata,
+	is_inbound: bool,
 }
 
 /// The essential task that handles `socket relay` related events.
@@ -98,6 +111,11 @@ where
 	debug_mode: bool,
 	/// Pending events waiting for block confirmations.
 	pending_events: Arc<RwLock<Vec<PendingEvent>>>,
+	/// Socket relays parked per destination chain because that chain hadn't yet synced to
+	/// the relay's `req_id.round_id` (roundup phase2 pending). Uses a plain `Mutex` (no
+	/// `Arc`) for interior mutability — the lock is always released before any `.await`,
+	/// mirroring `RoundupRelayHandler::pending_relays`.
+	pending_socket_relays: Mutex<HashMap<ChainId, Vec<PendingSocketRelay>>>,
 	/// The Substrate online client for pallet storage queries.
 	sub_client: OnlineClient<CustomConfig>,
 }
@@ -118,6 +136,13 @@ where
 		// Interval for checking confirmed events
 		let check_interval = tokio::time::Duration::from_millis(self.client.metadata.call_interval);
 		let mut check_timer = tokio::time::interval(check_interval);
+
+		// Interval for retrying socket relays parked on a destination-chain round gate.
+		let mut socket_retry_interval = tokio::time::interval(tokio::time::Duration::from_millis(
+			SOCKET_RELAY_RETRY_INTERVAL_MS,
+		));
+		// Skip the immediate first tick so we don't retry before any relay has been parked.
+		socket_retry_interval.tick().await;
 
 		loop {
 			tokio::select! {
@@ -227,6 +252,21 @@ where
 						);
 					}
 				},
+				// Periodically retry socket relays parked on a destination-chain round gate
+				_ = socket_retry_interval.tick() => {
+					if !self.pending_socket_relays.lock().unwrap().is_empty() {
+						if let Err(e) = self.retry_pending_socket_relays().await {
+							br_primitives::log_and_capture!(
+								error,
+								&self.client.get_chain_name(),
+								SUB_LOG_TARGET,
+								self.client.address().await,
+								"❗️ Error retrying pending socket relays: {:?}",
+								e
+							);
+						}
+					}
+				},
 			}
 		}
 
@@ -262,6 +302,20 @@ where
 
 				let is_inbound =
 					self.is_inbound_sequence(Into::<u32>::into(msg.ins_code.ChainIndex) as ChainId);
+
+				if self.client.is_asset_migrated_to_n_rail(&msg, log.address(), is_inbound).await? {
+					br_primitives::log_and_capture!(
+						warn,
+						&self.client.get_chain_name(),
+						SUB_LOG_TARGET,
+						self.client.address().await,
+						"⚠️  Ignoring L-Socket event: asset migrated to N-Vault (asset={}, seq={}, tx={:?})",
+						msg.params.tokenIDX0,
+						msg.req_id.sequence,
+						log.transaction_hash,
+					);
+					return Ok(());
+				}
 				let metadata = SocketRelayMetadata::new(
 					is_inbound,
 					status,
@@ -279,7 +333,7 @@ where
 				if self.bootstrap_shared_data.cccp_relay_queue_enabled {
 					// Check if we should execute the hook (Executed status with valid requirements)
 					if let Some(variants) = self.should_execute_hook(&msg).await? {
-						match self.execute_hook(&msg, variants, is_inbound).await {
+						match self.execute_hook(&msg, variants, &metadata).await {
 							Ok(()) => (),
 							Err(error) => {
 								// we don't propagate the error to prevent hook execution errors fail the entire relay process
@@ -288,15 +342,16 @@ where
 									&self.client.get_chain_name(),
 									SUB_LOG_TARGET,
 									self.client.address().await,
-									"❗️ Failed to execute hook: {:?}",
-									error
+									"❗️ Failed to execute hook: {:?} ({})",
+									error,
+									hook_msg_info(&msg)
 								);
 							},
 						}
 					}
 					// Check if we should rollback the hook (Rollbacked status with valid requirements)
 					if let Some(variants) = self.should_rollback_hook(&msg).await? {
-						match self.rollback_hook(&msg, variants).await {
+						match self.rollback_hook(&msg, variants, &metadata).await {
 							Ok(()) => (),
 							Err(error) => {
 								// we don't propagate the error to prevent hook rollback errors fail the entire relay process
@@ -305,15 +360,16 @@ where
 									&self.client.get_chain_name(),
 									SUB_LOG_TARGET,
 									self.client.address().await,
-									"❗️ Failed to rollback hook: {:?}",
-									error
+									"❗️ Failed to rollback hook: {:?} ({})",
+									error,
+									hook_msg_info(&msg)
 								);
 							},
 						}
 					}
 				}
 
-				if self.is_sequence_ended(&msg.req_id, &msg.ins_code, metadata.status).await? {
+				if self.is_sequence_ended(&msg, metadata.status).await? {
 					// do nothing if protocol sequence ended
 					return Ok(());
 				}
@@ -337,13 +393,11 @@ where
 
 	#[inline]
 	fn is_target_contract(&self, log: &Log) -> bool {
-		match self.client.protocol_contracts.bitcoin_socket.as_ref() {
-			Some(bitcoin_socket) => {
-				log.address() == *self.client.protocol_contracts.socket.address()
-					|| log.address() == *bitcoin_socket.address()
-			},
-			_ => log.address() == *self.client.protocol_contracts.socket.address(),
-		}
+		let addr = log.address();
+		let contracts = &self.client.protocol_contracts;
+		addr == *contracts.socket.address()
+			|| contracts.legacy_socket.as_ref().is_some_and(|ls| addr == *ls.address())
+			|| contracts.bitcoin_socket.as_ref().is_some_and(|bs| addr == *bs.address())
 	}
 
 	#[inline]
@@ -480,6 +534,7 @@ where
 			bootstrap_shared_data,
 			debug_mode,
 			pending_events: Arc::new(RwLock::new(Vec::new())),
+			pending_socket_relays: Mutex::new(HashMap::new()),
 			sub_client,
 		}
 	}
@@ -698,7 +753,7 @@ where
 		}
 
 		// Check if sequence already ended
-		if self.is_sequence_ended(&msg.req_id, &msg.ins_code, metadata.status).await? {
+		if self.is_sequence_ended(&msg, metadata.status).await? {
 			log::debug!(
 				target: &self.client.get_chain_name(),
 				"-[{}] Sequence already ended, skipping",
@@ -737,6 +792,83 @@ where
 			)
 		};
 
+		// Round-readiness gate (EVM targets only): the dst chain's `poll()` signature
+		// verification is tied to the authority set registered for `req_id.round_id`. If
+		// roundup phase2 (`round_control_relay`) hasn't landed on this dst chain yet
+		// (`authority.latest_round() < round_id`), sending now either reverts or verifies
+		// against a stale authority set — and starts the rollback timer on a request that
+		// would otherwise succeed once phase2 catches up. Park it instead; the periodic
+		// `retry_pending_socket_relays` tick resends once the dst chain reports synced.
+		if let Some(target_client) = self.system_clients.get(&relay_tx_chain_id) {
+			let dst_latest_round =
+				target_client.protocol_contracts.authority.latest_round().call().await?;
+			if U256::from(socket_msg.req_id.round_id) > dst_latest_round {
+				log::info!(
+					target: &self.client.get_chain_name(),
+					"-[{}] ⏳ dst chain {} not round-synced yet (round {} > latest {}) for {} — parking",
+					sub_display_format(SUB_LOG_TARGET),
+					relay_tx_chain_id,
+					socket_msg.req_id.round_id,
+					dst_latest_round,
+					metadata,
+				);
+				let mut pending = self.pending_socket_relays.lock().unwrap();
+				let relays = pending.entry(relay_tx_chain_id).or_default();
+				if !relays.iter().any(|r| {
+					r.socket_msg.req_id.ChainIndex == socket_msg.req_id.ChainIndex
+						&& r.socket_msg.req_id.sequence == socket_msg.req_id.sequence
+						&& r.metadata.status == metadata.status
+				}) {
+					relays.push(PendingSocketRelay { socket_msg, metadata, is_inbound });
+				}
+				return Ok(());
+			}
+		}
+
+		// Defensive pre-check (EVM targets only): query the destination
+		// chain's Socket `poll_filter[req_id][our_addr]` for the bit at
+		// position `msg.status`. If it's already set, this relayer has
+		// already submitted a poll for that exact (rid, status) — the
+		// contract would `revert "poll filtered"`. Skipping here avoids
+		// the gas-estimate retry storm we otherwise see on restart when
+		// `socket-queue-poller` re-fetches historical events whose
+		// pollFilter bits are permanently set on chain (e.g., for
+		// transfers that already completed successfully in a prior run).
+		if let Some(client) = self.system_clients.get(&relay_tx_chain_id) {
+			let our_addr = self.client.address().await;
+			match client
+				.protocol_contracts
+				.socket
+				.get_poll_filter(socket_msg.req_id.clone(), our_addr)
+				.call()
+				.await
+			{
+				Ok(mask) => {
+					let bit_set = (mask >> U256::from(socket_msg.status)) & U256::from(1u64)
+						== U256::from(1u64);
+					if bit_set {
+						log::debug!(
+							target: &self.client.get_chain_name(),
+							"-[{}] skipping {} — pollFilter bit {} already set for relayer {}",
+							sub_display_format(SUB_LOG_TARGET),
+							metadata,
+							socket_msg.status,
+							our_addr,
+						);
+						return Ok(());
+					}
+				},
+				Err(err) => {
+					log::debug!(
+						target: &self.client.get_chain_name(),
+						"-[{}] pollFilter precheck failed for {}: {err:?}, proceeding anyway",
+						sub_display_format(SUB_LOG_TARGET),
+						metadata,
+					);
+				},
+			}
+		}
+
 		// build and send transaction request
 		if let Some(built_transaction) = self
 			.build_transaction(socket_msg.clone(), is_inbound, relay_tx_chain_id)
@@ -749,6 +881,79 @@ where
 				socket_msg,
 			)
 			.await;
+		}
+
+		Ok(())
+	}
+
+	/// Retries socket relays parked by the round-readiness gate in `send_socket_message`
+	/// because the destination chain hadn't yet synced to the relay's `req_id.round_id`.
+	/// Mirrors `RoundupRelayHandler::retry_pending_relays`.
+	async fn retry_pending_socket_relays(&self) -> Result<()> {
+		let chain_ids: Vec<ChainId> =
+			self.pending_socket_relays.lock().unwrap().keys().cloned().collect();
+
+		for dst_chain_id in chain_ids {
+			let Some(target_client) = self.system_clients.get(&dst_chain_id) else {
+				self.pending_socket_relays.lock().unwrap().remove(&dst_chain_id);
+				continue;
+			};
+
+			let dst_latest_round =
+				target_client.protocol_contracts.authority.latest_round().call().await?;
+
+			// Split off the relays that are now round-synced; leave the rest parked.
+			let ready: Vec<PendingSocketRelay> = {
+				let mut pending = self.pending_socket_relays.lock().unwrap();
+				let Some(relays) = pending.get_mut(&dst_chain_id) else {
+					continue;
+				};
+				let (ready, still_pending): (Vec<_>, Vec<_>) = std::mem::take(relays)
+					.into_iter()
+					.partition(|r| U256::from(r.socket_msg.req_id.round_id) <= dst_latest_round);
+				*relays = still_pending;
+				if relays.is_empty() {
+					pending.remove(&dst_chain_id);
+				}
+				ready
+			};
+
+			for relay in ready {
+				log::info!(
+					target: &self.client.get_chain_name(),
+					"-[{}] 🔄 Retrying parked socket relay to chain {} now that round {} is synced",
+					sub_display_format(SUB_LOG_TARGET),
+					dst_chain_id,
+					relay.socket_msg.req_id.round_id,
+				);
+				// Isolate per-relay failures: a transient RPC error on one relay must not
+				// drop the remaining `ready` relays, which were already spliced out of
+				// `pending_socket_relays` above. Re-park on failure instead of propagating.
+				if let Err(e) = self
+					.send_socket_message(
+						relay.socket_msg.clone(),
+						relay.metadata.clone(),
+						relay.is_inbound,
+					)
+					.await
+				{
+					br_primitives::log_and_capture!(
+						error,
+						&self.client.get_chain_name(),
+						SUB_LOG_TARGET,
+						self.client.address().await,
+						"❗️ Failed to retry parked socket relay to chain {}, re-parking: {:?}",
+						dst_chain_id,
+						e
+					);
+					self.pending_socket_relays
+						.lock()
+						.unwrap()
+						.entry(dst_chain_id)
+						.or_default()
+						.push(relay);
+				}
+			}
 		}
 
 		Ok(())
@@ -799,14 +1004,17 @@ where
 
 	/// Compare the request status recorded in source chain with event status to determine if the
 	/// event has already been committed or rollbacked.
+	///
+	/// The source chain's owning contract (L-Socket or N-Socket) is resolved via the asset's
+	/// migration state (`tokenIDX0`), which is correct regardless of which chain's event is
+	/// currently being processed — unlike relying on the observed log's address.
 	async fn is_sequence_ended(
 		&self,
-		req_id: &RequestID,
-		ins_code: &Instruction,
+		socket_msg: &Socket_Message,
 		status: SocketEventStatus,
 	) -> Result<bool> {
-		let src = Into::<u32>::into(req_id.ChainIndex) as ChainId;
-		let dst = Into::<u32>::into(ins_code.ChainIndex) as ChainId;
+		let src = Into::<u32>::into(socket_msg.req_id.ChainIndex) as ChainId;
+		let dst = Into::<u32>::into(socket_msg.ins_code.ChainIndex) as ChainId;
 
 		// if inbound::accepted and relaying to bitcoin we consider as ended
 		if let Some(bitcoin_chain_id) = self.client.get_bitcoin_chain_id() {
@@ -816,9 +1024,29 @@ where
 		}
 
 		if let Some(src_client) = &self.system_clients.get(&src) {
-			let request =
-				src_client.protocol_contracts.socket.get_request(req_id.clone()).call().await?;
+			let src_socket_address =
+				src_client.resolve_socket_address(socket_msg.params.tokenIDX0, true).await?;
 
+			let request = if let Some(legacy_socket) = &src_client.protocol_contracts.legacy_socket
+			{
+				if src_socket_address == *legacy_socket.address() {
+					legacy_socket.get_request(socket_msg.req_id.clone()).call().await?
+				} else {
+					src_client
+						.protocol_contracts
+						.socket
+						.get_request(socket_msg.req_id.clone())
+						.call()
+						.await?
+				}
+			} else {
+				src_client
+					.protocol_contracts
+					.socket
+					.get_request(socket_msg.req_id.clone())
+					.call()
+					.await?
+			};
 			return Ok(matches!(
 				SocketEventStatus::from(&request.field[0]),
 				SocketEventStatus::Committed | SocketEventStatus::Rollbacked
@@ -1086,21 +1314,19 @@ where
 				let chunk_to_block =
 					std::cmp::min(from_block + BOOTSTRAP_BLOCK_CHUNK_SIZE - 1, to_block);
 
-				let filter = match &self.client.protocol_contracts.bitcoin_socket {
-					Some(bitcoin_socket) => Filter::new()
-						.address(vec![
-							*self.client.protocol_contracts.socket.address(),
-							*bitcoin_socket.address(),
-						])
-						.event_signature(Socket::SIGNATURE_HASH)
-						.from_block(from_block)
-						.to_block(chunk_to_block),
-					_ => Filter::new()
-						.address(*self.client.protocol_contracts.socket.address())
-						.event_signature(Socket::SIGNATURE_HASH)
-						.from_block(from_block)
-						.to_block(chunk_to_block),
-				};
+				let contracts = &self.client.protocol_contracts;
+				let mut addresses = vec![*contracts.socket.address()];
+				if let Some(ls) = &contracts.legacy_socket {
+					addresses.push(*ls.address());
+				}
+				if let Some(bs) = &contracts.bitcoin_socket {
+					addresses.push(*bs.address());
+				}
+				let filter = Filter::new()
+					.address(addresses)
+					.event_signature(Socket::SIGNATURE_HASH)
+					.from_block(from_block)
+					.to_block(chunk_to_block);
 				let target_logs_chunk = self.client.get_logs(&filter).await?;
 				logs.extend(target_logs_chunk);
 
@@ -1214,7 +1440,9 @@ mod tests {
 
 	#[test]
 	fn test_socket_event_decode() {
-		let data = bytes!("");
+		let data = bytes!(
+			"00000000000000000000000000000000000000000000000000000000000000200000bfc000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000266100000000000000000000000000000000000000000000000000000000000009f2000000000000000000000000000000000000000000000000000000000000000100014a3400000000000000000000000000000000000000000000000000000000030203010000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000e000000004000000030000bfc0adcbd5ec26a0bfb347d14f449adca193005f97be000000000000000000000000000000000000000000000000000000000000000000000000000000000000000055b57a7a0f41d668c584b2246d373b639084eaed00000000000000000000000055b57a7a0f41d668c584b2246d373b639084eaed0000000000000000000000000000000000000000000000000007c1c5cf6a93af00000000000000000000000000000000000000000000000000000000000000c00000000000000000000000000000000000000000000000000000000000000000"
+		);
 
 		match Socket::abi_decode_data(&data) {
 			Ok(socket) => {

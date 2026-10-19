@@ -17,10 +17,10 @@ use alloy::{
 	primitives::ChainId,
 	providers::{Provider, WalletProvider, fillers::TxFiller},
 };
-use bitcoincore_rpc::{Auth, Client as BitcoinClient};
 use br_client::{
 	btc::{
 		block::BlockManager,
+		failover::FailoverClient,
 		handlers::{InboundHandler, OutboundHandler},
 		storage::keypair::KeypairStorage,
 	},
@@ -44,6 +44,10 @@ use br_primitives::{
 		errors::{
 			INVALID_BIFROST_NATIVENESS, INVALID_BITCOIN_NETWORK, INVALID_CHAIN_ID,
 			INVALID_PROVIDER_URL,
+		},
+		tx::{
+			DEFAULT_BTC_CALL_TIMEOUT_MS, DEFAULT_CALL_RETRIES, DEFAULT_CALL_RETRY_INTERVAL_MS,
+			PROVIDER_PROBE_PRIMARY_INTERVAL_MS,
 		},
 	},
 	contracts::socket::Socket_Struct::Socket_Message,

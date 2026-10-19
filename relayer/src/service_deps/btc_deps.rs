@@ -1,9 +1,14 @@
 use br_client::btc::handlers::FeeRateFeeder;
 use br_periodic::PsbtBroadcaster;
-use br_primitives::constants::btc::{
-	MEMPOOL_SPACE_BLOCK_HEIGHT_ENDPOINT, MEMPOOL_SPACE_FEE_RATE_ENDPOINT,
-	MEMPOOL_SPACE_TESTNET_BLOCK_HEIGHT_ENDPOINT, MEMPOOL_SPACE_TESTNET_FEE_RATE_ENDPOINT,
+use br_primitives::{
+	cli::BTCProvider,
+	constants::btc::{
+		MEMPOOL_SPACE_BLOCK_HEIGHT_ENDPOINT, MEMPOOL_SPACE_FEE_RATE_ENDPOINT,
+		MEMPOOL_SPACE_TESTNET_BLOCK_HEIGHT_ENDPOINT, MEMPOOL_SPACE_TESTNET_FEE_RATE_ENDPOINT,
+	},
 };
+use std::time::Duration;
+use url::Url;
 
 use super::*;
 
@@ -36,7 +41,7 @@ where
 	P: Provider<N>,
 {
 	pub fn new(
-		config: &Configuration,
+		btc_provider: &BTCProvider,
 		keypair_storage: KeypairStorage,
 		bootstrap_shared_data: BootstrapSharedData,
 		substrate_deps: &SubstrateDeps<F, P, N>,
@@ -45,17 +50,34 @@ where
 		task_manager: &TaskManager,
 		debug_mode: bool,
 	) -> Self {
-		let btc_provider = &config.relayer_config.btc_provider;
 		let bootstrap_shared_data = Arc::new(bootstrap_shared_data.clone());
 		let network = Network::from_core_arg(&btc_provider.chain).expect(INVALID_BITCOIN_NETWORK);
 
-		let auth = match (btc_provider.username.clone(), btc_provider.password.clone()) {
-			(Some(username), Some(password)) => Auth::UserPass(username, password),
-			_ => Auth::None,
-		};
-		let btc_client =
-			BitcoinClient::new(&btc_provider.provider, auth, btc_provider.wallet.clone(), Some(60))
-				.expect(INVALID_PROVIDER_URL);
+		// the primary first, then the fallbacks in the configured order. Only the primary takes
+		// the configured credentials: a fallback carries its own in its URL.
+		let endpoints = btc_provider
+			.endpoints()
+			.enumerate()
+			.map(|(index, url)| {
+				let mut url: Url = url.parse().expect(INVALID_PROVIDER_URL);
+				if let (0, Some(username), Some(password)) =
+					(index, &btc_provider.username, &btc_provider.password)
+				{
+					url.set_username(username).expect(INVALID_PROVIDER_URL);
+					url.set_password(Some(password)).expect(INVALID_PROVIDER_URL);
+				}
+				url
+			})
+			.collect();
+		let btc_client = FailoverClient::new(
+			br_client::btc::LOG_TARGET.to_string(),
+			endpoints,
+			btc_provider.wallet.clone(),
+			DEFAULT_CALL_RETRIES,
+			Duration::from_millis(DEFAULT_CALL_RETRY_INTERVAL_MS),
+			Duration::from_millis(DEFAULT_BTC_CALL_TIMEOUT_MS),
+			Duration::from_millis(PROVIDER_PROBE_PRIMARY_INTERVAL_MS),
+		);
 
 		let block_manager = BlockManager::new(
 			btc_client.clone(),

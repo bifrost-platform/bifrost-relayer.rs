@@ -1,6 +1,7 @@
 use crate::traits::PeriodicWorker;
 use alloy::{
 	network::Network,
+	primitives::{B256, U256},
 	providers::{Provider, WalletProvider, fillers::TxFiller},
 };
 use br_client::eth::{EthClient, send_transaction};
@@ -29,6 +30,10 @@ where
 	handle: SpawnTaskHandle,
 	/// Whether to enable debug mode.
 	debug_mode: bool,
+	/// The relayer implementation version to report.
+	impl_version: U256,
+	/// The relayer spec version (commit hash) to report.
+	spec_version: B256,
 }
 
 #[async_trait::async_trait]
@@ -57,6 +62,8 @@ where
 					HeartbeatMetadata::new(
 						round_info.current_round_index,
 						round_info.current_session_index,
+						self.impl_version,
+						self.spec_version,
 					),
 				)
 				.await;
@@ -72,23 +79,31 @@ where
 	P: Provider<N> + 'static,
 {
 	/// Instantiates a new `HeartbeatSender` instance.
-	pub fn new(client: Arc<EthClient<F, P, N>>, handle: SpawnTaskHandle, debug_mode: bool) -> Self {
+	pub fn new(
+		client: Arc<EthClient<F, P, N>>,
+		handle: SpawnTaskHandle,
+		debug_mode: bool,
+		impl_version: U256,
+		spec_version: B256,
+	) -> Self {
 		Self {
 			schedule: Schedule::from_str(HEARTBEAT_SCHEDULE).expect(INVALID_PERIODIC_SCHEDULE),
 			client,
 			handle,
 			debug_mode,
+			impl_version,
+			spec_version,
 		}
 	}
 
-	/// Build `heartbeat` transaction.
+	/// Build `heartbeat_v2` transaction.
 	fn build_transaction(&self) -> N::TransactionRequest {
 		self.client
 			.protocol_contracts
 			.relayer_manager
 			.as_ref()
 			.unwrap()
-			.heartbeat()
+			.heartbeat_v2(self.impl_version, self.spec_version)
 			.into_transaction_request()
 	}
 
