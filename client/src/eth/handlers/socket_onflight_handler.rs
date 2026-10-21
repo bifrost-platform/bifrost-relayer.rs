@@ -1,8 +1,11 @@
 use std::{
 	collections::{BTreeMap, HashSet},
-	sync::Arc,
+	sync::{
+		Arc,
+		atomic::{AtomicBool, Ordering},
+	},
 };
-use tokio::sync::RwLock;
+use tokio::sync::{RwLock, watch};
 
 use alloy::{
 	network::Network,
@@ -75,7 +78,10 @@ enum TxVerificationResult {
 /// The handler that processes `TransferPolled` events from Bifrost Substrate chain.
 ///
 /// This is a single-instance handler that:
-/// 1. Subscribes to Bifrost Substrate blocks
+/// 1. Receives a block tick from the Bifrost `EventManager` for every scanned block, and reads
+///    the `OnFlightTransfers` storage snapshot at that block. It deliberately does not hold a
+///    Substrate subscription: a dropped WebSocket (e.g. a node restart) would end the stream and
+///    the storage read only needs the latest state anyway.
 /// 2. Processes TransferPolled events from cccp-relay-queue pallet
 /// 3. For Fast transfers: immediately sends to destination chain's SocketRelayHandler
 /// 4. For Standard transfers: waits for block_confirmations, then sends to SocketRelayHandler
@@ -99,6 +105,10 @@ where
 	sub_client: OnlineClient<CustomConfig>,
 	/// The legacy RPC methods for querying best block.
 	sub_rpc: LegacyRpcMethods<subxt::config::RpcConfigFor<CustomConfig>>,
+	/// The block tick from the Bifrost `EventManager`: the newest block number it has scanned.
+	/// Bursts of ticks are coalesced by the `watch` channel, so each wake-up scans the latest
+	/// state exactly once.
+	block_receiver: watch::Receiver<u64>,
 	/// The senders for each chain's SocketRelayHandler. <chain_id, Sender>
 	onflight_senders: Arc<BTreeMap<ChainId, SocketOnflightSender>>,
 	/// The bootstrap shared data.
@@ -107,6 +117,10 @@ where
 	pending_standard_transfers: Arc<RwLock<Vec<PendingStandardTransfer>>>,
 	/// Already processed transfers to avoid duplicate processing. Key: msg_hash (keccak256 of socket message)
 	processed_transfers: Arc<RwLock<HashSet<H256>>>,
+	/// Whether the initial bootstrap phase wait has already been satisfied. The bootstrap state
+	/// machine passes `BootstrapSocketRelay` exactly once per process, so a restarted `run` must
+	/// not wait for it again or it would block forever.
+	initial_bootstrap_done: AtomicBool,
 }
 
 impl<F, P, N: Network> SocketOnflightHandler<F, P, N>
@@ -121,6 +135,7 @@ where
 		sol_clients: Arc<BTreeMap<ChainId, SolClient>>,
 		sub_client: OnlineClient<CustomConfig>,
 		sub_rpc_url: String,
+		block_receiver: watch::Receiver<u64>,
 		onflight_senders: Arc<BTreeMap<ChainId, SocketOnflightSender>>,
 		bootstrap_shared_data: Arc<BootstrapSharedData>,
 	) -> Result<Self> {
@@ -134,10 +149,12 @@ where
 			sol_clients,
 			sub_client,
 			sub_rpc,
+			block_receiver,
 			onflight_senders,
 			bootstrap_shared_data,
 			pending_standard_transfers: Arc::new(RwLock::new(Vec::new())),
 			processed_transfers: Arc::new(RwLock::new(HashSet::new())),
+			initial_bootstrap_done: AtomicBool::new(false),
 		})
 	}
 
@@ -147,13 +164,11 @@ where
 		// This avoids race condition with SocketRelayHandler which shares the same chain_id
 		self.bootstrap().await?;
 
-		// Note: No wait_for_all_chains_bootstrapped() here
-		// Messages sent to SocketRelayHandler are buffered in the channel
-		// and processed once SocketRelayHandler finishes its bootstrap and starts main loop.
-		// This allows us to catch TransferPolled events that occur during other handlers' bootstrap.
-
-		// Subscribe to Substrate blocks for TransferPolled events
-		let mut sub_block_stream = self.sub_client.stream_best_blocks().await?;
+		// Note: No explicit wait_for_all_chains_bootstrapped() here, but the block tick below is
+		// produced by the Bifrost EventManager, which only starts scanning once every chain has
+		// reached NormalStart. That is the same gate SocketRelayHandler sits behind before it
+		// reads the onflight channel, so nothing is lost: OnFlight entries approved during other
+		// handlers' bootstrap stay in storage and are picked up by the first scan.
 
 		log::info!(
 			target: &self.bifrost_client.get_chain_name(),
@@ -161,34 +176,45 @@ where
 			sub_display_format(SUB_LOG_TARGET),
 		);
 
-		while let Some(Ok(block)) = sub_block_stream.next().await {
-			if let Err(e) = self.process_substrate_block(block).await {
+		// Drive the storage scan off the Bifrost EventManager's block tick. RPC failures during a
+		// scan (including a Substrate node restart) are logged and retried on the next tick; they
+		// never end the loop. `changed()` only fails if the EventManager (the sender) is dropped,
+		// which cannot happen while its essential task is alive, so that arm is a last resort.
+		loop {
+			if self.block_receiver.changed().await.is_err() {
+				return Err(eyre::eyre!("Bifrost EventManager block channel closed"));
+			}
+			let tick_block = *self.block_receiver.borrow_and_update();
+
+			if let Err(e) = self.scan_on_flight_transfers().await {
 				br_primitives::log_and_capture!(
 					error,
 					&self.bifrost_client.get_chain_name(),
 					SUB_LOG_TARGET,
 					self.bifrost_client.address().await,
-					"❗️ Error processing Substrate block: {:?}",
+					"❗️ Error scanning OnFlight transfers (triggered by Bifrost block #{}): {:?}",
+					tick_block,
 					e
 				);
 			}
 		}
-
-		Ok(())
 	}
 
-	/// Process a Substrate block by querying OnFlightTransfers storage directly.
-	async fn process_substrate_block(
-		&self,
-		block: subxt::client::Block<CustomConfig>,
-	) -> Result<()> {
+	/// Scans the `OnFlightTransfers` storage at the current best block and forwards newly
+	/// approved transfers. The block tick is only a trigger; the scan always reads the latest
+	/// state, so coalesced or skipped ticks are harmless.
+	async fn scan_on_flight_transfers(&self) -> Result<()> {
 		use bifrost_runtime::runtime_types::pallet_cccp_relay_queue::TransferOption;
 
 		// First, process any pending Standard transfers that have been confirmed
 		self.process_pending_standard_transfers().await;
 
 		// Query OnFlightTransfers storage directly instead of relying on events
-		let block_hash = block.hash();
+		let block_hash = self
+			.sub_rpc
+			.chain_get_block_hash(None)
+			.await?
+			.ok_or_else(|| eyre::eyre!("Bifrost node returned no best block hash"))?;
 		let at = self
 			.sub_client
 			.at_block(subxt::backend::BlockRef::from_hash(block_hash))
@@ -864,11 +890,16 @@ where
 			.map(|c| c.is_enabled)
 			.unwrap_or(false);
 
-		if bootstrap_enabled {
-			// Bootstrap enabled: wait for BootstrapSocketRelay phase
-			// This ensures RoundUp bootstrap is complete before recovery
-			self.wait_for_bootstrap_state(BootstrapState::BootstrapSocketRelay).await?;
+		// Bootstrap enabled: wait until the BootstrapSocketRelay phase has been reached, on the
+		// first run only. This ensures RoundUp bootstrap is complete before recovery. The wait is
+		// "reached or later" because SocketRelayHandler may leave that phase within one polling
+		// interval, and the state machine never returns to it, so a restarted handler must skip
+		// the wait entirely.
+		if bootstrap_enabled && !self.initial_bootstrap_done.load(Ordering::Acquire) {
+			self.wait_for_bootstrap_state_reached(BootstrapState::BootstrapSocketRelay)
+				.await?;
 		}
+		self.initial_bootstrap_done.store(true, Ordering::Release);
 
 		log::info!(
 			target: &self.bifrost_client.get_chain_name(),

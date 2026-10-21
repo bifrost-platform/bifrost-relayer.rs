@@ -225,6 +225,27 @@ pub trait BootstrapHandler {
 		Ok(())
 	}
 
+	/// Waits until the bootstrap state of the chain has reached `state` or any later phase.
+	///
+	/// Unlike `wait_for_bootstrap_state`, this cannot miss a phase that another handler leaves
+	/// within one polling interval, so it is the right choice for handlers that only observe a
+	/// phase without owning the transition out of it.
+	async fn wait_for_bootstrap_state_reached(&self, state: BootstrapState) -> Result<()> {
+		loop {
+			let current_state = {
+				let shared_data = self.bootstrap_shared_data();
+				let bootstrap_states = shared_data.bootstrap_states.read().await;
+				*bootstrap_states.get(&self.get_chain_id()).unwrap()
+			};
+
+			if current_state >= state {
+				break;
+			}
+			sleep(Duration::from_millis(100)).await;
+		}
+		Ok(())
+	}
+
 	/// Waits for all chains to be bootstrapped.
 	async fn wait_for_all_chains_bootstrapped(&self) -> Result<()> {
 		loop {
