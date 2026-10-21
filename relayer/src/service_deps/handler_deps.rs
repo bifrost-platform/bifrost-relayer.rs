@@ -131,12 +131,20 @@ where
 
 		// SocketOnflightHandler watches OnFlightTransfers storage on the Substrate chain.
 		// Only create it when the relay queue pallet is present and there are socket handlers.
+		// It is driven by the Bifrost EventManager's block tick so there is a single polling
+		// source for Bifrost blocks.
 		let socket_onflight_handler = if cccp_relay_queue_enabled && !onflight_senders.is_empty() {
+			let bifrost_block_receiver = event_managers
+				.get(&bifrost_client.chain_id())
+				.expect(INVALID_CHAIN_ID)
+				.block_sender
+				.subscribe();
 			match SocketOnflightHandler::new(
 				bifrost_client.clone(),
 				clients.clone(),
 				substrate_deps.sub_client.clone(),
 				substrate_deps.sub_rpc_url.clone(),
+				bifrost_block_receiver,
 				Arc::new(onflight_senders),
 				Arc::new(bootstrap_shared_data.clone()),
 			)
