@@ -15,7 +15,7 @@ use crate::{
 	price_source::{
 		binance::BinancePriceFetcher, bithumb::BithumbPriceFetcher,
 		chainlink::ChainlinkPriceFetcher, coinbase::CoinbasePriceFetcher,
-		exchange_rate::ExchangeRatePriceFetcher, gateio::GateioPriceFetcher,
+		exchange_rate::ExchangeRatePriceFetcher, gateio::GateioPriceFetcher, htx::HtxPriceFetcher,
 		kucoin::KucoinPriceFetcher, upbit::UpbitPriceFetcher,
 	},
 	traits::PriceFetcher,
@@ -27,6 +27,7 @@ mod chainlink;
 mod coinbase;
 pub mod exchange_rate;
 mod gateio;
+mod htx;
 mod kucoin;
 mod upbit;
 
@@ -48,6 +49,7 @@ where
 	Bithumb(BithumbPriceFetcher),
 	Chainlink(ChainlinkPriceFetcher<F, P, N>),
 	Gateio(GateioPriceFetcher),
+	Htx(HtxPriceFetcher),
 	Kucoin(KucoinPriceFetcher),
 	Upbit(UpbitPriceFetcher),
 	Coinbase(CoinbasePriceFetcher),
@@ -76,6 +78,7 @@ where
 				Ok(PriceFetchers::Chainlink(ChainlinkPriceFetcher::new(eth_client, mode).await))
 			},
 			PriceSource::Gateio => Ok(PriceFetchers::Gateio(GateioPriceFetcher::new(http_client))),
+			PriceSource::Htx => Ok(PriceFetchers::Htx(HtxPriceFetcher::new(http_client))),
 			PriceSource::Kucoin => Ok(PriceFetchers::Kucoin(KucoinPriceFetcher::new(http_client))),
 			PriceSource::Upbit => Ok(PriceFetchers::Upbit(UpbitPriceFetcher::new(http_client))),
 			PriceSource::Coinbase => {
@@ -93,6 +96,7 @@ where
 			PriceFetchers::Bithumb(_) => FetchMode::Standard,
 			PriceFetchers::Chainlink(fetcher) => fetcher.mode.clone(),
 			PriceFetchers::Gateio(_) => FetchMode::Standard,
+			PriceFetchers::Htx(_) => FetchMode::Standard,
 			PriceFetchers::Kucoin(_) => FetchMode::Standard,
 			PriceFetchers::Upbit(_) => FetchMode::Standard,
 			PriceFetchers::Coinbase(_) => FetchMode::Standard,
@@ -113,6 +117,7 @@ where
 			PriceFetchers::Bithumb(fetcher) => fetcher.get_ticker_with_symbol(symbol).await,
 			PriceFetchers::Chainlink(fetcher) => fetcher.get_ticker_with_symbol(symbol).await,
 			PriceFetchers::Gateio(fetcher) => fetcher.get_ticker_with_symbol(symbol).await,
+			PriceFetchers::Htx(fetcher) => fetcher.get_ticker_with_symbol(symbol).await,
 			PriceFetchers::Kucoin(fetcher) => fetcher.get_ticker_with_symbol(symbol).await,
 			PriceFetchers::Upbit(fetcher) => fetcher.get_ticker_with_symbol(symbol).await,
 			PriceFetchers::Coinbase(fetcher) => fetcher.get_ticker_with_symbol(symbol).await,
@@ -126,6 +131,7 @@ where
 			PriceFetchers::Bithumb(fetcher) => fetcher.get_tickers().await,
 			PriceFetchers::Chainlink(fetcher) => fetcher.get_tickers().await,
 			PriceFetchers::Gateio(fetcher) => fetcher.get_tickers().await,
+			PriceFetchers::Htx(fetcher) => fetcher.get_tickers().await,
 			PriceFetchers::Kucoin(fetcher) => fetcher.get_tickers().await,
 			PriceFetchers::Upbit(fetcher) => fetcher.get_tickers().await,
 			PriceFetchers::Coinbase(fetcher) => fetcher.get_tickers().await,
