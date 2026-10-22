@@ -5,5 +5,5 @@ use alloy::primitives::{Address, address};
 pub const NATIVE_CURRENCY_ADDRESS: Address = address!("ffffffffffffffffffffffffffffffffffffffff");
 
 /// The maximum byte size of a single socket message on runtimes without `BtcSocketQueue`
-/// (e.g. the private mainnet hub), matching that runtime's 2 KiB default.
-pub const DEFAULT_MAX_SOCKET_MESSAGE_BYTES: u32 = 2 * 1024;
+/// (e.g. the private mainnet hub), matching that runtime's 20 KiB default.
+pub const DEFAULT_MAX_SOCKET_MESSAGE_BYTES: u32 = 20 * 1024;
