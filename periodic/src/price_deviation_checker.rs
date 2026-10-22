@@ -137,6 +137,9 @@ where
 			PriceSource::Binance,
 			PriceSource::Bithumb,
 			PriceSource::Gateio,
+			// HTX is implemented but intentionally not wired in: as of 2026-10 its BFC/USDT
+			// market shows a ~28% bid/ask spread with trades printing inside the spread, and
+			// its reported volume (10x Upbit) would dominate the volume-weighted price.
 			PriceSource::Kucoin,
 			PriceSource::Upbit,
 			PriceSource::Coinbase,
