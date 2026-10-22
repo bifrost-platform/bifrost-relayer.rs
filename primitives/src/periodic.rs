@@ -17,6 +17,7 @@ pub enum PriceSource {
 	Bithumb,
 	Chainlink,
 	Gateio,
+	Htx,
 	Kucoin,
 	Upbit,
 	Coinbase,
