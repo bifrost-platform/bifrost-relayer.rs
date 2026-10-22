@@ -10,7 +10,10 @@ use std::{
 	sync::Arc,
 };
 use tokio::{
-	sync::broadcast::{self, Receiver, Sender},
+	sync::{
+		broadcast::{self, Receiver, Sender},
+		watch,
+	},
 	time::{Duration, interval, sleep},
 };
 use tokio_stream::{StreamExt, wrappers::IntervalStream};
@@ -68,6 +71,13 @@ where
 	pub client: Arc<EthClient<F, P, N>>,
 	/// The channel sending event messages.
 	pub sender: Sender<EventMessage>,
+	/// The latest scanned block number. Unlike `sender`, this is updated for every scanned batch
+	/// even when no target logs were found, so subscribers that only need a "new block" tick
+	/// (e.g. `SocketOnflightHandler`) can reuse this manager as their single polling source
+	/// instead of running their own RPC loop or subscription. A `watch` channel is used on
+	/// purpose: it coalesces bursts (e.g. catch-up after a provider stall) into one wake-up,
+	/// since such subscribers only care about the latest state.
+	pub block_sender: watch::Sender<u64>,
 	/// The block waiting for enough confirmations.
 	waiting_block: u64,
 	/// The block waiting to be (re-)scanned by the confirmed-log backstop loop. Trails
@@ -102,6 +112,7 @@ where
 		is_balance_sync_enabled: bool,
 	) -> Self {
 		let (sender, _receiver) = broadcast::channel(512);
+		let (block_sender, _block_receiver) = watch::channel(0u64);
 		let head_monitor = HeadMonitor::new(
 			Duration::from_millis(PROVIDER_STALE_HEAD_TIMEOUT_MS),
 			client.metadata.block_confirmations.max(MIN_HEAD_LAG_TOLERANCE),
@@ -109,6 +120,7 @@ where
 		Self {
 			client,
 			sender,
+			block_sender,
 			waiting_block: 0u64,
 			confirmed_waiting_block: 0u64,
 			broadcast_log_counts: BTreeMap::new(),
@@ -231,6 +243,8 @@ where
 		}
 
 		self.increment_waiting_block(to);
+		// Always announce the newest scanned block, even with no subscribers attached.
+		self.block_sender.send_replace(to);
 
 		Ok(())
 	}
