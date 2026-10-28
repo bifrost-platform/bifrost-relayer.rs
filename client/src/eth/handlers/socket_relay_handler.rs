@@ -235,16 +235,29 @@ where
 				} => {
 					if let Some(msg) = onflight_msg {
 						if let Err(e) = self.process_onflight_message(msg.socket_message).await {
-							br_primitives::log_and_capture!(
-								error,
-								&self.client.get_chain_name(),
-								SUB_LOG_TARGET,
-								self.client.address().await,
-								"❗️ Error processing TransferPolled: asset={}, seq={}, {:?}",
-								msg.asset_index_hash,
-								msg.sequence_id,
-								e
-							);
+							// the relayer_manager round lookup reverting is logged only, kept out of Sentry
+							if format!("{e:?}").contains("round_index out of bounds") {
+								log::error!(
+									target: &self.client.get_chain_name(),
+									"-[{}]-[{}] ❗️ Error processing TransferPolled: asset={}, seq={}, {:?}",
+									sub_display_format(SUB_LOG_TARGET),
+									self.client.address().await,
+									msg.asset_index_hash,
+									msg.sequence_id,
+									e
+								);
+							} else {
+								br_primitives::log_and_capture!(
+									error,
+									&self.client.get_chain_name(),
+									SUB_LOG_TARGET,
+									self.client.address().await,
+									"❗️ Error processing TransferPolled: asset={}, seq={}, {:?}",
+									msg.asset_index_hash,
+									msg.sequence_id,
+									e
+								);
+							}
 						}
 					}
 				},
