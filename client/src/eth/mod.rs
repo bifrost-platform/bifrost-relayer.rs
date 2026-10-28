@@ -18,7 +18,7 @@ use br_primitives::{
 
 use alloy::{
 	consensus::{BlockHeader, Transaction, TxType, Typed2718},
-	eips::BlockNumberOrTag,
+	eips::{BlockNumberOrTag, eip1559::Eip1559Estimation},
 	network::{
 		BlockResponse, Network, NetworkTransactionBuilder, TransactionBuilder, TransactionResponse,
 	},
@@ -30,6 +30,7 @@ use alloy::{
 		EthCall, PendingTransactionBuilder, Provider, RootProvider, SendableTx, WalletProvider,
 		ext::TxPoolApi as _,
 		fillers::{FillProvider, TxFiller},
+		utils::EIP1559_MIN_PRIORITY_FEE,
 	},
 	rpc::types::{Filter, Log},
 	signers::Signature,
@@ -561,10 +562,13 @@ where
 			// gas price is fixed to 1000 Gwei on bifrost network
 			request.set_max_fee_per_gas(1000 * Unit::GWEI.wei().to::<u128>());
 			request.set_max_priority_fee_per_gas(0);
+		} else if self.metadata.eip1559 {
+			// filled here so the floored estimate below is used instead of `GasFiller`'s own
+			let fees = self.estimate_eip1559_fees().await?;
+			request.set_max_fee_per_gas(fees.max_fee_per_gas);
+			request.set_max_priority_fee_per_gas(fees.max_priority_fee_per_gas);
 		} else {
-			if !self.metadata.eip1559 {
-				request.set_gas_price(self.get_gas_price().await?);
-			}
+			request.set_gas_price(self.get_gas_price().await?);
 		}
 
 		Ok(())
@@ -786,6 +790,17 @@ where
 		self.inner.send_transaction_internal(tx).await
 	}
 
+	/// alloy falls back to a 1 wei tip when none of the recent blocks paid one (e.g. empty BSC
+	/// blocks under a zero base fee), which validators never include and which then blocks every
+	/// later nonce. The node's suggested tip is taken instead in that case.
+	async fn estimate_eip1559_fees(&self) -> TransportResult<Eip1559Estimation> {
+		let fees = self.inner.estimate_eip1559_fees().await?;
+		if fees.max_priority_fee_per_gas > EIP1559_MIN_PRIORITY_FEE {
+			return Ok(fees);
+		}
+		Ok(with_tip(fees, self.get_max_priority_fee_per_gas().await?))
+	}
+
 	/// Keeps only the logs that match `filter`, which callers trust: some providers do not apply
 	/// it (QuickNode answers a single-block range with every log of the block).
 	async fn get_logs(&self, filter: &Filter) -> TransportResult<Vec<Log>> {
@@ -804,6 +819,15 @@ where
 			}
 		}
 		Ok(logs)
+	}
+}
+
+/// `fees` with the priority fee raised to `tip` (never lowered), keeping the base fee allowance.
+fn with_tip(fees: Eip1559Estimation, tip: u128) -> Eip1559Estimation {
+	let tip = tip.max(fees.max_priority_fee_per_gas);
+	Eip1559Estimation {
+		max_fee_per_gas: fees.max_fee_per_gas - fees.max_priority_fee_per_gas + tip,
+		max_priority_fee_per_gas: tip,
 	}
 }
 
@@ -1008,5 +1032,19 @@ mod tests {
 		assert_eq!(kept.len(), 1);
 		assert_eq!(dropped, 3);
 		assert_eq!(kept[0].address(), address!("0x24d0fff5601e50647f791607b1c2b6c1e0360326"));
+	}
+
+	#[test]
+	fn tip_is_raised_to_the_suggested_one() {
+		let fees = |max_fee_per_gas, max_priority_fee_per_gas| Eip1559Estimation {
+			max_fee_per_gas,
+			max_priority_fee_per_gas,
+		};
+		// zero base fee (BSC): the 1 wei fallback becomes the node's suggestion
+		assert_eq!(with_tip(fees(1, 1), 100_000_000), fees(100_000_000, 100_000_000));
+		// the base fee allowance is kept
+		assert_eq!(with_tip(fees(2_000_000_001, 1), 5), fees(2_000_000_005, 5));
+		// a lower suggestion (Bifrost answers 0) never lowers the tip
+		assert_eq!(with_tip(fees(10, 1), 0), fees(10, 1));
 	}
 }
