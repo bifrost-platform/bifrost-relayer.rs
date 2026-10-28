@@ -351,6 +351,22 @@ where
 
 		let address = self.address().await;
 		let content = match self.txpool_content_from(address).await {
+			// some nodes answer `txpool_contentFrom` with an empty result while `txpool_content`
+			// holds the account's transactions. the full content is only fetched when the
+			// account's pending nonce shows something is actually stuck.
+			Ok(content)
+				if content.pending.is_empty()
+					&& content.queued.is_empty()
+					&& self.get_transaction_count(address).pending().await?
+						> self.get_transaction_count(address).await? =>
+			{
+				log::warn!(
+					target: &self.get_chain_name(),
+					"-[{}] txpool_contentFrom returned nothing for a pending nonce, retrying with full content",
+					sub_display_format(SUB_LOG_TARGET),
+				);
+				self.txpool_content().await?.remove_from(&address)
+			},
 			Ok(content) => content,
 			Err(err) => {
 				log::warn!(
