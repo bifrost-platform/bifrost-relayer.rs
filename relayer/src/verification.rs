@@ -3,7 +3,8 @@ use br_primitives::{
 	constants::{
 		cli::{
 			DEFAULT_BOOTSTRAP_ROUND_OFFSET, DEFAULT_GET_LOGS_BATCH_SIZE, MAX_BLOCK_CONFIRMATIONS,
-			MAX_BOOTSTRAP_ROUND_OFFSET, MAX_CALL_INTERVAL_MS, MIN_GET_LOGS_BATCH_SIZE,
+			MAX_BOOTSTRAP_ROUND_OFFSET, MAX_CALL_INTERVAL_MS, MAX_GET_LOGS_BATCH_SIZE,
+			MIN_GET_LOGS_BATCH_SIZE,
 		},
 		errors::PARAMETER_OUT_OF_RANGE,
 	},
@@ -46,15 +47,13 @@ pub(super) fn assert_configuration_validity(config: &Configuration) {
 			MAX_BLOCK_CONFIRMATIONS
 		);
 		if let Some(get_logs_batch_size) = evm_provider.get_logs_batch_size {
-			let max_get_logs_batch_size =
-				MAX_CALL_INTERVAL_MS.saturating_div(evm_provider.call_interval);
 			assert!(
-				(MIN_GET_LOGS_BATCH_SIZE..=max_get_logs_batch_size).contains(&get_logs_batch_size),
+				(MIN_GET_LOGS_BATCH_SIZE..=MAX_GET_LOGS_BATCH_SIZE).contains(&get_logs_batch_size),
 				"{} [parameter: {}, range: {}…{}, default: {}]",
 				PARAMETER_OUT_OF_RANGE,
 				"evm_provider.get_logs_batch_size",
 				MIN_GET_LOGS_BATCH_SIZE,
-				max_get_logs_batch_size,
+				MAX_GET_LOGS_BATCH_SIZE,
 				DEFAULT_GET_LOGS_BATCH_SIZE
 			);
 		}
