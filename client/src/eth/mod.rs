@@ -2,7 +2,7 @@ use br_primitives::{
 	constants::{
 		config::{BOOTSTRAP_BLOCK_OFFSET, NATIVE_BLOCK_TIME},
 		errors::{INVALID_CHAIN_ID, PROVIDER_INTERNAL_ERROR},
-		tx::DEFAULT_TX_TIMEOUT_MS,
+		tx::{DEFAULT_TX_TIMEOUT_MS, NATIVE_TX_TIMEOUT_MS},
 	},
 	contracts::{
 		authority::BfcStaking::round_meta_data,
@@ -488,11 +488,7 @@ where
 			};
 			let submitted_tx_hash = *pending.tx_hash();
 
-			match pending
-				.with_timeout(Some(Duration::from_millis(DEFAULT_TX_TIMEOUT_MS)))
-				.watch()
-				.await
-			{
+			match pending.with_timeout(Some(self.tx_timeout())).watch().await {
 				Ok(tx_hash) => {
 					log::info!(
 						target: &self.get_chain_name(),
@@ -526,6 +522,15 @@ where
 		log::info!(target: &self.get_chain_name(), "-[{}] Flushing stalled transactions completed", sub_display_format(SUB_LOG_TARGET));
 
 		Ok(())
+	}
+
+	/// How long to wait for a submitted transaction to confirm.
+	fn tx_timeout(&self) -> Duration {
+		Duration::from_millis(if self.metadata.is_native {
+			NATIVE_TX_TIMEOUT_MS
+		} else {
+			DEFAULT_TX_TIMEOUT_MS
+		})
 	}
 
 	/// Checks whether a submitted transaction is already confirmed on-chain via
@@ -628,11 +633,7 @@ where
 		};
 		let submitted_tx_hash = *pending.tx_hash();
 
-		match pending
-			.with_timeout(Some(Duration::from_millis(DEFAULT_TX_TIMEOUT_MS)))
-			.watch()
-			.await
-		{
+		match pending.with_timeout(Some(self.tx_timeout())).watch().await {
 			Ok(tx_hash) => {
 				log::info!(
 					target: &requester,
@@ -936,11 +937,7 @@ pub fn send_transaction<F, P, N: Network>(
 				);
 				let submitted_tx_hash = *pending.tx_hash();
 
-				match pending
-					.with_timeout(Some(Duration::from_millis(DEFAULT_TX_TIMEOUT_MS)))
-					.watch()
-					.await
-				{
+				match pending.with_timeout(Some(client.tx_timeout())).watch().await {
 					Ok(tx_hash) => {
 						log::info!(
 							target: &requester,
