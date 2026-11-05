@@ -29,6 +29,11 @@ pub const DEFAULT_TX_RETRY_INTERVAL_MS: u64 = 3000;
 /// The default transaction timeout in milliseconds.
 pub const DEFAULT_TX_TIMEOUT_MS: u64 = 60000;
 
+/// The transaction timeout in milliseconds on Bifrost. After every round change, validator rewards
+/// are settled one validator per block; those blocks are heavy and RPC nodes fall up to ~2 minutes
+/// behind the chain, holding the transaction until they catch up.
+pub const NATIVE_TX_TIMEOUT_MS: u64 = 180_000;
+
 /// The coefficient that will be multiplied on the max fee.
 pub const MAX_FEE_COEFFICIENT: u64 = 2;
 

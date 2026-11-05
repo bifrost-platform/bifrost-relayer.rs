@@ -2,7 +2,7 @@ use br_primitives::{
 	constants::{
 		config::{BOOTSTRAP_BLOCK_OFFSET, NATIVE_BLOCK_TIME},
 		errors::{INVALID_CHAIN_ID, PROVIDER_INTERNAL_ERROR},
-		tx::DEFAULT_TX_TIMEOUT_MS,
+		tx::{DEFAULT_TX_TIMEOUT_MS, NATIVE_TX_TIMEOUT_MS},
 	},
 	contracts::{
 		authority::BfcStaking::round_meta_data,
@@ -30,9 +30,11 @@ use alloy::{
 		EthCall, PendingTransactionBuilder, Provider, RootProvider, SendableTx, WalletProvider,
 		ext::TxPoolApi as _,
 		fillers::{FillProvider, TxFiller},
-		utils::EIP1559_MIN_PRIORITY_FEE,
+		utils::{
+			EIP1559_FEE_ESTIMATION_PAST_BLOCKS, EIP1559_MIN_PRIORITY_FEE, eip1559_default_estimator,
+		},
 	},
-	rpc::types::{Filter, Log},
+	rpc::types::{FeeHistory, Filter, Log},
 	signers::Signature,
 	transports::TransportResult,
 };
@@ -488,11 +490,7 @@ where
 			};
 			let submitted_tx_hash = *pending.tx_hash();
 
-			match pending
-				.with_timeout(Some(Duration::from_millis(DEFAULT_TX_TIMEOUT_MS)))
-				.watch()
-				.await
-			{
+			match pending.with_timeout(Some(self.tx_timeout())).watch().await {
 				Ok(tx_hash) => {
 					log::info!(
 						target: &self.get_chain_name(),
@@ -526,6 +524,15 @@ where
 		log::info!(target: &self.get_chain_name(), "-[{}] Flushing stalled transactions completed", sub_display_format(SUB_LOG_TARGET));
 
 		Ok(())
+	}
+
+	/// How long to wait for a submitted transaction to confirm.
+	fn tx_timeout(&self) -> Duration {
+		Duration::from_millis(if self.metadata.is_native {
+			NATIVE_TX_TIMEOUT_MS
+		} else {
+			DEFAULT_TX_TIMEOUT_MS
+		})
 	}
 
 	/// Checks whether a submitted transaction is already confirmed on-chain via
@@ -628,11 +635,7 @@ where
 		};
 		let submitted_tx_hash = *pending.tx_hash();
 
-		match pending
-			.with_timeout(Some(Duration::from_millis(DEFAULT_TX_TIMEOUT_MS)))
-			.watch()
-			.await
-		{
+		match pending.with_timeout(Some(self.tx_timeout())).watch().await {
 			Ok(tx_hash) => {
 				log::info!(
 					target: &requester,
@@ -806,11 +809,22 @@ where
 		self.inner.send_transaction_internal(tx).await
 	}
 
-	/// alloy falls back to a 1 wei tip when none of the recent blocks paid one (e.g. empty BSC
-	/// blocks under a zero base fee), which validators never include and which then blocks every
-	/// later nonce. The node's suggested tip is taken instead in that case.
+	/// alloy's estimate taken at `TIP_PERCENTILE`. alloy falls back to a 1 wei tip when none of the
+	/// recent blocks paid one (e.g. empty BSC blocks under a zero base fee), which validators never
+	/// include and which then blocks every later nonce. The node's suggested tip is taken instead
+	/// in that case.
 	async fn estimate_eip1559_fees(&self) -> TransportResult<Eip1559Estimation> {
-		let fees = self.inner.estimate_eip1559_fees().await?;
+		let history = self
+			.get_fee_history(
+				EIP1559_FEE_ESTIMATION_PAST_BLOCKS,
+				BlockNumberOrTag::Latest,
+				&[TIP_PERCENTILE],
+			)
+			.await?;
+		let fees = match estimate_from(&history) {
+			Some(fees) => fees,
+			None => self.inner.estimate_eip1559_fees().await?,
+		};
 		if fees.max_priority_fee_per_gas > EIP1559_MIN_PRIORITY_FEE {
 			return Ok(fees);
 		}
@@ -836,6 +850,18 @@ where
 		}
 		Ok(logs)
 	}
+}
+
+/// Percentile of past tips the EIP-1559 tip is taken from. alloy's 20th lands on the near-zero tips
+/// that private-orderflow transactions pay on Ethereum (5115 wei on 2026-11-05), which most
+/// builders skip, so a relay waited 5 blocks and outran the confirmation timeout.
+const TIP_PERCENTILE: f64 = 50.0;
+
+/// alloy's default estimate over `history` (fetched at `TIP_PERCENTILE`). `None` without a base
+/// fee (zero-base-fee chains such as BSC), where alloy's own estimate checks the latest block.
+fn estimate_from(history: &FeeHistory) -> Option<Eip1559Estimation> {
+	let base_fee = history.latest_block_base_fee().filter(|fee| *fee != 0)?;
+	Some(eip1559_default_estimator(base_fee, history.reward.as_deref().unwrap_or_default()))
 }
 
 /// `fees` with the priority fee raised to `tip` (never lowered), keeping the base fee allowance.
@@ -936,11 +962,7 @@ pub fn send_transaction<F, P, N: Network>(
 				);
 				let submitted_tx_hash = *pending.tx_hash();
 
-				match pending
-					.with_timeout(Some(Duration::from_millis(DEFAULT_TX_TIMEOUT_MS)))
-					.watch()
-					.await
-				{
+				match pending.with_timeout(Some(client.tx_timeout())).watch().await {
 					Ok(tx_hash) => {
 						log::info!(
 							target: &requester,
@@ -1062,5 +1084,38 @@ mod tests {
 		assert_eq!(with_tip(fees(2_000_000_001, 1), 5), fees(2_000_000_005, 5));
 		// a lower suggestion (Bifrost answers 0) never lowers the tip
 		assert_eq!(with_tip(fees(10, 1), 0), fees(10, 1));
+	}
+
+	#[test]
+	fn tip_is_the_median_of_past_tips() {
+		// Ethereum p50 rewards of blocks 26345081..=26345090; alloy's p20 gave 5115 wei
+		let history = FeeHistory {
+			// block 26345090's base fee, then the next block's
+			base_fee_per_gas: vec![44_886_604, 46_191_047],
+			reward: Some(
+				[
+					2639,
+					1_863_372,
+					5_575_000,
+					10_000_000,
+					10_000_000,
+					11_500_000,
+					11_543_331,
+					21_602_725,
+					50_000_000,
+					100_000_000,
+				]
+				.map(|tip| vec![tip])
+				.to_vec(),
+			),
+			..Default::default()
+		};
+		let fees = estimate_from(&history).unwrap();
+		assert_eq!(fees.max_priority_fee_per_gas, 10_750_000);
+		assert_eq!(fees.max_fee_per_gas, 2 * 44_886_604 + 10_750_000);
+
+		// zero base fee (BSC): left to alloy's estimate
+		let history = FeeHistory { base_fee_per_gas: vec![0, 0], ..Default::default() };
+		assert_eq!(estimate_from(&history), None);
 	}
 }
