@@ -45,8 +45,9 @@ pub struct RelayerConfig {
 	pub keystore_config: Option<KeystoreConfig>,
 	/// EVM configs
 	pub evm_providers: Vec<EVMProvider>,
-	/// BTC configs
-	pub btc_provider: BTCProvider,
+	/// BTC configs. Required when the connected runtime has the `BtcSocketQueue` and
+	/// `BtcRegistrationPool` pallets, ignored otherwise.
+	pub btc_provider: Option<BTCProvider>,
 	/// Handler configs
 	pub handler_configs: Vec<HandlerConfig>,
 	/// Bootstrapping configs
@@ -71,6 +72,10 @@ pub struct EVMProvider {
 	pub id: ChainId,
 	/// Endpoint provider
 	pub provider: String,
+	/// Fallback endpoints, tried in order once `provider` keeps failing. Requests return to
+	/// `provider` periodically. Only the EVM JSON-RPC client fails over: Bifrost's Substrate
+	/// connection always uses `provider`. (default: none)
+	pub fallback_providers: Option<Vec<String>>,
 	/// The time interval(ms) used when to request a new block
 	pub call_interval: u64,
 	/// The number of confirmations required for a block to be processed.
@@ -91,12 +96,26 @@ pub struct EVMProvider {
 	/// execution is skipped to prevent draining the relayer's native balance.
 	/// Only relevant for chains that have `hooks_address` configured.
 	pub max_hook_fee: Option<u128>,
+	/// Addresses of hook target contracts (i.e. `Variants.receiver`) that are whitelisted for
+	/// feeless hook execution. When the hook's receiver matches one of these addresses,
+	/// `Hooks.execute()` is called with a fee of zero instead of the estimated fee.
+	/// Only relevant for chains that have `hooks_address` configured.
+	pub feeless_hook_contracts: Option<Vec<String>>,
+	/// The coefficient multiplied to the estimated gas of a `Hooks.execute()`/`Hooks.rollback()`
+	/// transaction before it's set as the transaction's gas limit (e.g. `1.2` adds a 20% buffer).
+	/// Defaults to `1.0` (no buffer) when unset. Only relevant for chains that have
+	/// `hooks_address` configured.
+	pub hook_gas_multiplier: Option<f64>,
 	/// Socket contract address
 	pub socket_address: String,
 	/// Authority contract address
 	pub authority_address: String,
 	/// Vault contract address
 	pub vault_address: String,
+	/// Legacy socket contract address (L-Socket, external chains only during N-contract migration)
+	pub legacy_socket_address: Option<String>,
+	/// Legacy vault contract address (L-Vault, external chains only during N-contract migration)
+	pub legacy_vault_address: Option<String>,
 	/// Hooks contract address (Only for chains that support hooks)
 	pub hooks_address: Option<String>,
 	/// Relayer manager contract address (Bifrost only)
@@ -127,12 +146,38 @@ pub struct EVMProvider {
 	pub chainlink_jpy_usd_address: Option<String>,
 }
 
+/// The endpoint URLs of a provider: the primary, then the fallbacks in order.
+fn endpoints<'a>(
+	primary: &'a str,
+	fallbacks: &'a Option<Vec<String>>,
+) -> impl Iterator<Item = &'a str> {
+	std::iter::once(primary).chain(fallbacks.iter().flatten().map(String::as_str))
+}
+
+impl EVMProvider {
+	/// The endpoint URLs: `provider`, then `fallback_providers` in order.
+	pub fn endpoints(&self) -> impl Iterator<Item = &str> {
+		endpoints(&self.provider, &self.fallback_providers)
+	}
+}
+
+impl BTCProvider {
+	/// The endpoint URLs: `provider`, then `fallback_providers` in order.
+	pub fn endpoints(&self) -> impl Iterator<Item = &str> {
+		endpoints(&self.provider, &self.fallback_providers)
+	}
+}
+
 #[derive(Debug, Clone, Deserialize)]
 pub struct BTCProvider {
 	/// The bitcoin chain ID used for CCCP.
 	pub id: u64,
 	/// The Bitcoin provider URL.
 	pub provider: String,
+	/// Fallback endpoints, tried in order once `provider` keeps failing. Requests return to
+	/// `provider` periodically. `username`/`password` apply to `provider` only: a fallback that
+	/// needs credentials carries them in its URL (`http://user:pass@host:port`). (default: none)
+	pub fallback_providers: Option<Vec<String>>,
 	/// The time interval(ms) used when to request a new block
 	pub call_interval: u64,
 	/// The number of confirmations required for a block to be processed.
@@ -143,7 +188,7 @@ pub struct BTCProvider {
 	pub username: Option<String>,
 	/// Optional. The provider password credential.
 	pub password: Option<String>,
-	/// Optional. The wallet name.
+	/// Optional. The wallet name. Applies to `provider` only.
 	pub wallet: Option<String>,
 }
 

@@ -1,6 +1,6 @@
 [package]
 name = "bifrost-relayer"
-version = "3.0.3"
+version = "3.0.4"
 description = "The core rust implementation for Bifrost relayer"
 authors = { workspace = true }
 homepage = { workspace = true }
@@ -29,6 +29,7 @@ sentry = { workspace = true }
 aws-sdk-kms = { workspace = true }
 aws-config = { workspace = true }
 sp-core = { workspace = true }
+url = { workspace = true }
 
 # Bifrost Relayer
 br-cli = { path = "../client/cli", default-features = false }

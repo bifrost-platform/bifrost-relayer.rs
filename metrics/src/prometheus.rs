@@ -14,6 +14,19 @@ lazy_static! {
 		&["chain_name"],
 	)
 	.unwrap();
+	pub static ref RPC_ACTIVE_PROVIDER: GaugeVec<U64> = GaugeVec::<U64>::new(
+		Opts::new(
+			"relayer_rpc_active_provider",
+			"Index of the RPC provider currently in use (0 = primary, 1.. = fallbacks)",
+		),
+		&["chain_name"],
+	)
+	.unwrap();
+	pub static ref RPC_PROVIDER_SWITCHES: GaugeVec<U64> = GaugeVec::<U64>::new(
+		Opts::new("relayer_rpc_provider_switches", "Times the chain switched RPC provider"),
+		&["chain_name"],
+	)
+	.unwrap();
 	pub static ref NATIVE_BALANCE: GaugeVec<F64> = GaugeVec::<F64>::new(
 		Opts::new("relayer_native_balance", "Native token balance remained of the chain"),
 		&["chain_name"],
@@ -47,6 +60,8 @@ fn register_system_prometheus_metrics(registry: &Registry) {
 fn register_evm_prometheus_metrics(registry: &Registry) {
 	registry.register(Box::new(BLOCK_HEIGHT.clone())).unwrap();
 	registry.register(Box::new(RPC_CALLS.clone())).unwrap();
+	registry.register(Box::new(RPC_ACTIVE_PROVIDER.clone())).unwrap();
+	registry.register(Box::new(RPC_PROVIDER_SWITCHES.clone())).unwrap();
 	registry.register(Box::new(NATIVE_BALANCE.clone())).unwrap();
 	registry.register(Box::new(PAYED_FEES.clone())).unwrap();
 }
@@ -59,6 +74,12 @@ pub fn set_block_height(label: &str, block_height: u64) {
 /// Increase the RPC call counter.
 pub fn increase_rpc_calls(label: &str) {
 	RPC_CALLS.with_label_values(&[label]).inc();
+}
+
+/// Record a switch of the chain's RPC provider to the one at `index`.
+pub fn set_rpc_provider_switch(label: &str, index: usize) {
+	RPC_ACTIVE_PROVIDER.with_label_values(&[label]).set(index as u64);
+	RPC_PROVIDER_SWITCHES.with_label_values(&[label]).inc();
 }
 
 /// Set the native token balance remained of the chain.

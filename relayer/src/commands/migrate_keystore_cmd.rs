@@ -58,8 +58,12 @@ impl MigrateKeystoreCmd {
 	pub async fn run(&self, config: Configuration) -> Result<(), CliError> {
 		println!("Migrating keystore for chain: {}", self.chain);
 
-		let network = Network::from_core_arg(&config.relayer_config.btc_provider.chain)
-			.expect(INVALID_BITCOIN_NETWORK);
+		let Some(btc_provider) = &config.relayer_config.btc_provider else {
+			return Err(CliError::Input(
+				"`btc_provider` is required to migrate the Bitcoin keystore".to_string(),
+			));
+		};
+		let network = Network::from_core_arg(&btc_provider.chain).expect(INVALID_BITCOIN_NETWORK);
 
 		let mut password = None;
 		let mut keystore_path = DEFAULT_KEYSTORE_PATH.to_string();

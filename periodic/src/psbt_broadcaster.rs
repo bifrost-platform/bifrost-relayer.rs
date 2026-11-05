@@ -5,8 +5,11 @@ use alloy::{
 	primitives::{Bytes, keccak256},
 	providers::{Provider, WalletProvider, fillers::TxFiller},
 };
-use bitcoincore_rpc::{Client as BtcClient, RpcApi};
-use br_client::{btc::handlers::XtRequester, eth::EthClient};
+use bitcoincore_rpc::RpcApi;
+use br_client::{
+	btc::{failover::FailoverClient as BtcClient, handlers::XtRequester},
+	eth::EthClient,
+};
 use br_primitives::{
 	constants::{errors::INVALID_PERIODIC_SCHEDULE, schedule::PSBT_BROADCASTER_SCHEDULE},
 	substrate::{EthereumSignature, ExecutedPsbtMessage, bifrost_runtime},

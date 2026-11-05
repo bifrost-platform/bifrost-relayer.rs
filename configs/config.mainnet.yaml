@@ -18,6 +18,8 @@ btc_provider:
   id: 10000
   chain: "main"
   provider: "<YOUR_BITCOIN_RPC_ENDPOINT>"
+  # Optional. Tried in order when `provider` keeps failing. Credentials go in the URL.
+  # fallback_providers: ["http://<USER>:<PASSWORD>@<YOUR_FALLBACK_BITCOIN_RPC_ENDPOINT>"]
   call_interval: 10000
   block_confirmations: 2
 
@@ -41,6 +43,8 @@ evm_providers:
   - name: "ethereum"
     id: 1
     provider: "<YOUR_ETHEREUM_RPC_ENDPOINT>"
+    # Optional. Tried in order when `provider` keeps failing.
+    # fallback_providers: ["<YOUR_FALLBACK_RPC_ENDPOINT>"]
     call_interval: 12000
     block_confirmations: 1
     is_relay_target: false

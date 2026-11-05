@@ -51,7 +51,9 @@ impl PriceFetcher for KucoinPriceFetcher {
 
 impl KucoinPriceFetcher {
 	pub fn new(client: Client) -> Self {
-		let symbols: Vec<String> = vec!["ETH".into(), "BFC".into(), "BNB".into(), "POL".into()];
+		// BFC-USDT is no longer listed on KuCoin (the stats endpoint returns all-null fields),
+		// and one failing symbol fails the whole `get_tickers` call.
+		let symbols: Vec<String> = vec!["ETH".into(), "BNB".into(), "POL".into()];
 
 		Self {
 			base_url: Url::parse("https://api.kucoin.com/api/v1/")
@@ -85,7 +87,7 @@ mod tests {
 	#[tokio::test]
 	async fn fetch_price() {
 		let kucoin_fetcher = KucoinPriceFetcher::new(test_client());
-		let res = kucoin_fetcher.get_ticker_with_symbol("BFC".to_string()).await;
+		let res = kucoin_fetcher.get_ticker_with_symbol("ETH".to_string()).await;
 
 		println!("{:#?}", res);
 	}

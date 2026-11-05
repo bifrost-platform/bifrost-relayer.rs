@@ -1,6 +1,9 @@
 use alloy::{
 	network::Network,
-	primitives::{Address, ChainId, U256, map::AddressHashMap},
+	primitives::{
+		Address, ChainId, U256,
+		map::{AddressHashMap, AddressHashSet},
+	},
 	providers::{
 		Provider, WalletProvider,
 		fillers::{FillProvider, TxFiller},
@@ -15,6 +18,7 @@ use crate::{
 	cli::EVMProvider,
 	constants::{
 		cli::DEFAULT_GET_LOGS_BATCH_SIZE,
+		config::DEFAULT_HOOK_GAS_MULTIPLIER,
 		errors::{INVALID_CONTRACT_ADDRESS, MISSING_CONTRACT_ADDRESS},
 	},
 	contracts::{
@@ -111,6 +115,12 @@ pub struct ProviderMetadata {
 	/// Maximum fee in native currency wei the relayer will pay for a single `Hooks.execute()`.
 	/// Hook execution is skipped if the estimated gas cost exceeds this value.
 	pub max_hook_fee: Option<U256>,
+	/// Hook target contract addresses (`Variants.receiver`) whitelisted for feeless hook
+	/// execution. `Hooks.execute()` is called with a zero fee when the receiver is a member.
+	pub feeless_hook_contracts: AddressHashSet,
+	/// The coefficient multiplied to the estimated gas of a `Hooks.execute()`/`Hooks.rollback()`
+	/// transaction before it's set as the transaction's gas limit.
+	pub hook_gas_multiplier: f64,
 }
 
 impl ProviderMetadata {
@@ -140,6 +150,15 @@ impl ProviderMetadata {
 			},
 			is_relay_target: evm_provider.is_relay_target,
 			max_hook_fee: evm_provider.max_hook_fee.map(U256::from),
+			feeless_hook_contracts: evm_provider
+				.feeless_hook_contracts
+				.unwrap_or_default()
+				.iter()
+				.map(|address| Address::from_str(address).expect(INVALID_CONTRACT_ADDRESS))
+				.collect(),
+			hook_gas_multiplier: evm_provider
+				.hook_gas_multiplier
+				.unwrap_or(DEFAULT_HOOK_GAS_MULTIPLIER),
 		}
 	}
 }
@@ -241,6 +260,10 @@ where
 	pub authority: AuthorityInstance<F, P, N>,
 	/// VaultContract
 	pub vault: VaultInstance<F, P, N>,
+	/// Legacy SocketContract (L-Socket, external chains only during N-contract migration)
+	pub legacy_socket: Option<SocketInstance<F, P, N>>,
+	/// Legacy VaultContract (L-Vault, external chains only during N-contract migration)
+	pub legacy_vault: Option<VaultInstance<F, P, N>>,
 	/// HooksContract
 	pub hooks: Option<HooksInstance<F, P, N>>,
 	/// RelayerManagerContract (Bifrost only)
@@ -262,8 +285,11 @@ where
 	F: TxFiller<N> + WalletProvider<N>,
 	P: Provider<N>,
 {
+	/// Instantiates the protocol contracts. The Bitcoin contracts are only bound on Bifrost
+	/// when `btc_enabled` is set.
 	pub fn new(
 		is_native: bool,
+		btc_enabled: bool,
 		provider: Arc<FillProvider<F, P, N>>,
 		evm_provider: EVMProvider,
 	) -> Self {
@@ -280,6 +306,8 @@ where
 				Address::from_str(&evm_provider.vault_address).expect(INVALID_CONTRACT_ADDRESS),
 				provider.clone(),
 			),
+			legacy_socket: None,
+			legacy_vault: None,
 			hooks: evm_provider.hooks_address.map(|address| {
 				HooksContract::new(
 					Address::from_str(&address).expect(INVALID_CONTRACT_ADDRESS),
@@ -301,6 +329,8 @@ where
 				.expect(INVALID_CONTRACT_ADDRESS),
 				provider.clone(),
 			));
+		}
+		if is_native && btc_enabled {
 			contracts.bitcoin_socket = Some(BitcoinSocketContract::new(
 				Address::from_str(
 					&evm_provider.bitcoin_socket_address.expect(MISSING_CONTRACT_ADDRESS),
@@ -334,6 +364,19 @@ where
 					.expect(INVALID_CONTRACT_ADDRESS),
 				provider.clone(),
 			));
+		} else {
+			contracts.legacy_socket = evm_provider.legacy_socket_address.map(|address| {
+				SocketContract::new(
+					Address::from_str(&address).expect(INVALID_CONTRACT_ADDRESS),
+					provider.clone(),
+				)
+			});
+			contracts.legacy_vault = evm_provider.legacy_vault_address.map(|address| {
+				VaultContract::new(
+					Address::from_str(&address).expect(INVALID_CONTRACT_ADDRESS),
+					provider.clone(),
+				)
+			});
 		}
 		contracts
 	}
