@@ -1,10 +1,11 @@
 use super::{Event, EventMessage, EventType, Handler, LOG_TARGET, XtRequester};
+use crate::btc::failover::FailoverClient as BtcClient;
 use crate::eth::EthClient;
 use alloy::{
 	network::Network,
 	providers::{Provider, WalletProvider, fillers::TxFiller},
 };
-use bitcoincore_rpc::{Client as BtcClient, RpcApi};
+use bitcoincore_rpc::RpcApi;
 use br_primitives::{
 	btc::FeeRateResponse,
 	constants::{btc::MEMPOOL_SPACE_FEE_RATE_MULTIPLIER, tx::DEFAULT_CALL_RETRY_INTERVAL_MS},

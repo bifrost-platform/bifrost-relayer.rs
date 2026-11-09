@@ -31,5 +31,9 @@ pub const MAX_ESCALATE_INTERVAL_SEC: u64 = 60;
 /// The minimum batch size allowed for `eth_getLogs()`. (=1 block)
 pub const MIN_GET_LOGS_BATCH_SIZE: u64 = 1;
 
+/// The maximum batch size allowed for `eth_getLogs()`. (=1000 blocks)
+/// Fixed rather than derived from `call_interval`, so sub-second chains can batch a full minute.
+pub const MAX_GET_LOGS_BATCH_SIZE: u64 = 1_000;
+
 /// The maximum round offset allowed for bootstrap. (=14 rounds)
 pub const MAX_BOOTSTRAP_ROUND_OFFSET: u64 = 14;

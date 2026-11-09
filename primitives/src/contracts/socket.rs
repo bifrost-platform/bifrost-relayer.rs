@@ -125,6 +125,9 @@ impl From<Socket_Message> for Vec<u8> {
 }
 
 use SocketContract::SocketContractInstance;
-use alloy::{dyn_abi::DynSolValue, primitives::U256};
+use alloy::{
+	dyn_abi::DynSolValue,
+	primitives::{FixedBytes, U256},
+};
 
 pub type SocketInstance<F, P, N> = SocketContractInstance<Arc<FillProvider<F, P, N>>, N>;

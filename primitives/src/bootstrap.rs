@@ -30,13 +30,13 @@ pub struct BootstrapSharedData {
 impl BootstrapSharedData {
 	/// Initializes the bootstrap shared data and lock barrier in order to wait until
 	/// `Socket` events bootstrap process is completed on each chain.
-	pub fn new(config: &Configuration) -> Self {
+	/// `bitcoin_chain_id` is `None` when Bitcoin support is disabled.
+	pub fn new(config: &Configuration, bitcoin_chain_id: Option<ChainId>) -> Self {
 		let evm_providers = &config.relayer_config.evm_providers;
-		let btc_provider = &config.relayer_config.btc_provider;
 		let bootstrap_config = &config.relayer_config.bootstrap_config;
 
 		let mut chain_ids = evm_providers.iter().map(|p| p.id).collect::<Vec<_>>();
-		chain_ids.push(btc_provider.id);
+		chain_ids.extend(bitcoin_chain_id);
 
 		fn new_states_with(
 			chain_ids: &[ChainId],

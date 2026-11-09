@@ -16,8 +16,8 @@ pub const BITCOIN_ROLLBACK_CHECK_SCHEDULE: &str = "*/15 * * * * * *";
 /// The schedule definition for rollback checks. This will trigger on every minute.
 pub const ROLLBACK_CHECK_SCHEDULE: &str = "0 * * * * * *";
 
-/// The minimum interval that should be passed in order to handle rollback checks. (=3 minutes)
-pub const ROLLBACK_CHECK_MINIMUM_INTERVAL: u64 = 3 * 60;
+/// The minimum interval that should be passed in order to handle rollback checks. (=15 minutes)
+pub const ROLLBACK_CHECK_MINIMUM_INTERVAL: u64 = 15 * 60;
 
 /// The schedule definition for migration detector. This will trigger on every 9th second.
 pub const MIGRATION_DETECTOR_SCHEDULE: &str = "*/9 * * * * * *";
