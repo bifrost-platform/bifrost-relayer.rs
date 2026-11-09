@@ -5,9 +5,10 @@ use br_primitives::{
 	cli::{Configuration, SolProvider},
 	constants::{
 		cli::{
-			DEFAULT_BOOTSTRAP_ROUND_OFFSET, DEFAULT_GET_LOGS_BATCH_SIZE, MAX_BLOCK_CONFIRMATIONS,
-			MAX_BOOTSTRAP_ROUND_OFFSET, MAX_CALL_INTERVAL_MS, MAX_GET_LOGS_BATCH_SIZE,
-			MIN_GET_LOGS_BATCH_SIZE,
+			DEFAULT_BITCOIN_BOOTSTRAP_BLOCK_OFFSET, DEFAULT_BOOTSTRAP_ROUND_OFFSET,
+			DEFAULT_GET_LOGS_BATCH_SIZE, MAX_BITCOIN_BOOTSTRAP_BLOCK_OFFSET,
+			MAX_BLOCK_CONFIRMATIONS, MAX_BOOTSTRAP_ROUND_OFFSET, MAX_CALL_INTERVAL_MS,
+			MAX_GET_LOGS_BATCH_SIZE, MIN_GET_LOGS_BATCH_SIZE,
 		},
 		errors::PARAMETER_OUT_OF_RANGE,
 	},
@@ -31,6 +32,16 @@ pub(super) fn assert_configuration_validity(config: &Configuration) {
 				"bootstrap_config.round_offset",
 				MAX_BOOTSTRAP_ROUND_OFFSET,
 				DEFAULT_BOOTSTRAP_ROUND_OFFSET
+			);
+		}
+		if let Some(btc_block_offset) = bootstrap_config.btc_block_offset {
+			assert!(
+				(0..=MAX_BITCOIN_BOOTSTRAP_BLOCK_OFFSET).contains(&btc_block_offset),
+				"{} [parameter: {}, range: 0…{}, default: {}]",
+				PARAMETER_OUT_OF_RANGE,
+				"bootstrap_config.btc_block_offset",
+				MAX_BITCOIN_BOOTSTRAP_BLOCK_OFFSET,
+				DEFAULT_BITCOIN_BOOTSTRAP_BLOCK_OFFSET
 			);
 		}
 	}

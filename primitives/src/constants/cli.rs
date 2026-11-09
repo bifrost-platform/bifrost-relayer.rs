@@ -40,3 +40,7 @@ pub const MAX_GET_LOGS_BATCH_SIZE: u64 = 1_000;
 
 /// The maximum round offset allowed for bootstrap. (=14 rounds)
 pub const MAX_BOOTSTRAP_ROUND_OFFSET: u64 = 14;
+
+/// The maximum block offset allowed for Bitcoin bootstrap. (=2000 blocks, about two weeks)
+/// Bootstrap fetches every block one by one while the other chains wait for it.
+pub const MAX_BITCOIN_BOOTSTRAP_BLOCK_OFFSET: u32 = 2_000;
