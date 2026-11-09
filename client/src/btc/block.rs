@@ -19,10 +19,14 @@ use crate::{btc::failover::FailoverClient as BtcClient, failover::HeadMonitor};
 use alloy::network::Network;
 use bitcoincore_rpc::{RpcApi, bitcoincore_rpc_json::GetRawTransactionResultVout};
 use br_primitives::btc::{Event, EventMessage};
-use miniscript::bitcoin::{Address, Txid, address::NetworkUnchecked};
+use miniscript::bitcoin::{Address, BlockHash, Txid, address::NetworkUnchecked};
 use serde::Deserialize;
 use serde_json::Value;
-use std::{collections::BTreeSet, str::FromStr, sync::Arc};
+use std::{
+	collections::{BTreeMap, BTreeSet},
+	str::FromStr,
+	sync::Arc,
+};
 use tokio::{
 	sync::broadcast::{self, Receiver, Sender},
 	time::{Duration, interval, sleep},
@@ -35,6 +39,11 @@ const SUB_LOG_TARGET: &str = "block-manager";
 /// is considered behind. Right after start the processed block is the head itself, so this
 /// absorbs load-balanced backends a block or two apart.
 const BTC_HEAD_LAG_TOLERANCE: u64 = 2;
+
+/// How many recently processed block hashes are kept to detect reorgs.
+/// shortcut: a reorg deeper than this rescans only the tracked window; raise it if reorgs get
+/// deeper (testnet4 has shown up to 45 blocks).
+const REORG_TRACK_DEPTH: usize = 100;
 
 /// A module that reads every new Bitcoin block and filters `Inbound`, `Outbound` events.
 pub struct BlockManager<F, P, N: Network>
@@ -52,6 +61,8 @@ where
 	block_confirmations: u64,
 	/// The block that is waiting for confirmations.
 	waiting_block: u64,
+	/// Hashes of the most recently processed blocks, used to detect reorgs.
+	processed_hashes: BTreeMap<u64, BlockHash>,
 	/// The `getblockcount` request interval in milliseconds.
 	call_interval: u64,
 	/// The bootstrap shared data.
@@ -111,6 +122,7 @@ where
 			sender,
 			block_confirmations,
 			waiting_block: Default::default(),
+			processed_hashes: Default::default(),
 			call_interval,
 			bootstrap_shared_data,
 			bootstrap_offset,
@@ -142,6 +154,11 @@ where
 		self.btc_client.verify_fallbacks().await?;
 		let latest_block = self.get_block_count().await?;
 		self.waiting_block = latest_block.saturating_add(1);
+		// bootstrap scans these blocks, so a reorg replacing any of them must be caught too
+		let tracked = u64::from(self.bootstrap_offset).min(REORG_TRACK_DEPTH as u64 - 1);
+		for height in latest_block.saturating_sub(tracked)..=latest_block {
+			self.processed_hashes.insert(height, self.get_block_hash(height).await?);
+		}
 
 		log::info!(
 			target: LOG_TARGET,
@@ -339,8 +356,17 @@ where
 				(EventMessage::inbound(num), EventMessage::outbound(num));
 
 			let block_hash = self.get_block_hash(num).await?;
-			let txs = self.get_block_info_with_txs(&block_hash).await?.tx;
-			for tx in txs {
+			let block = self.get_block_info_with_txs(&block_hash).await?;
+			if self
+				.processed_hashes
+				.get(&num.saturating_sub(1))
+				.is_some_and(|prev| block.previousblockhash != Some(*prev))
+			{
+				self.rewind_to_fork_point(num).await?;
+				return Ok(());
+			}
+
+			for tx in block.tx {
 				self.filter(
 					tx.txid,
 					&tx.vout,
@@ -367,9 +393,33 @@ where
 
 			// Advance per block so a failure on a later block doesn't re-emit the ones already
 			// sent when the caller retries.
+			self.processed_hashes.insert(num, block_hash);
+			if self.processed_hashes.len() > REORG_TRACK_DEPTH {
+				self.processed_hashes.pop_first();
+			}
 			self.increment_waiting_block(num);
 		}
 
+		Ok(())
+	}
+
+	/// Moves `waiting_block` back to just above the last processed block that is still on the
+	/// canonical chain, so blocks replaced by a reorg are scanned (and their events emitted) again.
+	/// Re-emitted events are safe: handlers skip already-voted / already-executed requests, as
+	/// they do for bootstrap.
+	async fn rewind_to_fork_point(&mut self, reorged_at: u64) -> Result<()> {
+		let from = rescan_start(&self.processed_hashes, |h| self.get_block_hash(h))
+			.await?
+			.unwrap_or(reorged_at);
+		self.processed_hashes.retain(|h, _| *h < from);
+
+		br_primitives::log_and_capture_simple!(
+			warn,
+			"⚠️ [Bitcoin] Reorg detected at #{:?}. Rescanning from #{:?}",
+			reorged_at,
+			from
+		);
+		self.waiting_block = from;
 		Ok(())
 	}
 
@@ -466,5 +516,55 @@ where
 			}
 		}
 		Ok((inbound, outbound))
+	}
+}
+
+/// Returns the height to rescan from after a reorg: just above the highest tracked block still on
+/// the canonical chain, or the lowest tracked height if every tracked block was replaced.
+/// `None` only when nothing is tracked.
+async fn rescan_start<E, Fut>(
+	tracked: &BTreeMap<u64, BlockHash>,
+	mut canonical_hash: impl FnMut(u64) -> Fut,
+) -> Result<Option<u64>, E>
+where
+	Fut: Future<Output = Result<BlockHash, E>>,
+{
+	for (&height, hash) in tracked.iter().rev() {
+		if canonical_hash(height).await? == *hash {
+			return Ok(Some(height.saturating_add(1)));
+		}
+	}
+	// deeper than the tracked window: rescan all of it
+	Ok(tracked.keys().next().copied())
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+	use miniscript::bitcoin::hashes::Hash;
+
+	fn hash(n: u8) -> BlockHash {
+		BlockHash::from_byte_array([n; 32])
+	}
+
+	async fn start(tracked: &[(u64, u8)], canonical: &[(u64, u8)]) -> Option<u64> {
+		let tracked: BTreeMap<_, _> = tracked.iter().map(|&(h, n)| (h, hash(n))).collect();
+		let canonical: BTreeMap<_, _> = canonical.iter().map(|&(h, n)| (h, hash(n))).collect();
+		rescan_start::<(), _>(&tracked, |h| std::future::ready(Ok(canonical[&h])))
+			.await
+			.unwrap()
+	}
+
+	#[tokio::test]
+	async fn rescans_above_highest_block_still_canonical() {
+		let tracked = [(10, 1), (11, 2), (12, 3)];
+		assert_eq!(start(&tracked, &[(10, 1), (11, 9), (12, 9)]).await, Some(11));
+		assert_eq!(start(&tracked, &[(10, 1), (11, 2), (12, 9)]).await, Some(12));
+		assert_eq!(start(&tracked, &[(10, 1), (11, 2), (12, 3)]).await, Some(13));
+	}
+
+	#[tokio::test]
+	async fn rescans_whole_window_when_reorg_is_deeper_than_tracked() {
+		assert_eq!(start(&[(10, 1), (11, 2)], &[(10, 8), (11, 9)]).await, Some(10));
 	}
 }
