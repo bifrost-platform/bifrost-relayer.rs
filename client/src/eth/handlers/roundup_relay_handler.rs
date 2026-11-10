@@ -535,7 +535,11 @@ where
 					},
 					Err(e) => return Err(e.into()),
 				};
-			if roundup_submit.round > latest_round {
+			// Strict next-round gate: dst Socket.round_control_relay only accepts
+			// `submit.round - 1 == latest_round`. Sending anything else just burns a tx
+			// and emits a "latest round" revert that the bootstrap retry loop would keep
+			// re-trying until it exhausts retries. Pre-filter here.
+			if roundup_submit.round == latest_round + U256::from(1) {
 				let transaction_request = self.build_transaction_request(
 					&target_client.protocol_contracts.socket,
 					&roundup_submit,
@@ -560,49 +564,15 @@ where
 							eyre::bail!(e);
 						}
 					}
-				}
-
-				let latest_round =
-					target_client.protocol_contracts.authority.latest_round().call().await?;
-				// Strict next-round gate: dst Socket.round_control_relay only accepts
-				// `submit.round - 1 == latest_round`. Sending anything else just burns a tx
-				// and emits a "latest round" revert that the bootstrap retry loop would keep
-				// re-trying until it exhausts retries. Pre-filter here.
-				if roundup_submit.round == latest_round + U256::from(1) {
-					let transaction_request = self.build_transaction_request(
-						&target_client.protocol_contracts.socket,
-						&roundup_submit,
-						from,
+				} else {
+					send_transaction(
+						target_client.clone(),
+						transaction_request,
+						SUB_LOG_TARGET.to_string(),
+						metadata,
+						self.debug_mode,
+						self.handle.clone(),
 					);
-					let metadata =
-						Arc::new(VSPPhase2Metadata::new(roundup_submit.round, *dst_chain_id));
-
-					if is_bootstrap {
-						while let Err(e) = target_client
-							.sync_send_transaction(
-								transaction_request.clone(),
-								SUB_LOG_TARGET.to_string(),
-								metadata.clone(),
-							)
-							.await
-						{
-							if e.to_string().to_lowercase().contains("nonce too low") {
-								target_client.flush_stalled_transactions().await?;
-								continue;
-							} else {
-								eyre::bail!(e);
-							}
-						}
-					} else {
-						send_transaction(
-							target_client.clone(),
-							transaction_request,
-							SUB_LOG_TARGET.to_string(),
-							metadata,
-							self.debug_mode,
-							self.handle.clone(),
-						);
-					}
 				}
 			}
 		}
