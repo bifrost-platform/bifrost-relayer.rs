@@ -809,10 +809,10 @@ where
 		self.inner.send_transaction_internal(tx).await
 	}
 
-	/// alloy's estimate taken at `TIP_PERCENTILE`. alloy falls back to a 1 wei tip when none of the
-	/// recent blocks paid one (e.g. empty BSC blocks under a zero base fee), which validators never
-	/// include and which then blocks every later nonce. The node's suggested tip is taken instead
-	/// in that case.
+	/// alloy's estimate taken at `TIP_PERCENTILE`, with the tip floored at `MIN_PRIORITY_FEE`.
+	/// alloy falls back to a 1 wei tip when none of the recent blocks paid one (e.g. empty BSC
+	/// blocks under a zero base fee), which validators never include and which then blocks every
+	/// later nonce. The node's suggested tip is taken instead in that case.
 	async fn estimate_eip1559_fees(&self) -> TransportResult<Eip1559Estimation> {
 		let history = self
 			.get_fee_history(
@@ -826,9 +826,9 @@ where
 			None => self.inner.estimate_eip1559_fees().await?,
 		};
 		if fees.max_priority_fee_per_gas > EIP1559_MIN_PRIORITY_FEE {
-			return Ok(fees);
+			return Ok(with_tip(fees, MIN_PRIORITY_FEE));
 		}
-		Ok(with_tip(fees, self.get_max_priority_fee_per_gas().await?))
+		Ok(with_tip(fees, self.get_max_priority_fee_per_gas().await?.max(MIN_PRIORITY_FEE)))
 	}
 
 	/// Keeps only the logs that match `filter`, which callers trust: some providers do not apply
@@ -856,6 +856,12 @@ where
 /// that private-orderflow transactions pay on Ethereum (5115 wei on 2026-11-05), which most
 /// builders skip, so a relay waited 5 blocks and outran the confirmation timeout.
 const TIP_PERCENTILE: f64 = 50.0;
+
+/// geth's default minimum miner tip since v1.14.5. Sepolia's spam-filled median (50 wei on
+/// 2026-11-12) sits below it, so proposers enforcing it skipped relays past the confirmation
+/// timeout.
+/// shortcut: one floor for every chain, move it to per-chain config if a chain needs another value.
+const MIN_PRIORITY_FEE: u128 = 1_000_000;
 
 /// alloy's default estimate over `history` (fetched at `TIP_PERCENTILE`). `None` without a base
 /// fee (zero-base-fee chains such as BSC), where alloy's own estimate checks the latest block.
@@ -1084,6 +1090,13 @@ mod tests {
 		assert_eq!(with_tip(fees(2_000_000_001, 1), 5), fees(2_000_000_005, 5));
 		// a lower suggestion (Bifrost answers 0) never lowers the tip
 		assert_eq!(with_tip(fees(10, 1), 0), fees(10, 1));
+		// Sepolia's 50 wei median is raised to the floor, keeping the base fee allowance
+		assert_eq!(with_tip(fees(103, 49), MIN_PRIORITY_FEE), fees(1_000_054, 1_000_000));
+		// a tip above the floor is kept
+		assert_eq!(
+			with_tip(fees(3_000_000, 2_000_000), MIN_PRIORITY_FEE),
+			fees(3_000_000, 2_000_000)
+		);
 	}
 
 	#[test]
