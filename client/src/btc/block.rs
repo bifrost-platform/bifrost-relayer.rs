@@ -152,13 +152,34 @@ where
 	/// Initialize the block manager.
 	pub async fn initialize(&mut self) -> Result<()> {
 		self.btc_client.verify_fallbacks().await?;
-		let latest_block = self.get_block_count().await?;
-		self.waiting_block = latest_block.saturating_add(1);
 		// bootstrap scans these blocks, so a reorg replacing any of them must be caught too
 		let tracked = u64::from(self.bootstrap_offset).min(REORG_TRACK_DEPTH as u64 - 1);
-		for height in latest_block.saturating_sub(tracked)..=latest_block {
-			self.processed_hashes.insert(height, self.get_block_hash(height).await?);
-		}
+		let (latest_block, blocks) = loop {
+			let latest_block = self.get_block_count().await?;
+			let tip = self.get_block_hash(latest_block).await?;
+			let blocks = canonical_range(
+				&BTreeMap::new(),
+				latest_block.saturating_sub(tracked),
+				latest_block,
+				tip,
+				1,
+				|hash| self.header_link(hash),
+			)
+			.await?;
+			if let Some(blocks) = blocks {
+				break (latest_block, blocks);
+			}
+			log::warn!(
+				target: LOG_TARGET,
+				"-[{}] ⚠️  Provider served an unconfirmed block {} for #{:?}, retrying",
+				sub_display_format(SUB_LOG_TARGET),
+				tip,
+				latest_block
+			);
+			sleep(Duration::from_millis(self.call_interval)).await;
+		};
+		self.waiting_block = latest_block.saturating_add(1);
+		self.processed_hashes = blocks.into_iter().collect();
 
 		log::info!(
 			target: LOG_TARGET,
@@ -341,7 +362,18 @@ where
 		latest_block_num.saturating_sub(self.waiting_block) >= self.block_confirmations
 	}
 
+	/// Returns the confirmations (-1 off the canonical chain) and the parent of the block `hash`.
+	async fn header_link(
+		&self,
+		hash: BlockHash,
+	) -> bitcoincore_rpc::Result<(i32, Option<BlockHash>)> {
+		let header = self.get_block_header_info(&hash).await?;
+		Ok((header.confirmations, header.previous_block_hash))
+	}
+
 	/// Process the confirmed block. Filters whether the block has any Inbound or Outbound events.
+	/// Blocks replaced by a reorg are scanned (and their events emitted) again. Re-emitted events
+	/// are safe: handlers skip already-voted / already-executed requests, as they do for bootstrap.
 	#[inline]
 	async fn process_confirmed_block(
 		&mut self,
@@ -351,21 +383,47 @@ where
 	) -> Result<()> {
 		let from_block = self.waiting_block;
 
-		for num in from_block..=to_block {
+		let tip = self.get_block_hash(to_block).await?;
+		let this = &*self;
+		let blocks = canonical_range(
+			&self.processed_hashes,
+			from_block,
+			to_block,
+			tip,
+			i32::try_from(self.block_confirmations).unwrap_or(i32::MAX),
+			|hash| this.header_link(hash),
+		)
+		.await?;
+		let Some(blocks) = blocks else {
+			// retried on the next tick
+			log::warn!(
+				target: LOG_TARGET,
+				"-[{}] ⚠️  Provider served an unconfirmed block {} for #{:?}, skipping",
+				sub_display_format(SUB_LOG_TARGET),
+				tip,
+				to_block
+			);
+			return Ok(());
+		};
+
+		if let Some(&(rescan_from, _)) = blocks.first()
+			&& rescan_from < from_block
+		{
+			self.processed_hashes.retain(|h, _| *h < rescan_from);
+			self.waiting_block = rescan_from;
+			br_primitives::log_and_capture_simple!(
+				warn,
+				"⚠️ [Bitcoin] Reorg detected at #{:?}. Rescanning from #{:?}",
+				from_block,
+				rescan_from
+			);
+		}
+
+		for (num, block_hash) in blocks {
 			let (mut inbound, mut outbound) =
 				(EventMessage::inbound(num), EventMessage::outbound(num));
 
-			let block_hash = self.get_block_hash(num).await?;
 			let block = self.get_block_info_with_txs(&block_hash).await?;
-			if self
-				.processed_hashes
-				.get(&num.saturating_sub(1))
-				.is_some_and(|prev| block.previousblockhash != Some(*prev))
-			{
-				self.rewind_to_fork_point(num).await?;
-				return Ok(());
-			}
-
 			for tx in block.tx {
 				self.filter(
 					tx.txid,
@@ -400,26 +458,6 @@ where
 			self.increment_waiting_block(num);
 		}
 
-		Ok(())
-	}
-
-	/// Moves `waiting_block` back to just above the last processed block that is still on the
-	/// canonical chain, so blocks replaced by a reorg are scanned (and their events emitted) again.
-	/// Re-emitted events are safe: handlers skip already-voted / already-executed requests, as
-	/// they do for bootstrap.
-	async fn rewind_to_fork_point(&mut self, reorged_at: u64) -> Result<()> {
-		let from = rescan_start(&self.processed_hashes, |h| self.get_block_hash(h))
-			.await?
-			.unwrap_or(reorged_at);
-		self.processed_hashes.retain(|h, _| *h < from);
-
-		br_primitives::log_and_capture_simple!(
-			warn,
-			"⚠️ [Bitcoin] Reorg detected at #{:?}. Rescanning from #{:?}",
-			reorged_at,
-			from
-		);
-		self.waiting_block = from;
 		Ok(())
 	}
 
@@ -500,42 +538,78 @@ where
 		let mut inbound = EventMessage::inbound(to_block);
 		let mut outbound = EventMessage::outbound(to_block);
 
-		for i in from_block..=to_block {
-			let block_hash = self.get_block_hash(i).await?;
-			let txs = self.get_block_info_with_txs(&block_hash).await?.tx;
-			for tx in txs {
+		// Walks parent links down from the tip `initialize` tracked, rather than looking each
+		// height up: a hosted RPC can keep serving a replaced block's hash by height.
+		let mut block_hash = match self.processed_hashes.get(&to_block) {
+			Some(tracked) => *tracked,
+			None => self.get_block_hash(to_block).await?,
+		};
+		let mut events = Vec::new();
+		for _ in from_block..=to_block {
+			let block = self.get_block_info_with_txs(&block_hash).await?;
+			let (mut inbound, mut outbound) = (Vec::new(), Vec::new());
+			for tx in block.tx {
 				self.filter(
 					tx.txid,
 					&tx.vout,
-					&mut inbound.events,
-					&mut outbound.events,
+					&mut inbound,
+					&mut outbound,
 					&vault_set,
 					&refund_set,
 				)
 				.await;
 			}
+			events.push((inbound, outbound));
+			match block.previousblockhash {
+				Some(parent) => block_hash = parent,
+				None => break,
+			}
+		}
+		// lowest block first, as scanned before
+		for (inbound_events, outbound_events) in events.into_iter().rev() {
+			inbound.events.extend(inbound_events);
+			outbound.events.extend(outbound_events);
 		}
 		Ok((inbound, outbound))
 	}
 }
 
-/// Returns the height to rescan from after a reorg: just above the highest tracked block still on
-/// the canonical chain, or the lowest tracked height if every tracked block was replaced.
-/// `None` only when nothing is tracked.
-async fn rescan_start<E, Fut>(
+/// Returns the `(height, hash)` of every block to scan, ascending: the canonical chain from
+/// `from` to `to`, preceded by the tracked blocks below `from` that a reorg replaced (down to
+/// the end of the tracked window at most).
+/// Found by walking parent links down from `tip`, the hash at `to`: a hosted RPC can keep
+/// serving a replaced block's hash by height, so only `tip` is looked up that way, and `None` is
+/// returned if it has under `min_confirmations` (a replaced block reports -1).
+async fn canonical_range<E, Fut>(
 	tracked: &BTreeMap<u64, BlockHash>,
-	mut canonical_hash: impl FnMut(u64) -> Fut,
-) -> Result<Option<u64>, E>
+	from: u64,
+	to: u64,
+	tip: BlockHash,
+	min_confirmations: i32,
+	mut header: impl FnMut(BlockHash) -> Fut,
+) -> Result<Option<Vec<(u64, BlockHash)>>, E>
 where
-	Fut: Future<Output = Result<BlockHash, E>>,
+	Fut: Future<Output = Result<(i32, Option<BlockHash>), E>>,
 {
-	for (&height, hash) in tracked.iter().rev() {
-		if canonical_hash(height).await? == *hash {
-			return Ok(Some(height.saturating_add(1)));
+	let (mut height, mut hash) = (to, tip);
+	let mut blocks = Vec::new();
+	loop {
+		// below `from`: stop at the first block still tracked as is, or out of the window
+		if height < from && tracked.get(&height).is_none_or(|tracked| *tracked == hash) {
+			break;
+		}
+		let (confirmations, parent) = header(hash).await?;
+		if height == to && confirmations < min_confirmations {
+			return Ok(None);
+		}
+		blocks.push((height, hash));
+		match (height.checked_sub(1), parent) {
+			(Some(below), Some(parent)) => (height, hash) = (below, parent),
+			_ => break,
 		}
 	}
-	// deeper than the tracked window: rescan all of it
-	Ok(tracked.keys().next().copied())
+	blocks.reverse();
+	Ok(Some(blocks))
 }
 
 #[cfg(test)]
@@ -547,24 +621,54 @@ mod tests {
 		BlockHash::from_byte_array([n; 32])
 	}
 
-	async fn start(tracked: &[(u64, u8)], canonical: &[(u64, u8)]) -> Option<u64> {
+	/// Scans up to #13 from `from`, on a node whose chain is `canonical` (ascending, ending at
+	/// #13) and whose tip has `confirmations`.
+	async fn range(
+		tracked: &[(u64, u8)],
+		from: u64,
+		canonical: &[u8],
+		confirmations: i32,
+	) -> Option<Vec<(u64, u8)>> {
 		let tracked: BTreeMap<_, _> = tracked.iter().map(|&(h, n)| (h, hash(n))).collect();
-		let canonical: BTreeMap<_, _> = canonical.iter().map(|&(h, n)| (h, hash(n))).collect();
-		rescan_start::<(), _>(&tracked, |h| std::future::ready(Ok(canonical[&h])))
-			.await
-			.unwrap()
+		let parent_of = |h: BlockHash| {
+			let at = canonical.iter().position(|&n| hash(n) == h).unwrap();
+			at.checked_sub(1).map(|below| hash(canonical[below]))
+		};
+		let tip = hash(*canonical.last().unwrap());
+		canonical_range::<(), _>(&tracked, from, 13, tip, 3, |h| {
+			std::future::ready(Ok((confirmations, parent_of(h))))
+		})
+		.await
+		.unwrap()
+		.map(|blocks| blocks.into_iter().map(|(h, hash)| (h, hash.to_byte_array()[0])).collect())
+	}
+
+	#[tokio::test]
+	async fn scans_only_new_blocks_without_a_reorg() {
+		let tracked = [(10, 1), (11, 2)];
+		assert_eq!(range(&tracked, 12, &[1, 2, 3, 4], 4).await, Some(vec![(12, 3), (13, 4)]));
 	}
 
 	#[tokio::test]
 	async fn rescans_above_highest_block_still_canonical() {
 		let tracked = [(10, 1), (11, 2), (12, 3)];
-		assert_eq!(start(&tracked, &[(10, 1), (11, 9), (12, 9)]).await, Some(11));
-		assert_eq!(start(&tracked, &[(10, 1), (11, 2), (12, 9)]).await, Some(12));
-		assert_eq!(start(&tracked, &[(10, 1), (11, 2), (12, 3)]).await, Some(13));
+		assert_eq!(
+			range(&tracked, 13, &[1, 7, 8, 9], 4).await,
+			Some(vec![(11, 7), (12, 8), (13, 9)])
+		);
 	}
 
 	#[tokio::test]
 	async fn rescans_whole_window_when_reorg_is_deeper_than_tracked() {
-		assert_eq!(start(&[(10, 1), (11, 2)], &[(10, 8), (11, 9)]).await, Some(10));
+		let tracked = [(11, 2), (12, 3)];
+		assert_eq!(
+			range(&tracked, 13, &[6, 7, 8, 9], 4).await,
+			Some(vec![(11, 7), (12, 8), (13, 9)])
+		);
+	}
+
+	#[tokio::test]
+	async fn skips_a_tip_off_the_canonical_chain() {
+		assert_eq!(range(&[(12, 3)], 13, &[1, 2, 3, 4], -1).await, None);
 	}
 }
