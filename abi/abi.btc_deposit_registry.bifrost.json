@@ -1,0 +1,26 @@
+[
+  {
+    "inputs": [
+      {
+        "internalType": "string",
+        "name": "vault",
+        "type": "string"
+      }
+    ],
+    "name": "vaultDepositor",
+    "outputs": [
+      {
+        "internalType": "bool",
+        "name": "whitelisted",
+        "type": "bool"
+      },
+      {
+        "internalType": "string",
+        "name": "depositor",
+        "type": "string"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  }
+]

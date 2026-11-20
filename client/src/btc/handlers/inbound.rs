@@ -1,5 +1,8 @@
 use crate::{
-	btc::handlers::{Handler, LOG_TARGET},
+	btc::{
+		failover::FailoverClient as BtcClient,
+		handlers::{Handler, LOG_TARGET},
+	},
 	eth::{EthClient, send_transaction},
 };
 
@@ -10,7 +13,7 @@ use alloy::{
 	providers::{Provider, WalletProvider, fillers::TxFiller},
 };
 use array_bytes::Hexify;
-use bitcoincore_rpc::bitcoin::Txid;
+use bitcoincore_rpc::{RpcApi, bitcoin::Txid};
 use br_primitives::{
 	bootstrap::BootstrapSharedData,
 	btc::{Event, EventMessage as BTCEventMessage, EventType},
@@ -40,6 +43,8 @@ where
 {
 	/// `EthClient` to interact with Bifrost network.
 	pub bfc_client: Arc<EthClient<F, P, N>>,
+	/// The Bitcoin client, to look up the inputs of deposits to whitelisted vaults.
+	btc_client: BtcClient,
 	/// The unsigned transaction message sender.
 	xt_request_sender: Arc<XtRequestSender>,
 	/// The receiver that consumes new events from the block channel.
@@ -61,6 +66,7 @@ where
 {
 	pub fn new(
 		bfc_client: Arc<EthClient<F, P, N>>,
+		btc_client: BtcClient,
 		xt_request_sender: Arc<XtRequestSender>,
 		event_receiver: Receiver<BTCEventMessage>,
 		bootstrap_shared_data: Arc<BootstrapSharedData>,
@@ -69,6 +75,7 @@ where
 	) -> Self {
 		Self {
 			bfc_client,
+			btc_client,
 			xt_request_sender,
 			event_stream: BroadcastStream::new(event_receiver),
 			target_event: EventType::Inbound,
@@ -91,6 +98,62 @@ where
 		// if system vault address, return None.
 		// otherwise, return Some(user address).
 		if user_address == *registration_pool.address() { Ok(None) } else { Ok(Some(user_address)) }
+	}
+
+	/// Whether the deposit may be polled. A deposit to a vault the Koyomi `BtcDepositRegistry`
+	/// whitelists counts only when every input spends from the depositor registered for it;
+	/// deposits to any other vault always count.
+	async fn is_accepted_deposit(&self, event: &Event) -> Result<bool> {
+		let Some(registry) = self.bfc_client.protocol_contracts.btc_deposit_registry.as_ref()
+		else {
+			return Ok(true);
+		};
+		let vault = event.address.assume_checked_ref().to_string();
+		let answer = registry.vaultDepositor(vault.clone()).call().await?;
+		if !answer.whitelisted {
+			return Ok(true);
+		}
+
+		// unparsable when empty: none registered, or its KYC expired / is suspended / revoked
+		let accepted = match answer.depositor.parse::<BtcAddress<NetworkUnchecked>>() {
+			Ok(depositor) => {
+				let tx = self.btc_client.get_raw_transaction_info(&rpc_txid(event), None).await?;
+				let inputs = tx.vin.into_iter().map(|input| input.txid.zip(input.vout));
+				spends_only_from(inputs, &depositor, |txid, vout| self.output_owner(txid, vout))
+					.await?
+			},
+			Err(_) => false,
+		};
+		if !accepted {
+			br_primitives::log_and_capture!(
+				warn,
+				&self.bfc_client.get_chain_name(),
+				SUB_LOG_TARGET,
+				self.bfc_client.address().await,
+				"🚫 Refused deposit {}:{} to whitelisted vault {}: not sent from its depositor ({:?}). Not polled, roll it back",
+				rpc_txid(event),
+				event.index,
+				vault,
+				answer.depositor
+			);
+		}
+		Ok(accepted)
+	}
+
+	/// The address the output `txid:vout` pays to (`None` if it has none).
+	async fn output_owner(
+		&self,
+		txid: Txid,
+		vout: u32,
+	) -> Result<Option<BtcAddress<NetworkUnchecked>>> {
+		Ok(self
+			.btc_client
+			.get_raw_transaction_info(&txid, None)
+			.await?
+			.vout
+			.into_iter()
+			.nth(vout as usize)
+			.and_then(|output| output.script_pub_key.address))
 	}
 
 	async fn is_rollback_output(&self, txid: Txid, index: u32) -> Result<bool> {
@@ -293,6 +356,25 @@ where
 			if self.is_vote_finished(&event, user_bfc_address).await? {
 				return Ok(());
 			}
+			// a refused deposit is still submitted to blaze above, so it can be rolled back
+			match self.is_accepted_deposit(event).await {
+				Ok(true) => {},
+				Ok(false) => return Ok(()),
+				// skip only this deposit: an error would end `run` and drop the block's later ones
+				Err(error) => {
+					br_primitives::log_and_capture!(
+						error,
+						&self.bfc_client.get_chain_name(),
+						SUB_LOG_TARGET,
+						self.bfc_client.address().await,
+						"❗️ Failed to check deposit {}:{} against its depositor, not polled: {}",
+						rpc_txid(event),
+						event.index,
+						error
+					);
+					return Ok(());
+				},
+			}
 
 			let tx_request = self.build_transaction(&event, user_bfc_address);
 			let metadata = BitcoinRelayMetadata::new(&event, user_bfc_address);
@@ -351,5 +433,91 @@ where
 
 	fn bfc_client(&self) -> Arc<EthClient<F, P, N>> {
 		self.bfc_client.clone()
+	}
+}
+
+/// The event's txid as Bitcoin RPCs know it: `run` stores it byte-reversed for the contracts.
+fn rpc_txid(event: &Event) -> Txid {
+	let mut bytes = event.txid.to_byte_array();
+	bytes.reverse();
+	Txid::from_byte_array(bytes)
+}
+
+/// Whether every input (`txid:vout` it spends, `None` for a coinbase) spends from `depositor`,
+/// looking each owner up with `owner_of`. Stops at the first that doesn't, so a deposit with
+/// foreign inputs costs one lookup however many it has.
+async fn spends_only_from<Fut>(
+	inputs: impl IntoIterator<Item = Option<(Txid, u32)>>,
+	depositor: &BtcAddress<NetworkUnchecked>,
+	mut owner_of: impl FnMut(Txid, u32) -> Fut,
+) -> Result<bool>
+where
+	Fut: Future<Output = Result<Option<BtcAddress<NetworkUnchecked>>>>,
+{
+	for input in inputs {
+		let Some((txid, vout)) = input else {
+			return Ok(false);
+		};
+		if owner_of(txid, vout).await?.as_ref() != Some(depositor) {
+			return Ok(false);
+		}
+	}
+	Ok(true)
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	const DEPOSITOR: &str = "bcrt1q7wtdpm9whw4qcqqkamxjky8jqp7e402nu0gd44";
+	const OTHER: &str = "bcrt1q22vcxsa7mt6frxps53vyfjfea8pmm0yxlnl30djzksg8f42a0rrqf3zg7s";
+
+	/// Checks inputs spending prev txs `[n; 32]` (`None`: a coinbase), whose output pays to
+	/// DEPOSITOR for n = 1, OTHER for n = 2 and to no address otherwise. Returns the verdict
+	/// and how many owners it looked up.
+	async fn check(inputs: &[Option<u8>]) -> (bool, usize) {
+		let depositor = DEPOSITOR.parse().unwrap();
+		let inputs = inputs.iter().map(|n| n.map(|n| (Txid::from_byte_array([n; 32]), 0)));
+		let mut lookups = 0;
+		let accepted = spends_only_from(inputs, &depositor, |txid, _| {
+			lookups += 1;
+			let owner = match txid.to_byte_array()[0] {
+				1 => Some(DEPOSITOR),
+				2 => Some(OTHER),
+				_ => None,
+			};
+			std::future::ready(Ok(owner.map(|address| address.parse().unwrap())))
+		})
+		.await
+		.unwrap();
+		(accepted, lookups)
+	}
+
+	#[tokio::test]
+	async fn accepts_only_deposits_spent_entirely_from_the_depositor() {
+		assert_eq!(check(&[Some(1), Some(1)]).await, (true, 2));
+		assert_eq!(check(&[Some(1), Some(3)]).await, (false, 2));
+		assert_eq!(check(&[None]).await, (false, 0));
+	}
+
+	#[tokio::test]
+	async fn stops_at_the_first_foreign_input() {
+		assert_eq!(check(&[Some(2), Some(1), Some(1), Some(1)]).await, (false, 1));
+	}
+
+	#[test]
+	fn compares_bech32_depositors_regardless_of_case() {
+		let depositor: BtcAddress<NetworkUnchecked> = DEPOSITOR.parse().unwrap();
+		assert_eq!(
+			DEPOSITOR.to_uppercase().parse::<BtcAddress<NetworkUnchecked>>().unwrap(),
+			depositor
+		);
+		// mixed case is invalid bech32 (BIP173), so such a depositor refuses every deposit
+		assert!(
+			DEPOSITOR
+				.replacen("bcrt1q", "bcrt1Q", 1)
+				.parse::<BtcAddress<NetworkUnchecked>>()
+				.is_err()
+		);
 	}
 }

@@ -40,6 +40,9 @@ evm_providers:
     registration_pool_address: "0x0000000000000000000000000000000000000100"
     relay_executive_address: "0x0000000000000000000000000000000000000803"
     blaze_address: "0x0000000000000000000000000000000000000102"
+    # Optional: Koyomi BtcDepositRegistry. Deposits to the vaults it whitelists are relayed
+    # only when every input spends from the vault's registered depositor.
+    # btc_deposit_registry_address: "0x0000000000000000000000000000000000000000"
   - name: "ethereum"
     id: 1
     provider: "<YOUR_ETHEREUM_RPC_ENDPOINT>"

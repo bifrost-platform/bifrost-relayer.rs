@@ -25,6 +25,7 @@ use crate::{
 		authority::{AuthorityContract, AuthorityInstance},
 		bitcoin_socket::{BitcoinSocketContract, BitcoinSocketInstance},
 		blaze::{BlazeContract, BlazeInstance},
+		btc_deposit_registry::{BtcDepositRegistryContract, BtcDepositRegistryInstance},
 		chainlink_aggregator::{ChainlinkContract, ChainlinkInstance},
 		erc20::Erc20Instance,
 		hooks::{HooksContract, HooksInstance},
@@ -278,6 +279,8 @@ where
 	pub relay_executive: Option<RelayExecutiveInstance<F, P, N>>,
 	/// BlazeContract (Bifrost only)
 	pub blaze: Option<BlazeInstance<F, P, N>>,
+	/// Koyomi BtcDepositRegistry (Bifrost only, optional)
+	pub btc_deposit_registry: Option<BtcDepositRegistryInstance<F, P, N>>,
 }
 
 impl<F, P, N: Network> ProtocolContracts<F, P, N>
@@ -320,6 +323,7 @@ where
 			registration_pool: None,
 			relay_executive: None,
 			blaze: None,
+			btc_deposit_registry: None,
 		};
 		if is_native {
 			contracts.relayer_manager = Some(RelayerManagerContract::new(
@@ -364,6 +368,13 @@ where
 					.expect(INVALID_CONTRACT_ADDRESS),
 				provider.clone(),
 			));
+			contracts.btc_deposit_registry =
+				evm_provider.btc_deposit_registry_address.map(|address| {
+					BtcDepositRegistryContract::new(
+						Address::from_str(&address).expect(INVALID_CONTRACT_ADDRESS),
+						provider.clone(),
+					)
+				});
 		} else {
 			contracts.legacy_socket = evm_provider.legacy_socket_address.map(|address| {
 				SocketContract::new(

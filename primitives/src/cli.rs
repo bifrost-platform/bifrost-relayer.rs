@@ -135,6 +135,10 @@ pub struct EVMProvider {
 	pub relay_executive_address: Option<String>,
 	/// Blaze contract address (Bifrost only)
 	pub blaze_address: Option<String>,
+	/// Koyomi `BtcDepositRegistry` contract address (Bifrost only, optional). When set, deposits
+	/// to a vault it whitelists are relayed only if every input spends from the vault's
+	/// registered depositor.
+	pub btc_deposit_registry_address: Option<String>,
 	/// Chainlink usdc/usd aggregator
 	pub chainlink_usdc_usd_address: Option<String>,
 	/// Chainlink usdt/usd aggregator

@@ -93,6 +93,7 @@ where
 		);
 		let inbound = InboundHandler::new(
 			bfc_client.clone(),
+			btc_client.clone(),
 			substrate_deps.xt_request_sender.clone(),
 			block_manager.subscribe(),
 			bootstrap_shared_data.clone(),

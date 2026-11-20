@@ -1,6 +1,7 @@
 pub mod authority;
 pub mod bitcoin_socket;
 pub mod blaze;
+pub mod btc_deposit_registry;
 pub mod chainlink_aggregator;
 pub mod erc20;
 pub mod hooks;
